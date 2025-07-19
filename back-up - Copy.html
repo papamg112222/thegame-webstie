@@ -89,9 +89,13 @@
       height: 350px;
       position: relative;
       display: flex;
-      justify-content: center;
+      flex-direction: column; /* Changed to column to better manage vertical space */
+      justify-content: space-between; /* Distribute items vertically */
       align-items: center;
-      flex-direction: column;
+    }
+    .container h2 { /* Adjust title margin to prevent overlap */
+        margin-top: 0;
+        margin-bottom: 10px;
     }
 
     .return-btn {
@@ -129,16 +133,15 @@
       display: flex;
       justify-content: center;
       align-items: center;
+      flex-grow: 1; /* Allow container to take available space */
+      min-height: 150px; /* Ensure minimum height even when balloon is small */
     }
     .balloon {
-      /* New Gradient for Realistic Look */
       background: radial-gradient(circle at 25% 25%, #ffbaba, #ff7a7f 30%, #ff5a5f 60%, #cc0000 100%);
-      /* More oval shape */
-      border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; /* Top more rounded, bottom slightly flatter */
-      /* Softer box-shadow for depth */
+      border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
       box-shadow: 0 8px 20px rgba(0,0,0,0.4);
-      transition: width 0.3s, height 0.3s, background 0.3s, box-shadow 0.3s, transform 0.3s; /* Add transform to transition */
-      position: relative; /* Needed for ::after positioning */
+      transition: width 0.3s, height 0.3s, background 0.3s, box-shadow 0.3s, transform 0.3s;
+      position: relative;
       z-index: 10;
       animation: floatUpDown 3s ease-in-out infinite alternate;
     }
@@ -199,7 +202,7 @@
       padding: 12px 30px;
       cursor: pointer;
       display: block;
-      margin: 10px auto 0 auto;
+      margin-top: auto; /* Push button to bottom, maintaining space */
       box-shadow: 0 3px 7px rgba(255, 90, 95, 0.5);
       transition: background-color .3s;
       user-select: none;
@@ -571,13 +574,18 @@
 
     let avogadroMolecules = 0;
     let increaseInterval = null;
-    const MAX_MOLECULES = 100;
+    const MAX_MOLECULES = 100; // Balloon pops at this many molecules
+
+    // NEW: Define smaller max balloon size to prevent overlap
+    const AVOGADRO_MIN_WIDTH = 80;
+    const AVOGADRO_MIN_HEIGHT = 120;
+    const AVOGADRO_MAX_WIDTH = 130; // Reduced from 180
+    const AVOGADRO_MAX_HEIGHT = 195; // Reduced from 270
 
     function initAvogadro() {
       avogadroMolecules = 0;
-      avogadroBalloon.style.width = '100px';
-      avogadroBalloon.style.height = '150px';
-      // Initial background for realistic look (same as CSS for consistency)
+      avogadroBalloon.style.width = AVOGADRO_MIN_WIDTH + 'px';
+      avogadroBalloon.style.height = AVOGADRO_MIN_HEIGHT + 'px';
       avogadroBalloon.style.background = 'radial-gradient(circle at 25% 25%, #ffbaba, #ff7a7f 30%, #ff5a5f 60%, #cc0000 100%)';
       avogadroBalloon.style.boxShadow = '0 8px 20px rgba(0,0,0,0.4)';
       avogadroBalloon.classList.remove('pop');
@@ -587,6 +595,10 @@
       increaseMoleculeBtn.style.display = 'block'; // Ensure increase button is visible
       getNewOneBtn.style.display = 'none'; // Ensure "Get New One" button is hidden
 
+      // Ensure animationend listener is set up only once
+      avogadroBalloon.removeEventListener('animationend', handlePopAnimationEnd);
+      avogadroBalloon.addEventListener('animationend', handlePopAnimationEnd);
+
       updateAvogadroDisplay();
     }
 
@@ -594,20 +606,20 @@
       avogadroMoleculeBg.textContent = avogadroMolecules;
       avogadroTopLeftCounter.textContent = 'Molecules: ' + avogadroMolecules;
 
-      const minWidth = 80, minHeight = 120;
-      const maxWidth = 180, maxHeight = 270;
-
       const progress = avogadroMolecules / MAX_MOLECULES;
-      const width = minWidth + (maxWidth - minWidth) * progress;
-      const height = minHeight + (maxHeight - minHeight) * progress;
+      const width = AVOGADRO_MIN_WIDTH + (AVOGADRO_MAX_WIDTH - AVOGADRO_MIN_WIDTH) * progress;
+      const height = AVOGADRO_MIN_HEIGHT + (AVOGADRO_MAX_HEIGHT - AVOGADRO_MIN_HEIGHT) * progress;
 
       avogadroBalloon.style.width = width + 'px';
       avogadroBalloon.style.height = height + 'px';
 
       const balloonContainer = document.querySelector('#avogadro .balloon-container');
-      const containerHeight = balloonContainer ? balloonContainer.clientHeight : 250;
       const moleculeBgHeight = avogadroMoleculeBg.clientHeight;
-      avogadroMoleculeBg.style.top = `${(containerHeight - moleculeBgHeight) / 2}px`;
+      // Center the large number dynamically within its container
+      if (balloonContainer) {
+          avogadroMoleculeBg.style.top = `${(balloonContainer.clientHeight - moleculeBgHeight) / 2}px`;
+      }
+
 
       if (avogadroMolecules >= MAX_MOLECULES) {
         popBalloon();
@@ -615,7 +627,7 @@
     }
 
     function popBalloon() {
-      if (avogadroBalloon.classList.contains('pop')) return;
+      if (avogadroBalloon.classList.contains('pop')) return; // Prevent multiple pops
 
       avogadroBalloon.classList.add('pop');
       popSound.currentTime = 0;
@@ -624,12 +636,18 @@
       avogadroBalloon.style.animationPlayState = 'paused'; // Pause float animation during pop
 
       increaseMoleculeBtn.style.display = 'none'; // Hide increase button
-      getNewOneBtn.style.display = 'block'; // Show "Get New One" button
+      // The getNewOneBtn will be shown by handlePopAnimationEnd
+    }
 
-      setTimeout(() => {
-        avogadroBalloon.style.display = 'none'; // Hide the balloon after animation
-        avogadroBalloon.classList.remove('pop'); // Remove animation class for next time
-      }, 600); // This timeout matches the animation duration
+    // NEW: Handler for animation end event
+    function handlePopAnimationEnd(event) {
+        // Ensure it's the 'betterPopAnimation' for the balloon itself
+        // Or 'popNeckAnimation' for the ::after element
+        if (event.animationName === 'betterPopAnimation' || event.animationName === 'popNeckAnimation') {
+            avogadroBalloon.style.display = 'none'; // Hide the balloon after animation
+            avogadroBalloon.classList.remove('pop'); // Remove animation class for next time
+            getNewOneBtn.style.display = 'block'; // Show "Get New One" button
+        }
     }
 
     function increaseMassStep() {
