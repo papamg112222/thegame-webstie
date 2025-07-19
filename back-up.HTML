@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Gas Laws Game</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;600;700&display=swap'); /* Added 700 for bolder text */
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;600;700&display=swap');
 
     /* Base styles & main menu */
     html, body {
@@ -284,6 +284,22 @@
       flex-grow: 1; /* Allow container to take available space */
       min-height: 150px; /* Ensure minimum height even when balloon is small */
     }
+    /* Specific adjustment for Charles's balloon container */
+    #charles .balloon-container {
+      flex-grow: 0; /* Prevent it from taking extra space */
+      margin: 20px auto; /* Added more vertical margin */
+    }
+    /* Specific adjustment for Charles's background molecule number */
+    #charlesMoleculeBg {
+      font-size: 120px; /* Smaller for Charles */
+      line-height: 0; /* To prevent it from pushing elements down */
+      top: 50%; /* Center vertically within its relative parent */
+      transform: translate(-50%, -50%); /* True center */
+      color: rgba(255, 255, 255, 0.1); /* Very subtle background color */
+      text-shadow: none; /* Remove glow for background element */
+    }
+
+
     .balloon {
       background: radial-gradient(circle at 25% 25%, #ffbaba, #ff7a7f 30%, #ff5a5f 60%, #cc0000 100%);
       border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
@@ -355,6 +371,7 @@
       box-shadow: 0 3px 7px rgba(255, 90, 95, 0.5);
       transition: background-color .3s;
       user-select: none;
+      -webkit-tap-highlight-color: transparent; /* Prevent blue highlight on mobile tap */
     }
     .avogadro-increase-btn:hover {
       background: #ff7a7f;
@@ -732,7 +749,7 @@
         cancelBoyleAnimation();
         cancelCharlesAnimation();
         cancelGayLussacAnimation();
-        cancelAvogadroIncrease();
+        cancelAvogadroIncrease(); // Make sure to call this to stop timers
     }
 
     // Member button function
@@ -845,7 +862,7 @@
 
             if (speedAlongNormal > 0) return;
 
-            const elasticity = 0.95;
+            const elasticity = 0.3; // Changed from 0.95 to 0.3 for "stickier" collisions
             const impulseMagnitude = -(1 + elasticity) * speedAlongNormal;
 
             ball1.speedX += impulseMagnitude * nx;
@@ -934,13 +951,13 @@
     const INITIAL_CHARLES_BALLOON_HEIGHT = 150;
     const MIN_CHARLES_BALLOON_SCALE = 0.5; // Minimum size factor
     const MAX_CHARLES_BALLOON_SCALE = 1.5; // Maximum size factor
+    const CHARLES_FIXED_MOLECULE_COUNT = 50; // Fixed number for Charles's Law
 
     function initCharles() {
       charlesTempVal.textContent = charlesTempSlider.value;
       updateCharlesBalloonSize();
-      // The background molecules in Charles' Law are static as 'n' is constant.
-      // Set an arbitrary but visible number.
-      charlesMoleculeBg.textContent = 'N'; // Represent 'n' as constant
+      // Set the fixed number for molecules
+      charlesMoleculeBg.textContent = CHARLES_FIXED_MOLECULE_COUNT; 
     }
 
     function updateCharlesBalloonSize() {
@@ -1111,8 +1128,60 @@
     const MAX_MOLECULES_BEFORE_POP = 15; // Adjusted for a reasonable pop threshold
     const BASE_BALLOON_WIDTH = 100;
     const BASE_BALLOON_HEIGHT = 150;
-    let avogadroIncreaseAnimTimeout;
     let avogadroPopAnimTimeout;
+
+    // --- Avogadro Hold to Increase Logic ---
+    let isHolding = false;
+    let holdInterval;
+    let holdTimeout;
+    const HOLD_INITIAL_DELAY = 300; // ms before auto-increment starts
+    const HOLD_INCREMENT_INTERVAL = 100; // ms between increments after initial delay
+
+    function startIncrement() {
+        if (moleculeCount < MAX_MOLECULES_BEFORE_POP) {
+            moleculeCount++;
+            updateAvogadroDisplay();
+            if (moleculeCount >= MAX_MOLECULES_BEFORE_POP) {
+                stopIncrement(); // Stop if max reached
+            }
+        } else {
+            stopIncrement(); // Stop if max reached
+        }
+    }
+
+    function handleHoldStart(e) {
+        if (increaseMoleculeBtn.disabled) return;
+        isHolding = true;
+        // Start incrementing immediately
+        startIncrement(); 
+        // Set a timeout before rapid increment starts
+        holdTimeout = setTimeout(() => {
+            if (isHolding) { // Only start interval if still holding after delay
+                holdInterval = setInterval(startIncrement, HOLD_INCREMENT_INTERVAL);
+            }
+        }, HOLD_INITIAL_DELAY);
+    }
+
+    function stopIncrement() {
+        isHolding = false;
+        clearTimeout(holdTimeout);
+        clearInterval(holdInterval);
+    }
+
+    // Attach event listeners for hold functionality
+    increaseMoleculeBtn.addEventListener('mousedown', handleHoldStart);
+    increaseMoleculeBtn.addEventListener('mouseup', stopIncrement);
+    increaseMoleculeBtn.addEventListener('mouseleave', stopIncrement); // Important for desktop if mouse drags off
+
+    increaseMoleculeBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent scrolling/zooming on touch
+        handleHoldStart(e);
+    }, { passive: false }); // Use passive: false to allow preventDefault
+
+    increaseMoleculeBtn.addEventListener('touchend', stopIncrement);
+    increaseMoleculeBtn.addEventListener('touchcancel', stopIncrement);
+    // --- End Avogadro Hold to Increase Logic ---
+
 
     function initAvogadro() {
         moleculeCount = 0; // Reset count
@@ -1134,7 +1203,8 @@
 
         getNewOneBtn.style.display = 'none'; // Hide "GET NEW ONE!!!" button initially
         increaseMoleculeBtn.style.display = 'block'; // Show "Increase Molecules" button
-        increaseMoleculeBtn.disabled = false; // Enable the button (typo fixed here)
+        increaseMoleculeBtn.disabled = false; // Enable the button
+        stopIncrement(); // Ensure any lingering hold timers are cleared
     }
 
     function updateAvogadroDisplay() {
@@ -1166,6 +1236,7 @@
     function popBalloon() {
         if (!avogadroBalloon.classList.contains('pop')) { // Prevent multiple pop animations
             increaseMoleculeBtn.disabled = true; // Disable button when popping
+            stopIncrement(); // Stop any ongoing increment when popping
             avogadroBalloon.classList.add('pop');
             popSound.currentTime = 0; // Rewind to start if already playing
             popSound.play().catch(e => console.error("Error playing pop sound:", e));
@@ -1179,10 +1250,7 @@
     }
 
     function cancelAvogadroIncrease() {
-        if (avogadroIncreaseAnimTimeout) {
-            clearTimeout(avogadroIncreaseAnimTimeout);
-            avogadroIncreaseAnimTimeout = null;
-        }
+        stopIncrement(); // Stop hold mechanism
         if (avogadroPopAnimTimeout) {
             clearTimeout(avogadroPopAnimTimeout);
             avogadroPopAnimTimeout = null;
@@ -1199,12 +1267,13 @@
         }
     }
 
-    increaseMoleculeBtn.addEventListener('click', () => {
-        if (moleculeCount < MAX_MOLECULES_BEFORE_POP) {
-            moleculeCount++;
-            updateAvogadroDisplay();
-        }
-    });
+    // No longer needed since handleHoldStart handles the first increment
+    // increaseMoleculeBtn.addEventListener('click', () => {
+    //     if (moleculeCount < MAX_MOLECULES_BEFORE_POP) {
+    //         moleculeCount++;
+    //         updateAvogadroDisplay();
+    //     }
+    // });
 
     getNewOneBtn.addEventListener('click', () => {
         initAvogadro();
