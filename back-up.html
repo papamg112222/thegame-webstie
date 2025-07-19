@@ -318,7 +318,7 @@
     }
 
     .balloon {
-      background: radial-gradient(circle at 25% 25%, #ffbaba, #ff7a7f 30%, #ff5a5f 60%, #cc0000 100%);
+      background: radial-gradient(circle at 25% 25%, rgba(255, 186, 186, 0.7), rgba(255, 122, 127, 0.7) 30%, rgba(255, 90, 95, 0.7) 60%, rgba(204, 0, 0, 0.7) 100%); /* Added transparency */
       border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
       box-shadow: 0 8px 20px rgba(0,0,0,0.4);
       transition: width 0.3s, height 0.3s, background 0.3s, box-shadow 0.3s, border-radius 0.3s; /* Added border-radius to transition */
@@ -327,13 +327,23 @@
       animation: floatUpDown 3s ease-in-out infinite alternate;
     }
 
-    /* Avogadro specific max size - REMOVED, now controlled by JS calculation directly */
-    /*
-    #avogadroBalloon {
-        max-width: 100px;
-        max-height: 150px;
+    /* Charles Balloon specific styling for canvas inside */
+    #charlesBalloon {
+        position: relative; /* Make it a positioning context for the canvas */
+        overflow: hidden; /* Crucial: hide particles outside the balloon's shape */
+        display: flex; /* Make it a flex container to center its content (if any) */
+        justify-content: center;
+        align-items: center;
     }
-    */
+    #charlesParticlesCanvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 1; /* Particles drawn on this, behind the balloon's 'neck' pseudo-element */
+    }
+
 
     /* Keyframes for floating animation */
     @keyframes floatUpDown {
@@ -618,8 +628,10 @@
     </p>
     <div class="container" style="position: relative;">
       <div class="balloon-container">
-        <div id="charlesBalloon" class="balloon" style="z-index: 2;"></div>
         <div id="charlesMoleculeBg" class="molecule-teller-bg">0</div>
+        <div id="charlesBalloon" class="balloon" style="z-index: 2;">
+            <canvas id="charlesParticlesCanvas"></canvas>
+        </div>
       </div>
       <div class="slider-container">
         <label>Temperature (°C): <span id="charlesTempVal">20</span></label>
@@ -783,6 +795,41 @@
       showMode('memberPage'); // This will handle hiding other modes and displaying memberPage
     }
 
+    // This function is general enough to be used by Boyle, Gay-Lussac, and Charles
+    function resolveBoyleCollision(ball1, ball2) {
+        const dx = ball2.x - ball1.x;
+        const dy = ball2.y - ball1.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const minDistance = ball1.radius + ball2.radius;
+
+        if (distance < minDistance && distance > 0) {
+            const overlap = minDistance - distance;
+            const nx = dx / distance;
+            const ny = dy / distance;
+            const separationAmount = overlap / 2 + 0.05;
+
+            ball1.x -= nx * separationAmount;
+            ball1.y -= ny * separationAmount;
+            ball2.x += nx * separationAmount;
+            ball2.y += ny * separationAmount;
+
+            const vrx = ball1.speedX - ball2.speedX;
+            const vry = ball1.speedY - ball2.speedY;
+            const speedAlongNormal = vrx * nx + vry * ny;
+
+            if (speedAlongNormal > 0) return;
+
+            const elasticity = 0.3; // Changed from 0.95 to 0.3 for "stickier" collisions
+            const impulseMagnitude = -(1 + elasticity) * speedAlongNormal;
+
+            ball1.speedX += impulseMagnitude * nx;
+            ball1.speedY += impulseMagnitude * ny;
+            ball2.speedX -= impulseMagnitude * nx;
+            ball2.speedY -= impulseMagnitude * ny;
+        }
+    }
+
+
     // === BOYLE MODE ===
     const boyleMassSlider = document.getElementById('boyleMass');
     const boyleTempSlider = document.getElementById('boyleTemp');
@@ -864,40 +911,6 @@
       });
     }
 
-    // This function is general enough to be used by Boyle and Gay-Lussac
-    function resolveBoyleCollision(ball1, ball2) {
-        const dx = ball2.x - ball1.x;
-        const dy = ball2.y - ball1.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        const minDistance = ball1.radius + ball2.radius;
-
-        if (distance < minDistance && distance > 0) {
-            const overlap = minDistance - distance;
-            const nx = dx / distance;
-            const ny = dy / distance;
-            const separationAmount = overlap / 2 + 0.05;
-
-            ball1.x -= nx * separationAmount;
-            ball1.y -= ny * separationAmount;
-            ball2.x += nx * separationAmount;
-            ball2.y += ny * separationAmount;
-
-            const vrx = ball1.speedX - ball2.speedX;
-            const vry = ball1.speedY - ball2.speedY;
-            const speedAlongNormal = vrx * nx + vry * ny;
-
-            if (speedAlongNormal > 0) return;
-
-            const elasticity = 0.3; // Changed from 0.95 to 0.3 for "stickier" collisions
-            const impulseMagnitude = -(1 + elasticity) * speedAlongNormal;
-
-            ball1.speedX += impulseMagnitude * nx;
-            ball1.speedY += impulseMagnitude * ny;
-            ball2.speedX -= impulseMagnitude * nx;
-            ball2.speedY -= impulseMagnitude * ny;
-        }
-    }
-
     function animateBoyle() {
       const container = boyleCanvas.parentElement;
       if (boyleCanvas.width !== container.clientWidth || boyleCanvas.height !== container.clientHeight) {
@@ -972,7 +985,13 @@
     const charlesBalloon = document.getElementById('charlesBalloon');
     const charlesMoleculeBg = document.getElementById('charlesMoleculeBg');
 
-    let charlesAnimId;
+    const charlesParticlesCanvas = document.getElementById('charlesParticlesCanvas'); // NEW
+    const cpCtx = charlesParticlesCanvas.getContext('2d'); // NEW
+    let charlesParticles = []; // NEW
+    let charlesParticleAnimId; // NEW
+    const CHARLES_PARTICLE_RADIUS = 3; // Smaller particles for Charles' Law // NEW
+
+
     const INITIAL_CHARLES_BALLOON_WIDTH = 100;
     const INITIAL_CHARLES_BALLOON_HEIGHT = 150;
     const MIN_CHARLES_BALLOON_SCALE = 0.5; // Minimum size factor
@@ -985,10 +1004,120 @@
       charlesBalloon.style.width = `${INITIAL_CHARLES_BALLOON_WIDTH}px`;
       charlesBalloon.style.height = `${INITIAL_CHARLES_BALLOON_HEIGHT}px`;
 
-      updateCharlesBalloonSize();
-      // Set the fixed number for molecules in the background counter
-      charlesMoleculeBg.textContent = CHARLES_FIXED_MOLECULE_COUNT; 
+      updateCharlesBalloonSize(); // This updates the balloon's CSS size
+      charlesMoleculeBg.textContent = CHARLES_FIXED_MOLECULE_COUNT;
+      initCharlesParticles(); // NEW: Initialize particles when Charles' mode starts
     }
+
+    // NEW: Particle Initialization for Charles' Law
+    function initCharlesParticles() {
+        charlesParticles = [];
+        // Ensure the canvas matches the balloon's current dimensions for proper drawing area
+        charlesParticlesCanvas.width = charlesBalloon.clientWidth;
+        charlesParticlesCanvas.height = charlesBalloon.clientHeight;
+
+        const numParticles = CHARLES_FIXED_MOLECULE_COUNT;
+        for (let i = 0; i < numParticles; i++) {
+            charlesParticles.push({
+                x: Math.random() * (charlesParticlesCanvas.width - 2 * CHARLES_PARTICLE_RADIUS) + CHARLES_PARTICLE_RADIUS,
+                y: Math.random() * (charlesParticlesCanvas.height - 2 * CHARLES_PARTICLE_RADIUS) + CHARLES_PARTICLE_RADIUS,
+                radius: CHARLES_PARTICLE_RADIUS,
+                speedX: 0, // Will be set by updateCharlesParticleSpeeds
+                speedY: 0,
+                color: 'rgba(0, 200, 255, 0.8)' // A different color for Charles' particles (light blue)
+            });
+        }
+        updateCharlesParticleSpeeds(); // Set initial speeds based on current temp
+        animateCharlesParticles();
+    }
+
+    // NEW: Update Particle Speeds for Charles' Law
+    function updateCharlesParticleSpeeds() {
+        const temp = parseInt(charlesTempSlider.value);
+        const baseSpeed = 0.5; // Base speed for Charles' particles
+        const speedFactor = baseSpeed + (temp / 100) * 3.0; // Scale speed with temperature
+
+        charlesParticles.forEach(particle => {
+            let currentSpeedMagnitude = Math.sqrt(particle.speedX * particle.speedX + particle.speedY * particle.speedY);
+            
+            if (currentSpeedMagnitude === 0 || isNaN(currentSpeedMagnitude) || currentSpeedMagnitude < 0.01) { 
+                let angle = Math.random() * Math.PI * 2;
+                particle.speedX = Math.cos(angle) * speedFactor;
+                particle.speedY = Math.sin(angle) * speedFactor;
+            } else {
+                const scaleRatio = speedFactor / currentSpeedMagnitude;
+                particle.speedX *= scaleRatio;
+                particle.speedY *= scaleRatio;
+            }
+        });
+    }
+
+    // NEW: Animation loop for Charles' Law particles
+    function animateCharlesParticles() {
+        // Dynamically adjust canvas size to match balloon's current dimensions
+        const currentBalloonWidth = charlesBalloon.clientWidth;
+        const currentBalloonHeight = charlesBalloon.clientHeight;
+
+        if (charlesParticlesCanvas.width !== currentBalloonWidth || charlesParticlesCanvas.height !== currentBalloonHeight) {
+            charlesParticlesCanvas.width = currentBalloonWidth;
+            charlesParticlesCanvas.height = currentBalloonHeight;
+            // When canvas resizes, particles might be outside, so re-position them
+            charlesParticles.forEach(particle => {
+                particle.x = Math.max(CHARLES_PARTICLE_RADIUS, Math.min(particle.x, currentBalloonWidth - CHARLES_PARTICLE_RADIUS));
+                particle.y = Math.max(CHARLES_PARTICLE_RADIUS, Math.min(particle.y, currentBalloonHeight - CHARLES_PARTICLE_RADIUS));
+            });
+        }
+
+        cpCtx.clearRect(0, 0, charlesParticlesCanvas.width, charlesParticlesCanvas.height);
+
+        for (let i = 0; i < charlesParticles.length; i++) {
+            const particle = charlesParticles[i];
+
+            // Update position
+            particle.x += particle.speedX;
+            particle.y += particle.speedY;
+
+            // Wall collisions (balloon boundaries)
+            if (particle.x + particle.radius > charlesParticlesCanvas.width || particle.x - particle.radius < 0) {
+                particle.speedX *= -1;
+                // Correct position to prevent sticking
+                if (particle.x + particle.radius > charlesParticlesCanvas.width) particle.x = charlesParticlesCanvas.width - particle.radius;
+                else if (particle.x - particle.radius < 0) particle.x = particle.radius;
+            }
+            if (particle.y + particle.radius > charlesParticlesCanvas.height || particle.y - particle.radius < 0) {
+                particle.speedY *= -1;
+                // Correct position to prevent sticking
+                if (particle.y + particle.radius > charlesParticlesCanvas.height) particle.y = charlesParticlesCanvas.height - particle.radius;
+                else if (particle.y - particle.radius < 0) particle.y = particle.radius;
+            }
+
+            // Draw particle
+            cpCtx.beginPath();
+            cpCtx.arc(particle.x, particle.y, particle.radius, 0, Math.PI * 2);
+            cpCtx.fillStyle = particle.color;
+            cpCtx.fill();
+            cpCtx.closePath();
+        }
+
+        // Handle particle-to-particle collisions
+        for (let i = 0; i < charlesParticles.length; i++) {
+            for (let j = i + 1; j < charlesParticles.length; j++) {
+                // Reuse the general collision resolution function
+                resolveBoyleCollision(charlesParticles[i], charlesParticles[j]);
+            }
+        }
+
+        charlesParticleAnimId = requestAnimationFrame(animateCharlesParticles);
+    }
+
+    // NEW: Function to cancel Charles' Law particle animation
+    function cancelCharlesParticleAnimation() {
+        if (charlesParticleAnimId) {
+            cancelAnimationFrame(charlesParticleAnimId);
+            charlesParticleAnimId = null;
+        }
+    }
+
 
     function updateCharlesBalloonSize() {
       const temp = parseInt(charlesTempSlider.value);
@@ -1007,15 +1136,17 @@
       const verticalTopRadius = 60 + (scale - 1) * 10;
       const verticalBottomRadius = 40 + (scale - 1) * 10;
       charlesBalloon.style.borderRadius = `${horizontalRadius}% ${horizontalRadius}% ${horizontalRadius}% ${horizontalRadius}% / ${verticalTopRadius}% ${verticalTopRadius}% ${verticalBottomRadius}% ${verticalBottomRadius}%`;
+
+      updateCharlesParticleSpeeds(); // NEW: Update particle speeds when temp/size changes
     }
 
     function cancelCharlesAnimation() {
-        // No ongoing animation frames to cancel for Charles' Law
+        cancelCharlesParticleAnimation(); // NEW: Cancel particle animation when leaving Charles mode
     }
 
     charlesTempSlider.addEventListener('input', () => {
       charlesTempVal.textContent = charlesTempSlider.value;
-      updateCharlesBalloonSize();
+      updateCharlesBalloonSize(); // This now also triggers updateCharlesParticleSpeeds
     });
 
     // === GAY-LUSSAC MODE ===
