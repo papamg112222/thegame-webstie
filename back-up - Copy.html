@@ -552,68 +552,161 @@
     const boyleTempVal = document.getElementById('boyleTempVal');
     const boyleCanvas = document.getElementById('boyleCanvas');
     const bCtx = boyleCanvas.getContext('2d');
+
     let boyleBalls = [];
     let boyleAnimId;
-    let currentBoyleMass = 0; // Keep track of current mass for adding/removing balls
+    const BOYLE_BALL_RADIUS = 6; // Fixed radius for consistency
+    const MAX_MASS_VALUE = 20; // Max value of the mass slider
+    const MIN_TEMP_VALUE = 0;
+    const MAX_TEMP_VALUE = 100;
 
     function initBoyle() {
       const container = boyleCanvas.parentElement;
       boyleCanvas.width = container.clientWidth;
       boyleCanvas.height = container.clientHeight;
 
-      currentBoyleMass = parseInt(boyleMassSlider.value); // Initialize current mass
-      boyleMassVal.textContent = currentBoyleMass;
+      boyleMassVal.textContent = boyleMassSlider.value;
       boyleTempVal.textContent = boyleTempSlider.value;
       
       boyleBalls = []; // Clear balls initially
-      addRemoveBoyleBalls(currentBoyleMass); // Populate with initial count
+      addRemoveBoyleBalls(parseInt(boyleMassSlider.value)); // Populate with initial count
       updateBoyleBallSpeeds(); // Set initial speeds
       
       animateBoyle();
     }
 
     function addRemoveBoyleBalls(newMass) {
-      const targetBallCount = newMass * 5; // Assuming 5 balls per unit of mass
       const currentBallCount = boyleBalls.length;
-      const temp = parseInt(boyleTempSlider.value);
-      const speedFactor = (temp > 0) ? (temp / 20) : 0.1; // Ensure some movement even at 0 temp
+      
+      // Calculate target balls to fill the container at max mass
+      // This is an approximation. If radius changes, this needs adjustment.
+      // At max mass (20), we want the canvas to be mostly full.
+      // Approx density: container area / (ball area * buffer_factor)
+      // Assume approx 1000-1500 balls for a "solid" look on a 400x400 container
+      const containerArea = boyleCanvas.width * boyleCanvas.height;
+      const ballArea = Math.PI * BOYLE_BALL_RADIUS * BOYLE_BALL_RADIUS;
+      const IDEAL_MAX_BALLS = Math.floor(containerArea / (ballArea * 2.5)); // Adjust buffer_factor (2.5 here) for desired density
 
+      const targetBallCount = Math.floor((newMass / MAX_MASS_VALUE) * IDEAL_MAX_BALLS);
+      
       if (targetBallCount > currentBallCount) {
         // Add new balls
         for (let i = 0; i < (targetBallCount - currentBallCount); i++) {
-          boyleBalls.push({
+          let newBall = {
             x: Math.random() * boyleCanvas.width,
             y: Math.random() * boyleCanvas.height,
-            radius: 6,
-            speedX: (Math.random() - 0.5) * speedFactor,
-            speedY: (Math.random() - 0.5) * speedFactor,
+            radius: BOYLE_BALL_RADIUS,
+            speedX: 0, // Will be updated by updateBoyleBallSpeeds
+            speedY: 0, // Will be updated by updateBoyleBallSpeeds
             color: '#ff5a5f'
-          });
+          };
+
+          // Simple non-overlapping placement for new balls (can be slow for many balls)
+          let overlaps = true;
+          let attempts = 0;
+          while (overlaps && attempts < 100) { // Limit attempts to prevent infinite loop
+            overlaps = false;
+            newBall.x = Math.random() * (boyleCanvas.width - 2 * BOYLE_BALL_RADIUS) + BOYLE_BALL_RADIUS;
+            newBall.y = Math.random() * (boyleCanvas.height - 2 * BOYLE_BALL_RADIUS) + BOYLE_BALL_RADIUS;
+            for (const existingBall of boyleBalls) {
+              const dx = newBall.x - existingBall.x;
+              const dy = newBall.y - existingBall.y;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              if (distance < (newBall.radius + existingBall.radius)) {
+                overlaps = true;
+                break;
+              }
+            }
+            attempts++;
+          }
+          boyleBalls.push(newBall);
         }
       } else if (targetBallCount < currentBallCount) {
         // Remove balls
         boyleBalls.splice(0, currentBallCount - targetBallCount); // Remove from the beginning
       }
-      currentBoyleMass = newMass; // Update current mass tracker
     }
 
     function updateBoyleBallSpeeds() {
       const temp = parseInt(boyleTempSlider.value);
-      const speedFactor = (temp > 0) ? (temp / 20) : 0.1; // Ensure some movement even at 0 temp
+      const mass = parseInt(boyleMassSlider.value);
 
+      // Base speed (when temp=mid, mass=mid)
+      const baseSpeed = 2; 
+
+      // Temperature influence: higher temp = higher speed
+      // Scale temp from 0-100 to a factor, e.g., 0.1 to 2.0
+      const tempFactor = 0.1 + (temp / MAX_TEMP_VALUE) * 1.9; // temp 0 -> 0.1, temp 100 -> 2.0
+
+      // Mass influence: higher mass = lower speed (due to crowding/more collisions)
+      // Scale mass from 1-20 to an inverse factor, e.g., 1.0 to 0.1
+      // Use a smoothing function or logarithmic scale if linear is too extreme
+      const massFactor = 1.0 - ( (mass - 1) / (MAX_MASS_VALUE - 1) ) * 0.9; // mass 1 -> 1.0, mass 20 -> 0.1
+
+      // Combined speed factor: temp increases, mass decreases.
+      // This creates the "refuting" effect: high mass * low temp = very slow
+      // (e.g., massFactor 0.1 * tempFactor 0.1 = 0.01 overall factor)
+      // low mass * high temp = very fast
+      // (e.g., massFactor 1.0 * tempFactor 2.0 = 2.0 overall factor)
+      const combinedSpeedFactor = baseSpeed * tempFactor * massFactor;
+      
       boyleBalls.forEach(ball => {
-        // Scale existing speeds proportionally
-        // To maintain direction but change magnitude:
+        // Normalize current speed to maintain direction but adjust magnitude
         let currentSpeedMagnitude = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
-        if (currentSpeedMagnitude === 0) { // If ball was completely still
-             ball.speedX = (Math.random() - 0.5) * speedFactor;
-             ball.speedY = (Math.random() - 0.5) * speedFactor;
+        
+        if (currentSpeedMagnitude === 0 || isNaN(currentSpeedMagnitude)) { 
+            // If ball was still or had invalid speed, give it a random initial direction
+            let angle = Math.random() * Math.PI * 2;
+            ball.speedX = Math.cos(angle) * combinedSpeedFactor;
+            ball.speedY = Math.sin(angle) * combinedSpeedFactor;
         } else {
-            let scaleRatio = speedFactor / currentSpeedMagnitude;
+            // Scale existing speeds proportionally
+            const scaleRatio = combinedSpeedFactor / currentSpeedMagnitude;
             ball.speedX *= scaleRatio;
             ball.speedY *= scaleRatio;
         }
       });
+    }
+
+    function resolveBoyleCollision(ball1, ball2) {
+        const dx = ball2.x - ball1.x;
+        const dy = ball2.y - ball1.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // If balls are overlapping
+        if (distance < ball1.radius + ball2.radius && distance > 0) {
+            // Calculate overlap amount
+            const overlap = (ball1.radius + ball2.radius) - distance;
+
+            // Normalize collision vector
+            const nx = dx / distance;
+            const ny = dy / distance;
+
+            // Move balls apart to prevent sticking
+            ball1.x -= nx * (overlap / 2);
+            ball1.y -= ny * (overlap / 2);
+            ball2.x += nx * (overlap / 2);
+            ball2.y += ny * (overlap / 2);
+
+            // Relative velocity
+            const vrx = ball1.speedX - ball2.speedX;
+            const vry = ball1.speedY - ball2.speedY;
+
+            // Dot product of relative velocity and collision normal
+            const dotProduct = vrx * nx + vry * ny;
+
+            // Only resolve if balls are moving towards each other
+            if (dotProduct > 0) return;
+
+            // Calculate impulse scalar
+            const impulse = -dotProduct;
+
+            // Apply impulse
+            ball1.speedX += impulse * nx;
+            ball1.speedY += impulse * ny;
+            ball2.speedX -= impulse * nx;
+            ball2.speedY -= impulse * ny;
+        }
     }
 
     function animateBoyle() {
@@ -622,7 +715,6 @@
           boyleCanvas.width = container.clientWidth;
           boyleCanvas.height = container.clientHeight;
           // When canvas resizes, re-adjust ball positions/speeds to fit
-          // This prevents balls from getting stuck outside the new bounds or teleporting.
           boyleBalls.forEach(ball => {
               ball.x = Math.max(ball.radius, Math.min(ball.x, boyleCanvas.width - ball.radius));
               ball.y = Math.max(ball.radius, Math.min(ball.y, boyleCanvas.height - ball.radius));
@@ -630,17 +722,30 @@
       }
 
       bCtx.clearRect(0, 0, boyleCanvas.width, boyleCanvas.height);
+
+      // Update ball positions first
       boyleBalls.forEach(ball => {
         ball.x += ball.speedX;
         ball.y += ball.speedY;
+      });
 
-        // Bounce inside the container edges
+      // Handle wall collisions
+      boyleBalls.forEach(ball => {
         if (ball.x + ball.radius > boyleCanvas.width) { ball.x = boyleCanvas.width - ball.radius; ball.speedX *= -1; }
         if (ball.x - ball.radius < 0) { ball.x = ball.radius; ball.speedX *= -1; }
         if (ball.y + ball.radius > boyleCanvas.height) { ball.y = boyleCanvas.height - ball.radius; ball.speedY *= -1; }
         if (ball.y - ball.radius < 0) { ball.y = ball.radius; ball.speedY *= -1; }
+      });
 
-        // Draw ball
+      // Handle ball-to-ball collisions
+      for (let i = 0; i < boyleBalls.length; i++) {
+        for (let j = i + 1; j < boyleBalls.length; j++) {
+          resolveBoyleCollision(boyleBalls[i], boyleBalls[j]);
+        }
+      }
+
+      // Draw balls
+      boyleBalls.forEach(ball => {
         bCtx.fillStyle = ball.color;
         bCtx.beginPath();
         bCtx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
@@ -648,6 +753,7 @@
       });
       boyleAnimId = requestAnimationFrame(animateBoyle);
     }
+
     function cancelBoyleAnimation() {
       if (boyleAnimId) cancelAnimationFrame(boyleAnimId);
     }
@@ -656,6 +762,7 @@
       const newMass = parseInt(boyleMassSlider.value);
       boyleMassVal.textContent = newMass;
       addRemoveBoyleBalls(newMass); // Add/remove balls based on new mass
+      updateBoyleBallSpeeds(); // Recalculate speeds based on new mass and current temp
     };
 
     boyleTempSlider.oninput = () => {
