@@ -580,9 +580,8 @@
       
       // Calculate target balls to fill the container at max mass
       // This is an approximation. If radius changes, this needs adjustment.
-      // At max mass (20), we want the canvas to be mostly full.
       // Approx density: container area / (ball area * buffer_factor)
-      // Assume approx 1000-1500 balls for a "solid" look on a 400x400 container
+      // For a 400x400 container and 6px radius balls, 2.5 buffer means ~1200 balls
       const containerArea = boyleCanvas.width * boyleCanvas.height;
       const ballArea = Math.PI * BOYLE_BALL_RADIUS * BOYLE_BALL_RADIUS;
       const IDEAL_MAX_BALLS = Math.floor(containerArea / (ballArea * 2.5)); // Adjust buffer_factor (2.5 here) for desired density
@@ -593,21 +592,23 @@
         // Add new balls
         for (let i = 0; i < (targetBallCount - currentBallCount); i++) {
           let newBall = {
-            x: Math.random() * boyleCanvas.width,
-            y: Math.random() * boyleCanvas.height,
+            x: 0, y: 0, // Will find a non-overlapping position
             radius: BOYLE_BALL_RADIUS,
             speedX: 0, // Will be updated by updateBoyleBallSpeeds
             speedY: 0, // Will be updated by updateBoyleBallSpeeds
             color: '#ff5a5f'
           };
 
-          // Simple non-overlapping placement for new balls (can be slow for many balls)
+          // Simple non-overlapping placement for new balls
           let overlaps = true;
           let attempts = 0;
-          while (overlaps && attempts < 100) { // Limit attempts to prevent infinite loop
+          const MAX_PLACEMENT_ATTEMPTS = 200; // Limit attempts to prevent infinite loop for very dense packing
+          while (overlaps && attempts < MAX_PLACEMENT_ATTEMPTS) { 
             overlaps = false;
+            // Random position within bounds, considering radius
             newBall.x = Math.random() * (boyleCanvas.width - 2 * BOYLE_BALL_RADIUS) + BOYLE_BALL_RADIUS;
             newBall.y = Math.random() * (boyleCanvas.height - 2 * BOYLE_BALL_RADIUS) + BOYLE_BALL_RADIUS;
+            
             for (const existingBall of boyleBalls) {
               const dx = newBall.x - existingBall.x;
               const dy = newBall.y - existingBall.y;
@@ -619,7 +620,11 @@
             }
             attempts++;
           }
-          boyleBalls.push(newBall);
+          // If after max attempts we still overlap, add it anyway (might stick briefly)
+          // or just skip adding this ball (better than infinite loop / freezing)
+          if (!overlaps || attempts < MAX_PLACEMENT_ATTEMPTS) {
+              boyleBalls.push(newBall);
+          }
         }
       } else if (targetBallCount < currentBallCount) {
         // Remove balls
@@ -631,36 +636,22 @@
       const temp = parseInt(boyleTempSlider.value);
       const mass = parseInt(boyleMassSlider.value);
 
-      // Base speed (when temp=mid, mass=mid)
       const baseSpeed = 2; 
+      const tempFactor = 0.1 + (temp / MAX_TEMP_VALUE) * 1.9; 
+      // massFactor: 1.0 when mass=1, 0.1 when mass=MAX_MASS_VALUE
+      const massFactor = 1.0 - ( (mass - 1) / (MAX_MASS_VALUE - 1) ) * 0.9; 
 
-      // Temperature influence: higher temp = higher speed
-      // Scale temp from 0-100 to a factor, e.g., 0.1 to 2.0
-      const tempFactor = 0.1 + (temp / MAX_TEMP_VALUE) * 1.9; // temp 0 -> 0.1, temp 100 -> 2.0
-
-      // Mass influence: higher mass = lower speed (due to crowding/more collisions)
-      // Scale mass from 1-20 to an inverse factor, e.g., 1.0 to 0.1
-      // Use a smoothing function or logarithmic scale if linear is too extreme
-      const massFactor = 1.0 - ( (mass - 1) / (MAX_MASS_VALUE - 1) ) * 0.9; // mass 1 -> 1.0, mass 20 -> 0.1
-
-      // Combined speed factor: temp increases, mass decreases.
-      // This creates the "refuting" effect: high mass * low temp = very slow
-      // (e.g., massFactor 0.1 * tempFactor 0.1 = 0.01 overall factor)
-      // low mass * high temp = very fast
-      // (e.g., massFactor 1.0 * tempFactor 2.0 = 2.0 overall factor)
       const combinedSpeedFactor = baseSpeed * tempFactor * massFactor;
       
       boyleBalls.forEach(ball => {
-        // Normalize current speed to maintain direction but adjust magnitude
         let currentSpeedMagnitude = Math.sqrt(ball.speedX * ball.speedX + ball.speedY * ball.speedY);
         
-        if (currentSpeedMagnitude === 0 || isNaN(currentSpeedMagnitude)) { 
-            // If ball was still or had invalid speed, give it a random initial direction
+        if (currentSpeedMagnitude === 0 || isNaN(currentSpeedMagnitude) || currentSpeedMagnitude < 0.01) { 
+            // Give a minimum random speed if almost stopped
             let angle = Math.random() * Math.PI * 2;
             ball.speedX = Math.cos(angle) * combinedSpeedFactor;
             ball.speedY = Math.sin(angle) * combinedSpeedFactor;
         } else {
-            // Scale existing speeds proportionally
             const scaleRatio = combinedSpeedFactor / currentSpeedMagnitude;
             ball.speedX *= scaleRatio;
             ball.speedY *= scaleRatio;
@@ -672,17 +663,19 @@
         const dx = ball2.x - ball1.x;
         const dy = ball2.y - ball1.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
+        const minDistance = ball1.radius + ball2.radius;
 
         // If balls are overlapping
-        if (distance < ball1.radius + ball2.radius && distance > 0) {
+        if (distance < minDistance && distance > 0) {
             // Calculate overlap amount
-            const overlap = (ball1.radius + ball2.radius) - distance;
+            const overlap = minDistance - distance;
 
-            // Normalize collision vector
+            // Normalize collision vector (direction from ball1 to ball2)
             const nx = dx / distance;
             const ny = dy / distance;
 
-            // Move balls apart to prevent sticking
+            // Separation: move balls apart based on overlap
+            // Move each ball by half the overlap along the normal vector
             ball1.x -= nx * (overlap / 2);
             ball1.y -= ny * (overlap / 2);
             ball2.x += nx * (overlap / 2);
@@ -693,19 +686,20 @@
             const vry = ball1.speedY - ball2.speedY;
 
             // Dot product of relative velocity and collision normal
-            const dotProduct = vrx * nx + vry * ny;
+            const speedAlongNormal = vrx * nx + vry * ny;
 
             // Only resolve if balls are moving towards each other
-            if (dotProduct > 0) return;
+            if (speedAlongNormal > 0) return; // Already moving apart or parallel
 
-            // Calculate impulse scalar
-            const impulse = -dotProduct;
+            // Elastic collision (coefficient of restitution = 1 for perfect bounce)
+            const elasticity = 0.9; // A little less than 1 to dampen movement slightly over time
+            const impulseMagnitude = -(1 + elasticity) * speedAlongNormal;
 
             // Apply impulse
-            ball1.speedX += impulse * nx;
-            ball1.speedY += impulse * ny;
-            ball2.speedX -= impulse * nx;
-            ball2.speedY -= impulse * ny;
+            ball1.speedX += impulseMagnitude * nx;
+            ball1.speedY += impulseMagnitude * ny;
+            ball2.speedX -= impulseMagnitude * nx;
+            ball2.speedY -= impulseMagnitude * ny;
         }
     }
 
@@ -738,6 +732,10 @@
       });
 
       // Handle ball-to-ball collisions
+      // It's crucial to separate this from position updates and wall collisions
+      // For more accurate physics, you might need multiple iterations per frame
+      // or a more advanced collision detection/response system.
+      // For simplicity here, one pass for resolution.
       for (let i = 0; i < boyleBalls.length; i++) {
         for (let j = i + 1; j < boyleBalls.length; j++) {
           resolveBoyleCollision(boyleBalls[i], boyleBalls[j]);
@@ -922,7 +920,6 @@
         }
     }
 
-
     function increaseMassStep() {
       if (avogadroBalloon.classList.contains('pop') || avogadroMolecules >= MAX_MOLECULES) {
           clearInterval(increaseInterval);
@@ -932,21 +929,37 @@
       updateAvogadroDisplay();
     }
 
+    // Function to start the continuous increase
+    function startIncrease() {
+        if (increaseInterval) return; // Prevent multiple intervals
+        increaseMassStep(); // Execute once immediately on press/touch
+        increaseInterval = setInterval(increaseMassStep, 100); // Then repeat every 100ms
+    }
+
+    // Function to stop the continuous increase
+    function stopIncrease() {
+        clearInterval(increaseInterval);
+        increaseInterval = null; // Clear the interval ID
+    }
+
     // Event listener for the "Get New One" button
     getNewOneBtn.addEventListener('click', () => {
         initAvogadro(); // Re-initialize the mode to get a new balloon
     });
 
-    increaseMoleculeBtn.addEventListener('mousedown', () => {
-      increaseMassStep();
-      increaseInterval = setInterval(increaseMassStep, 100);
-    });
-    increaseMoleculeBtn.addEventListener('mouseup', () => {
-      clearInterval(increaseInterval);
-    });
-    increaseMoleculeBtn.addEventListener('mouseleave', () => {
-      clearInterval(increaseInterval);
-    });
+    // Modified event listeners for `increaseMoleculeBtn`
+    increaseMoleculeBtn.addEventListener('mousedown', startIncrease);
+    increaseMoleculeBtn.addEventListener('mouseup', stopIncrease);
+    increaseMoleculeBtn.addEventListener('mouseleave', stopIncrease);
+
+    // Add touch event listeners for mobile devices
+    increaseMoleculeBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent default touch behavior like scrolling or zooming
+        startIncrease();
+    }, { passive: false }); // Use passive: false to allow preventDefault
+
+    increaseMoleculeBtn.addEventListener('touchend', stopIncrease);
+    increaseMoleculeBtn.addEventListener('touchcancel', stopIncrease); // In case touch is interrupted (e.g., call, alert)
 
     function cancelAvogadroIncrease() {
       clearInterval(increaseInterval);
