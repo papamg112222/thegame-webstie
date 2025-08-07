@@ -11,10 +11,10 @@
     html, body {
       margin: 0;
       padding: 0;
-      /* MODIFIED: Changed height: 100% and overflow: hidden to allow scrolling */
-      overflow-x: hidden;
+      height: 100%;
       font-family: 'Montserrat', sans-serif;
       background: #1a0a3a;
+      overflow: hidden;
       color: white;
     }
     #particleCanvas {
@@ -83,8 +83,7 @@
       display: none;
       position: relative;
       z-index: 2;
-      /* MODIFIED: Changed height to min-height to allow scrolling */
-      min-height: 100vh;
+      height: 100vh;
       padding: 20px;
       background: #111; /* Default dark background for game modes */
       overflow: auto;
@@ -101,8 +100,7 @@
         display: none; /* Hidden by default */
         position: relative;
         z-index: 2;
-        /* MODIFIED: Changed height to min-height to allow scrolling */
-        min-height: 100vh;
+        height: 100vh;
         padding: 20px;
         background: #1a0a3a; /* Darker background for member page */
         overflow: auto;
@@ -490,21 +488,6 @@
             font-size: 0.85rem;
             margin-bottom: 15px;
         }
-
-        /* MODIFIED: Adjusted member page layout for small screens */
-        #memberPage pre {
-            font-size: 18px;
-            white-space: pre-wrap; /* Now wraps text */
-            line-height: 1.4;
-            text-align: center;
-        }
-        #memberPage h2 {
-            font-size: 2.5rem;
-        }
-        #memberPage .return-btn {
-            font-size: 1rem;
-            padding: 10px 20px;
-        }
     }
 
   </style>
@@ -625,6 +608,9 @@
     Return to Menu
   </button>
 </div>
+
+
+
 
 
 
@@ -1018,3 +1004,184 @@
       const container = gayLussacCanvas.parentElement;
       const newCanvasWidth = container.clientWidth - 40;
       const newCanvasHeight = container.clientHeight - 40;
+
+      if (gayLussacCanvas.width !== newCanvasWidth || gayLussacCanvas.height !== newCanvasHeight) {
+          gayLussacCanvas.width = newCanvasWidth;
+          gayLussacCanvas.height = newCanvasHeight;
+          gayLussacBalls.forEach(ball => {
+              ball.x = Math.max(ball.radius, Math.min(ball.x, gayLussacCanvas.width - ball.radius));
+              ball.y = Math.max(ball.radius, Math.min(ball.y, gayLussacCanvas.height - ball.radius));
+          });
+      }
+
+      gCtx.clearRect(0, 0, gayLussacCanvas.width, gayLussacCanvas.height);
+
+      gayLussacBalls.forEach(ball => {
+        ball.x += ball.speedX;
+        ball.y += ball.speedY;
+      });
+
+      gayLussacBalls.forEach(ball => {
+        if (ball.x + ball.radius > gayLussacCanvas.width) { ball.x = gayLussacCanvas.width - ball.radius; ball.speedX *= -1; }
+        if (ball.x - ball.radius < 0) { ball.x = ball.radius; ball.speedX *= -1; }
+        if (ball.y + ball.radius > gayLussacCanvas.height) { ball.y = gayLussacCanvas.height - ball.radius; ball.speedY *= -1; }
+        if (ball.y - ball.radius < 0) { ball.y = ball.radius; ball.speedY *= -1; }
+      });
+
+      // *** COMMENTED OUT TO DISABLE BALL-TO-BALL COLLISIONS ***
+      /*
+      const numCollisionIterations = 3; 
+      for (let k = 0; k < numCollisionIterations; k++) {
+          for (let i = 0; i < gayLussacBalls.length; i++) {
+              for (let j = i + 1; j < gayLussacBalls.length; j++) {
+                  resolveBoyleCollision(gayLussacBalls[i], gayLussacBalls[j]);
+              }
+          }
+      }
+      */
+
+      gayLussacBalls.forEach(ball => {
+        gCtx.fillStyle = ball.color;
+        gCtx.beginPath();
+        gCtx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        gCtx.fill();
+      });
+      gayLussacAnimId = requestAnimationFrame(animateGayLussac);
+    }
+
+    function cancelGayLussacAnimation() {
+      if (gayLussacAnimId) cancelAnimationFrame(gayLussacAnimId);
+      gayLussacAnimId = null;
+    }
+
+    gayLussacTempSlider.oninput = () => {
+      const temp = parseInt(gayLussacTempSlider.value);
+      gayLussacTempVal.textContent = temp;
+      updateGayLussacSpeeds();
+      updateGayLussacPressureDisplay(temp);
+    };
+
+    // === AVOGADRO MODE ===
+    const avogadroBalloon = document.getElementById('avogadroBalloon');
+    const avogadroMoleculeBg = document.getElementById('avogadroMoleculeBg');
+    const avogadroTopLeftCounter = document.getElementById('avogadroTopLeftCounter');
+    const increaseMoleculeBtn = document.getElementById('increaseMoleculeBtn');
+    const getNewOneBtn = document.getElementById('getNewOneBtn');
+    const popSound = document.getElementById('popSound');
+
+    let avogadroMolecules = 0;
+    let increaseInterval = null;
+    const MAX_MOLECULES = 100; // Balloon pops at this many molecules
+
+    const AVOGADRO_MIN_WIDTH = 80;
+    const AVOGADRO_MIN_HEIGHT = 120;
+    const AVOGADRO_MAX_WIDTH = 120;
+    const AVOGADRO_MAX_HEIGHT = 170;
+
+    function initAvogadro() {
+      avogadroMolecules = 0;
+      avogadroBalloon.style.width = AVOGADRO_MIN_WIDTH + 'px';
+      avogadroBalloon.style.height = AVOGADRO_MIN_HEIGHT + 'px';
+      avogadroBalloon.style.background = 'radial-gradient(circle at 25% 25%, #ffbaba, #ff7a7f 30%, #ff5a5f 60%, #cc0000 100%)';
+      avogadroBalloon.style.boxShadow = '0 8px 20px rgba(0,0,0,0.4)';
+      avogadroBalloon.classList.remove('pop');
+      avogadroBalloon.style.display = 'block';
+      avogadroBalloon.style.animationPlayState = 'running';
+
+      increaseMoleculeBtn.style.display = 'block';
+      getNewOneBtn.style.display = 'none';
+
+      avogadroBalloon.removeEventListener('animationend', handlePopAnimationEnd);
+      avogadroBalloon.addEventListener('animationend', handlePopAnimationEnd);
+
+      updateAvogadroDisplay();
+    }
+
+    function updateAvogadroDisplay() {
+      avogadroMoleculeBg.textContent = avogadroMolecules;
+      avogadroTopLeftCounter.textContent = 'Molecules: ' + avogadroMolecules;
+
+      const progress = avogadroMolecules / MAX_MOLECULES;
+      const width = AVOGADRO_MIN_WIDTH + (AVOGADRO_MAX_WIDTH - AVOGADRO_MIN_WIDTH) * progress;
+      const height = AVOGADRO_MIN_HEIGHT + (AVOGADRO_MAX_HEIGHT - AVOGADRO_MIN_HEIGHT) * progress;
+
+      avogadroBalloon.style.width = width + 'px';
+      avogadroBalloon.style.height = height + 'px';
+
+      const balloonContainer = document.querySelector('#avogadro .balloon-container');
+      const moleculeBgHeight = avogadroMoleculeBg.clientHeight;
+      if (balloonContainer) {
+          avogadroMoleculeBg.style.top = `${(balloonContainer.clientHeight - moleculeBgHeight) / 2}px`;
+      }
+
+      if (avogadroMolecules >= MAX_MOLECULES) {
+        popBalloon();
+      }
+    }
+
+    function popBalloon() {
+      if (avogadroBalloon.classList.contains('pop')) return;
+
+      avogadroBalloon.classList.add('pop');
+      popSound.currentTime = 0;
+      popSound.play();
+      clearInterval(increaseInterval);
+      avogadroBalloon.style.animationPlayState = 'paused';
+
+      increaseMoleculeBtn.style.display = 'none';
+    }
+
+    function handlePopAnimationEnd(event) {
+        if (event.animationName === 'betterPopAnimation' || event.animationName === 'popNeckAnimation') {
+            if (avogadroBalloon.style.display !== 'none') {
+                avogadroBalloon.style.display = 'none';
+                avogadroBalloon.classList.remove('pop');
+                getNewOneBtn.style.display = 'block';
+            }
+        }
+    }
+
+    function increaseMassStep() {
+      if (avogadroBalloon.classList.contains('pop') || avogadroMolecules >= MAX_MOLECULES) {
+          clearInterval(increaseInterval);
+          return;
+      }
+      avogadroMolecules++;
+      updateAvogadroDisplay();
+    }
+
+    function startIncrease() {
+        if (increaseInterval) return;
+        increaseMassStep();
+        increaseInterval = setInterval(increaseMassStep, 100);
+    }
+
+    function stopIncrease() {
+        clearInterval(increaseInterval);
+        increaseInterval = null;
+    }
+
+    getNewOneBtn.addEventListener('click', () => {
+        initAvogadro();
+    });
+
+    increaseMoleculeBtn.addEventListener('mousedown', startIncrease);
+    increaseMoleculeBtn.addEventListener('mouseup', stopIncrease);
+    increaseMoleculeBtn.addEventListener('mouseleave', stopIncrease);
+
+    increaseMoleculeBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startIncrease();
+    }, { passive: false });
+
+    increaseMoleculeBtn.addEventListener('touchend', stopIncrease);
+    increaseMoleculeBtn.addEventListener('touchcancel', stopIncrease);
+
+    function cancelAvogadroIncrease() {
+      clearInterval(increaseInterval);
+    }
+
+  </script>
+
+</body>
+</html>
