@@ -3,638 +3,809 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Epic AI Stickman Fight</title>
+<title>Epic Stickman Fight</title>
 <style>
   body {
-    background: #111;
-    color: #eee;
-    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    margin: 0;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    user-select: none;
+    margin: 0; background: #111; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;
+    color: #eee; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   }
   canvas {
-    background: #222;
-    border-radius: 10px;
-    box-shadow: 0 0 25px #000 inset;
-    margin-top: 1rem;
+    background: #222; border-radius: 12px; box-shadow: 0 0 15px #0f0;
+    display: block;
   }
-  button {
-    margin: 1rem;
+  #startBtn {
+    margin-top: 15px;
     padding: 10px 20px;
+    font-size: 1.2rem;
+    border: 2px solid #0f0;
     background: transparent;
-    border: 2px solid #39ff14;
-    border-radius: 6px;
-    color: #39ff14;
-    font-size: 18px;
+    color: #0f0;
+    border-radius: 8px;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: all 0.3s ease;
   }
-  button:hover {
-    background: #39ff14;
+  #startBtn:hover {
+    background: #0f0;
     color: #111;
-  }
-  #victory {
-    position: absolute;
-    top: 20%;
-    font-size: 4rem;
-    font-weight: 900;
-    color: #39ff14;
-    text-shadow: 0 0 20px #39ff14, 0 0 40px #39ff14;
-    pointer-events: none;
   }
 </style>
 </head>
 <body>
 
-<canvas id="canvas" width="900" height="400"></canvas>
+<canvas id="fightCanvas" width="900" height="450"></canvas>
 <button id="startBtn">Start Fight</button>
-<div id="victory" style="display:none;"></div>
 
 <script>
 (() => {
-  const canvas = document.getElementById("canvas");
-  const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const canvas = document.getElementById('fightCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
 
-  const GRAVITY = 0.8;
-  const FLOOR = height - 80;
-
-  // Helper utilities
+  // --- Utility functions ---
   function lerp(a, b, t) { return a + (b - a) * t; }
-  function clamp(x, min, max) { return Math.min(max, Math.max(min, x)); }
-  function randomChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-  function distance(a, b) { return Math.hypot(b.x - a.x, b.y - a.y); }
+  function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+  function randRange(min, max) { return Math.random() * (max - min) + min; }
+  function easeOutQuad(t) { return t * (2 - t); }
+  function easeInOutQuad(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
 
-  // Camera shake and slow motion
-  let cameraShake = 0;
-  let slowMotion = 1;
-  let slowMotionTimer = 0;
-
-  function doCameraShake(amount) {
-    cameraShake = Math.max(cameraShake, amount);
+  // --- Camera Shake ---
+  class Camera {
+    constructor() {
+      this.shakeDuration = 0;
+      this.shakeIntensity = 0;
+      this.zoom = 1;
+      this.zoomTarget = 1;
+      this.zoomSpeed = 0.1;
+      this.offsetX = 0;
+      this.offsetY = 0;
+    }
+    shake(intensity, duration) {
+      this.shakeIntensity = intensity;
+      this.shakeDuration = duration;
+    }
+    update(dt) {
+      if(this.shakeDuration > 0){
+        this.shakeDuration -= dt;
+        this.offsetX = (Math.random() - 0.5) * this.shakeIntensity;
+        this.offsetY = (Math.random() - 0.5) * this.shakeIntensity;
+      } else {
+        this.offsetX = 0;
+        this.offsetY = 0;
+      }
+      // smooth zoom reset
+      this.zoom += (this.zoomTarget - this.zoom) * this.zoomSpeed;
+    }
   }
-  function doSlowMotion(duration = 20, factor = 0.2) {
-    slowMotion = factor;
-    slowMotionTimer = duration;
-  }
 
-  // Vector2 class for 2D positions and math
+  // --- Vector2 ---
   class Vec2 {
-    constructor(x = 0, y = 0) { this.x = x; this.y = y; }
-    add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
-    sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
-    mul(s) { return new Vec2(this.x * s, this.y * s); }
-    length() { return Math.sqrt(this.x * this.x + this.y * this.y); }
-    normalized() { const len = this.length(); return len === 0 ? new Vec2(0,0) : this.mul(1 / len); }
+    constructor(x=0,y=0){this.x=x;this.y=y;}
+    set(x,y){this.x=x;this.y=y;return this;}
+    copy(){return new Vec2(this.x,this.y);}
+    add(v){this.x+=v.x;this.y+=v.y;return this;}
+    sub(v){this.x-=v.x;this.y-=v.y;return this;}
+    mul(s){this.x*=s;this.y*=s;return this;}
+    length(){return Math.sqrt(this.x*this.x+this.y*this.y);}
+    normalize(){let len=this.length();if(len>0){this.x/=len;this.y/=len;}return this;}
   }
 
-  // Stickman class with limbs & animations
-  class Stickman {
-    constructor(x, color, neckwearColor) {
-      this.pos = new Vec2(x, FLOOR);
-      this.vel = new Vec2(0, 0);
-      this.facing = 1; // 1 right, -1 left
-      this.color = color;
-      this.neckwearColor = neckwearColor;
+  // --- Stickman Limb ---
+  class Limb {
+    constructor(length, angle=0) {
+      this.length = length;
+      this.angle = angle;
+      this.rotationSpeed = 0;
+      this.targetAngle = angle;
+    }
+    update(dt) {
+      const diff = this.targetAngle - this.angle;
+      this.angle += diff * dt * 8;
+    }
+  }
 
+  // --- Weapon Trail Effect ---
+  class Trail {
+    constructor(color) {
+      this.points = [];
+      this.color = color;
+      this.maxLength = 10;
+    }
+    addPoint(pos) {
+      this.points.push({...pos});
+      if(this.points.length > this.maxLength) this.points.shift();
+    }
+    draw(ctx) {
+      if(this.points.length < 2) return;
+      ctx.save();
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      for(let i=0; i<this.points.length-1; i++){
+        let p0 = this.points[i];
+        let p1 = this.points[i+1];
+        let alpha = (i / this.points.length);
+        ctx.strokeStyle = `rgba(${this.color.r},${this.color.g},${this.color.b},${alpha*0.6})`;
+        ctx.lineWidth = lerp(10, 2, alpha);
+        ctx.beginPath();
+        ctx.moveTo(p0.x, p0.y);
+        ctx.lineTo(p1.x, p1.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  // --- Stickman ---
+  class Stickman {
+    constructor(x, color, weaponType) {
+      this.pos = new Vec2(x, H - 120);
+      this.vel = new Vec2();
+      this.color = color;
+      this.weaponType = weaponType; // 'claw' or 'dagger'
       this.health = 100;
       this.maxHealth = 100;
-
-      this.state = "idle"; // idle, walk, run, jump, attack, dodge, hurt
-      this.stateTimer = 0;
-
+      this.facing = 1; // 1 = right, -1 = left
       this.animTimer = 0;
+      this.state = 'idle'; // idle, run, attack1, attack2, jump, dodge, hit
+      this.attackTimer = 0;
+      this.comboStage = 0;
+      this.comboCooldown = 0;
 
+      // Body parts lengths (px)
       this.limbs = {
-        head: { pos: new Vec2(0, -80), radius: 10 },
-        neck: { length: 18, swayAngle: 0, swaySpeed: 0.1 },
-        torso: { length: 60 },
-        upperArm: { length: 25, angle: 0 },
-        lowerArm: { length: 25, angle: 0 },
-        upperLeg: { length: 35, angle: 0 },
-        lowerLeg: { length: 35, angle: 0 },
-        weaponTrail: [],
+        upperArmL: new Limb(35, -0.5),
+        lowerArmL: new Limb(30, -0.7),
+        upperArmR: new Limb(35, -0.5),
+        lowerArmR: new Limb(30, -0.7),
+        upperLegL: new Limb(40, 1.5),
+        lowerLegL: new Limb(40, 1.7),
+        upperLegR: new Limb(40, 1.5),
+        lowerLegR: new Limb(40, 1.7),
+        neck: new Limb(30, 0), // long neck for green with scarf waving
+        headRadius: 12,
+        bodyHeight: 60,
       };
 
-      this.attackPhase = 0;
-      this.comboTimer = 0;
-      this.isAttacking = false;
-      this.weaponExtension = 0;
-      this.weaponGlowAlpha = 0;
+      this.attackHitFrame = 8;
 
-      this.isDodging = false;
-      this.dodgeTimer = 0;
+      // Trail for weapons
+      this.trailL = new Trail(color);
+      this.trailR = new Trail(color);
 
-      this.isJumping = false;
-      this.jumpTimer = 0;
+      // Scarf animation (green only)
+      this.scarfOffset = 0;
+      this.scarfSpeed = randRange(3,5);
 
+      this.isHit = false;
+      this.hitFlashTimer = 0;
+
+      // AI target
       this.target = null;
     }
 
-    updateAI() {
-      if (this.health <= 0) return;
+    update(dt) {
+      this.animTimer += dt*6;
+      this.comboCooldown = Math.max(0, this.comboCooldown - dt);
 
-      const dist = this.target ? this.target.pos.x - this.pos.x : 0;
+      // Scarf sway if green
+      if(this.color.r === 0 && this.color.g > 200 && this.color.b === 0) {
+        this.scarfOffset = Math.sin(Date.now()/200)*5;
+      }
 
-      // Face opponent
-      this.facing = dist > 0 ? 1 : -1;
+      this.updateState(dt);
+      this.updateLimbs(dt);
 
-      // Simple AI behavior
-      if (this.isAttacking || this.isDodging || this.isJumping) return;
+      if(this.hitFlashTimer > 0) this.hitFlashTimer -= dt;
+      else this.isHit = false;
+    }
 
-      if (Math.abs(dist) > 150) {
-        // Walk closer
-        this.state = "walk";
-        this.vel.x = 2 * this.facing;
-      } else if (Math.abs(dist) > 70) {
-        // Run attack
-        if (Math.random() < 0.01) {
-          this.startAttack();
-        } else {
-          this.state = "run";
-          this.vel.x = 4 * this.facing;
+    updateState(dt) {
+      switch(this.state){
+        case 'idle':
+          this.idleMovement(dt);
+          break;
+        case 'run':
+          this.runMovement(dt);
+          break;
+        case 'attack1':
+        case 'attack2':
+          this.attackMovement(dt);
+          break;
+        case 'dodge':
+          this.dodgeMovement(dt);
+          break;
+        case 'jump':
+          this.jumpMovement(dt);
+          break;
+        case 'hit':
+          this.hitMovement(dt);
+          break;
+      }
+    }
+
+    idleMovement(dt) {
+      // small idle breathing animation or subtle sway
+      this.vel.x *= 0.9;
+      if(Math.abs(this.vel.x) > 0.1) this.state = 'run';
+      else this.vel.x = 0;
+      this.pos.x += this.vel.x * dt * 200;
+    }
+
+    runMovement(dt) {
+      this.pos.x += this.vel.x * dt * 200;
+      if(Math.abs(this.vel.x) < 0.1) this.state = 'idle';
+    }
+
+    attackMovement(dt) {
+      this.attackTimer += dt*15;
+      if(this.attackTimer > 1) {
+        this.attackTimer = 0;
+        this.comboStage++;
+        if(this.comboStage > 2){
+          this.comboStage = 0;
+          this.state = 'idle';
         }
-      } else {
-        // Close range attack or dodge
-        if (Math.random() < 0.02) {
-          this.startAttack();
-        } else if (Math.random() < 0.01) {
-          this.startDodge();
-        } else if (Math.random() < 0.005) {
-          this.startJump();
-        } else {
-          this.state = "idle";
-          this.vel.x = 0;
-        }
+      }
+    }
+
+    dodgeMovement(dt) {
+      this.pos.x += this.vel.x * dt * 400;
+      this.attackTimer += dt*10;
+      if(this.attackTimer > 0.6) {
+        this.attackTimer = 0;
+        this.state = 'idle';
+      }
+    }
+
+    jumpMovement(dt) {
+      this.vel.y += 700 * dt;
+      this.pos.y += this.vel.y * dt;
+      if(this.pos.y >= H - 120) {
+        this.pos.y = H - 120;
+        this.vel.y = 0;
+        this.state = 'idle';
+      }
+    }
+
+    hitMovement(dt) {
+      this.attackTimer += dt;
+      if(this.attackTimer > 0.5) {
+        this.attackTimer = 0;
+        this.state = 'idle';
+        this.isHit = false;
       }
     }
 
     startAttack() {
-      if (this.isAttacking) return;
-      this.isAttacking = true;
-      this.state = "attack";
-      this.attackPhase = 0;
-      this.stateTimer = 0;
-      this.comboTimer = 60;
-      this.weaponExtension = 0;
-      this.weaponGlowAlpha = 1;
-    }
-    startDodge() {
-      if (this.isDodging || this.isJumping) return;
-      this.isDodging = true;
-      this.state = "dodge";
-      this.dodgeTimer = 30;
-      this.vel.x = -this.facing * 6;
-    }
-    startJump() {
-      if (this.isJumping || this.isDodging) return;
-      this.isJumping = true;
-      this.state = "jump";
-      this.jumpTimer = 45;
-      this.vel.y = -15;
-    }
-
-    applyDamage(amount) {
-      if (this.health <= 0) return;
-      this.health -= amount;
-      if (this.health < 0) this.health = 0;
-      doCameraShake(15);
-      doSlowMotion(15);
-    }
-
-    update(delta) {
-      // Update timers
-      if (slowMotionTimer > 0) slowMotionTimer--;
-      else slowMotion = 1;
-
-      if (this.comboTimer > 0) this.comboTimer--;
-      else this.isAttacking = false;
-
-      if (this.isDodging) {
-        this.dodgeTimer--;
-        if (this.dodgeTimer <= 0) {
-          this.isDodging = false;
-          this.state = "idle";
-          this.vel.x = 0;
-        }
+      if(this.state === 'idle' && this.comboCooldown <= 0){
+        this.state = 'attack1';
+        this.attackTimer = 0;
+        this.comboStage = 0;
+        this.comboCooldown = 1.2;
+      } else if(this.state === 'attack1' && this.attackTimer > 0.3 && this.comboCooldown <= 0){
+        this.state = 'attack2';
+        this.attackTimer = 0;
+        this.comboCooldown = 1.2;
       }
-      if (this.isJumping) {
-        this.vel.y += GRAVITY * delta * 60;
-        this.pos.y += this.vel.y * delta * 60;
-        this.jumpTimer--;
-        if (this.jumpTimer <= 0 || this.pos.y >= FLOOR) {
-          this.isJumping = false;
-          this.pos.y = FLOOR;
-          this.vel.y = 0;
-          this.state = "idle";
+    }
+
+    getHandPos(side) {
+      // Calculate position of hand for weapon drawing
+      const dir = this.facing;
+      const baseX = this.pos.x;
+      const baseY = this.pos.y - this.limbs.bodyHeight;
+
+      const upperArm = side === 'L' ? this.limbs.upperArmL : this.limbs.upperArmR;
+      const lowerArm = side === 'L' ? this.limbs.lowerArmL : this.limbs.lowerArmR;
+
+      // Shoulder pos
+      const shoulderX = baseX + dir * 15 * (side === 'L' ? -1 : 1);
+      const shoulderY = baseY + 10;
+
+      // Upper arm end
+      const uaX = shoulderX + Math.cos(upperArm.angle) * upperArm.length * dir;
+      const uaY = shoulderY + Math.sin(upperArm.angle) * upperArm.length;
+
+      // Lower arm end = hand pos
+      const handX = uaX + Math.cos(lowerArm.angle) * lowerArm.length * dir;
+      const handY = uaY + Math.sin(lowerArm.angle) * lowerArm.length;
+
+      return {x: handX, y: handY};
+    }
+
+    updateLimbs(dt) {
+      // Animate limbs based on state and animTimer (smooth rotations)
+      let t = this.animTimer % (Math.PI * 2);
+
+      // Legs movement for walking/running
+      let legAngle = Math.sin(t) * 0.6;
+      let legAngle2 = Math.cos(t) * 0.6;
+
+      this.limbs.upperLegL.targetAngle = 1.5 + legAngle;
+      this.limbs.lowerLegL.targetAngle = 1.7 + Math.abs(legAngle);
+      this.limbs.upperLegR.targetAngle = 1.5 + legAngle2;
+      this.limbs.lowerLegR.targetAngle = 1.7 + Math.abs(legAngle2);
+
+      // Arms depend on state
+      if(this.state === 'attack1' || this.state === 'attack2'){
+        // Swinging arms attack pose
+        let atkProgress = (this.attackTimer % 1);
+        let swing = Math.sin(atkProgress * Math.PI) * -1.5;
+
+        if(this.comboStage === 0){
+          this.limbs.upperArmR.targetAngle = -0.5 + swing;
+          this.limbs.lowerArmR.targetAngle = -0.7 + swing/2;
+          this.limbs.upperArmL.targetAngle = -0.5 - swing/2;
+          this.limbs.lowerArmL.targetAngle = -0.7 - swing/4;
+        } else {
+          this.limbs.upperArmL.targetAngle = -0.5 + swing;
+          this.limbs.lowerArmL.targetAngle = -0.7 + swing/2;
+          this.limbs.upperArmR.targetAngle = -0.5 - swing/2;
+          this.limbs.lowerArmR.targetAngle = -0.7 - swing/4;
         }
-      }
-
-      // Movement
-      if (!this.isDodging && !this.isJumping && !this.isAttacking) {
-        this.pos.x += this.vel.x * delta * 60;
-      } else if (this.isDodging) {
-        this.pos.x += this.vel.x * delta * 60;
-      }
-
-      // Clamp position
-      this.pos.x = clamp(this.pos.x, 50, width - 50);
-
-      // Attack logic
-      if (this.isAttacking) {
-        this.stateTimer += delta * 60;
-        // Attack phases for combo: 3 phases
-        if (this.stateTimer > 20 && this.attackPhase === 0) {
-          this.attackPhase = 1;
-          this.weaponExtension = 1;
-        } else if (this.stateTimer > 40 && this.attackPhase === 1) {
-          this.attackPhase = 2;
-          this.weaponExtension = 1.2;
-        } else if (this.stateTimer > 60 && this.attackPhase === 2) {
-          this.attackPhase = 3;
-          this.weaponExtension = 0;
-          this.isAttacking = false;
-          this.state = "idle";
-        }
-        // Weapon glow fades out slowly
-        this.weaponGlowAlpha = lerp(this.weaponGlowAlpha, 0, 0.1);
+      } else if(this.state === 'dodge') {
+        this.limbs.upperArmL.targetAngle = -1;
+        this.limbs.lowerArmL.targetAngle = -1;
+        this.limbs.upperArmR.targetAngle = -1;
+        this.limbs.lowerArmR.targetAngle = -1;
       } else {
-        this.weaponExtension = lerp(this.weaponExtension, 0, 0.3);
-        this.weaponGlowAlpha = lerp(this.weaponGlowAlpha, 0, 0.1);
+        // Idle swing arms slowly
+        this.limbs.upperArmL.targetAngle = -0.5 + Math.sin(t) * 0.1;
+        this.limbs.lowerArmL.targetAngle = -0.7 + Math.sin(t) * 0.05;
+        this.limbs.upperArmR.targetAngle = -0.5 - Math.sin(t) * 0.1;
+        this.limbs.lowerArmR.targetAngle = -0.7 - Math.sin(t) * 0.05;
       }
 
-      // Limb swinging for walk and run
-      this.animTimer += delta * 10;
-    }
+      // Head bob slightly on movement
+      this.limbs.neck.targetAngle = 0.1 * Math.sin(t*2);
 
-    // Draw flowing neckwear
-    drawNeckwear(ctx, baseX, baseY, swayAngle) {
-      ctx.save();
-      ctx.strokeStyle = this.neckwearColor;
-      ctx.lineWidth = 4;
-      ctx.shadowColor = this.neckwearColor;
-      ctx.shadowBlur = 20;
-
-      const length = this.limbs.neck.length;
-      const segments = 8;
-      let prevX = baseX;
-      let prevY = baseY;
-
-      for (let i = 0; i < segments; i++) {
-        const t = i / segments;
-        const sway = Math.sin(swayAngle + t * Math.PI * 4) * 8 * (1 - t);
-        const x = prevX + sway * this.facing;
-        const y = prevY + length / segments;
-        ctx.beginPath();
-        ctx.moveTo(prevX, prevY);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-        prevX = x;
-        prevY = y;
+      // Update all limbs rotation smoothly
+      for(let key in this.limbs){
+        if(this.limbs[key].update) this.limbs[key].update(dt);
       }
-      ctx.restore();
-    }
-
-    drawWeaponTrail(ctx) {
-      ctx.save();
-      ctx.strokeStyle = `rgba(0,255,0,${this.weaponGlowAlpha * 0.6})`;
-      ctx.lineWidth = 8;
-      ctx.shadowColor = 'lime';
-      ctx.shadowBlur = 15;
-      ctx.beginPath();
-      for (let i = 0; i < this.limbs.weaponTrail.length - 1; i++) {
-        const p1 = this.limbs.weaponTrail[i];
-        const p2 = this.limbs.weaponTrail[i + 1];
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-      }
-      ctx.stroke();
-      ctx.restore();
     }
 
     draw(ctx) {
       ctx.save();
+      ctx.translate(this.pos.x, this.pos.y);
 
-      // Body base position
-      const baseX = this.pos.x;
-      const baseY = this.pos.y;
+      // Draw health bar
+      const barW = 140;
+      const barH = 14;
+      ctx.fillStyle = '#222';
+      ctx.fillRect(-barW/2, -this.limbs.bodyHeight - 80, barW, barH);
+      ctx.fillStyle = this.colorToHex(this.color);
+      ctx.fillRect(-barW/2, -this.limbs.bodyHeight - 80, barW * (this.health/this.maxHealth), barH);
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-barW/2, -this.limbs.bodyHeight - 80, barW, barH);
 
-      // Health bar above head
-      const healthBarWidth = 120;
-      const healthPercent = this.health / this.maxHealth;
-      ctx.fillStyle = "black";
-      ctx.fillRect(baseX - healthBarWidth / 2 - 2, baseY - 110, healthBarWidth + 4, 14);
-      ctx.fillStyle = this.color;
-      ctx.fillRect(baseX - healthBarWidth / 2, baseY - 108, healthBarWidth * healthPercent, 10);
-
-      // Neckwear sway angle updates for green stickman only
-      if (this.neckwearColor) {
-        this.limbs.neck.swayAngle += 0.05;
+      // Hit flash overlay
+      if(this.isHit){
+        ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.6, this.hitFlashTimer * 3) + ')';
+        ctx.fillRect(-100, -this.limbs.bodyHeight - 100, 200, 250);
       }
 
-      // Draw neckwear if present
-      if (this.neckwearColor) {
-        this.drawNeckwear(ctx, baseX, baseY - 80, this.limbs.neck.swayAngle);
-      }
+      // Draw neck + scarf for green stickman
+      if(this.color.g > 200) {
+        ctx.save();
+        ctx.strokeStyle = this.colorToHex(this.color);
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
 
-      // Calculate limb angles and swinging animation
-      const swing = Math.sin(this.animTimer) * 0.6;
-      const walkPhase = this.state === "walk" || this.state === "run" ? this.animTimer : 0;
-
-      // Head
-      ctx.fillStyle = this.color;
-      ctx.beginPath();
-      ctx.arc(baseX, baseY - 80, 10, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Torso line
-      ctx.strokeStyle = this.color;
-      ctx.lineWidth = 5;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(baseX, baseY - 70);
-      ctx.lineTo(baseX, baseY - 10);
-      ctx.stroke();
-
-      // Arms
-      const armLength = 30;
-
-      // Left arm swinging
-      let leftArmAngle = 0;
-      if (this.state === "walk" || this.state === "run") {
-        leftArmAngle = Math.sin(walkPhase) * 0.8;
-      } else if (this.state === "attack") {
-        // attack swing
-        leftArmAngle = lerp(leftArmAngle, -Math.PI / 4, this.weaponExtension);
-      } else if (this.state === "dodge") {
-        leftArmAngle = Math.sin(walkPhase * 2) * 0.4;
-      } else {
-        leftArmAngle = 0;
-      }
-
-      // Right arm swinging and weapon
-      let rightArmAngle = 0;
-      if (this.state === "walk" || this.state === "run") {
-        rightArmAngle = -Math.sin(walkPhase) * 0.8;
-      } else if (this.state === "attack") {
-        rightArmAngle = lerp(0, Math.PI / 2, this.weaponExtension);
-      } else if (this.state === "dodge") {
-        rightArmAngle = Math.sin(walkPhase * 2 + Math.PI) * 0.4;
-      } else {
-        rightArmAngle = 0;
-      }
-
-      // Left Arm
-      ctx.beginPath();
-      ctx.moveTo(baseX, baseY - 60);
-      const leftElbowX = baseX + Math.cos(leftArmAngle) * -armLength;
-      const leftElbowY = baseY - 60 + Math.sin(leftArmAngle) * armLength;
-      ctx.lineTo(leftElbowX, leftElbowY);
-      ctx.lineWidth = 5;
-      ctx.stroke();
-
-      // Left Forearm
-      const leftForearmAngle = leftArmAngle + Math.sin(this.animTimer * 2) * 0.2;
-      ctx.beginPath();
-      ctx.moveTo(leftElbowX, leftElbowY);
-      ctx.lineTo(
-        leftElbowX + Math.cos(leftForearmAngle) * -armLength,
-        leftElbowY + Math.sin(leftForearmAngle) * armLength
-      );
-      ctx.stroke();
-
-      // Right Arm (weapon arm)
-      ctx.beginPath();
-      ctx.moveTo(baseX, baseY - 60);
-      const rightElbowX = baseX + Math.cos(rightArmAngle) * armLength;
-      const rightElbowY = baseY - 60 + Math.sin(rightArmAngle) * armLength;
-      ctx.lineTo(rightElbowX, rightElbowY);
-      ctx.lineWidth = 5;
-      ctx.stroke();
-
-      // Right Forearm
-      const rightForearmAngle = rightArmAngle + Math.sin(this.animTimer * 3) * 0.3;
-      const weaponX = rightElbowX + Math.cos(rightForearmAngle) * (armLength + this.weaponExtension * 30);
-      const weaponY = rightElbowY + Math.sin(rightForearmAngle) * (armLength + this.weaponExtension * 30);
-      ctx.beginPath();
-      ctx.moveTo(rightElbowX, rightElbowY);
-      ctx.lineTo(weaponX, weaponY);
-      ctx.stroke();
-
-      // Weapon glow trail update
-      this.limbs.weaponTrail.push({ x: weaponX, y: weaponY });
-      if (this.limbs.weaponTrail.length > 10) this.limbs.weaponTrail.shift();
-
-      this.drawWeaponTrail(ctx);
-
-      // Draw weapon as glowing green blade for green stickman
-      if (this.color === "lime") {
-        ctx.strokeStyle = `rgba(0,255,0,${this.weaponGlowAlpha})`;
-        ctx.lineWidth = 8;
-        ctx.shadowColor = "lime";
-        ctx.shadowBlur = 20;
+        // Neck line (long neck)
         ctx.beginPath();
-        ctx.moveTo(rightElbowX, rightElbowY);
-        ctx.lineTo(weaponX, weaponY);
+        ctx.moveTo(0, -this.limbs.bodyHeight);
+        ctx.lineTo(0, -this.limbs.bodyHeight - this.limbs.neck.length);
         ctx.stroke();
 
-        ctx.fillStyle = "lime";
+        // Scarf swinging
+        ctx.lineWidth = 8;
+        ctx.strokeStyle = 'lime';
+        ctx.shadowColor = 'lime';
+        ctx.shadowBlur = 10;
         ctx.beginPath();
-        ctx.arc(weaponX, weaponY, 6 + this.weaponExtension * 8, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        // Blue stickman weapon as glowing ball mace
-        ctx.fillStyle = `rgba(0, 200, 255, ${this.weaponGlowAlpha})`;
-        ctx.shadowColor = "cyan";
-        ctx.shadowBlur = 15;
-        ctx.beginPath();
-        ctx.arc(weaponX, weaponY, 10 + this.weaponExtension * 4, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(0, -this.limbs.bodyHeight - this.limbs.neck.length);
+        const scarfX = Math.sin(Date.now()/200)*8;
+        ctx.lineTo(scarfX, -this.limbs.bodyHeight - this.limbs.neck.length + 30);
+        ctx.stroke();
+        ctx.restore();
       }
 
-      // Legs swinging
-      const legLengthUpper = 35;
-      const legLengthLower = 35;
-
-      let leftLegAngle = 0;
-      let rightLegAngle = 0;
-
-      if (this.state === "walk" || this.state === "run") {
-        leftLegAngle = Math.sin(walkPhase) * 1.2;
-        rightLegAngle = -Math.sin(walkPhase) * 1.2;
-      } else if (this.state === "jump") {
-        leftLegAngle = Math.PI / 6;
-        rightLegAngle = Math.PI / 6;
-      }
-
-      // Left thigh
-      const leftHipX = baseX;
-      const leftHipY = baseY - 10;
-      const leftKneeX = leftHipX + Math.cos(leftLegAngle) * -legLengthUpper;
-      const leftKneeY = leftHipY + Math.sin(leftLegAngle) * legLengthUpper;
-      ctx.beginPath();
-      ctx.moveTo(leftHipX, leftHipY);
-      ctx.lineTo(leftKneeX, leftKneeY);
+      // Draw body (simple line)
+      ctx.strokeStyle = this.colorToHex(this.color);
       ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -this.limbs.bodyHeight);
       ctx.stroke();
 
-      // Left lower leg
-      const leftLowerLegAngle = leftLegAngle + Math.sin(this.animTimer * 2) * 0.3;
-      const leftFootX = leftKneeX + Math.cos(leftLowerLegAngle) * -legLengthLower;
-      const leftFootY = leftKneeY + Math.sin(leftLowerLegAngle) * legLengthLower;
+      // Draw head
+      ctx.fillStyle = this.colorToHex(this.color);
       ctx.beginPath();
-      ctx.moveTo(leftKneeX, leftKneeY);
-      ctx.lineTo(leftFootX, leftFootY);
+      ctx.arc(0, -this.limbs.bodyHeight - this.limbs.headRadius, this.limbs.headRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Draw legs
+      this.drawLimb(ctx, 0, 0, this.limbs.upperLegL.angle, this.limbs.lowerLegL.angle, -15);
+      this.drawLimb(ctx, 0, 0, this.limbs.upperLegR.angle, this.limbs.lowerLegR.angle, 15);
+
+      // Draw arms and weapons
+      this.drawArmAndWeapon(ctx, 'L');
+      this.drawArmAndWeapon(ctx, 'R');
+
+      ctx.restore();
+    }
+
+    drawLimb(ctx, baseX, baseY, upperAngle, lowerAngle, offsetX) {
+      ctx.save();
+      ctx.translate(offsetX, 0);
+      ctx.strokeStyle = this.colorToHex(this.color);
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
+
+      // Upper leg
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      let upperEndX = Math.cos(upperAngle) * this.limbs.upperLegL.length;
+      let upperEndY = Math.sin(upperAngle) * this.limbs.upperLegL.length;
+      ctx.lineTo(upperEndX, upperEndY);
       ctx.stroke();
 
-      // Right thigh
-      const rightHipX = baseX;
-      const rightHipY = baseY - 10;
-      const rightKneeX = rightHipX + Math.cos(rightLegAngle) * legLengthUpper;
-      const rightKneeY = rightHipY + Math.sin(rightLegAngle) * legLengthUpper;
+      // Lower leg
       ctx.beginPath();
-      ctx.moveTo(rightHipX, rightHipY);
-      ctx.lineTo(rightKneeX, rightKneeY);
-      ctx.stroke();
-
-      // Right lower leg
-      const rightLowerLegAngle = rightLegAngle + Math.sin(this.animTimer * 2 + Math.PI) * 0.3;
-      const rightFootX = rightKneeX + Math.cos(rightLowerLegAngle) * legLengthLower;
-      const rightFootY = rightKneeY + Math.sin(rightLowerLegAngle) * legLengthLower;
-      ctx.beginPath();
-      ctx.moveTo(rightKneeX, rightKneeY);
-      ctx.lineTo(rightFootX, rightFootY);
+      ctx.moveTo(upperEndX, upperEndY);
+      let lowerEndX = upperEndX + Math.cos(lowerAngle) * this.limbs.lowerLegL.length;
+      let lowerEndY = upperEndY + Math.sin(lowerAngle) * this.limbs.lowerLegL.length;
+      ctx.lineTo(lowerEndX, lowerEndY);
       ctx.stroke();
 
       ctx.restore();
     }
-  }
 
-  // Impact flash and shake overlays
-  let impactFlashAlpha = 0;
+    drawArmAndWeapon(ctx, side) {
+      const dir = this.facing;
+      const upperArm = side === 'L' ? this.limbs.upperArmL : this.limbs.upperArmR;
+      const lowerArm = side === 'L' ? this.limbs.lowerArmL : this.limbs.lowerArmR;
 
-  // Game State
-  let player, enemy;
-  let isRunning = false;
+      // Shoulder position
+      const shoulderX = dir * 15 * (side === 'L' ? -1 : 1);
+      const shoulderY = -this.limbs.bodyHeight + 10;
 
-  // Start fight function
-  function startFight() {
-    player = new Stickman(200, "lime", "#0f0");
-    enemy = new Stickman(700, "cyan", null);
-    player.target = enemy;
-    enemy.target = player;
-    isRunning = true;
-    victoryMessage.style.display = "none";
-  }
+      ctx.save();
+      ctx.translate(shoulderX, shoulderY);
+      ctx.strokeStyle = this.colorToHex(this.color);
+      ctx.lineWidth = 6;
+      ctx.lineCap = 'round';
 
-  // Collision and attack detection
-  function checkHits() {
-    if (!player.isAttacking) return;
+      // Upper arm
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      let upperEndX = Math.cos(upperArm.angle) * upperArm.length * dir;
+      let upperEndY = Math.sin(upperArm.angle) * upperArm.length;
+      ctx.lineTo(upperEndX, upperEndY);
+      ctx.stroke();
 
-    // Weapon tip pos from player (right arm forearm)
-    const weaponTip = player.limbs.weaponTrail[player.limbs.weaponTrail.length - 1];
-    if (!weaponTip) return;
+      // Lower arm
+      ctx.translate(upperEndX, upperEndY);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      let lowerEndX = Math.cos(lowerArm.angle) * lowerArm.length * dir;
+      let lowerEndY = Math.sin(lowerArm.angle) * lowerArm.length;
+      ctx.lineTo(lowerEndX, lowerEndY);
+      ctx.stroke();
 
-    // Distance to enemy head
-    const distToEnemy = distance(weaponTip, enemy.pos.sub(new Vec2(0, 80)));
-    if (distToEnemy < 20 && enemy.health > 0) {
-      enemy.applyDamage(10);
-      impactFlashAlpha = 1;
-    }
-  }
-
-  function checkHitsEnemy() {
-    if (!enemy.isAttacking) return;
-    const weaponTip = enemy.limbs.weaponTrail[enemy.limbs.weaponTrail.length - 1];
-    if (!weaponTip) return;
-    const distToPlayer = distance(weaponTip, player.pos.sub(new Vec2(0, 80)));
-    if (distToPlayer < 20 && player.health > 0) {
-      player.applyDamage(10);
-      impactFlashAlpha = 1;
-    }
-  }
-
-  // Draw camera shake effect
-  function applyCameraShake() {
-    if (cameraShake > 0) {
-      const dx = (Math.random() - 0.5) * cameraShake;
-      const dy = (Math.random() - 0.5) * cameraShake;
-      ctx.translate(dx, dy);
-      cameraShake *= 0.85;
-      if (cameraShake < 0.5) cameraShake = 0;
-    }
-  }
-
-  // Main loop
-  let lastTime = 0;
-  const victoryMessage = document.getElementById("victory");
-
-  function loop(time = 0) {
-    const deltaRaw = (time - lastTime) / 1000;
-    lastTime = time;
-    const delta = deltaRaw * slowMotion;
-
-    ctx.clearRect(0, 0, width, height);
-
-    ctx.save();
-    applyCameraShake();
-
-    // Draw floor
-    ctx.fillStyle = "#444";
-    ctx.fillRect(0, FLOOR + 35, width, height - FLOOR - 35);
-
-    // Update AI and update entities
-    if (isRunning) {
-      player.updateAI();
-      enemy.updateAI();
-
-      player.update(delta);
-      enemy.update(delta);
-
-      checkHits();
-      checkHitsEnemy();
-
-      // Check victory
-      if (player.health <= 0 || enemy.health <= 0) {
-        isRunning = false;
-        const winner = player.health > 0 ? "Green Stickman Wins!" : "Blue Stickman Wins!";
-        victoryMessage.textContent = winner;
-        victoryMessage.style.display = "block";
+      // Draw weapon at hand
+      ctx.translate(lowerEndX, lowerEndY);
+      if(this.weaponType === 'claw'){
+        this.drawClaw(ctx, side);
+      } else if(this.weaponType === 'dagger'){
+        this.drawDagger(ctx, side);
       }
-    } else {
-      // Idle animation
-      player && player.update(delta);
-      enemy && enemy.update(delta);
+      ctx.restore();
+
+      // Add trail point for weapon trail
+      const handPos = this.getHandPos(side);
+      if(side === 'L') this.trailL.addPoint(handPos);
+      else this.trailR.addPoint(handPos);
+
+      // Draw weapon trail
+      if(side === 'L') this.trailL.draw(ctx);
+      else this.trailR.draw(ctx);
     }
 
-    // Draw stickmen
-    player && player.draw(ctx);
-    enemy && enemy.draw(ctx);
+    drawClaw(ctx, side) {
+      // Three sharp curved claws
+      ctx.save();
+      ctx.strokeStyle = 'lime';
+      ctx.fillStyle = 'rgba(0,255,0,0.8)';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = 'lime';
+      ctx.shadowBlur = 12;
+      ctx.lineCap = 'round';
 
-    ctx.restore();
-
-    // Draw impact flash overlay
-    if (impactFlashAlpha > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${impactFlashAlpha})`;
-      ctx.fillRect(0, 0, width, height);
-      impactFlashAlpha -= 0.05;
-      if (impactFlashAlpha < 0) impactFlashAlpha = 0;
+      // Claw arcs
+      const clawOffsets = [-10, 0, 10];
+      for(let offset of clawOffsets){
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(offset/2, -15, offset, -30);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
-    requestAnimationFrame(loop);
+    drawDagger(ctx, side) {
+      ctx.save();
+      ctx.fillStyle = 'cyan';
+      ctx.strokeStyle = 'cyan';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = 'cyan';
+      ctx.shadowBlur = 10;
+
+      // Blade
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(6, -20);
+      ctx.lineTo(-6, -20);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Handle
+      ctx.beginPath();
+      ctx.rect(-3, 0, 6, 8);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    takeHit(damage) {
+      this.health = clamp(this.health - damage, 0, this.maxHealth);
+      this.state = 'hit';
+      this.isHit = true;
+      this.hitFlashTimer = 0.5;
+    }
+
+    colorToHex(color) {
+      return `rgb(${color.r},${color.g},${color.b})`;
+    }
   }
 
-  document.getElementById("startBtn").addEventListener("click", () => {
-    startFight();
-  });
+  // --- Impact Effects ---
+  class ImpactFlash {
+    constructor() {
+      this.active = false;
+      this.timer = 0;
+      this.duration = 0.15;
+      this.alpha = 0;
+    }
+    trigger() {
+      this.active = true;
+      this.timer = this.duration;
+    }
+    update(dt) {
+      if(this.active) {
+        this.timer -= dt;
+        if(this.timer <= 0) {
+          this.active = false;
+          this.alpha = 0;
+        } else {
+          this.alpha = this.timer / this.duration;
+        }
+      }
+    }
+    draw(ctx) {
+      if(this.active) {
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,255,${this.alpha * 0.7})`;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
+    }
+  }
 
-  // Start loop
-  loop();
+  // --- AI Controller ---
+  class AIController {
+    constructor(stickman, opponent) {
+      this.stickman = stickman;
+      this.opponent = opponent;
+      this.actionTimer = 0;
+      this.state = 'approach'; // approach, attack, retreat, dodge, jump
+      this.cooldown = 0;
+    }
+    update(dt) {
+      this.actionTimer -= dt;
+      this.cooldown = Math.max(0, this.cooldown - dt);
+
+      const dist = this.opponent.pos.x - this.stickman.pos.x;
+      const absDist = Math.abs(dist);
+      this.stickman.facing = dist > 0 ? 1 : -1;
+
+      switch(this.state){
+        case 'approach':
+          if(absDist > 100) {
+            this.stickman.state = 'run';
+            this.stickman.vel.x = this.stickman.facing * 1;
+          } else {
+            this.stickman.state = 'idle';
+            this.stickman.vel.x = 0;
+            if(this.cooldown <= 0){
+              this.state = 'attack';
+              this.actionTimer = 1.5;
+            }
+          }
+          break;
+        case 'attack':
+          this.stickman.vel.x = 0;
+          this.stickman.startAttack();
+          if(this.actionTimer <= 0) {
+            this.state = 'retreat';
+            this.actionTimer = 1.5;
+          }
+          break;
+        case 'retreat':
+          this.stickman.state = 'run';
+          this.stickman.vel.x = -this.stickman.facing * 1.2;
+          if(this.actionTimer <= 0) {
+            this.state = 'dodge';
+            this.actionTimer = 0.7;
+          }
+          break;
+        case 'dodge':
+          this.stickman.state = 'dodge';
+          this.stickman.vel.x = this.stickman.facing * 0;
+          if(this.actionTimer <= 0) {
+            this.state = 'jump';
+            this.actionTimer = 1;
+          }
+          break;
+        case 'jump':
+          if(this.stickman.state !== 'jump') {
+            this.stickman.state = 'jump';
+            this.stickman.vel.y = -350;
+          }
+          if(this.actionTimer <= 0) {
+            this.state = 'approach';
+            this.cooldown = 1;
+          }
+          break;
+      }
+    }
+  }
+
+  // --- Main fight class ---
+  class Fight {
+    constructor() {
+      this.stickmanGreen = new Stickman(250, {r:0,g:255,b:0}, 'claw');
+      this.stickmanBlue = new Stickman(650, {r:0,g:180,b:255}, 'dagger');
+      this.stickmanGreen.facing = 1;
+      this.stickmanBlue.facing = -1;
+
+      this.aiGreen = new AIController(this.stickmanGreen, this.stickmanBlue);
+      this.aiBlue = new AIController(this.stickmanBlue, this.stickmanGreen);
+
+      this.impactFlash = new ImpactFlash();
+
+      this.camera = new Camera();
+      this.slowMotionTimer = 0;
+      this.comboHits = 0;
+
+      this.lastTime = 0;
+
+      this.running = false;
+    }
+
+    start() {
+      this.running = true;
+      this.lastTime = performance.now();
+      requestAnimationFrame(this.loop.bind(this));
+    }
+
+    loop(t) {
+      if(!this.running) return;
+      let dt = (t - this.lastTime) / 1000;
+
+      // Slow motion effect
+      if(this.slowMotionTimer > 0) {
+        dt *= 0.3;
+        this.slowMotionTimer -= (t - this.lastTime)/1000;
+      }
+
+      this.lastTime = t;
+      this.update(dt);
+      this.render();
+
+      requestAnimationFrame(this.loop.bind(this));
+    }
+
+    update(dt) {
+      this.aiGreen.update(dt);
+      this.aiBlue.update(dt);
+
+      this.stickmanGreen.update(dt);
+      this.stickmanBlue.update(dt);
+
+      this.checkCollisions();
+
+      this.impactFlash.update(dt);
+      this.camera.update(dt);
+
+      // Clamp positions so they don't go off screen
+      this.stickmanGreen.pos.x = clamp(this.stickmanGreen.pos.x, 60, W - 60);
+      this.stickmanBlue.pos.x = clamp(this.stickmanBlue.pos.x, 60, W - 60);
+    }
+
+    checkCollisions() {
+      // Check hand-to-hand weapon hits for attacks
+      [this.stickmanGreen, this.stickmanBlue].forEach((attacker, i) => {
+        if(attacker.state.startsWith('attack')) {
+          const defender = i === 0 ? this.stickmanBlue : this.stickmanGreen;
+          const atkProgress = attacker.attackTimer;
+          // On hit frame
+          if(Math.floor(atkProgress*15) === attacker.attackHitFrame && !attacker.hasHit){
+            attacker.hasHit = true;
+            // Check distance between hands and defender body pos
+            const handL = attacker.getHandPos('L');
+            const handR = attacker.getHandPos('R');
+            const distL = Math.abs(defender.pos.x - handL.x);
+            const distR = Math.abs(defender.pos.x - handR.x);
+            if(distL < 40 && Math.abs(defender.pos.y - handL.y) < 50) {
+              defender.takeHit(15);
+              this.triggerHitEffects(defender);
+            }
+            if(distR < 40 && Math.abs(defender.pos.y - handR.y) < 50) {
+              defender.takeHit(15);
+              this.triggerHitEffects(defender);
+            }
+          }
+          if(atkProgress > 1) attacker.hasHit = false;
+        }
+      });
+    }
+
+    triggerHitEffects(defender) {
+      this.impactFlash.trigger();
+      this.camera.shake(10, 0.2);
+      this.camera.zoomTarget = 1.15;
+      this.slowMotionTimer = 0.25;
+    }
+
+    render() {
+      ctx.clearRect(0,0,W,H);
+
+      ctx.save();
+      ctx.translate(this.camera.offsetX, this.camera.offsetY);
+      ctx.scale(this.camera.zoom, this.camera.zoom);
+
+      // Draw ground
+      ctx.strokeStyle = '#0a0';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, H-60);
+      ctx.lineTo(W, H-60);
+      ctx.stroke();
+
+      this.stickmanGreen.draw(ctx);
+      this.stickmanBlue.draw(ctx);
+
+      this.impactFlash.draw(ctx);
+
+      ctx.restore();
+
+      // Reset zoom to normal over time
+      this.camera.zoomTarget = 1;
+    }
+  }
+
+  // --- Initialization ---
+  const fight = new Fight();
+
+  document.getElementById('startBtn').addEventListener('click', () => {
+    fight.start();
+    document.getElementById('startBtn').style.display = 'none';
+  });
 
 })();
 </script>
