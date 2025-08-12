@@ -1,176 +1,569 @@
-startAttack() {
-  if (this.attackCooldown > 0) return;
-  this.state = 'attack';
-  this.stateTime = 0;
-  this.attackCooldown = 60;
-
-  // Choose attack type with combo logic
-  if (this.comboCooldown === 0 && Math.random() < 0.4) {
-    this.comboSequence = ['punch', 'kick', 'punch'];
-    this.comboStep = 0;
-    this.comboCooldown = 120;
-    this.currentAttack = this.getAttackByName(this.comboSequence[this.comboStep]);
-  } else {
-    this.comboSequence = [];
-    this.currentAttack = this.getAttackByName(Math.random() < 0.5 ? 'punch' : 'kick');
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Epic Stick Fight AI</title>
+<style>
+  body {
+    margin:0; background:#111; overflow:hidden; color:#eee; font-family: monospace;
+    user-select:none;
+    display:flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh;
   }
-},
-
-getAttackByName(name) {
-  if (name === 'punch') {
-    return {
-      name: 'punch',
-      damage: 10,
-      duration: 25,
-      hitbox: (progress) => ({
-        x: this.x + this.facingDir() * (20 + 30 * Math.sin(progress * Math.PI)),
-        y: this.y - 30 - 10 * Math.sin(progress * Math.PI),
-        w: 30,
-        h: 30
-      })
-    };
-  } else if (name === 'kick') {
-    return {
-      name: 'kick',
-      damage: 14,
-      duration: 30,
-      hitbox: (progress) => ({
-        x: this.x + this.facingDir() * (15 + 40 * Math.sin(progress * Math.PI)),
-        y: this.y - 10 + 5 * Math.sin(progress * Math.PI),
-        w: 40,
-        h: 25
-      })
-    };
+  canvas {
+    background:#222; border: 2px solid #555; border-radius: 8px;
   }
-  return null;
-},
+  #ui {
+    margin-top: 8px;
+  }
+  button {
+    background:#444; border:none; padding: 10px 20px; border-radius: 4px; color:#eee;
+    font-size: 16px; cursor:pointer;
+  }
+  button:hover {
+    background:#666;
+  }
+  #message {
+    margin-top: 10px;
+    font-size: 20px;
+    font-weight: bold;
+  }
+</style>
+</head>
+<body>
 
-update(opponent) {
-  // ...existing physics & state updates...
+<canvas id="canvas" width="800" height="450"></canvas>
+<div id="ui">
+  <button id="startBtn">Start Fight</button>
+  <div id="message"></div>
+</div>
 
-  if (this.state === 'attack') {
-    const progress = this.stateTime / this.currentAttack.duration;
+<script>
+(() => {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
 
-    // Punch snap animation for arm swing with easing
-    this.armAngle = Math.sin(progress * Math.PI) * 1.4;
+  // Utility easing
+  function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+  function lerp(a,b,t) { return a + (b - a)*t; }
 
-    // Stretch and squash body on impact peak
-    this.bodyStretch = 1 + 0.15 * Math.sin(progress * Math.PI);
+  // Vector helper
+  class Vec2 {
+    constructor(x,y){this.x=x;this.y=y;}
+    add(v){return new Vec2(this.x+v.x,this.y+v.y);}
+    sub(v){return new Vec2(this.x-v.x,this.y-v.y);}
+    mul(s){return new Vec2(this.x*s,this.y*s);}
+    len(){return Math.hypot(this.x,this.y);}
+    norm(){const l=this.len();return l?this.mul(1/l):new Vec2(0,0);}
+  }
 
-    // Trigger hit frame at peak
-    if (this.stateTime === Math.floor(this.currentAttack.duration / 2)) {
-      if (this.checkHit(opponent, progress)) {
-        opponent.takeDamage(this.currentAttack.damage);
-        createHitEffect(opponent.x, opponent.y - 40);
-        shakeScreen(8);
-        triggerPunchFlash(this);
-        if (opponent.health <= 0) slowMoFrames = 90;
+  // Particle for hit sparks, smoke, debris
+  class Particle {
+    constructor(pos, vel, life, size, color) {
+      this.pos = pos;
+      this.vel = vel;
+      this.life = life;
+      this.size = size;
+      this.color = color;
+      this.age = 0;
+    }
+    update() {
+      this.pos = this.pos.add(this.vel);
+      this.vel = this.vel.mul(0.95); // air friction
+      this.age++;
+    }
+    draw(ctx) {
+      const alpha = Math.max(0,1 - this.age/this.life);
+      ctx.fillStyle = `rgba(${this.color.r},${this.color.g},${this.color.b},${alpha})`;
+      ctx.beginPath();
+      ctx.arc(this.pos.x, this.pos.y, this.size*alpha, 0, Math.PI*2);
+      ctx.fill();
+    }
+    isDead() { return this.age >= this.life; }
+  }
+
+  // Stickman limb for ragdoll effect
+  class Limb {
+    constructor(length, angle, parent=null, offset=0) {
+      this.length = length;
+      this.angle = angle;  // in radians relative to parent limb or body
+      this.parent = parent;
+      this.offset = offset; // offset from parent's end (x,y)
+      this.pos = new Vec2(0,0);  // world pos of base
+      this.end = new Vec2(0,0);  // world pos of tip
+      this.angleVelocity = 0;
+      this.targetAngle = angle;
+    }
+    update(dt) {
+      // Smoothly move angle toward targetAngle with damping
+      const stiffness = 0.2;
+      const damping = 0.7;
+      const diff = this.targetAngle - this.angle;
+      this.angleVelocity += diff * stiffness;
+      this.angleVelocity *= damping;
+      this.angle += this.angleVelocity * dt;
+      // Calculate world position based on parent
+      if (this.parent) {
+        this.pos = this.parent.end.add(this.offset);
+        this.end = this.pos.add(new Vec2(Math.cos(this.angle), Math.sin(this.angle)).mul(this.length));
+      } else {
+        this.end = this.pos.add(new Vec2(Math.cos(this.angle), Math.sin(this.angle)).mul(this.length));
       }
     }
+    draw(ctx) {
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = '#eee';
+      ctx.beginPath();
+      ctx.moveTo(this.pos.x, this.pos.y);
+      ctx.lineTo(this.end.x, this.end.y);
+      ctx.stroke();
 
-    if (this.stateTime > this.currentAttack.duration) {
-      if (this.comboSequence.length > 0) {
-        this.comboStep++;
-        if (this.comboStep < this.comboSequence.length) {
-          // Next combo attack
-          this.stateTime = 0;
-          this.currentAttack = this.getAttackByName(this.comboSequence[this.comboStep]);
-          return; // continue combo without resetting to idle
+      // draw joint circle
+      ctx.beginPath();
+      ctx.fillStyle = '#ccc';
+      ctx.arc(this.pos.x, this.pos.y, 6, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  // Stickman class with ragdoll limbs and AI
+  class Stickman {
+    constructor(x, y, color, facingRight=true) {
+      this.pos = new Vec2(x, y);
+      this.color = color;
+      this.facingRight = facingRight;
+
+      // Body parts
+      this.headRadius = 15;
+      this.bodyLength = 60;
+
+      // Core body pos (hips)
+      this.bodyPos = new Vec2(x, y);
+
+      // Limbs
+      this.torso = new Limb(this.bodyLength, Math.PI/2);
+      this.torso.pos = this.bodyPos;
+
+      // Arms: upper arm + lower arm
+      this.leftUpperArm = new Limb(35, Math.PI*1.25, this.torso, new Vec2(0, -this.bodyLength*0.8));
+      this.leftLowerArm = new Limb(30, Math.PI*1.5, this.leftUpperArm);
+
+      this.rightUpperArm = new Limb(35, Math.PI*0.75, this.torso, new Vec2(0, -this.bodyLength*0.8));
+      this.rightLowerArm = new Limb(30, Math.PI*0.5, this.rightUpperArm);
+
+      // Legs: upper leg + lower leg
+      this.leftUpperLeg = new Limb(40, Math.PI*1.8, this.torso);
+      this.leftLowerLeg = new Limb(40, Math.PI*1.6, this.leftUpperLeg);
+
+      this.rightUpperLeg = new Limb(40, Math.PI*1.2, this.torso);
+      this.rightLowerLeg = new Limb(40, Math.PI*1.4, this.rightUpperLeg);
+
+      // Health
+      this.maxHealth = 100;
+      this.health = this.maxHealth;
+
+      // AI state
+      this.state = 'idle'; // idle, approach, attack, dodge, jump
+      this.stateTime = 0;
+      this.attackCooldown = 0;
+      this.hitCooldown = 0;
+      this.comboCount = 0;
+
+      // Movement vars
+      this.velocity = new Vec2(0,0);
+      this.onGround = true;
+
+      // Facing fix
+      this.facingRight = facingRight;
+    }
+
+    facingDir() { return this.facingRight ? 1 : -1; }
+
+    update(dt, opponent) {
+      this.stateTime += dt;
+      if(this.attackCooldown>0) this.attackCooldown -= dt;
+      if(this.hitCooldown>0) this.hitCooldown -= dt;
+
+      // Simple gravity
+      if(!this.onGround) {
+        this.velocity = this.velocity.add(new Vec2(0, 0.5*dt));
+        this.bodyPos = this.bodyPos.add(this.velocity.mul(dt*60));
+        if(this.bodyPos.y >= H - 50) {
+          this.bodyPos.y = H - 50;
+          this.onGround = true;
+          this.velocity.y = 0;
         }
-        this.comboSequence = [];
       }
-      this.state = 'idle';
-      this.currentAttack = null;
-      this.armAngle = 0;
-      this.bodyStretch = 1;
+
+      // Face opponent
+      if(opponent.pos.x > this.pos.x) this.facingRight = true;
+      else this.facingRight = false;
+
+      // AI behavior
+      switch(this.state) {
+        case 'idle':
+          if(this.stateTime > 0.5) {
+            // Choose to approach or attack randomly
+            let dist = Math.abs(this.bodyPos.x - opponent.bodyPos.x);
+            if(dist > 120) {
+              this.state = 'approach';
+            } else if(this.attackCooldown <= 0) {
+              this.state = 'attack';
+              this.stateTime = 0;
+            }
+          }
+          break;
+        case 'approach':
+          // Move toward opponent
+          let dir = opponent.bodyPos.x > this.bodyPos.x ? 1 : -1;
+          this.velocity.x = lerp(this.velocity.x, dir * 3, 0.1);
+          this.bodyPos.x += this.velocity.x;
+          if(Math.abs(this.bodyPos.x - opponent.bodyPos.x) < 110) {
+            this.state = 'idle';
+            this.velocity.x = 0;
+          }
+          break;
+        case 'attack':
+          // Animate attack sequence with combo
+          if(this.stateTime > 0.5) {
+            this.attackCooldown = 1;
+            this.state = 'idle';
+            this.stateTime = 0;
+            this.comboCount = (this.comboCount+1) % 3;
+            this.doAttack(opponent);
+          }
+          break;
+      }
+
+      // Update torso position
+      this.torso.pos = this.bodyPos;
+
+      // Animate limbs - add some idle sway or attack poses
+      this.animateLimbs(dt);
+
+      // Update limbs
+      this.torso.update(dt);
+
+      this.leftUpperArm.update(dt);
+      this.leftLowerArm.update(dt);
+
+      this.rightUpperArm.update(dt);
+      this.rightLowerArm.update(dt);
+
+      this.leftUpperLeg.update(dt);
+      this.leftLowerLeg.update(dt);
+
+      this.rightUpperLeg.update(dt);
+      this.rightLowerLeg.update(dt);
+
+      // Store main position
+      this.pos = this.bodyPos;
+    }
+
+    animateLimbs(dt) {
+      // Idle sway
+      let time = Date.now()/500;
+
+      // Legs swing gently while moving
+      let speed = Math.abs(this.velocity.x);
+      let walkSwing = speed > 0.1 ? Math.sin(time*10) * 0.5 : 0;
+
+      this.leftUpperLeg.targetAngle = Math.PI * 1.8 + walkSwing;
+      this.leftLowerLeg.targetAngle = Math.PI * 1.6 + walkSwing*1.5;
+
+      this.rightUpperLeg.targetAngle = Math.PI * 1.2 - walkSwing;
+      this.rightLowerLeg.targetAngle = Math.PI * 1.4 - walkSwing*1.5;
+
+      // Arms swing opposite legs when walking
+      this.leftUpperArm.targetAngle = Math.PI * 1.25 - walkSwing*1.2;
+      this.leftLowerArm.targetAngle = Math.PI * 1.5 - walkSwing*1.5;
+
+      this.rightUpperArm.targetAngle = Math.PI * 0.75 + walkSwing*1.2;
+      this.rightLowerArm.targetAngle = Math.PI * 0.5 + walkSwing*1.5;
+
+      // Attack pose override
+      if(this.state === 'attack' && this.stateTime < 0.5) {
+        let p = this.stateTime / 0.5;
+        let attackSwing = Math.sin(p * Math.PI) * 1.5;
+
+        // Right arm punch swing
+        this.rightUpperArm.targetAngle = lerp(this.rightUpperArm.targetAngle, Math.PI * 0.2, attackSwing);
+        this.rightLowerArm.targetAngle = lerp(this.rightLowerArm.targetAngle, Math.PI * 0.2, attackSwing);
+
+        // Slight torso lean forward
+        this.torso.angle = lerp(0, -0.3, attackSwing);
+      } else {
+        this.torso.angle = lerp(this.torso.angle || 0, 0, 0.1);
+      }
+
+      // Flip angles if facing left
+      if(!this.facingRight) {
+        // Flip limbs horizontally
+        const flipAngle = (a) => Math.PI - a;
+        this.leftUpperArm.targetAngle = flipAngle(this.leftUpperArm.targetAngle);
+        this.leftLowerArm.targetAngle = flipAngle(this.leftLowerArm.targetAngle);
+        this.rightUpperArm.targetAngle = flipAngle(this.rightUpperArm.targetAngle);
+        this.rightLowerArm.targetAngle = flipAngle(this.rightLowerArm.targetAngle);
+
+        this.leftUpperLeg.targetAngle = flipAngle(this.leftUpperLeg.targetAngle);
+        this.leftLowerLeg.targetAngle = flipAngle(this.leftLowerLeg.targetAngle);
+        this.rightUpperLeg.targetAngle = flipAngle(this.rightUpperLeg.targetAngle);
+        this.rightLowerLeg.targetAngle = flipAngle(this.rightLowerLeg.targetAngle);
+      }
+    }
+
+    doAttack(opponent) {
+      // Check distance to opponent for hit
+      const attackRange = 60;
+      const dist = Math.abs(this.bodyPos.x - opponent.bodyPos.x);
+      if(dist <= attackRange) {
+        opponent.takeHit(10 + Math.floor(Math.random()*10));
+        // Create hit effects
+        createHitEffect(opponent.bodyPos);
+        // Shake screen on hit
+        screenShake.shake(8, 15);
+      }
+    }
+
+    takeHit(damage) {
+      if(this.hitCooldown <= 0) {
+        this.health -= damage;
+        this.hitCooldown = 0.5;
+        if(this.health < 0) this.health = 0;
+      }
+    }
+
+    draw(ctx) {
+      ctx.save();
+      ctx.translate(this.bodyPos.x, this.bodyPos.y);
+
+      // Flip horizontally if needed
+      if(!this.facingRight) {
+        ctx.scale(-1,1);
+      }
+
+      // Draw head
+      ctx.fillStyle = this.color;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#eee';
+      ctx.beginPath();
+      ctx.arc(0, -this.bodyLength - this.headRadius, this.headRadius, 0, Math.PI*2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Draw torso line (spine)
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = this.color;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(0, -this.bodyLength);
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Draw limbs
+      this.torso.draw(ctx);
+      this.leftUpperArm.draw(ctx);
+      this.leftLowerArm.draw(ctx);
+      this.rightUpperArm.draw(ctx);
+      this.rightLowerArm.draw(ctx);
+      this.leftUpperLeg.draw(ctx);
+      this.leftLowerLeg.draw(ctx);
+      this.rightUpperLeg.draw(ctx);
+      this.rightLowerLeg.draw(ctx);
+
+      // Draw health bar
+      this.drawHealthBar(ctx);
+    }
+
+    drawHealthBar(ctx) {
+      const barWidth = 120;
+      const barHeight = 12;
+      const x = this.bodyPos.x - barWidth/2;
+      const y = this.bodyPos.y - this.bodyLength - 60;
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#eee';
+      ctx.fillStyle = '#444';
+      ctx.fillRect(x, y, barWidth, barHeight);
+      ctx.strokeRect(x, y, barWidth, barHeight);
+
+      let healthPct = this.health / this.maxHealth;
+      let healthColor = `hsl(${healthPct*120}, 80%, 60%)`;
+
+      ctx.fillStyle = healthColor;
+      ctx.fillRect(x, y, barWidth*healthPct, barHeight);
     }
   }
-},
 
-checkHit(opponent, progress=0.5) {
-  const a = this.currentAttack.hitbox(progress);
-  const b = {
-    x: opponent.x - 10,
-    y: opponent.y - 60,
-    w: 20,
-    h: 60
+  // Screen shake handler
+  const screenShake = {
+    duration: 0,
+    magnitude: 0,
+    time: 0,
+    shake(dx, mag) {
+      this.duration = dx;
+      this.magnitude = mag;
+      this.time = 0;
+    },
+    update() {
+      if(this.time < this.duration) {
+        this.time++;
+        const shakeX = (Math.random()*2 - 1) * this.magnitude;
+        const shakeY = (Math.random()*2 - 1) * this.magnitude;
+        return {x: shakeX, y: shakeY};
+      }
+      return {x:0, y:0};
+    }
   };
-  return !(a.x > b.x + b.w || a.x + a.w < b.x || a.y > b.y + b.h || a.y + a.h < b.y);
-},
 
-draw(ctx) {
-  // motion trails & other drawing
-
-  ctx.save();
-  ctx.translate(this.x, this.y);
-
-  ctx.scale(this.facingRight ? 1 : -1, 1);
-
-  // Apply stretch and squash to body during attack
-  ctx.scale(1, this.bodyStretch || 1);
-
-  // Head
-  ctx.beginPath();
-  ctx.arc(0, -45, 10, 0, Math.PI * 2);
-  ctx.fillStyle = this.hitCooldown > 0 && Math.floor(this.hitCooldown / 3) % 2 === 0 ? 'red' : this.color;
-  ctx.fill();
-  ctx.strokeStyle = this.color;
-  ctx.lineWidth = 3;
-  ctx.stroke();
-
-  // Body
-  ctx.beginPath();
-  ctx.moveTo(0, -35);
-  ctx.lineTo(0, 0);
-  ctx.stroke();
-
-  // Arms with punch swing
-  ctx.lineWidth = 4;
-  let armSwing = this.armAngle || 0;
-  // Left arm (idle swing)
-  ctx.beginPath();
-  ctx.moveTo(0, -30);
-  ctx.lineTo(-15 * Math.cos(armSwing * 0.3), -30 + 15 * Math.sin(armSwing * 0.3));
-  ctx.stroke();
-
-  // Right arm (attack arm)
-  ctx.beginPath();
-  ctx.moveTo(0, -30);
-  const punchX = 15 + 25 * Math.sin(armSwing * Math.PI);
-  const punchY = -30 - 15 * Math.sin(armSwing * Math.PI);
-  ctx.lineTo(punchX, punchY);
-  ctx.stroke();
-
-  // Punch flash circle on attack peak
-  if (this.punchFlashAlpha) {
-    ctx.fillStyle = `rgba(255,255,255,${this.punchFlashAlpha.toFixed(2)})`;
-    ctx.beginPath();
-    ctx.arc(punchX, punchY, 15, 0, Math.PI * 2);
-    ctx.fill();
-    this.punchFlashAlpha -= 0.05;
-    if (this.punchFlashAlpha < 0) this.punchFlashAlpha = 0;
+  // Hit effects
+  const particles = [];
+  function createHitEffect(pos) {
+    // Create multiple particles flying out
+    for(let i=0; i<20; i++) {
+      const angle = Math.random()*Math.PI*2;
+      const speed = 2 + Math.random()*3;
+      const vel = new Vec2(Math.cos(angle), Math.sin(angle)).mul(speed);
+      const p = new Particle(
+        new Vec2(pos.x + (Math.random()*20 - 10), pos.y + (Math.random()*20 - 10)),
+        vel,
+        30 + Math.random()*20,
+        3 + Math.random()*3,
+        {r:255, g:200 + Math.random()*55, b:0}
+      );
+      particles.push(p);
+    }
   }
 
-  // Legs with walking animation
-  ctx.lineWidth = 3;
-  let legAngle = 0;
-  if (this.state === 'run') {
-    legAngle = Math.sin(Date.now() * 0.01) * 0.7;
+  // Camera
+  const camera = {
+    x: 0,
+    y: 0,
+    zoom: 1,
+    targetX: 0,
+    targetY: 0,
+    targetZoom: 1,
+    update() {
+      // Smoothly move camera toward target
+      const smooth = 0.05;
+      this.x += (this.targetX - this.x)*smooth;
+      this.y += (this.targetY - this.y)*smooth;
+      this.zoom += (this.targetZoom - this.zoom)*smooth;
+    },
+    apply(ctx) {
+      ctx.translate(W/2, H/2);
+      ctx.scale(this.zoom, this.zoom);
+      ctx.translate(-this.x, -this.y);
+    }
+  };
+
+  // Game variables
+  let stickman1, stickman2;
+  let running = false;
+  let lastTime = 0;
+  let victory = null;
+
+  // Start button
+  const startBtn = document.getElementById('startBtn');
+  const message = document.getElementById('message');
+
+  startBtn.onclick = () => {
+    initGame();
+    running = true;
+    victory = null;
+    message.textContent = '';
+  };
+
+  // Initialize game state
+  function initGame() {
+    stickman1 = new Stickman(W/3, H-50, '#00d8ff', true);
+    stickman2 = new Stickman(2*W/3, H-50, '#ff4136', false);
   }
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(-15 * Math.cos(legAngle), 30 + 15 * Math.sin(legAngle));
-  ctx.moveTo(0, 0);
-  ctx.lineTo(15 * Math.cos(legAngle), 30 - 15 * Math.sin(legAngle));
-  ctx.stroke();
 
-  ctx.restore();
+  // Main loop
+  function loop(t=0) {
+    const dt = (t - lastTime) / 1000 || 0;
+    lastTime = t;
 
-  // Health bar (same as before)
-  // ...
-},
+    if(running && !victory) {
+      update(dt);
+      draw();
+      if(stickman1.health <= 0) {
+        victory = 'Red Stickman Wins!';
+      }
+      if(stickman2.health <= 0) {
+        victory = 'Blue Stickman Wins!';
+      }
+    } else {
+      draw();
+    }
 
-// New method to trigger punch flash effect
-triggerPunchFlash() {
-  this.punchFlashAlpha = 1;
-}
+    if(victory) {
+      message.textContent = victory;
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  function update(dt) {
+    stickman1.update(dt, stickman2);
+    stickman2.update(dt, stickman1);
+
+    // Update particles
+    for(let i = particles.length - 1; i >= 0; i--) {
+      particles[i].update();
+      if(particles[i].isDead()) particles.splice(i, 1);
+    }
+
+    // Update camera target to midpoint of fighters, zoom based on distance
+    const midX = (stickman1.bodyPos.x + stickman2.bodyPos.x)/2;
+    const midY = (stickman1.bodyPos.y + stickman2.bodyPos.y)/2;
+    const dist = Math.abs(stickman1.bodyPos.x - stickman2.bodyPos.x);
+    camera.targetX = midX;
+    camera.targetY = midY - 50;
+    camera.targetZoom = lerp(1.5, 1, dist / W);
+    camera.update();
+
+  }
+
+  function draw() {
+    // Clear with slight fade for motion blur effect
+    ctx.fillStyle = 'rgba(34,34,34,0.2)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Apply camera with shake
+    const shake = screenShake.update();
+    ctx.save();
+    ctx.translate(shake.x, shake.y);
+    camera.apply(ctx);
+
+    // Draw ground
+    ctx.fillStyle = '#333';
+    ctx.fillRect(camera.x - W, H - 40, W * 3, 40);
+
+    // Draw stickmen
+    stickman1.draw(ctx);
+    stickman2.draw(ctx);
+
+    // Draw particles
+    for(const p of particles) p.draw(ctx);
+
+    ctx.restore();
+  }
+
+  // Start initial state
+  message.textContent = 'Press Start Fight to begin!';
+  initGame();
+  draw();
+  requestAnimationFrame(loop);
+
+})();
+</script>
+
+</body>
+</html>
