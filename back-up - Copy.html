@@ -2,375 +2,349 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>3D Office Adventure Game</title>
+  <title>Echo Shard - Advanced 3D Game</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    html, body {
+      margin: 0; padding: 0; overflow: hidden;
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: white;
+      user-select: none;
+      height: 100%;
+    }
     #instructions {
       position: absolute;
-      top: 10px;
-      left: 10px;
-      color: white;
-      font-family: Arial, sans-serif;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      background: rgba(0,0,0,0.8);
+      padding: 20px;
+      border-radius: 10px;
+      z-index: 10;
+    }
+    #ui {
+      position: absolute;
+      top: 10px; left: 10px;
       background: rgba(0,0,0,0.5);
       padding: 10px;
-      max-width: 300px;
+      border-radius: 5px;
+      font-size: 14px;
       z-index: 10;
     }
-    #crosshair {
+    #message {
       position: absolute;
-      top: 50%;
-      left: 50%;
-      width: 20px;
-      height: 20px;
-      margin-left: -10px;
-      margin-top: -10px;
-      pointer-events: none;
+      bottom: 30px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.9);
+      color: black;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: bold;
+      display: none;
       z-index: 10;
-    }
-    #crosshair:before, #crosshair:after {
-      content: '';
-      position: absolute;
-      background: white;
-    }
-    #crosshair:before {
-      left: 50%;
-      top: 0;
-      width: 2px;
-      height: 20px;
-      margin-left: -1px;
-    }
-    #crosshair:after {
-      top: 50%;
-      left: 0;
-      width: 20px;
-      height: 2px;
-      margin-top: -1px;
     }
   </style>
 </head>
 <body>
   <div id="instructions">
-    Click to lock pointer.<br/>
-    WASD to move, Shift to sprint, Space to jump.<br/>
-    Hold R to rewind time.<br/>
-    Press Q to freeze/unfreeze time (with music).<br/>
-    Collect the glowing crystal to win.<br/>
+    Press any key to start<br><br>
+    <strong>WASD:</strong> Move &nbsp;|&nbsp;
+    <strong>Mouse:</strong> Look &nbsp;|&nbsp;
+    <strong>E:</strong> Interact<br>
+    <strong>R:</strong> Rewind &nbsp;|&nbsp;
+    <strong>Q:</strong> Stop Time
   </div>
-  <div id="crosshair"></div>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+
+  <div id="ui">
+    Health: <span id="health">100</span><br>
+    Keycards: <span id="keycards">0</span><br>
+    Stage: <span id="stage">1</span><br>
+    Time: <span id="time">00:00</span>
+  </div>
+
+  <div id="message"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/PointerLockControls.js"></script>
+
   <script>
-    // Setup basic scene, camera, renderer
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    const renderer = new THREE.WebGLRenderer({antialias:true});
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
-
-    // Controls
-    const controls = new THREE.PointerLockControls(camera, document.body);
-    scene.add(controls.getObject());
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0x404040, 2);
-    scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-    directionalLight.position.set(5,10,5);
-    scene.add(directionalLight);
-
-    // Movement vars
-    const playerVelocity = new THREE.Vector3();
-    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-    let isSprinting = false;
+    let scene, camera, renderer, controls;
+    let clock = new THREE.Clock();
+    let keys = {}, velocity = new THREE.Vector3();
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false, sprint = false;
     let canJump = false;
+    let rewindBuffer = [], isRewinding = false, isTimeStopped = false;
     const playerHeight = 1.8;
-    const moveSpeed = 5;
-    const sprintMultiplier = 1.5;
-    const gravity = -9.8;
 
-    // Walls
-    const walls = [];
+    const healthEl = document.getElementById('health');
+    const keycardsEl = document.getElementById('keycards');
+    const stageEl = document.getElementById('stage');
+    const timeEl = document.getElementById('time');
+    const messageEl = document.getElementById('message');
+    const instructions = document.getElementById('instructions');
 
-    // Create walls for office rooms and corridors
-    function createWalls() {
-      const wallMat = new THREE.MeshLambertMaterial({color:0x888888});
-      // Example walls, add more for full layout
-      const wallGeometry = new THREE.BoxGeometry(10, 2, 1);
+    let health = 100, keycards = 0, stage = 1;
 
-      // Front corridor wall
-      const wall1 = new THREE.Mesh(wallGeometry, wallMat);
-      wall1.position.set(0,1,0);
-      scene.add(wall1);
-      walls.push(wall1);
+    const music = new Audio('https://dl03.yt-dl.click/tunnel/?id=W82BxZI8qCrBQLbJAsx0E&exp=1755014290455&sig=s2y9TvuF4VPkgdDAQoQcmyq78bGpEfkevcPYbYye3TU&sec=HY5hysNiguBHIYv8xQhHxp4grYxvTvd8An7JhLcnO3o&iv=T0Vnf7Q2_IbzuYgnV0r01A');
+    music.loop = true;
 
-      // Side walls
-      const sideWallGeo = new THREE.BoxGeometry(1, 2, 10);
-      const wall2 = new THREE.Mesh(sideWallGeo, wallMat);
-      wall2.position.set(-5,1,5);
-      scene.add(wall2);
-      walls.push(wall2);
+    function playMusic() { music.play().catch(() => {}); }
+    function stopMusic() { music.pause(); music.currentTime = 0; }
 
-      const wall3 = new THREE.Mesh(sideWallGeo, wallMat);
-      wall3.position.set(5,1,5);
-      scene.add(wall3);
-      walls.push(wall3);
-
-      // More walls for 3 rooms and corridors can be added similarly...
+    function showMessage(text, duration = 3000) {
+      messageEl.textContent = text;
+      messageEl.style.display = 'block';
+      setTimeout(() => messageEl.style.display = 'none', duration);
     }
 
-    createWalls();
-
-    // Crystal collectible
-    const crystalGeo = new THREE.IcosahedronGeometry(0.6, 1);
-    const crystalMat = new THREE.MeshPhysicalMaterial({
-      color: 0x00aaff,
-      metalness: 0.5,
-      roughness: 0,
-      clearcoat: 1,
-      clearcoatRoughness: 0,
-      transmission: 1,
-      thickness: 1.5,
-      envMapIntensity: 2
-    });
-    const crystal = new THREE.Mesh(crystalGeo, crystalMat);
-    crystal.position.set(0,1,8);
-    scene.add(crystal);
-
-    // Enemy AI class
-    class Enemy {
-      constructor(position, patrolPoints) {
+    class Door {
+      constructor(pos, locked = true) {
+        this.locked = locked;
         this.mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(1, 1.8, 1),
-          new THREE.MeshPhongMaterial({color: 0xff2222})
+          new THREE.BoxGeometry(1, 3, 0.2),
+          new THREE.MeshPhongMaterial({ color: locked ? 0xaa0000 : 0x00aa00 })
         );
-        this.mesh.position.copy(position);
+        this.mesh.position.copy(pos);
         scene.add(this.mesh);
+      }
+      unlock() {
+        this.locked = false;
+        this.mesh.material.color.set(0x00aa00);
+      }
+    }
 
-        this.patrolPoints = patrolPoints;
-        this.currentPatrolIndex = 0;
-        this.speed = 2.5;
-        this.state = 'patrol';
-        this.searchTimer = 0;
-        this.chaseTarget = null;
-        this.detectionRadius = 6;
-        this.searchDuration = 5;
+    class Enemy {
+      constructor(pos) {
+        this.mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.7, 1.8, 0.7),
+          new THREE.MeshPhongMaterial({ color: 0xff0000 })
+        );
+        this.mesh.position.copy(pos);
+        this.dir = new THREE.Vector3(1, 0, 0);
+        scene.add(this.mesh);
       }
       update(delta, playerPos) {
-        if (isFrozen) return; // Stop moving when time frozen
-        if (this.state === 'patrol') {
-          const target = this.patrolPoints[this.currentPatrolIndex];
-          const dir = new THREE.Vector3().subVectors(target, this.mesh.position);
-          const dist = dir.length();
-          if (dist < 0.1) {
-            this.currentPatrolIndex = (this.currentPatrolIndex + 1) % this.patrolPoints.length;
-          } else {
-            dir.normalize();
-            this.mesh.position.addScaledVector(dir, this.speed * delta);
+        if (isTimeStopped) return;
+        this.mesh.position.addScaledVector(this.dir, delta * 2);
+        if (this.mesh.position.x > 9 || this.mesh.position.x < -9) this.dir.x *= -1;
+        if (this.mesh.position.distanceTo(playerPos) < 1.2) {
+          health -= 10;
+          healthEl.textContent = health;
+          if (health <= 0) {
+            alert("You died!");
+            window.location.reload();
           }
-          if (this.mesh.position.distanceTo(playerPos) < this.detectionRadius) {
-            this.state = 'chase';
-            this.chaseTarget = playerPos.clone();
-          }
-        } else if (this.state === 'chase') {
-          const dir = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
-          if (dir.length() > this.detectionRadius * 1.5) {
-            this.state = 'search';
-            this.searchTimer = this.searchDuration;
-            this.chaseTarget = null;
-          } else {
-            dir.normalize();
-            this.mesh.position.addScaledVector(dir, this.speed * 1.5 * delta);
-            if (this.mesh.position.distanceTo(playerPos) < 1) {
-              alert("Caught by a security guard! Restarting...");
-              resetGame();
-            }
-          }
-        } else if (this.state === 'search') {
-          this.searchTimer -= delta;
-          if (this.searchTimer <= 0) this.state = 'patrol';
         }
       }
     }
 
-    const enemies = [];
-    enemies.push(new Enemy(new THREE.Vector3(-3, 0.9, 2), [new THREE.Vector3(-3, 0.9, 2), new THREE.Vector3(3, 0.9, 2)]));
-    enemies.push(new Enemy(new THREE.Vector3(4, 0.9, 6), [new THREE.Vector3(4, 0.9, 6), new THREE.Vector3(-4, 0.9, 6)]));
+    class Crystal {
+      constructor(pos) {
+        this.mesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.4, 16, 16),
+          new THREE.MeshPhongMaterial({ color: 0x00aaff, emissive: 0x0077ff })
+        );
+        this.mesh.position.copy(pos);
+        scene.add(this.mesh);
+      }
+    }
 
-    // Collision detection (simple bounding box)
-    function checkCollision(newPos) {
-      const playerBox = new THREE.Box3(
-        new THREE.Vector3(newPos.x - 0.25, newPos.y, newPos.z - 0.25),
-        new THREE.Vector3(newPos.x + 0.25, newPos.y + playerHeight, newPos.z + 0.25)
+    class Keycard {
+      constructor(pos) {
+        this.mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.3, 0.1, 0.5),
+          new THREE.MeshPhongMaterial({ color: 0xffff00 })
+        );
+        this.mesh.position.copy(pos);
+        scene.add(this.mesh);
+      }
+    }
+    let doors = [], enemies = [], keycardsArr = [], crystals = [], player;
+    let playerBox = new THREE.Box3();
+
+    function setupScene() {
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x111111);
+
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      camera.position.set(0, playerHeight, 5);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      controls = new THREE.PointerLockControls(camera, document.body);
+
+      const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+      scene.add(ambient);
+      const light = new THREE.PointLight(0xffffff, 0.7);
+      light.position.set(0, 10, 0);
+      scene.add(light);
+
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(100, 100),
+        new THREE.MeshPhongMaterial({ color: 0x444444 })
       );
-      for (const wall of walls) {
-        const wallBox = new THREE.Box3().setFromObject(wall);
-        if (playerBox.intersectsBox(wallBox)) return true;
-      }
-      return false;
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+
+      player = camera;
+      player.position.set(0, playerHeight, 0);
+
+      createStage(stage);
     }
 
-    // Player starting position
-    controls.getObject().position.set(0, playerHeight, -5);
+    function createStage(stageNum) {
+      // Clear old
+      doors.forEach(d => scene.remove(d.mesh));
+      enemies.forEach(e => scene.remove(e.mesh));
+      keycardsArr.forEach(k => scene.remove(k.mesh));
+      crystals.forEach(c => scene.remove(c.mesh));
+      doors = [];
+      enemies = [];
+      keycardsArr = [];
+      crystals = [];
 
-    // Rewind mechanic variables
-    rewindBuffer = [];
-    isRewinding = false;
+      // Walls (simple box)
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(20, 4, 0.5),
+        new THREE.MeshPhongMaterial({ color: 0x888888 })
+      );
+      wall.position.set(0, 2, -10);
+      scene.add(wall);
 
-    // Time freeze mechanic
-    isFrozen = false;
+      // Objects
+      doors.push(new Door(new THREE.Vector3(0, 1.5, -9.5), true));
+      enemies.push(new Enemy(new THREE.Vector3(-8, 1, -5)));
+      keycardsArr.push(new Keycard(new THREE.Vector3(4, 0.1, -6)));
+      crystals.push(new Crystal(new THREE.Vector3(0, 1, -15)));
 
-    // Audio for freeze time music
-    const freezeMusic = new Audio('https://dl03.yt-dl.click/tunnel/?id=W82BxZI8qCrBQLbJAsx0E&exp=1755014290455&sig=s2y9TvuF4VPkgdDAQoQcmyq78bGpEfkevcPYbYye3TU&sec=HY5hysNiguBHIYv8xQhHxp4grYxvTvd8An7JhLcnO3o&iv=T0Vnf7Q2_IbzuYgnV0r01A');
-    freezeMusic.loop = true;
-    freezeMusic.volume = 0.5;
+      stageEl.textContent = stageNum;
+    }
 
-    // Keyboard input handling
-    document.addEventListener('keydown', function(event) {
-      switch(event.code) {
-        case 'KeyW': moveForward = true; break;
-        case 'KeyS': moveBackward = true; break;
-        case 'KeyA': moveLeft = true; break;
-        case 'KeyD': moveRight = true; break;
-        case 'ShiftLeft':
-        case 'ShiftRight': isSprinting = true; break;
-        case 'Space':
-          if (canJump && !isRewinding && !isFrozen) {
-            playerVelocity.y = 8;
-            canJump = false;
-          }
-          break;
-        case 'KeyR':
-          isRewinding = true;
-          break;
-        case 'KeyQ':
-          isFrozen = !isFrozen;
-          if (isFrozen) {
-            freezeMusic.play();
-          } else {
-            freezeMusic.pause();
-            freezeMusic.currentTime = 0;
-          }
-          break;
-      }
-    });
-
-    document.addEventListener('keyup', function(event) {
-      switch(event.code) {
-        case 'KeyW': moveForward = false; break;
-        case 'KeyS': moveBackward = false; break;
-        case 'KeyA': moveLeft = false; break;
-        case 'KeyD': moveRight = false; break;
-        case 'ShiftLeft':
-        case 'ShiftRight': isSprinting = false; break;
-        case 'KeyR':
-          isRewinding = false;
-          break;
-      }
-    });
-
-    // Reset game
-    function resetGame() {
-      controls.getObject().position.set(0, playerHeight, -5);
-      playerVelocity.set(0,0,0);
-      rewindBuffer = [];
-      isRewinding = false;
-      isFrozen = false;
-      freezeMusic.pause();
-      freezeMusic.currentTime = 0;
-      enemies.forEach(enemy => {
-        enemy.mesh.position.copy(enemy.patrolPoints[0]);
-        enemy.currentPatrolIndex = 0;
-        enemy.state = 'patrol';
+    function updateRewindBuffer() {
+      rewindBuffer.push({
+        pos: player.position.clone(),
+        vel: velocity.clone()
       });
-      if (!scene.children.includes(crystal)) scene.add(crystal);
+      if (rewindBuffer.length > 300) rewindBuffer.shift();
     }
 
-    // Clock and animation loop
-    const clock = new THREE.Clock();
+    function rewindTime() {
+      if (rewindBuffer.length > 1) {
+        const state = rewindBuffer.pop();
+        player.position.copy(state.pos);
+        velocity.copy(state.vel);
+      }
+    }
 
     function animate() {
       requestAnimationFrame(animate);
       const delta = clock.getDelta();
 
-      if (controls.isLocked === true) {
-        if (!isFrozen) {
-          // Movement logic only when not frozen
+      if (!isRewinding) updateRewindBuffer();
+      if (isRewinding) rewindTime();
 
-          // Movement direction
-          let direction = new THREE.Vector3();
-          if (moveForward) direction.z -= 1;
-          if (moveBackward) direction.z += 1;
-          if (moveLeft) direction.x -= 1;
-          if (moveRight) direction.x += 1;
-          direction.normalize();
+      if (!isTimeStopped && !isRewinding) {
+        velocity.x -= velocity.x * 10.0 * delta;
+        velocity.z -= velocity.z * 10.0 * delta;
 
-          let speed = moveSpeed * (isSprinting ? sprintMultiplier : 1);
+        direction.z = Number(moveForward) - Number(moveBackward);
+        direction.x = Number(moveRight) - Number(moveLeft);
+        direction.normalize();
 
-          // Calculate new position
-          let newPos = controls.getObject().position.clone();
-          newPos.x += direction.x * speed * delta;
-          newPos.z += direction.z * speed * delta;
+        const speed = sprint ? 10 : 5;
+        if (moveForward || moveBackward) velocity.z -= direction.z * speed * delta;
+        if (moveLeft || moveRight) velocity.x -= direction.x * speed * delta;
 
-          // Collision check & update position
-          if (!checkCollision(new THREE.Vector3(newPos.x, controls.getObject().position.y, controls.getObject().position.z)))
-            controls.getObject().position.x = newPos.x;
-          if (!checkCollision(new THREE.Vector3(controls.getObject().position.x, controls.getObject().position.y, newPos.z)))
-            controls.getObject().position.z = newPos.z;
-
-          // Gravity
-          playerVelocity.y += gravity * delta;
-          controls.getObject().position.y += playerVelocity.y * delta;
-
-          if (controls.getObject().position.y < playerHeight) {
-            playerVelocity.y = 0;
-            controls.getObject().position.y = playerHeight;
-            canJump = true;
-          }
-
-          // Enemies update
-          enemies.forEach(enemy => enemy.update(delta, controls.getObject().position));
-        }
-
-        // Rewind logic
-        if (isRewinding) {
-          if (rewindBuffer.length > 0) {
-            // Pop last saved state and apply it
-            const lastState = rewindBuffer.pop();
-            controls.getObject().position.copy(lastState.position);
-            playerVelocity.copy(lastState.velocity);
-          }
-        } else {
-          // Save current state for rewind buffer, max limit
-          rewindBuffer.push({
-            position: controls.getObject().position.clone(),
-            velocity: playerVelocity.clone()
-          });
-          if (rewindBuffer.length > 180) rewindBuffer.shift();
-        }
-
-        // Check for crystal pickup
-        if (controls.getObject().position.distanceTo(crystal.position) < 1) {
-          alert("You collected the crystal and won! Restarting...");
-          resetGame();
-        }
+        controls.moveRight(-velocity.x * delta);
+        controls.moveForward(-velocity.z * delta);
       }
+
+      playerBox.setFromCenterAndSize(player.position, new THREE.Vector3(1, 2, 1));
+
+      // Interactions
+      keycardsArr.forEach(k => {
+        if (!k.collected && player.position.distanceTo(k.mesh.position) < 1) {
+          keycards++;
+          keycardsEl.textContent = keycards;
+          k.collected = true;
+          scene.remove(k.mesh);
+          showMessage("Keycard picked up!");
+        }
+      });
+
+      doors.forEach(d => {
+        if (player.position.distanceTo(d.mesh.position) < 1.5 && d.locked && keycards > 0) {
+          keycards--;
+          d.unlock();
+          keycardsEl.textContent = keycards;
+        }
+      });
+
+      enemies.forEach(e => e.update(delta, player.position));
+
+      crystals.forEach(c => {
+        if (player.position.distanceTo(c.mesh.position) < 1.5) {
+          stage++;
+          showMessage("Crystal secured! Stage " + stage);
+          createStage(stage);
+        }
+      });
 
       renderer.render(scene, camera);
     }
 
+    function init() {
+      setupScene();
+      animate();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (!gameStarted) {
+        controls.lock();
+        instructions.style.display = 'none';
+        gameStarted = true;
+        init();
+        return;
+      }
+
+      switch (e.code) {
+        case 'KeyW': moveForward = true; break;
+        case 'KeyS': moveBackward = true; break;
+        case 'KeyA': moveLeft = true; break;
+        case 'KeyD': moveRight = true; break;
+        case 'ShiftLeft': sprint = true; break;
+        case 'KeyR': isRewinding = true; stopMusic(); break;
+        case 'KeyQ':
+          isTimeStopped = !isTimeStopped;
+          isTimeStopped ? playMusic() : stopMusic();
+          break;
+        case 'KeyE':
+          doors.forEach(d => {
+            if (player.position.distanceTo(d.mesh.position) < 1.5) d.interact?.();
+          });
+          break;
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      switch (e.code) {
+        case 'KeyW': moveForward = false; break;
+        case 'KeyS': moveBackward = false; break;
+        case 'KeyA': moveLeft = false; break;
+        case 'KeyD': moveRight = false; break;
+        case 'ShiftLeft': sprint = false; break;
+        case 'KeyR': isRewinding = false; break;
+      }
+    });
+
     window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.aspect = window.innerWidth / window.innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
     });
-
-    // Start game
-    init();
-    function init() {
-      controls.getObject().position.set(0, playerHeight, -5);
-      animate();
-    }
   </script>
 </body>
 </html>
+
