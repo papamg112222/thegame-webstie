@@ -1,129 +1,429 @@
-// script.js
-
-// --- Game Constants and Variables ---
-const board = document.getElementById('game-board');
-const statusMessage = document.getElementById('status-message');
-const scorePlayer1El = document.getElementById('score-player1');
-const scorePlayer2El = document.getElementById('score-player2');
-const gridSize = 20; // 20x20 grid
-
-let player1 = {
-    x: 0,
-    y: 0,
-    direction: 'right',
-    score: 0,
-    element: null // This will hold the HTML element for the tank
-};
-
-let player2 = {
-    x: gridSize - 1,
-    y: gridSize - 1,
-    direction: 'left',
-    score: 0,
-    element: null
-};
-
-let obstacles = [];
-
-// --- Game Initialization ---
-
-function createGameBoard() {
-    for (let i = 0; i < gridSize * gridSize; i++) {
-        const cell = document.createElement('div');
-        cell.classList.add('game-cell');
-        board.appendChild(cell);
-    }
-}
-
-function placeObstacles() {
-    // A simple way to place some obstacles randomly
-    const numberOfObstacles = 30;
-    for (let i = 0; i < numberOfObstacles; i++) {
-        let x = Math.floor(Math.random() * gridSize);
-        let y = Math.floor(Math.random() * gridSize);
-
-        // Make sure obstacles don't spawn on top of players
-        if ((x !== player1.x || y !== player1.y) && (x !== player2.x || y !== player2.y)) {
-            obstacles.push({ x, y });
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ball Fighting</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            text-align: center;
         }
-    }
-}
+        h1 {
+            color: #00b894;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1.5rem;
+            background: #2a2a4a;
+            padding: 2rem;
+            border-radius: 20px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+            border: 2px solid #3d3d6e;
+        }
+        canvas {
+            background-color: #f0f0f0;
+            border: 3px solid #00b894;
+            border-radius: 10px;
+            box-shadow: inset 0 0 15px rgba(0,0,0,0.7), 0 0 20px #00b894;
+        }
+        .controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            width: 100%;
+        }
+        .message-box {
+            background-color: #4c4c7c;
+            color: #ffbe76;
+            padding: 1rem;
+            border-radius: 10px;
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.5);
+            font-weight: bold;
+            font-size: 1.1rem;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+        button {
+            padding: 0.8rem 2rem;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #1a1a2e;
+            background: linear-gradient(145deg, #00d9a6, #00a082);
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0, 200, 150, 0.5);
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 200, 150, 0.7);
+        }
+        button:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 5px rgba(0, 200, 150, 0.5);
+        }
+        .health-bars {
+            display: flex;
+            justify-content: space-around;
+            width: 100%;
+            font-size: 1.2rem;
+            font-weight: bold;
+            margin-top: 1rem;
+        }
+        .health-bar-container {
+            width: 40%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .health-bar-wrapper {
+            width: 100%;
+            height: 25px;
+            background-color: #3d3d6e;
+            border-radius: 15px;
+            overflow: hidden;
+            border: 2px solid #e0e0e0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            position: relative;
+        }
+        #playerHealthBar, #opponentHealthBar {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        #playerHealthBar { background-color: #55b2d9; }
+        #opponentHealthBar { background-color: #d95555; }
+        
+        .health-text {
+            color: #1a1a2e;
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            line-height: 25px;
+        }
+        .player-info, .opponent-info {
+            font-weight: bold;
+            color: #e0e0e0;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }
+        .player-info span, .opponent-info span {
+            color: #ffbe76;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>Ball Fighting</h1>
+        <canvas id="gameCanvas" width="500" height="500"></canvas>
+        <div class="controls">
+            <div id="messageBox" class="message-box">Press "Start Game" to begin!</div>
+            <button id="startButton">Start Game</button>
+            <div class="health-bars">
+                <div class="health-bar-container">
+                    <span class="player-info">Player</span>
+                    <span id="playerWeapon" class="player-info">Weapon: <span>Dagger</span></span>
+                    <div class="health-bar-wrapper">
+                        <div id="playerHealthBar"></div>
+                        <span id="playerHealthText" class="health-text">100 / 100</span>
+                    </div>
+                </div>
+                <div class="health-bar-container">
+                    <span class="opponent-info">Opponent</span>
+                    <span id="opponentWeapon" class="opponent-info">Weapon: <span>Sword</span></span>
+                    <div class="health-bar-wrapper">
+                        <div id="opponentHealthBar"></div>
+                        <span id="opponentHealthText" class="health-text">100 / 100</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-function drawElements() {
-    // Clear the board for redrawing
-    board.querySelectorAll('.tank, .obstacle').forEach(el => el.remove());
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageBox = document.getElementById('messageBox');
+        const startButton = document.getElementById('startButton');
+        const playerHealthBarEl = document.getElementById('playerHealthBar');
+        const opponentHealthBarEl = document.getElementById('opponentHealthBar');
+        const playerHealthTextEl = document.getElementById('playerHealthText');
+        const opponentHealthTextEl = document.getElementById('opponentHealthText');
 
-    // Draw obstacles
-    obstacles.forEach(obs => {
-        const obstacleEl = document.createElement('div');
-        obstacleEl.classList.add('obstacle');
-        obstacleEl.style.gridColumnStart = obs.x + 1;
-        obstacleEl.style.gridRowStart = obs.y + 1;
-        board.appendChild(obstacleEl);
-    });
+        const arenaWidth = canvas.width;
+        const arenaHeight = canvas.height;
+        const arenaCenter = { x: arenaWidth / 2, y: arenaHeight / 2 };
 
-    // Draw Player 1's tank
-    player1.element = document.createElement('div');
-    player1.element.classList.add('tank', 'player1-tank', player1.direction);
-    board.appendChild(player1.element);
-    updateTankPosition(player1);
+        let playerBall, opponentBall;
+        let isGameRunning = false;
+        let keys = {};
+        let playerAttackCooldown = 0;
+        let opponentAttackCooldown = 0;
 
-    // Draw Player 2's tank
-    player2.element = document.createElement('div');
-    player2.element.classList.add('tank', 'player2-tank', player2.direction);
-    board.appendChild(player2.element);
-    updateTankPosition(player2);
-}
+        // Weapon definitions
+        const WEAPONS = {
+            dagger: { damage: 15, range: 40, cooldown: 45 },
+            sword: { damage: 25, range: 50, cooldown: 75 },
+            // Add more weapons here if you like
+        };
 
-function updateTankPosition(player) {
-    player.element.style.gridColumnStart = player.x + 1;
-    player.element.style.gridRowStart = player.y + 1;
-    // Update direction class for rotation
-    player.element.className = '';
-    player.element.classList.add('tank', (player === player1 ? 'player1-tank' : 'player2-tank'), player.direction);
-}
+        /**
+         * Represents a ball in the game with physics and combat properties.
+         * @param {number} x - The initial x position.
+         * @param {number} y - The initial y position.
+         * @param {number} radius - The radius of the ball.
+         * @param {string} color - The color of the ball.
+         * @param {number} mass - The mass of the ball (affects collisions).
+         * @param {number} maxHealth - The maximum health of the ball.
+         * @param {object} weapon - The weapon object from WEAPONS.
+         */
+        class Ball {
+            constructor(x, y, radius, color, mass, maxHealth, weapon) {
+                this.x = x;
+                this.y = y;
+                this.radius = radius;
+                this.color = color;
+                this.mass = mass;
+                this.health = maxHealth;
+                this.maxHealth = maxHealth;
+                this.weapon = weapon;
+                this.velocity = { x: 0, y: 0 };
+            }
 
-// --- Player Movement ---
+            draw() {
+                // Draw the ball
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2, false);
+                ctx.fillStyle = this.color;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.closePath();
+                ctx.shadowBlur = 0; // Reset shadow
+            }
 
-document.addEventListener('keydown', (event) => {
-    // Player 1 controls (W, A, S, D)
-    if (event.key === 'w' || event.key === 'W') moveTank(player1, 'up');
-    if (event.key === 's' || event.key === 'S') moveTank(player1, 'down');
-    if (event.key === 'a' || event.key === 'A') moveTank(player1, 'left');
-    if (event.key === 'd' || event.key === 'D') moveTank(player1, 'right');
+            updatePosition() {
+                this.x += this.velocity.x;
+                this.y += this.velocity.y;
 
-    // Player 2 controls (Arrow keys)
-    if (event.key === 'ArrowUp') moveTank(player2, 'up');
-    if (event.key === 'ArrowDown') moveTank(player2, 'down');
-    if (event.key === 'ArrowLeft') moveTank(player2, 'left');
-    if (event.key === 'ArrowRight') moveTank(player2, 'right');
-});
+                // Simple friction to slow the ball down
+                this.velocity.x *= 0.95;
+                this.velocity.y *= 0.95;
 
-function moveTank(player, direction) {
-    let newX = player.x;
-    let newY = player.y;
+                // Clamp position to the arena boundaries
+                this.x = Math.max(this.radius, Math.min(arenaWidth - this.radius, this.x));
+                this.y = Math.max(this.radius, Math.min(arenaHeight - this.radius, this.y));
+            }
+        }
 
-    switch (direction) {
-        case 'up': newY--; break;
-        case 'down': newY++; break;
-        case 'left': newX--; break;
-        case 'right': newX++; break;
-    }
-    
-    player.direction = direction; // Update direction for rotation
+        /**
+         * Initializes the game state, creating new balls and resetting health.
+         */
+        function initializeGame() {
+            const playerRadius = 25;
+            const opponentRadius = 25;
+            const maxHealth = 100;
+            playerBall = new Ball(150, arenaCenter.y, playerRadius, '#55b2d9', 1.5, maxHealth, WEAPONS.dagger);
+            opponentBall = new Ball(arenaWidth - 150, arenaCenter.y, opponentRadius, '#d95555', 1, maxHealth, WEAPONS.sword);
 
-    // Check for boundaries and obstacles
-    const isOutOfBounds = newX < 0 || newX >= gridSize || newY < 0 || newY >= gridSize;
-    const isCollidingWithObstacle = obstacles.some(obs => obs.x === newX && obs.y === newY);
+            playerAttackCooldown = 0;
+            opponentAttackCooldown = 0;
 
-    if (!isOutOfBounds && !isCollidingWithObstacle) {
-        player.x = newX;
-        player.y = newY;
-        updateTankPosition(player);
-    }
-}
+            updateHealthBars();
+            messageBox.textContent = "Use WASD or Arrow Keys to move! Press SPACE to attack!";
+            isGameRunning = true;
+        }
 
-// --- Start the Game ---
-createGameBoard();
-placeObstacles();
-drawElements();
+        /**
+         * The main game loop.
+         */
+        function gameLoop() {
+            if (!isGameRunning) return;
+
+            update();
+            draw();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * Updates the game state, including ball positions and collisions.
+         */
+        function update() {
+            // Clear the canvas
+            ctx.clearRect(0, 0, arenaWidth, arenaHeight);
+
+            // Handle player input
+            const speed = 0.8;
+            if (keys['w'] || keys['ArrowUp']) { playerBall.velocity.y -= speed; }
+            if (keys['s'] || keys['ArrowDown']) { playerBall.velocity.y += speed; }
+            if (keys['a'] || keys['ArrowLeft']) { playerBall.velocity.x -= speed; }
+            if (keys['d'] || keys['ArrowRight']) { playerBall.velocity.x += speed; }
+
+            // Handle player attack
+            if (keys[' '] && playerAttackCooldown <= 0) {
+                const dist = Math.sqrt((playerBall.x - opponentBall.x) ** 2 + (playerBall.y - opponentBall.y) ** 2);
+                if (dist < playerBall.radius + opponentBall.radius + playerBall.weapon.range) {
+                    opponentBall.health -= playerBall.weapon.damage;
+                    messageBox.textContent = `Player attacked for ${playerBall.weapon.damage} damage!`;
+                } else {
+                    messageBox.textContent = "You're too far to attack!";
+                }
+                playerAttackCooldown = playerBall.weapon.cooldown;
+            }
+
+            // Simple AI for the opponent
+            const dx = playerBall.x - opponentBall.x;
+            const dy = playerBall.y - opponentBall.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            const aiSpeed = 0.5;
+            if (distance > opponentBall.radius + playerBall.radius + opponentBall.weapon.range / 2) {
+                // Chase the player if out of range
+                opponentBall.velocity.x += (dx / distance) * aiSpeed;
+                opponentBall.velocity.y += (dy / distance) * aiSpeed;
+            } else if (opponentAttackCooldown <= 0) {
+                // Attack if in range and cooldown is ready
+                playerBall.health -= opponentBall.weapon.damage;
+                messageBox.textContent = `Opponent attacked for ${opponentBall.weapon.damage} damage!`;
+                opponentAttackCooldown = opponentBall.weapon.cooldown;
+            } else {
+                // Small random movement to make it less predictable
+                opponentBall.velocity.x += (Math.random() - 0.5) * 0.1;
+                opponentBall.velocity.y += (Math.random() - 0.5) * 0.1;
+            }
+
+            // Update ball positions
+            playerBall.updatePosition();
+            opponentBall.updatePosition();
+
+            // Decrease cooldowns
+            if (playerAttackCooldown > 0) playerAttackCooldown--;
+            if (opponentAttackCooldown > 0) opponentAttackCooldown--;
+
+            // Handle ball collision
+            const dist = Math.sqrt((playerBall.x - opponentBall.x) ** 2 + (playerBall.y - opponentBall.y) ** 2);
+            if (dist < playerBall.radius + opponentBall.radius) {
+                // Full 2D elastic collision formula
+                const angle = Math.atan2(opponentBall.y - playerBall.y, opponentBall.x - playerBall.x);
+                const overlap = (playerBall.radius + opponentBall.radius) - dist;
+
+                playerBall.x -= Math.cos(angle) * (overlap / 2);
+                playerBall.y -= Math.sin(angle) * (overlap / 2);
+                opponentBall.x += Math.cos(angle) * (overlap / 2);
+                opponentBall.y += Math.sin(angle) * (overlap / 2);
+
+                let v1 = playerBall.velocity;
+                let v2 = opponentBall.velocity;
+                let m1 = playerBall.mass;
+                let m2 = opponentBall.mass;
+
+                let nx = (opponentBall.x - playerBall.x) / dist;
+                let ny = (opponentBall.y - playerBall.y) / dist;
+                let tx = -ny;
+                let ty = nx;
+
+                let dp_norm1 = v1.x * nx + v1.y * ny;
+                let dp_tan1 = v1.x * tx + v1.y * ty;
+                let dp_norm2 = v2.x * nx + v2.y * ny;
+                let dp_tan2 = v2.x * tx + v2.y * ty;
+
+                let v1_norm_final = (dp_norm1 * (m1 - m2) + 2 * m2 * dp_norm2) / (m1 + m2);
+                let v2_norm_final = (dp_norm2 * (m2 - m1) + 2 * m1 * dp_norm1) / (m1 + m2);
+
+                playerBall.velocity.x = tx * dp_tan1 + nx * v1_norm_final;
+                playerBall.velocity.y = ty * dp_tan1 + ny * v1_norm_final;
+                opponentBall.velocity.x = tx * dp_tan2 + nx * v2_norm_final;
+                opponentBall.velocity.y = ty * dp_tan2 + ny * v2_norm_final;
+            }
+
+            updateHealthBars();
+            checkWinState();
+        }
+
+        /**
+         * Checks if either player's health is zero or less.
+         */
+        function checkWinState() {
+            if (playerBall.health <= 0) {
+                isGameRunning = false;
+                messageBox.textContent = "You Lose! The opponent was victorious.";
+                startButton.textContent = "Play Again?";
+            } else if (opponentBall.health <= 0) {
+                isGameRunning = false;
+                messageBox.textContent = "You Win! You defeated the opponent.";
+                startButton.textContent = "Play Again?";
+            }
+        }
+
+        /**
+         * Updates the health bar displays on the UI.
+         */
+        function updateHealthBars() {
+            playerHealthBarEl.style.width = `${(playerBall.health / playerBall.maxHealth) * 100}%`;
+            opponentHealthBarEl.style.width = `${(opponentBall.health / opponentBall.maxHealth) * 100}%`;
+            playerHealthTextEl.textContent = `${Math.max(0, playerBall.health)} / ${playerBall.maxHealth}`;
+            opponentHealthTextEl.textContent = `${Math.max(0, opponentBall.health)} / ${opponentBall.maxHealth}`;
+        }
+
+        /**
+         * Draws all game elements to the canvas.
+         */
+        function draw() {
+            // Draw a boundary line
+            ctx.strokeStyle = '#00b894';
+            ctx.lineWidth = 5;
+            ctx.strokeRect(0, 0, arenaWidth, arenaHeight);
+
+            if (isGameRunning) {
+                playerBall.draw();
+                opponentBall.draw();
+            }
+        }
+
+        // Event listeners for user input
+        document.addEventListener('keydown', (e) => {
+            keys[e.key] = true;
+            keys[e.key.toLowerCase()] = true; // For WASD
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.key] = false;
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        startButton.addEventListener('click', () => {
+            if (!isGameRunning) {
+                initializeGame();
+                startButton.textContent = "Restart Game";
+                gameLoop(); // Start the game loop only once
+            }
+        });
+
+        // Initial draw on page load
+        window.onload = function() {
+            draw();
+        }
+    </script>
+</body>
+</html>
