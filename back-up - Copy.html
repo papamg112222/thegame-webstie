@@ -6,11 +6,8 @@
     <title>Echo Shard - Reality Hacker</title>
     <style>
         html, body {
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background: #111;
-            color: #eee;
+            margin: 0; padding: 0; overflow: hidden;
+            background: #111; color: #eee;
             font-family: 'Inter', sans-serif;
         }
         #main-menu, #ui, #message {
@@ -18,14 +15,9 @@
             z-index: 10;
         }
         #main-menu {
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+            top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
             background: rgba(0, 0, 0, 0.95);
             transition: opacity 1s, visibility 1s;
         }
@@ -66,8 +58,7 @@
         }
 
         #ui {
-            top: 10px;
-            left: 10px;
+            top: 10px; left: 10px;
             background: rgba(0, 0, 0, 0.6);
             padding: 10px;
             border-radius: 6px;
@@ -98,8 +89,7 @@
         #stamina-bar .bar { background-color: #00aaff; }
 
         #message {
-            bottom: 30px;
-            left: 50%;
+            bottom: 30px; left: 50%;
             transform: translateX(-50%);
             background: rgba(255, 255, 255, 0.9);
             color: #000;
@@ -143,7 +133,6 @@
 </div>
 
 <div id="message"></div>
-
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/PointerLockControls.js"></script>
 <script>
@@ -188,11 +177,11 @@
     
     // --- Game Object Classes ---
     
-    // Door Class: Now requires a specific keycard based on its type.
+    // Door Class: requires specific keycard type to open.
     class Door {
         constructor(pos, locked = true, type = 0) {
             this.locked = locked;
-            this.type = type;
+            this.type = type; // Door type corresponds to required keycard color/type
             this.mesh = new THREE.Mesh(
                 new THREE.BoxGeometry(1, 3, 0.2),
                 new THREE.MeshPhongMaterial({
@@ -222,8 +211,7 @@
             }
         }
     }
-
-    // Enemy Class: The "monster in the matrix" with a patrol path.
+    // Enemy Class: patrols along waypoints, damages player on contact.
     class Enemy {
         constructor(path) {
             this.path = path;
@@ -242,17 +230,15 @@
         update(delta, playerPos) {
             if (isTimeStopped || isRewinding) return;
 
-            // Move towards the next waypoint in the patrol path
+            // Move towards next waypoint
             const target = this.path[this.currentWaypoint];
-            const direction = new THREE.Vector3().subVectors(target, this.mesh.position).normalize();
-            this.mesh.position.addScaledVector(direction, this.speed * delta);
+            const dir = new THREE.Vector3().subVectors(target, this.mesh.position).normalize();
+            this.mesh.position.addScaledVector(dir, this.speed * delta);
 
-            // Check if the enemy has reached the waypoint
             if (this.mesh.position.distanceTo(target) < 0.5) {
                 this.currentWaypoint = (this.currentWaypoint + 1) % this.path.length;
             }
 
-            // Check for collision with the player
             if (this.mesh.position.distanceTo(playerPos) < 1.2) {
                 health -= 10;
                 if (health <= 0) {
@@ -265,273 +251,299 @@
         }
     }
 
-    // Keycard Class: Collectible items to open doors.
+    // Keycard collectible, matches door type.
     class Keycard {
         constructor(pos, type = 0) {
+            this.type = type;
             this.mesh = new THREE.Mesh(
                 new THREE.BoxGeometry(0.3, 0.05, 0.5),
                 new THREE.MeshPhongMaterial({
                     color: KEYCARD_COLORS[type],
-                    emissive: KEYCARD_COLORS[type]
+                    emissive: KEYCARD_COLORS[type],
+                    emissiveIntensity: 0.8
                 })
             );
             this.mesh.position.copy(pos);
             scene.add(this.mesh);
             this.collected = false;
-            this.mesh.name = 'keycard';
         }
-        tryCollect(playerPos) {
+        checkPickup(playerPos) {
             if (!this.collected && this.mesh.position.distanceTo(playerPos) < 1) {
                 this.collected = true;
                 scene.remove(this.mesh);
                 keycards++;
                 ui.keycards.textContent = keycards;
-                showMessage("Keycard picked up!");
-                return true;
+                showMessage("Keycard collected!");
             }
-            return false;
         }
     }
 
-    // Crystal Class: The final objective of each stage.
-    class Crystal {
-        constructor(pos) {
-            this.mesh = new THREE.Mesh(
-                new THREE.IcosahedronGeometry(0.4, 0),
-                new THREE.MeshPhongMaterial({
-                    color: 0x00aaff,
-                    emissive: 0x0077ff,
-                    shininess: 100
-                })
-            );
-            this.mesh.position.copy(pos);
-            scene.add(this.mesh);
-            this.mesh.name = 'crystal';
-        }
-        tryCollect(playerPos) {
-            return playerPos.distanceTo(this.mesh.position) < 1;
-        }
-    }
+    // Initialize Player Controls
+    function initControls() {
+        controls = new THREE.PointerLockControls(camera, document.body);
 
-    let doors = [], enemies = [], keys = [], crystals = [];
-    
-    // --- Stage Setup: Creates the maze and objects for each level ---
-    function setupStage(num) {
-        // Clear previous stage
-        doors.forEach(d => scene.remove(d.mesh)); doors = [];
-        enemies.forEach(e => scene.remove(e.mesh)); enemies = [];
-        keys.forEach(k => scene.remove(k.mesh)); keys = [];
-        crystals.forEach(c => scene.remove(c.mesh)); crystals = [];
-
-        // Main office building geometry
-        const walls = [
-            // Outer walls
-            new THREE.BoxGeometry(20, 3, 0.2), new THREE.Vector3(0, 1.5, -10),
-            new THREE.BoxGeometry(20, 3, 0.2), new THREE.Vector3(0, 1.5, 10),
-            new THREE.BoxGeometry(0.2, 3, 20), new THREE.Vector3(-10, 1.5, 0),
-            new THREE.BoxGeometry(0.2, 3, 20), new THREE.Vector3(10, 1.5, 0),
-            // Inner maze walls
-            new THREE.BoxGeometry(10, 3, 0.2), new THREE.Vector3(5, 1.5, -5),
-            new THREE.BoxGeometry(0.2, 3, 10), new THREE.Vector3(0, 1.5, 5),
-            new THREE.BoxGeometry(10, 3, 0.2), new THREE.Vector3(-5, 1.5, 0),
-            new THREE.BoxGeometry(0.2, 3, 5), new THREE.Vector3(-5, 1.5, -2.5),
-        ];
-
-        walls.forEach((geom, i) => {
-            if (i % 2 === 0) {
-                const mesh = new THREE.Mesh(
-                    geom,
-                    new THREE.MeshPhongMaterial({
-                        color: 0xaaaaaa,
-                        emissive: 0x333333
-                    })
-                );
-                mesh.position.copy(walls[i + 1]);
-                scene.add(mesh);
-            }
+        document.body.addEventListener('click', () => {
+            if (!gameStarted) return;
+            controls.lock();
         });
 
-        // Place game objects within the maze
-        doors.push(new Door(new THREE.Vector3(0, 1.5, -9.9)));
-        keys.push(new Keycard(new THREE.Vector3(5, 0.1, 5)));
-        enemies.push(new Enemy([
-            new THREE.Vector3(-5, 1, -5),
-            new THREE.Vector3(5, 1, -5),
-            new THREE.Vector3(5, 1, -9),
-            new THREE.Vector3(-5, 1, -9),
-        ]));
-        crystals.push(new Crystal(new THREE.Vector3(-8, 1, 8)));
+        controls.addEventListener('lock', () => {
+            ui.menu.style.display = 'none';
+            ui.hud.style.display = 'flex';
+        });
 
-        ui.stage.textContent = num;
-        camera.position.set(0, PLAYER_HEIGHT, 9);
-        velocity.set(0,0,0);
-        canJump = true;
+        controls.addEventListener('unlock', () => {
+            ui.menu.style.display = 'flex';
+            ui.hud.style.display = 'none';
+        });
+
+        document.addEventListener('keydown', onKeyDown);
+        document.addEventListener('keyup', onKeyUp);
     }
-    
-    // --- Initial Game Setup ---
-    function setup() {
+
+    function onKeyDown(event) {
+        switch(event.code) {
+            case 'KeyW': move.forward = true; break;
+            case 'KeyS': move.backward = true; break;
+            case 'KeyA': move.left = true; break;
+            case 'KeyD': move.right = true; break;
+            case 'ShiftLeft': move.sprint = true; break;
+            case 'KeyE': interact(); break;
+            case 'KeyQ': toggleTimeStop(); break;
+            case 'KeyR': startRewind(); break;
+            case 'Space':
+                if (canJump) {
+                    velocity.y = 10;
+                    canJump = false;
+                }
+                break;
+        }
+    }
+    function onKeyUp(event) {
+        switch(event.code) {
+            case 'KeyW': move.forward = false; break;
+            case 'KeyS': move.backward = false; break;
+            case 'KeyA': move.left = false; break;
+            case 'KeyD': move.right = false; break;
+            case 'ShiftLeft': move.sprint = false; break;
+            case 'KeyR': stopRewind(); break;
+        }
+    }
+    // Interaction function (check nearby doors)
+    function interact() {
+        // Simple interaction check: closest door within 2 units
+        let playerPos = controls.getObject().position;
+        for (const door of doors) {
+            if (door.mesh.position.distanceTo(playerPos) < 2) {
+                door.interact();
+                return;
+            }
+        }
+        showMessage("Nothing to interact with.");
+    }
+
+    // Toggle time stop ability
+    function toggleTimeStop() {
+        if (stamina > 10) {
+            isTimeStopped = !isTimeStopped;
+            showMessage(isTimeStopped ? "Time stopped." : "Time resumed.");
+        } else {
+            showMessage("Not enough stamina to stop time.");
+        }
+    }
+
+    // Rewind mechanics
+    function startRewind() {
+        if (rewindBuffer.length > 0) {
+            isRewinding = true;
+            showMessage("Rewinding...");
+        }
+    }
+    function stopRewind() {
+        if (isRewinding) {
+            isRewinding = false;
+            showMessage("Rewind stopped.");
+        }
+    }
+
+    // Setup Three.js scene, camera, renderer
+    function initScene() {
         scene = new THREE.Scene();
         scene.background = new THREE.Color(0x111111);
-        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
-        controls = new THREE.PointerLockControls(camera, document.body);
-        scene.add(controls.getObject());
 
-        const ambient = new THREE.AmbientLight(0xffffff, 0.2);
-        scene.add(ambient);
-        const pl = new THREE.PointLight(0xffffff, 0.8);
-        pl.position.set(0, 10, 0);
-        scene.add(pl);
-
-        const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 20),
-            new THREE.MeshPhongMaterial({ color: 0x333333 })
-        );
-        floor.rotation.x = -Math.PI / 2;
-        scene.add(floor);
-
-        setupStage(stage);
         clock = new THREE.Clock();
-        animate();
+
+        // Lights
+        const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+        light.position.set(0, 200, 0);
+        scene.add(light);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(0, 100, 100);
+        scene.add(dirLight);
+
+        // Floor
+        const floorGeometry = new THREE.PlaneGeometry(100, 100);
+        const floorMaterial = new THREE.MeshPhongMaterial({color: 0x222222});
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.rotation.x = - Math.PI / 2;
+        floor.position.y = 0;
+        scene.add(floor);
     }
-    
-    // --- Main Animation Loop ---
+
+    // Game objects
+    let doors = [];
+    let enemies = [];
+    let keycardObjects = [];
+
+    function setupGameObjects() {
+        // Add doors with types (0,1,2)
+        doors.push(new Door(new THREE.Vector3(5, 1.5, -5), true, 0));
+        doors.push(new Door(new THREE.Vector3(10, 1.5, -5), true, 1));
+        doors.push(new Door(new THREE.Vector3(15, 1.5, -5), true, 2));
+
+        // Add enemies with patrol paths
+        enemies.push(new Enemy([
+            new THREE.Vector3(-5, 0, -5),
+            new THREE.Vector3(-5, 0, 5),
+        ]));
+
+        enemies.push(new Enemy([
+            new THREE.Vector3(7, 0, -10),
+            new THREE.Vector3(12, 0, -10),
+        ]));
+
+        // Add keycards
+        keycardObjects.push(new Keycard(new THREE.Vector3(-3, 0.3, -3), 0));
+        keycardObjects.push(new Keycard(new THREE.Vector3(8, 0.3, -4), 1));
+        keycardObjects.push(new Keycard(new THREE.Vector3(14, 0.3, -6), 2));
+    }
+
+    // Game Loop
     function animate() {
         requestAnimationFrame(animate);
-        const dt = clock.getDelta();
-        const playerPos = controls.getObject().position;
+        if (!gameStarted) return;
 
-        // Update timer
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        ui.timer.textContent = new Date(elapsed * 1000).toISOString().substr(14, 5);
-        
-        // Handle Rewind
-        if (isRewinding) {
+        const delta = clock.getDelta();
+
+        if (!isRewinding) {
+            // Movement
+            direction.z = Number(move.forward) - Number(move.backward);
+            direction.x = Number(move.right) - Number(move.left);
+            direction.normalize();
+
+            if (controls.isLocked === true) {
+                // Stamina management
+                if (move.sprint && stamina > 0) {
+                    velocity.x -= direction.x * 50 * delta;
+                    velocity.z -= direction.z * 50 * delta;
+                    stamina -= STAMINA_DRAIN_RATE * delta;
+                } else {
+                    velocity.x -= direction.x * 25 * delta;
+                    velocity.z -= direction.z * 25 * delta;
+                    stamina += STAMINA_RECHARGE_RATE * delta;
+                }
+                stamina = Math.min(Math.max(stamina, 0), STAMINA_MAX);
+
+                // Gravity
+                velocity.y += GRAVITY * delta;
+
+                controls.moveRight(-velocity.x * delta);
+                controls.moveForward(-velocity.z * delta);
+                controls.getObject().position.y += velocity.y * delta;
+
+                if (controls.getObject().position.y < PLAYER_HEIGHT) {
+                    velocity.y = 0;
+                    controls.getObject().position.y = PLAYER_HEIGHT;
+                    canJump = true;
+                }
+
+                // Update UI stamina bar
+                ui.stamina.textContent = Math.floor(stamina);
+                ui.staminaBar.style.width = `${(stamina / STAMINA_MAX) * 100}%`;
+
+                // Update enemies
+                enemies.forEach(enemy => enemy.update(delta, controls.getObject().position));
+
+                // Check keycard pickups
+                keycardObjects.forEach(kc => kc.checkPickup(controls.getObject().position));
+
+                // Save state for rewind
+                rewindBuffer.push({
+                    pos: controls.getObject().position.clone(),
+                    rot: camera.rotation.clone(),
+                    velocity: velocity.clone(),
+                    health: health,
+                    stamina: stamina,
+                    keycards: keycards
+                });
+                if (rewindBuffer.length > REWIND_MAX_FRAMES) rewindBuffer.shift();
+
+                // Timer UI
+                const elapsed = (Date.now() - startTime) / 1000;
+                const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const seconds = Math.floor(elapsed % 60).toString().padStart(2, '0');
+                ui.timer.textContent = `${minutes}:${seconds}`;
+            }
+
+            // Handle time stop stamina drain
+            if (isTimeStopped) {
+                stamina -= STAMINA_DRAIN_RATE * delta;
+                if (stamina <= 0) {
+                    stamina = 0;
+                    isTimeStopped = false;
+                    showMessage("Time stop ended due to exhaustion.");
+                }
+                ui.stamina.textContent = Math.floor(stamina);
+                ui.staminaBar.style.width = `${(stamina / STAMINA_MAX) * 100}%`;
+            }
+        } else {
+            // Rewind player position and states
             if (rewindBuffer.length > 0) {
                 const state = rewindBuffer.pop();
                 controls.getObject().position.copy(state.pos);
-                velocity.copy(state.vel);
-                scene.background = new THREE.Color(0x331111); // Visual cue for rewind
+                camera.rotation.copy(state.rot);
+                velocity.copy(state.velocity);
+                health = state.health;
+                stamina = state.stamina;
+                keycards = state.keycards;
+
+                ui.health.textContent = health;
+                ui.healthBar.style.width = `${health}%`;
+                ui.stamina.textContent = Math.floor(stamina);
+                ui.staminaBar.style.width = `${(stamina / STAMINA_MAX) * 100}%`;
+                ui.keycards.textContent = keycards;
             } else {
-                isRewinding = false;
-                showMessage("Rewind complete!");
-                scene.background = new THREE.Color(0x111111);
-            }
-        } else {
-            // Push current state to buffer only if not rewinding
-            rewindBuffer.push({
-                pos: controls.getObject().position.clone(),
-                vel: velocity.clone()
-            });
-            if (rewindBuffer.length > REWIND_MAX_FRAMES) rewindBuffer.shift();
-            scene.background = new THREE.Color(isTimeStopped ? 0x000033 : 0x111111); // Visual cue for time stop
-        }
-        
-        // Handle Stamina
-        if (isTimeStopped) {
-            stamina -= STAMINA_DRAIN_RATE * dt;
-            if (stamina <= 0) {
-                stamina = 0;
-                isTimeStopped = false;
-                showMessage("Stamina depleted! Time resumes.");
-            }
-        } else {
-            stamina += STAMINA_RECHARGE_RATE * dt;
-            if (stamina > STAMINA_MAX) stamina = STAMINA_MAX;
-        }
-        ui.stamina.textContent = Math.floor(stamina);
-        ui.staminaBar.style.width = `${stamina}%`;
-
-        // Player Movement (only if time is not stopped or rewinding)
-        if (!isTimeStopped && !isRewinding) {
-            velocity.x -= velocity.x * 10 * dt;
-            velocity.z -= velocity.z * 10 * dt;
-            direction.z = Number(move.backward) - Number(move.forward);
-            direction.x = Number(move.right) - Number(move.left);
-            direction.normalize();
-            const speed = move.sprint ? 10 : 5;
-            velocity.z -= direction.z * speed * dt;
-            velocity.x -= direction.x * speed * dt;
-            controls.moveRight(-velocity.x * dt);
-            controls.moveForward(-velocity.z * dt);
-            velocity.y += GRAVITY * dt;
-            controls.getObject().position.y += velocity.y * dt;
-            if (controls.getObject().position.y < PLAYER_HEIGHT) {
-                velocity.y = 0;
-                controls.getObject().position.y = PLAYER_HEIGHT;
-                canJump = true;
+                stopRewind();
             }
         }
-
-        // Object Interactions
-        keys.forEach(k => k.tryCollect(playerPos));
-        enemies.forEach(e => e.update(dt, playerPos));
-        crystals.forEach(c => {
-            if (c.tryCollect(playerPos)) {
-                stage++;
-                showMessage(`Stage ${stage - 1} cleared! Entering Stage ${stage}...`);
-                setTimeout(() => setupStage(stage), 1000);
-            }
-        });
-        
-        // Update UI health bar
-        ui.healthBar.style.width = `${health}%`;
 
         renderer.render(scene, camera);
     }
-    
-    // --- Event Listeners ---
-    document.addEventListener('keydown', e => {
-        if (!gameStarted) return;
-        
-        if (e.code === 'KeyW') move.forward = true;
-        if (e.code === 'KeyS') move.backward = true;
-        if (e.code === 'KeyA') move.left = true;
-        if (e.code === 'KeyD') move.right = true;
-        if (e.code === 'ShiftLeft') move.sprint = true;
-        if (e.code === 'Space' && canJump) { velocity.y = 8; canJump = false; }
-        if (e.code === 'KeyR' && rewindBuffer.length > 0) { isRewinding = true; }
-        if (e.code === 'KeyQ' && stamina > 0) {
-            isTimeStopped = !isTimeStopped;
-        }
-        if (e.code === 'KeyE') {
-            const playerPos = controls.getObject().position;
-            doors.forEach(d => {
-                if (playerPos.distanceTo(d.mesh.position) < 1.5) d.interact();
-            });
-        }
-    });
 
-    document.addEventListener('keyup', e => {
-        if (!gameStarted) return;
-        
-        if (e.code === 'KeyW') move.forward = false;
-        if (e.code === 'KeyS') move.backward = false;
-        if (e.code === 'KeyA') move.left = false;
-        if (e.code === 'KeyD') move.right = false;
-        if (e.code === 'ShiftLeft') move.sprint = false;
-        if (e.code === 'KeyR') isRewinding = false;
-    });
-
+    // Start Game button event
     ui.startBtn.addEventListener('click', () => {
-        gameStarted = true;
-        ui.menu.style.opacity = '0';
-        ui.menu.style.visibility = 'hidden';
+        ui.menu.style.display = 'none';
         ui.hud.style.display = 'flex';
+        gameStarted = true;
         controls.lock();
-        setup();
     });
 
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+    // Initialize everything
+    function init() {
+        initScene();
+        initControls();
+        setupGameObjects();
+        camera.position.set(0, PLAYER_HEIGHT, 10);
+        animate();
+    }
 
+    init();
 })();
 </script>
-
 </body>
 </html>
