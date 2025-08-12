@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Staff VS Shuriken Simulation</title>
+    <title>Battle Simulator</title>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
+        /* General styling for the page */
         body {
             font-family: 'Inter', sans-serif;
             background-color: #f6f3eb; /* Light creamy yellow background */
@@ -21,7 +22,7 @@
         .game-container {
             border: 3px solid #000;
             border-radius: 10px;
-            padding: 10px;
+            padding: 20px;
             background-color: #fff;
             box-shadow: 0 0 15px rgba(0,0,0,0.2);
             width: 520px; /* Adjusted to fit all elements */
@@ -43,62 +44,170 @@
             border: 3px solid #000; /* Black border */
             border-radius: 10px;
         }
-        .stats-panel {
+        /* Styling for the UI elements */
+        .ui-panel {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-family: 'Press Start 2P', cursive;
-            font-size: 0.7rem;
-            color: #000;
+            width: 100%;
             margin-top: 1rem;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.6rem;
+        }
+        .player-info {
+            width: 45%;
+            text-align: left;
+            padding: 5px;
+            border: 2px solid #000;
+            border-radius: 5px;
+        }
+        .player-info h3 {
+            margin: 0;
+            font-size: 0.8rem;
+        }
+        .health-bar-container {
+            width: 100%;
+            background-color: #eee;
+            border: 1px solid #000;
+            height: 15px;
+            margin-top: 5px;
+            border-radius: 3px;
+            position: relative;
+        }
+        .health-bar {
+            height: 100%;
+            background-color: #4CAF50; /* Green health bar */
+            transition: width 0.3s;
+            border-radius: 3px;
+        }
+        .health-text {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #000;
+            font-size: 0.6rem;
+            text-shadow: 1px 1px 0 #fff;
+        }
+        .start-button {
+            padding: 10px 20px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border: 2px solid #000;
+            border-radius: 5px;
+            background: linear-gradient(180deg, #ffd700, #ff8c00);
+            color: #000;
+            box-shadow: 3px 3px 0 #000;
+            transition: all 0.1s;
+        }
+        .start-button:hover {
+            box-shadow: 1px 1px 0 #000;
+            transform: translate(2px, 2px);
+        }
+        .victory-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 20px 40px;
+            border-radius: 10px;
+            font-family: 'Press Start 2P', cursive;
+            font-size: 1.5rem;
+            display: none;
+            z-index: 10;
         }
     </style>
 </head>
 <body>
     <div class="game-container">
-        <h1 class="header-text">Staff VS Shuriken</h1>
-        <p class="sub-header-text">Made With Weapon Ball Fight, No In App Purchases</p>
+        <h1 class="header-text">Battle Simulator</h1>
         <canvas id="gameCanvas" width="500" height="400"></canvas>
-        <div class="stats-panel">
-            <div id="damage-info">Damage: 1</div>
-            <div id="explosion-info">Explosion Radius: 150</div>
-            <div id="bounces-info">Bounces: 1</div>
+        <div class="ui-panel">
+            <div class="player-info" id="player1-info">
+                <h3>Player 1</h3>
+                <p>Weapon: <span id="p1-weapon">Staff</span></p>
+                <div class="health-bar-container">
+                    <div class="health-bar" id="p1-health-bar" style="width: 100%;"></div>
+                    <span class="health-text" id="p1-health-text">100 / 100</span>
+                </div>
+            </div>
+            <button class="start-button" id="startButton">Start Battle</button>
+            <div class="player-info" id="player2-info">
+                <h3>Player 2</h3>
+                <p>Weapon: <span id="p2-weapon">Shuriken</span></p>
+                <div class="health-bar-container">
+                    <div class="health-bar" id="p2-health-bar" style="width: 100%;"></div>
+                    <span class="health-text" id="p2-health-text">100 / 100</span>
+                </div>
+            </div>
         </div>
+        <div class="victory-message" id="victory-message">Victory!</div>
     </div>
 
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const victoryMessage = document.getElementById('victory-message');
+        const p1HealthBar = document.getElementById('p1-health-bar');
+        const p2HealthBar = document.getElementById('p2-health-bar');
+        const p1HealthText = document.getElementById('p1-health-text');
+        const p2HealthText = document.getElementById('p2-health-text');
+        const p1WeaponText = document.getElementById('p1-weapon');
+        const p2WeaponText = document.getElementById('p2-weapon');
 
         const arenaWidth = canvas.width;
         const arenaHeight = canvas.height;
-        const gravity = 0.5; // Increased gravity for a more noticeable fall
+        const gravity = 0.5; // Gravity constant for the physics simulation
 
         let balls = [];
+        let gameState = 'ready'; // 'ready', 'in-progress', 'game-over'
+        let animationId;
+
+        // Weapon definitions with unique stats
+        const weapons = {
+            staff: {
+                damage: 5,
+                range: 60,
+                color: '#6196ff',
+                name: 'Staff'
+            },
+            shuriken: {
+                damage: 10,
+                range: 40,
+                color: '#000',
+                name: 'Shuriken'
+            }
+        };
 
         /**
-         * Represents a ball in the simulation with physics properties.
+         * Represents a ball in the simulation with physics properties and combat stats.
          * @param {number} x - The initial x position.
          * @param {number} y - The initial y position.
          * @param {number} radius - The radius of the ball.
-         * @param {string} color - The color of the ball.
-         * @param {string} name - The name of the ball (Staff or Shuriken).
-         * @param {number} health - The initial health of the ball.
+         * @param {string} color - The base color of the ball.
+         * @param {object} weapon - The weapon object for this ball.
          */
         class Ball {
-            constructor(x, y, radius, color, name, health) {
+            constructor(x, y, radius, color, weapon) {
                 this.x = x;
                 this.y = y;
                 this.radius = radius;
                 this.color = color;
-                this.name = name;
-                this.health = health;
-                this.maxHealth = health;
+                this.health = 100;
+                this.maxHealth = 100;
+                this.weapon = weapon;
+                this.lastAttackTime = 0; // Timestamp of the last attack
+                this.attackCooldown = 500; // Cooldown in milliseconds
                 this.rotationAngle = 0;
-                
+
                 // Give each ball a random initial velocity, ensuring it's not zero
-                let velX = (Math.random() - 0.5) * 8; 
-                let velY = (Math.random() - 0.5) * 8; 
+                let velX = (Math.random() - 0.5) * 8;
+                let velY = (Math.random() - 0.5) * 8;
                 if (Math.abs(velX) < 1) velX = velX > 0 ? 1 : -1;
                 if (Math.abs(velY) < 1) velY = velY > 0 ? 1 : -1;
                 this.velocity = { x: velX, y: velY };
@@ -112,104 +221,96 @@
                 ctx.fill();
                 ctx.closePath();
 
-                // Draw the weapon based on the name
-                if (this.name === 'Staff') {
-                    ctx.save();
-                    ctx.translate(this.x, this.y);
-                    // Rotate based on a continuous rotation angle
-                    ctx.rotate(this.rotationAngle);
-                    
+                // Draw the weapon
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.rotationAngle);
+
+                if (this.weapon.name === 'Staff') {
                     // The staff handle (rectangle)
                     ctx.fillStyle = '#000';
-                    ctx.fillRect(this.radius, -2, 30, 4); 
-                    
+                    ctx.fillRect(this.radius, -2, 30, 4);
                     // The staff tip (smaller blue ball)
                     ctx.beginPath();
                     ctx.arc(this.radius + 30, 0, 8, 0, Math.PI * 2, false);
-                    ctx.fillStyle = '#6196ff';
+                    ctx.fillStyle = this.weapon.color;
                     ctx.fill();
                     ctx.closePath();
-                    
-                    ctx.restore();
-
-                } else if (this.name === 'Shuriken') {
-                    ctx.save();
-                    ctx.translate(this.x, this.y);
-                    // Rotate based on a continuous rotation angle
-                    ctx.rotate(this.rotationAngle);
-
+                } else if (this.weapon.name === 'Shuriken') {
                     // Draw the shuriken as a cross shape
-                    ctx.fillStyle = '#000';
+                    ctx.fillStyle = this.weapon.color;
                     ctx.fillRect( -15, -2, 30, 4); // Horizontal bar
                     ctx.fillRect( -2, -15, 4, 30); // Vertical bar
-
-                    ctx.restore();
                 }
-
-                // Draw health text in the middle of the ball
-                ctx.fillStyle = '#000'; // Black color for the text
-                ctx.font = 'bold 25px "Press Start 2P"'; // Increased font size
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(Math.max(0, Math.floor(this.health)), this.x, this.y);
+                
+                ctx.restore();
             }
 
             updatePosition() {
-                // Apply gravity to the vertical velocity
+                // Apply gravity and update position
                 this.velocity.y += gravity;
-                
                 this.x += this.velocity.x;
                 this.y += this.velocity.y;
-
-                // Update the rotation angle
+                
+                // Update the rotation angle for the weapon
                 this.rotationAngle += 0.05;
 
                 // Wall collision detection and reversal of velocity
                 if (this.x + this.radius > arenaWidth || this.x - this.radius < 0) {
                     this.velocity.x = -this.velocity.x;
-                    // Clamp position to prevent getting stuck
                     if (this.x + this.radius > arenaWidth) this.x = arenaWidth - this.radius;
                     if (this.x - this.radius < 0) this.x = this.radius;
                 }
                 
-                // Floor and ceiling collision
                 if (this.y + this.radius > arenaHeight || this.y - this.radius < 0) {
                     this.velocity.y = -this.velocity.y;
-                    // Simulate energy loss on bounce
-                    this.velocity.y *= 0.8; // Decreased bounce factor for more realistic bouncing
-                    
-                    // Clamp position to prevent getting stuck
+                    this.velocity.y *= 0.8; // Simulate energy loss on bounce
                     if (this.y + this.radius > arenaHeight) this.y = arenaHeight - this.radius;
                     if (this.y - this.radius < 0) this.y = this.radius;
                 }
             }
+            
+            // Function to check and perform an attack on another ball
+            checkAttack(otherBall) {
+                const now = Date.now();
+                if (now - this.lastAttackTime > this.attackCooldown) {
+                    const dx = otherBall.x - this.x;
+                    const dy = otherBall.y - this.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < this.radius + otherBall.radius + this.weapon.range) {
+                        // The other ball is in range, so attack!
+                        otherBall.health -= this.weapon.damage;
+                        this.lastAttackTime = now;
+                        // Play a simple particle effect here if desired
+                    }
+                }
+            }
         }
 
-        /**
-         * Initializes the simulation with two balls.
-         */
-        function initializeSimulation() {
-            // Create the two balls with names, colors, and health
-            balls.push(new Ball(200, 200, 35, '#c5e0ff', 'Staff', 100)); // Staff ball with a larger radius
-            balls.push(new Ball(400, 200, 35, '#d9d9d9', 'Shuriken', 100)); // Shuriken ball with a larger radius
+        // Initialize the game with two balls
+        function initializeGame() {
+            balls = [];
+            balls.push(new Ball(200, 200, 35, '#c5e0ff', weapons.staff));
+            balls.push(new Ball(400, 200, 35, '#d9d9d9', weapons.shuriken));
+            gameState = 'in-progress';
+            victoryMessage.style.display = 'none';
+            updateUI();
         }
 
-        /**
-         * The main simulation loop.
-         */
-        function simulationLoop() {
+        // Main game loop
+        function gameLoop() {
+            if (gameState !== 'in-progress') {
+                return;
+            }
+
             update();
             draw();
-            requestAnimationFrame(simulationLoop);
+            animationId = requestAnimationFrame(gameLoop);
         }
 
-        /**
-         * Updates the state of all balls in the simulation.
-         */
+        // Update function handles all game logic
         function update() {
-            // Clear the canvas for the next frame
-            ctx.clearRect(0, 0, arenaWidth, arenaHeight);
-
             // Update each ball's position
             balls.forEach(ball => {
                 ball.updatePosition();
@@ -219,27 +320,33 @@
             for (let i = 0; i < balls.length; i++) {
                 for (let j = i + 1; j < balls.length; j++) {
                     handleCollision(balls[i], balls[j]);
+                    balls[i].checkAttack(balls[j]);
+                    balls[j].checkAttack(balls[i]);
                 }
             }
+            
+            // Check for game over condition
+            checkGameOver();
+            updateUI();
         }
 
-        /**
-         * Draws all balls to the canvas.
-         */
+        // Draw function handles all rendering
         function draw() {
+            ctx.clearRect(0, 0, arenaWidth, arenaHeight);
+            
+            // Draw each ball and its weapon
+            balls.forEach(ball => {
+                ball.draw();
+            });
+
             // Draw the canvas boundary
             ctx.strokeStyle = '#000';
             ctx.lineWidth = 3;
             ctx.strokeRect(0, 0, arenaWidth, arenaHeight);
-
-            // Draw each ball
-            balls.forEach(ball => {
-                ball.draw();
-            });
         }
 
         /**
-         * Handles the collision physics between two balls, including damage.
+         * Handles the collision physics between two balls.
          * @param {Ball} ball1 
          * @param {Ball} ball2 
          */
@@ -249,35 +356,72 @@
             const dist = Math.sqrt(dx * dx + dy * dy);
 
             if (dist < ball1.radius + ball2.radius) {
-                // Collision detected, reverse velocities and apply damage
                 const angle = Math.atan2(dy, dx);
                 const overlap = (ball1.radius + ball2.radius) - dist;
 
-                // Push balls apart to prevent sticking
                 ball1.x -= Math.cos(angle) * (overlap / 2);
                 ball1.y -= Math.sin(angle) * (overlap / 2);
                 ball2.x += Math.cos(angle) * (overlap / 2);
                 ball2.y += Math.sin(angle) * (overlap / 2);
                 
-                // Simple velocity reversal for bouncing effect
                 const tempX = ball1.velocity.x;
                 const tempY = ball1.velocity.y;
                 ball1.velocity.x = ball2.velocity.x;
                 ball1.velocity.y = ball2.velocity.y;
                 ball2.velocity.x = tempX;
                 ball2.velocity.y = tempY;
-
-                // Apply damage
-                const damage = 1;
-                ball1.health -= damage;
-                ball2.health -= damage;
             }
         }
 
-        // Start the simulation when the page loads
+        function checkGameOver() {
+            const player1 = balls[0];
+            const player2 = balls[1];
+
+            if (player1.health <= 0 || player2.health <= 0) {
+                gameState = 'game-over';
+                cancelAnimationFrame(animationId);
+                let winner = player1.health > 0 ? "Player 1" : "Player 2";
+                victoryMessage.textContent = `${winner} Wins!`;
+                victoryMessage.style.display = 'block';
+            }
+        }
+        
+        // Updates the UI with player information
+        function updateUI() {
+            if (balls.length > 0) {
+                const p1 = balls[0];
+                const p2 = balls[1];
+
+                p1WeaponText.textContent = p1.weapon.name;
+                p2WeaponText.textContent = p2.weapon.name;
+
+                // Update Player 1 health bar
+                let p1HealthPercent = Math.max(0, (p1.health / p1.maxHealth) * 100);
+                p1HealthBar.style.width = p1HealthPercent + '%';
+                p1HealthText.textContent = `${Math.floor(p1.health)} / ${p1.maxHealth}`;
+                if (p1HealthPercent < 30) p1HealthBar.style.backgroundColor = '#FF5733'; // Orange/Red
+                else p1HealthBar.style.backgroundColor = '#4CAF50';
+
+                // Update Player 2 health bar
+                let p2HealthPercent = Math.max(0, (p2.health / p2.maxHealth) * 100);
+                p2HealthBar.style.width = p2HealthPercent + '%';
+                p2HealthText.textContent = `${Math.floor(p2.health)} / ${p2.maxHealth}`;
+                if (p2HealthPercent < 30) p2HealthBar.style.backgroundColor = '#FF5733';
+                else p2HealthBar.style.backgroundColor = '#4CAF50';
+            }
+        }
+
+        // Event listener for the start button
+        startButton.addEventListener('click', () => {
+            if (gameState === 'ready' || gameState === 'game-over') {
+                initializeGame();
+                gameLoop();
+            }
+        });
+
+        // Start the game loop on window load
         window.onload = function() {
-            initializeSimulation();
-            simulationLoop();
+            updateUI(); // Set initial UI stats
         };
     </script>
 </body>
