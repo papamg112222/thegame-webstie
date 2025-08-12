@@ -184,7 +184,7 @@
                 <div class="status-box">
                     <h2 class="text-xl">Code Spell</h2>
                     <div id="code-input-container">
-                        <input type="text" id="code-input" placeholder="e.g., if (enemy.hp < 50) fire();" class="outline-none">
+                        <input type="text" id="code-input" placeholder="Try 'fire', 'dash', 'zap', 'shield'!" class="outline-none">
                         <button id="cast-button">Cast Spell</button>
                     </div>
                 </div>
@@ -208,7 +208,7 @@
         // Game state variables
         let player = {
             x: 1, y: 1, hp: 100, maxHp: 100, isTurn: true,
-            color: '#3498db',
+            color: '#3498db', lastDirection: { x: 0, y: 0 }
         };
         let enemy = {
             x: MAP_SIZE - 2, y: MAP_SIZE - 2, hp: 100, maxHp: 100,
@@ -279,6 +279,14 @@
                     gameOver('You have defeated the NullPointer!');
                 }
             }
+        }
+
+        function heal(entity, amount) {
+            if (isGameOver) return;
+            entity.hp += amount;
+            if (entity.hp > entity.maxHp) entity.hp = entity.maxHp;
+            log(`${entity === player ? 'Player' : 'NullPointer'} heals for ${amount}.`);
+            updateUI();
         }
 
         function gameOver(message) {
@@ -367,11 +375,18 @@
 
             let newX = player.x;
             let newY = player.y;
+            let directionX = 0;
+            let directionY = 0;
 
-            if (e.key === 'ArrowUp' || e.key === 'w') newY--;
-            if (e.key === 'ArrowDown' || e.key === 's') newY++;
-            if (e.key === 'ArrowLeft' || e.key === 'a') newX--;
-            if (e.key === 'ArrowRight' || e.key === 'd') newX++;
+            if (e.key === 'ArrowUp' || e.key === 'w') { newY--; directionY = -1; }
+            if (e.key === 'ArrowDown' || e.key === 's') { newY++; directionY = 1; }
+            if (e.key === 'ArrowLeft' || e.key === 'a') { newX--; directionX = -1; }
+            if (e.key === 'ArrowRight' || e.key === 'd') { newX++; directionX = 1; }
+
+            // Store the last direction for the 'dash' spell
+            if (directionX !== 0 || directionY !== 0) {
+                player.lastDirection = { x: directionX, y: directionY };
+            }
 
             // Check if the new position is a valid floor tile
             if (map[newY][newX] === 1) {
@@ -391,37 +406,41 @@
         function handleCast() {
             if (isGameOver || turn !== 'player') return;
             
-            const spell = codeInput.value.trim();
+            const spell = codeInput.value.trim().toLowerCase();
             log(`You cast: "${spell}"`);
             
-            // Our single supported spell
-            if (spell.includes('if (enemy.hp < 50) fire();')) {
-                // Parse the condition from the string
-                const conditionMatch = spell.match(/if \((.*?)\)/);
-                if (conditionMatch) {
-                    // Evaluate the condition against the current game state
-                    let conditionMet = false;
-                    try {
-                        // This is a simple and unsafe way to evaluate. For a real game,
-                        // a custom parser and interpreter would be needed.
-                        const enemyHp = enemy.hp; // Expose enemy.hp to the evaluation scope
-                        conditionMet = eval(conditionMatch[1]);
-                    } catch (err) {
-                        log("Syntax Error: Could not parse spell condition.");
-                        conditionMet = false;
-                    }
+            switch (spell) {
+                case 'fire':
+                    log('You launch a fiery projectile!');
+                    takeDamage(enemy, 35);
+                    break;
+                case 'dash':
+                    // Move the player 2 tiles in the last known direction
+                    const dashAmount = 2;
+                    let newX = player.x + (player.lastDirection.x * dashAmount);
+                    let newY = player.y + (player.lastDirection.y * dashAmount);
 
-                    if (conditionMet) {
-                        log("Condition met! Firing spell!");
-                        takeDamage(enemy, 35); // A powerful "fire" spell
+                    // Check if the final position is a valid floor tile
+                    if (map[newY] && map[newY][newX] === 1) {
+                        player.x = newX;
+                        player.y = newY;
+                        log('You dash forward, a blur of code!');
                     } else {
-                        log("Condition not met. The spell fizzles...");
+                        log('Dash failed: path is blocked!');
                     }
-                } else {
-                    log("Invalid spell syntax. Try again.");
-                }
-            } else {
-                log("Unknown spell. Spells need to be precise!");
+                    break;
+                case 'zap':
+                    log('A bolt of lightning zaps the enemy!');
+                    takeDamage(enemy, 20);
+                    break;
+                case 'shield':
+                    log('A temporary shield restores some integrity!');
+                    heal(player, 15);
+                    break;
+                default:
+                    log("Unknown spell. Try 'fire', 'dash', 'zap', or 'shield'.");
+                    // No turn change for failed spells
+                    return;
             }
             
             codeInput.value = ''; // Clear the input
