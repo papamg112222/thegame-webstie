@@ -3,13 +3,14 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Epic Stickman Fight: Green vs Blue</title>
+<title>Epic AI Stickman Fight</title>
 <style>
   body {
-    margin: 0;
     background: #111;
     color: #eee;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -17,615 +18,626 @@
   }
   canvas {
     background: #222;
-    margin-top: 20px;
-    border-radius: 8px;
-    box-shadow: 0 0 12px #000 inset;
+    border-radius: 10px;
+    box-shadow: 0 0 25px #000 inset;
+    margin-top: 1rem;
   }
-  #startBtn {
-    margin: 20px;
-    padding: 10px 18px;
-    font-size: 18px;
-    background: #222;
-    color: #8f8;
-    border: 2px solid #0f0;
+  button {
+    margin: 1rem;
+    padding: 10px 20px;
+    background: transparent;
+    border: 2px solid #39ff14;
     border-radius: 6px;
+    color: #39ff14;
+    font-size: 18px;
     cursor: pointer;
-    transition: background 0.3s, color 0.3s;
+    transition: background 0.3s;
   }
-  #startBtn:hover {
-    background: #0f0;
+  button:hover {
+    background: #39ff14;
     color: #111;
   }
   #victory {
-    font-size: 28px;
-    margin-top: 12px;
-    color: #8f8;
-    text-shadow: 0 0 8px #0f0;
+    position: absolute;
+    top: 20%;
+    font-size: 4rem;
+    font-weight: 900;
+    color: #39ff14;
+    text-shadow: 0 0 20px #39ff14, 0 0 40px #39ff14;
+    pointer-events: none;
   }
 </style>
 </head>
 <body>
-<canvas id="game" width="800" height="400"></canvas>
+
+<canvas id="canvas" width="900" height="400"></canvas>
 <button id="startBtn">Start Fight</button>
-<div id="victory"></div>
+<div id="victory" style="display:none;"></div>
 
 <script>
 (() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  const startBtn = document.getElementById('startBtn');
-  const victoryDiv = document.getElementById('victory');
-
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
   const width = canvas.width;
   const height = canvas.height;
-  const groundY = height - 50;
 
-  // Stickman constants
-  const stickmanHeight = 80;
-  const stickmanWidth = 20;
+  const GRAVITY = 0.8;
+  const FLOOR = height - 80;
 
-  // Health bar constants
-  const healthBarWidth = 150;
-  const healthBarHeight = 14;
+  // Helper utilities
+  function lerp(a, b, t) { return a + (b - a) * t; }
+  function clamp(x, min, max) { return Math.min(max, Math.max(min, x)); }
+  function randomChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function distance(a, b) { return Math.hypot(b.x - a.x, b.y - a.y); }
 
-  // Game state
-  let fightActive = false;
+  // Camera shake and slow motion
+  let cameraShake = 0;
+  let slowMotion = 1;
+  let slowMotionTimer = 0;
 
-  // Utility lerp
-  function lerp(start, end, t) {
-    return start + (end - start) * t;
+  function doCameraShake(amount) {
+    cameraShake = Math.max(cameraShake, amount);
+  }
+  function doSlowMotion(duration = 20, factor = 0.2) {
+    slowMotion = factor;
+    slowMotionTimer = duration;
   }
 
-  // Screen shake state
-  let shakeMagnitude = 0;
-  let shakeDecay = 0.9;
-  let shakeX = 0;
-  let shakeY = 0;
+  // Vector2 class for 2D positions and math
+  class Vec2 {
+    constructor(x = 0, y = 0) { this.x = x; this.y = y; }
+    add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+    sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
+    mul(s) { return new Vec2(this.x * s, this.y * s); }
+    length() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+    normalized() { const len = this.length(); return len === 0 ? new Vec2(0,0) : this.mul(1 / len); }
+  }
 
-  // Stickman class
+  // Stickman class with limbs & animations
   class Stickman {
-    constructor(x, color, weaponType) {
-      this.x = x;
-      this.y = groundY;
+    constructor(x, color, neckwearColor) {
+      this.pos = new Vec2(x, FLOOR);
+      this.vel = new Vec2(0, 0);
+      this.facing = 1; // 1 right, -1 left
       this.color = color;
+      this.neckwearColor = neckwearColor;
+
       this.health = 100;
       this.maxHealth = 100;
-      this.facing = 1; // 1: right, -1: left
-      this.state = 'idle'; // idle, attack, dodge, jump, hit
-      this.attackFrame = 0;
-      this.hitTimer = 0;
-      this.velocityY = 0;
-      this.onGround = true;
 
-      this.weaponType = weaponType; // 'blades' or 'whip'
+      this.state = "idle"; // idle, walk, run, jump, attack, dodge, hurt
+      this.stateTimer = 0;
 
-      this.attackCooldown = 0;
-      this.dodgeCooldown = 0;
-      this.jumpCooldown = 0;
+      this.animTimer = 0;
 
-      this.stunTime = 0;
-      this.slowTime = 0;
+      this.limbs = {
+        head: { pos: new Vec2(0, -80), radius: 10 },
+        neck: { length: 18, swayAngle: 0, swaySpeed: 0.1 },
+        torso: { length: 60 },
+        upperArm: { length: 25, angle: 0 },
+        lowerArm: { length: 25, angle: 0 },
+        upperLeg: { length: 35, angle: 0 },
+        lowerLeg: { length: 35, angle: 0 },
+        weaponTrail: [],
+      };
 
-      // For animation curves
-      this.attackProgress = 0;
+      this.attackPhase = 0;
+      this.comboTimer = 0;
+      this.isAttacking = false;
+      this.weaponExtension = 0;
+      this.weaponGlowAlpha = 0;
 
-      // Weapon-specific properties
-      if (weaponType === 'blades') {
-        this.weaponGlowColor = 'limegreen';
-      } else if (weaponType === 'whip') {
-        this.weaponGlowColor = '#33ccff';
-      }
+      this.isDodging = false;
+      this.dodgeTimer = 0;
+
+      this.isJumping = false;
+      this.jumpTimer = 0;
+
+      this.target = null;
     }
 
-    // Reset stickman to start state
-    reset(x, facing) {
-      this.x = x;
-      this.health = this.maxHealth;
-      this.facing = facing;
-      this.state = 'idle';
-      this.attackFrame = 0;
-      this.hitTimer = 0;
-      this.velocityY = 0;
-      this.onGround = true;
-      this.attackCooldown = 0;
-      this.dodgeCooldown = 0;
-      this.jumpCooldown = 0;
-      this.stunTime = 0;
-      this.slowTime = 0;
-      this.attackProgress = 0;
-    }
+    updateAI() {
+      if (this.health <= 0) return;
 
-    isAlive() {
-      return this.health > 0;
-    }
+      const dist = this.target ? this.target.pos.x - this.pos.x : 0;
 
-    // Simple AI decision
-    decideAction(opponent) {
-      if (!this.isAlive()) return;
-      if (this.stunTime > 0) return; // stunned - no actions
-      if (this.attackCooldown > 0 || this.state === 'attack') return;
-      if (this.dodgeCooldown > 0 || this.state === 'dodge') return;
-      if (this.jumpCooldown > 0 || this.state === 'jump') return;
+      // Face opponent
+      this.facing = dist > 0 ? 1 : -1;
 
-      let dist = opponent.x - this.x;
+      // Simple AI behavior
+      if (this.isAttacking || this.isDodging || this.isJumping) return;
 
-      if (Math.abs(dist) < 60) {
-        // Close range: attack or dodge
-        if (Math.random() < 0.6) {
+      if (Math.abs(dist) > 150) {
+        // Walk closer
+        this.state = "walk";
+        this.vel.x = 2 * this.facing;
+      } else if (Math.abs(dist) > 70) {
+        // Run attack
+        if (Math.random() < 0.01) {
           this.startAttack();
         } else {
-          this.startDodge();
+          this.state = "run";
+          this.vel.x = 4 * this.facing;
         }
       } else {
-        // Mid range: approach or jump forward
-        if (Math.random() < 0.7) {
-          this.approach(opponent);
-        } else {
+        // Close range attack or dodge
+        if (Math.random() < 0.02) {
+          this.startAttack();
+        } else if (Math.random() < 0.01) {
+          this.startDodge();
+        } else if (Math.random() < 0.005) {
           this.startJump();
+        } else {
+          this.state = "idle";
+          this.vel.x = 0;
         }
       }
-    }
-
-    approach(opponent) {
-      let dir = opponent.x > this.x ? 1 : -1;
-      this.facing = dir;
-      let speed = this.slowTime > 0 ? 1.5 : 3;
-      this.x += dir * speed;
     }
 
     startAttack() {
-      this.state = 'attack';
-      this.attackFrame = 0;
-      this.attackCooldown = 40;
-      this.attackProgress = 0;
+      if (this.isAttacking) return;
+      this.isAttacking = true;
+      this.state = "attack";
+      this.attackPhase = 0;
+      this.stateTimer = 0;
+      this.comboTimer = 60;
+      this.weaponExtension = 0;
+      this.weaponGlowAlpha = 1;
     }
-
     startDodge() {
-      this.state = 'dodge';
-      this.dodgeCooldown = 30;
-      this.hitTimer = 10; // short invulnerability flash
+      if (this.isDodging || this.isJumping) return;
+      this.isDodging = true;
+      this.state = "dodge";
+      this.dodgeTimer = 30;
+      this.vel.x = -this.facing * 6;
     }
-
     startJump() {
-      if (!this.onGround) return;
-      this.state = 'jump';
-      this.velocityY = -12;
-      this.onGround = false;
-      this.jumpCooldown = 50;
+      if (this.isJumping || this.isDodging) return;
+      this.isJumping = true;
+      this.state = "jump";
+      this.jumpTimer = 45;
+      this.vel.y = -15;
     }
 
-    takeHit(damage, effect) {
-      if (this.state === 'dodge') return; // dodge blocks hit
-      this.health -= damage;
-      this.hitTimer = 20;
-      if (effect === 'stun') this.stunTime = 30;
-      if (effect === 'slow') this.slowTime = 60;
+    applyDamage(amount) {
+      if (this.health <= 0) return;
+      this.health -= amount;
+      if (this.health < 0) this.health = 0;
+      doCameraShake(15);
+      doSlowMotion(15);
     }
 
-    update(opponent) {
-      if (!this.isAlive()) {
-        this.state = 'dead';
-        return;
+    update(delta) {
+      // Update timers
+      if (slowMotionTimer > 0) slowMotionTimer--;
+      else slowMotion = 1;
+
+      if (this.comboTimer > 0) this.comboTimer--;
+      else this.isAttacking = false;
+
+      if (this.isDodging) {
+        this.dodgeTimer--;
+        if (this.dodgeTimer <= 0) {
+          this.isDodging = false;
+          this.state = "idle";
+          this.vel.x = 0;
+        }
+      }
+      if (this.isJumping) {
+        this.vel.y += GRAVITY * delta * 60;
+        this.pos.y += this.vel.y * delta * 60;
+        this.jumpTimer--;
+        if (this.jumpTimer <= 0 || this.pos.y >= FLOOR) {
+          this.isJumping = false;
+          this.pos.y = FLOOR;
+          this.vel.y = 0;
+          this.state = "idle";
+        }
       }
 
-      if (this.stunTime > 0) this.stunTime--;
-      if (this.slowTime > 0) this.slowTime--;
+      // Movement
+      if (!this.isDodging && !this.isJumping && !this.isAttacking) {
+        this.pos.x += this.vel.x * delta * 60;
+      } else if (this.isDodging) {
+        this.pos.x += this.vel.x * delta * 60;
+      }
 
-      // Cooldowns
-      if (this.attackCooldown > 0) this.attackCooldown--;
-      if (this.dodgeCooldown > 0) this.dodgeCooldown--;
-      if (this.jumpCooldown > 0) this.jumpCooldown--;
+      // Clamp position
+      this.pos.x = clamp(this.pos.x, 50, width - 50);
 
-      // State logic
-      if (this.state === 'attack') {
-        this.attackFrame++;
-        this.attackProgress = this.attackFrame / 15;
-        if (this.attackFrame > 15) {
-          this.state = 'idle';
+      // Attack logic
+      if (this.isAttacking) {
+        this.stateTimer += delta * 60;
+        // Attack phases for combo: 3 phases
+        if (this.stateTimer > 20 && this.attackPhase === 0) {
+          this.attackPhase = 1;
+          this.weaponExtension = 1;
+        } else if (this.stateTimer > 40 && this.attackPhase === 1) {
+          this.attackPhase = 2;
+          this.weaponExtension = 1.2;
+        } else if (this.stateTimer > 60 && this.attackPhase === 2) {
+          this.attackPhase = 3;
+          this.weaponExtension = 0;
+          this.isAttacking = false;
+          this.state = "idle";
         }
-      } else if (this.state === 'dodge') {
-        this.hitTimer--;
-        if (this.dodgeCooldown <= 0) this.state = 'idle';
-      } else if (this.state === 'jump') {
-        this.y += this.velocityY;
-        this.velocityY += 0.8; // gravity
-        if (this.y >= groundY) {
-          this.y = groundY;
-          this.onGround = true;
-          this.state = 'idle';
-        }
+        // Weapon glow fades out slowly
+        this.weaponGlowAlpha = lerp(this.weaponGlowAlpha, 0, 0.1);
       } else {
-        this.decideAction(opponent);
+        this.weaponExtension = lerp(this.weaponExtension, 0, 0.3);
+        this.weaponGlowAlpha = lerp(this.weaponGlowAlpha, 0, 0.1);
       }
+
+      // Limb swinging for walk and run
+      this.animTimer += delta * 10;
     }
 
-    // Draw glowing weapon (energy blades or whip)
-    drawWeapon(ctx) {
+    // Draw flowing neckwear
+    drawNeckwear(ctx, baseX, baseY, swayAngle) {
       ctx.save();
-      ctx.lineCap = 'round';
-      ctx.shadowColor = this.weaponGlowColor;
-      ctx.shadowBlur = 15;
+      ctx.strokeStyle = this.neckwearColor;
+      ctx.lineWidth = 4;
+      ctx.shadowColor = this.neckwearColor;
+      ctx.shadowBlur = 20;
 
-      if (this.weaponType === 'blades') {
-        // Dual energy blades on hands
-        const handY = this.y - stickmanHeight * 0.25;
-        const bladeLength = 40;
-        const bladeAngle = Math.sin(this.attackProgress * Math.PI * 2) * 0.8;
+      const length = this.limbs.neck.length;
+      const segments = 8;
+      let prevX = baseX;
+      let prevY = baseY;
 
-        // Left blade
-        ctx.strokeStyle = this.weaponGlowColor;
-        ctx.lineWidth = 6;
+      for (let i = 0; i < segments; i++) {
+        const t = i / segments;
+        const sway = Math.sin(swayAngle + t * Math.PI * 4) * 8 * (1 - t);
+        const x = prevX + sway * this.facing;
+        const y = prevY + length / segments;
         ctx.beginPath();
-        ctx.moveTo(this.x - 10, handY);
-        ctx.lineTo(
-          this.x - 10 + Math.cos(bladeAngle) * bladeLength,
-          handY + Math.sin(bladeAngle) * bladeLength
-        );
+        ctx.moveTo(prevX, prevY);
+        ctx.lineTo(x, y);
         ctx.stroke();
-
-        // Right blade
-        ctx.beginPath();
-        ctx.moveTo(this.x + 10, handY);
-        ctx.lineTo(
-          this.x + 10 + Math.cos(-bladeAngle) * bladeLength,
-          handY + Math.sin(-bladeAngle) * bladeLength
-        );
-        ctx.stroke();
-
-        // Electric arcs (random flickering)
-        for (let i = 0; i < 3; i++) {
-          if (Math.random() < 0.3) {
-            let sx = this.x + (i === 0 ? -10 : 10);
-            let sy = handY;
-            let ex = sx + (Math.random() - 0.5) * 20;
-            let ey = sy + (Math.random() - 0.5) * 20;
-            ctx.beginPath();
-            ctx.strokeStyle = 'rgba(100,255,100,' + (Math.random() * 0.8 + 0.2) + ')';
-            ctx.lineWidth = 2;
-            ctx.moveTo(sx, sy);
-            ctx.lineTo(ex, ey);
-            ctx.stroke();
-          }
-        }
-      } else if (this.weaponType === 'whip') {
-        // Energy whip with swoosh trail
-        const whipLength = 80;
-        const handY = this.y - stickmanHeight * 0.3;
-        const whipAngle = Math.sin(this.attackProgress * Math.PI * 2) * Math.PI * 0.7;
-
-        ctx.strokeStyle = this.weaponGlowColor;
-        ctx.lineWidth = 8;
-        ctx.beginPath();
-        ctx.moveTo(this.x, handY);
-        for (let i = 0; i <= 4; i++) {
-          let t = i / 4;
-          let x = this.x + Math.cos(whipAngle + t * Math.PI) * whipLength * t * this.facing;
-          let y = handY + Math.sin(whipAngle + t * Math.PI) * whipLength * t * 0.4;
-          ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-
-        // Whip tip glow
-        const tipX = this.x + Math.cos(whipAngle + Math.PI) * whipLength * this.facing;
-        const tipY = handY + Math.sin(whipAngle + Math.PI) * whipLength * 0.4;
-        const glowRadius = 12;
-
-        let gradient = ctx.createRadialGradient(tipX, tipY, 3, tipX, tipY, glowRadius);
-        gradient.addColorStop(0, this.weaponGlowColor);
-        gradient.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(tipX, tipY, glowRadius, 0, Math.PI * 2);
-        ctx.fill();
+        prevX = x;
+        prevY = y;
       }
       ctx.restore();
     }
 
-    drawStickman(ctx) {
-      // Body parts positions
-      const headRadius = 10;
-      const bodyHeight = stickmanHeight * 0.5;
-      const handY = this.y - bodyHeight * 0.7;
-      const footY = this.y;
+    drawWeaponTrail(ctx) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(0,255,0,${this.weaponGlowAlpha * 0.6})`;
+      ctx.lineWidth = 8;
+      ctx.shadowColor = 'lime';
+      ctx.shadowBlur = 15;
+      ctx.beginPath();
+      for (let i = 0; i < this.limbs.weaponTrail.length - 1; i++) {
+        const p1 = this.limbs.weaponTrail[i];
+        const p2 = this.limbs.weaponTrail[i + 1];
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
 
+    draw(ctx) {
       ctx.save();
 
-      // Draw glow aura
-      ctx.shadowColor = this.weaponGlowColor;
-      ctx.shadowBlur = 15;
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = this.weaponGlowColor;
-      ctx.fillStyle = this.color;
+      // Body base position
+      const baseX = this.pos.x;
+      const baseY = this.pos.y;
 
-      // Draw head (circle)
+      // Health bar above head
+      const healthBarWidth = 120;
+      const healthPercent = this.health / this.maxHealth;
+      ctx.fillStyle = "black";
+      ctx.fillRect(baseX - healthBarWidth / 2 - 2, baseY - 110, healthBarWidth + 4, 14);
+      ctx.fillStyle = this.color;
+      ctx.fillRect(baseX - healthBarWidth / 2, baseY - 108, healthBarWidth * healthPercent, 10);
+
+      // Neckwear sway angle updates for green stickman only
+      if (this.neckwearColor) {
+        this.limbs.neck.swayAngle += 0.05;
+      }
+
+      // Draw neckwear if present
+      if (this.neckwearColor) {
+        this.drawNeckwear(ctx, baseX, baseY - 80, this.limbs.neck.swayAngle);
+      }
+
+      // Calculate limb angles and swinging animation
+      const swing = Math.sin(this.animTimer) * 0.6;
+      const walkPhase = this.state === "walk" || this.state === "run" ? this.animTimer : 0;
+
+      // Head
+      ctx.fillStyle = this.color;
       ctx.beginPath();
-      ctx.arc(this.x, handY - 40, headRadius, 0, Math.PI * 2);
+      ctx.arc(baseX, baseY - 80, 10, 0, Math.PI * 2);
       ctx.fill();
 
-      // Body line
-      ctx.beginPath();
-      ctx.moveTo(this.x, handY - 30);
-      ctx.lineTo(this.x, footY - 10);
-      ctx.stroke();
-
-      // Arms - moving on attack
+      // Torso line
+      ctx.strokeStyle = this.color;
       ctx.lineWidth = 5;
-      ctx.strokeStyle = this.color;
-
-      const attackProgress = this.attackProgress;
-
-      // Left arm
-      let leftArmX = this.x - 15;
-      let leftArmY = handY - 20;
-      let leftArmSwingX = leftArmX - this.facing * Math.sin(attackProgress * Math.PI * 4) * 15;
-      let leftArmSwingY = leftArmY - Math.abs(Math.sin(attackProgress * Math.PI * 4)) * 10;
-
-      // Right arm
-      let rightArmX = this.x + 15;
-      let rightArmY = handY - 20;
-      let rightArmSwingX = rightArmX + this.facing * Math.sin(attackProgress * Math.PI * 4) * 15;
-      let rightArmSwingY = rightArmY - Math.abs(Math.sin(attackProgress * Math.PI * 4)) * 10;
-
-      // Draw arms lines
+      ctx.lineCap = "round";
       ctx.beginPath();
-      ctx.moveTo(this.x, handY - 30);
-      ctx.lineTo(leftArmSwingX, leftArmSwingY);
-      ctx.moveTo(this.x, handY - 30);
-      ctx.lineTo(rightArmSwingX, rightArmSwingY);
+      ctx.moveTo(baseX, baseY - 70);
+      ctx.lineTo(baseX, baseY - 10);
       ctx.stroke();
 
-      // Legs - simple bending during dodge
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = this.color;
+      // Arms
+      const armLength = 30;
 
+      // Left arm swinging
+      let leftArmAngle = 0;
+      if (this.state === "walk" || this.state === "run") {
+        leftArmAngle = Math.sin(walkPhase) * 0.8;
+      } else if (this.state === "attack") {
+        // attack swing
+        leftArmAngle = lerp(leftArmAngle, -Math.PI / 4, this.weaponExtension);
+      } else if (this.state === "dodge") {
+        leftArmAngle = Math.sin(walkPhase * 2) * 0.4;
+      } else {
+        leftArmAngle = 0;
+      }
+
+      // Right arm swinging and weapon
+      let rightArmAngle = 0;
+      if (this.state === "walk" || this.state === "run") {
+        rightArmAngle = -Math.sin(walkPhase) * 0.8;
+      } else if (this.state === "attack") {
+        rightArmAngle = lerp(0, Math.PI / 2, this.weaponExtension);
+      } else if (this.state === "dodge") {
+        rightArmAngle = Math.sin(walkPhase * 2 + Math.PI) * 0.4;
+      } else {
+        rightArmAngle = 0;
+      }
+
+      // Left Arm
       ctx.beginPath();
-      // Left leg
-      ctx.moveTo(this.x, footY - 10);
-      ctx.lineTo(this.x - 10, footY + (this.state === 'dodge' ? 10 : 0));
-      // Right leg
-      ctx.moveTo(this.x, footY - 10);
-      ctx.lineTo(this.x + 10, footY + (this.state === 'dodge' ? 10 : 0));
+      ctx.moveTo(baseX, baseY - 60);
+      const leftElbowX = baseX + Math.cos(leftArmAngle) * -armLength;
+      const leftElbowY = baseY - 60 + Math.sin(leftArmAngle) * armLength;
+      ctx.lineTo(leftElbowX, leftElbowY);
+      ctx.lineWidth = 5;
+      ctx.stroke();
+
+      // Left Forearm
+      const leftForearmAngle = leftArmAngle + Math.sin(this.animTimer * 2) * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(leftElbowX, leftElbowY);
+      ctx.lineTo(
+        leftElbowX + Math.cos(leftForearmAngle) * -armLength,
+        leftElbowY + Math.sin(leftForearmAngle) * armLength
+      );
+      ctx.stroke();
+
+      // Right Arm (weapon arm)
+      ctx.beginPath();
+      ctx.moveTo(baseX, baseY - 60);
+      const rightElbowX = baseX + Math.cos(rightArmAngle) * armLength;
+      const rightElbowY = baseY - 60 + Math.sin(rightArmAngle) * armLength;
+      ctx.lineTo(rightElbowX, rightElbowY);
+      ctx.lineWidth = 5;
+      ctx.stroke();
+
+      // Right Forearm
+      const rightForearmAngle = rightArmAngle + Math.sin(this.animTimer * 3) * 0.3;
+      const weaponX = rightElbowX + Math.cos(rightForearmAngle) * (armLength + this.weaponExtension * 30);
+      const weaponY = rightElbowY + Math.sin(rightForearmAngle) * (armLength + this.weaponExtension * 30);
+      ctx.beginPath();
+      ctx.moveTo(rightElbowX, rightElbowY);
+      ctx.lineTo(weaponX, weaponY);
+      ctx.stroke();
+
+      // Weapon glow trail update
+      this.limbs.weaponTrail.push({ x: weaponX, y: weaponY });
+      if (this.limbs.weaponTrail.length > 10) this.limbs.weaponTrail.shift();
+
+      this.drawWeaponTrail(ctx);
+
+      // Draw weapon as glowing green blade for green stickman
+      if (this.color === "lime") {
+        ctx.strokeStyle = `rgba(0,255,0,${this.weaponGlowAlpha})`;
+        ctx.lineWidth = 8;
+        ctx.shadowColor = "lime";
+        ctx.shadowBlur = 20;
+        ctx.beginPath();
+        ctx.moveTo(rightElbowX, rightElbowY);
+        ctx.lineTo(weaponX, weaponY);
+        ctx.stroke();
+
+        ctx.fillStyle = "lime";
+        ctx.beginPath();
+        ctx.arc(weaponX, weaponY, 6 + this.weaponExtension * 8, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        // Blue stickman weapon as glowing ball mace
+        ctx.fillStyle = `rgba(0, 200, 255, ${this.weaponGlowAlpha})`;
+        ctx.shadowColor = "cyan";
+        ctx.shadowBlur = 15;
+        ctx.beginPath();
+        ctx.arc(weaponX, weaponY, 10 + this.weaponExtension * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Legs swinging
+      const legLengthUpper = 35;
+      const legLengthLower = 35;
+
+      let leftLegAngle = 0;
+      let rightLegAngle = 0;
+
+      if (this.state === "walk" || this.state === "run") {
+        leftLegAngle = Math.sin(walkPhase) * 1.2;
+        rightLegAngle = -Math.sin(walkPhase) * 1.2;
+      } else if (this.state === "jump") {
+        leftLegAngle = Math.PI / 6;
+        rightLegAngle = Math.PI / 6;
+      }
+
+      // Left thigh
+      const leftHipX = baseX;
+      const leftHipY = baseY - 10;
+      const leftKneeX = leftHipX + Math.cos(leftLegAngle) * -legLengthUpper;
+      const leftKneeY = leftHipY + Math.sin(leftLegAngle) * legLengthUpper;
+      ctx.beginPath();
+      ctx.moveTo(leftHipX, leftHipY);
+      ctx.lineTo(leftKneeX, leftKneeY);
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      // Left lower leg
+      const leftLowerLegAngle = leftLegAngle + Math.sin(this.animTimer * 2) * 0.3;
+      const leftFootX = leftKneeX + Math.cos(leftLowerLegAngle) * -legLengthLower;
+      const leftFootY = leftKneeY + Math.sin(leftLowerLegAngle) * legLengthLower;
+      ctx.beginPath();
+      ctx.moveTo(leftKneeX, leftKneeY);
+      ctx.lineTo(leftFootX, leftFootY);
+      ctx.stroke();
+
+      // Right thigh
+      const rightHipX = baseX;
+      const rightHipY = baseY - 10;
+      const rightKneeX = rightHipX + Math.cos(rightLegAngle) * legLengthUpper;
+      const rightKneeY = rightHipY + Math.sin(rightLegAngle) * legLengthUpper;
+      ctx.beginPath();
+      ctx.moveTo(rightHipX, rightHipY);
+      ctx.lineTo(rightKneeX, rightKneeY);
+      ctx.stroke();
+
+      // Right lower leg
+      const rightLowerLegAngle = rightLegAngle + Math.sin(this.animTimer * 2 + Math.PI) * 0.3;
+      const rightFootX = rightKneeX + Math.cos(rightLowerLegAngle) * legLengthLower;
+      const rightFootY = rightKneeY + Math.sin(rightLowerLegAngle) * legLengthLower;
+      ctx.beginPath();
+      ctx.moveTo(rightKneeX, rightKneeY);
+      ctx.lineTo(rightFootX, rightFootY);
       ctx.stroke();
 
       ctx.restore();
-
-      // Draw weapon after body
-      this.drawWeapon(ctx);
-
-      // Draw hit flash
-      if (this.hitTimer > 0) {
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.beginPath();
-        ctx.arc(this.x, handY - 40, headRadius + 12, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-
-    drawHealthBar(ctx, x, y) {
-      // Background
-      ctx.fillStyle = '#222';
-      ctx.fillRect(x, y, healthBarWidth, healthBarHeight);
-
-      // Health fill with glow color
-      let healthRatio = this.health / this.maxHealth;
-      let gradient = ctx.createLinearGradient(x, y, x + healthBarWidth, y);
-      gradient.addColorStop(0, this.weaponGlowColor);
-      gradient.addColorStop(1, 'black');
-
-      ctx.fillStyle = gradient;
-      ctx.fillRect(x, y, healthBarWidth * healthRatio, healthBarHeight);
-
-      // Border
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = this.weaponGlowColor;
-      ctx.strokeRect(x, y, healthBarWidth, healthBarHeight);
     }
   }
 
-  // Game objects
-  let greenStickman = new Stickman(200, 'limegreen', 'blades');
-  let blueStickman = new Stickman(600, '#33ccff', 'whip');
-  blueStickman.facing = -1;
-  greenStickman.facing = 1;
+  // Impact flash and shake overlays
+  let impactFlashAlpha = 0;
+
+  // Game State
+  let player, enemy;
+  let isRunning = false;
+
+  // Start fight function
+  function startFight() {
+    player = new Stickman(200, "lime", "#0f0");
+    enemy = new Stickman(700, "cyan", null);
+    player.target = enemy;
+    enemy.target = player;
+    isRunning = true;
+    victoryMessage.style.display = "none";
+  }
+
+  // Collision and attack detection
+  function checkHits() {
+    if (!player.isAttacking) return;
+
+    // Weapon tip pos from player (right arm forearm)
+    const weaponTip = player.limbs.weaponTrail[player.limbs.weaponTrail.length - 1];
+    if (!weaponTip) return;
+
+    // Distance to enemy head
+    const distToEnemy = distance(weaponTip, enemy.pos.sub(new Vec2(0, 80)));
+    if (distToEnemy < 20 && enemy.health > 0) {
+      enemy.applyDamage(10);
+      impactFlashAlpha = 1;
+    }
+  }
+
+  function checkHitsEnemy() {
+    if (!enemy.isAttacking) return;
+    const weaponTip = enemy.limbs.weaponTrail[enemy.limbs.weaponTrail.length - 1];
+    if (!weaponTip) return;
+    const distToPlayer = distance(weaponTip, player.pos.sub(new Vec2(0, 80)));
+    if (distToPlayer < 20 && player.health > 0) {
+      player.applyDamage(10);
+      impactFlashAlpha = 1;
+    }
+  }
+
+  // Draw camera shake effect
+  function applyCameraShake() {
+    if (cameraShake > 0) {
+      const dx = (Math.random() - 0.5) * cameraShake;
+      const dy = (Math.random() - 0.5) * cameraShake;
+      ctx.translate(dx, dy);
+      cameraShake *= 0.85;
+      if (cameraShake < 0.5) cameraShake = 0;
+    }
+  }
 
   // Main loop
-  function gameLoop() {
-    if (!fightActive) return;
+  let lastTime = 0;
+  const victoryMessage = document.getElementById("victory");
 
-    // Update
-    greenStickman.update(blueStickman);
-    blueStickman.update(greenStickman);
+  function loop(time = 0) {
+    const deltaRaw = (time - lastTime) / 1000;
+    lastTime = time;
+    const delta = deltaRaw * slowMotion;
 
-    // Check attacks hitting
-    checkHits(greenStickman, blueStickman);
-    checkHits(blueStickman, greenStickman);
-
-    // Screen shake decay
-    if (shakeMagnitude > 0.1) {
-      shakeMagnitude *= shakeDecay;
-      shakeX = (Math.random() - 0.5) * shakeMagnitude * 10;
-      shakeY = (Math.random() - 0.5) * shakeMagnitude * 10;
-    } else {
-      shakeMagnitude = 0;
-      shakeX = 0;
-      shakeY = 0;
-    }
-
-    // Draw
-    draw();
-
-    // Check victory
-    if (!greenStickman.isAlive()) {
-      endFight('Blue Stickman Wins!');
-    } else if (!blueStickman.isAlive()) {
-      endFight('Green Stickman Wins!');
-    } else {
-      requestAnimationFrame(gameLoop);
-    }
-  }
-
-  // Hit detection & effect
-  function checkHits(attacker, defender) {
-    if (attacker.state !== 'attack') return;
-
-    // Attack hitbox (rough circle in front)
-    let attackRange = 40;
-    let attackX = attacker.x + attacker.facing * 30;
-    let attackY = attacker.y - stickmanHeight * 0.3;
-
-    let dist = Math.abs(defender.x - attackX);
-
-    // Only hit if defender in range, and not dodging
-    if (dist < attackRange && defender.state !== 'dodge' && defender.hitTimer <= 0) {
-      let damage = 8;
-      let effect = null;
-
-      if (attacker.weaponType === 'blades') {
-        damage = 7;
-        effect = 'stun';
-        createElectricHitEffect(attackX, attackY, attacker.weaponGlowColor);
-      } else if (attacker.weaponType === 'whip') {
-        damage = 6;
-        effect = 'slow';
-        createWhipHitEffect(attackX, attackY, attacker.weaponGlowColor);
-      }
-
-      defender.takeHit(damage, effect);
-      attacker.state = 'idle';
-
-      // Screen shake on hit
-      shakeMagnitude = 1.2;
-    }
-  }
-
-  // Draw the entire scene
-  function draw() {
     ctx.clearRect(0, 0, width, height);
 
-    // Apply screen shake
     ctx.save();
-    ctx.translate(shakeX, shakeY);
+    applyCameraShake();
 
-    // Draw ground line
-    ctx.strokeStyle = '#444';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, groundY + 1);
-    ctx.lineTo(width, groundY + 1);
-    ctx.stroke();
+    // Draw floor
+    ctx.fillStyle = "#444";
+    ctx.fillRect(0, FLOOR + 35, width, height - FLOOR - 35);
+
+    // Update AI and update entities
+    if (isRunning) {
+      player.updateAI();
+      enemy.updateAI();
+
+      player.update(delta);
+      enemy.update(delta);
+
+      checkHits();
+      checkHitsEnemy();
+
+      // Check victory
+      if (player.health <= 0 || enemy.health <= 0) {
+        isRunning = false;
+        const winner = player.health > 0 ? "Green Stickman Wins!" : "Blue Stickman Wins!";
+        victoryMessage.textContent = winner;
+        victoryMessage.style.display = "block";
+      }
+    } else {
+      // Idle animation
+      player && player.update(delta);
+      enemy && enemy.update(delta);
+    }
 
     // Draw stickmen
-    greenStickman.drawStickman(ctx);
-    blueStickman.drawStickman(ctx);
-
-    // Draw health bars
-    greenStickman.drawHealthBar(ctx, 20, 20);
-    blueStickman.drawHealthBar(ctx, width - healthBarWidth - 20, 20);
+    player && player.draw(ctx);
+    enemy && enemy.draw(ctx);
 
     ctx.restore();
 
-    // Draw effects on top
-    drawEffects();
-  }
-
-  // Effects arrays
-  let electricHits = [];
-  let whipHits = [];
-
-  // Create electric hit effect for green blades
-  function createElectricHitEffect(x, y, color) {
-    electricHits.push({
-      x,
-      y,
-      radius: 4,
-      maxRadius: 20,
-      opacity: 1,
-      color,
-    });
-  }
-
-  // Create whip hit effect for blue whip
-  function createWhipHitEffect(x, y, color) {
-    whipHits.push({
-      x,
-      y,
-      time: 0,
-      maxTime: 15,
-      color,
-    });
-  }
-
-  // Draw hit effects
-  function drawEffects() {
-    // Electric arc hits
-    for (let i = electricHits.length - 1; i >= 0; i--) {
-      let e = electricHits[i];
-      ctx.save();
-      ctx.strokeStyle = e.color;
-      ctx.globalAlpha = e.opacity;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-
-      // Simple random arc lines around center
-      for (let j = 0; j < 4; j++) {
-        let angle = (j / 4) * Math.PI * 2 + Math.random() * 0.5;
-        let r = lerp(e.radius, e.maxRadius, Math.random());
-        let x1 = e.x + Math.cos(angle) * r;
-        let y1 = e.y + Math.sin(angle) * r;
-        let x2 = e.x + Math.cos(angle + 0.3) * (r + 5);
-        let y2 = e.y + Math.sin(angle + 0.3) * (r + 5);
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-      }
-      ctx.stroke();
-      ctx.restore();
-
-      // Shrink and fade
-      e.radius += 2;
-      e.opacity -= 0.12;
-      if (e.opacity <= 0) electricHits.splice(i, 1);
+    // Draw impact flash overlay
+    if (impactFlashAlpha > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${impactFlashAlpha})`;
+      ctx.fillRect(0, 0, width, height);
+      impactFlashAlpha -= 0.05;
+      if (impactFlashAlpha < 0) impactFlashAlpha = 0;
     }
 
-    // Whip slow hits (blue circles that fade and expand)
-    for (let i = whipHits.length - 1; i >= 0; i--) {
-      let w = whipHits[i];
-      ctx.save();
-      ctx.fillStyle = w.color;
-      ctx.globalAlpha = 1 - w.time / w.maxTime;
-      let radius = lerp(5, 25, w.time / w.maxTime);
-      ctx.beginPath();
-      ctx.arc(w.x, w.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      w.time++;
-      if (w.time > w.maxTime) whipHits.splice(i, 1);
-    }
+    requestAnimationFrame(loop);
   }
 
-  // End fight and show winner
-  function endFight(text) {
-    fightActive = false;
-    victoryDiv.textContent = text;
-    startBtn.textContent = 'Restart Fight';
-    startBtn.disabled = false;
-  }
+  document.getElementById("startBtn").addEventListener("click", () => {
+    startFight();
+  });
 
-  // Start fight setup
-  function startFight() {
-    victoryDiv.textContent = '';
-    greenStickman.reset(200, 1);
-    blueStickman.reset(600, -1);
-    fightActive = true;
-    startBtn.disabled = true;
-    gameLoop();
-  }
+  // Start loop
+  loop();
 
-  startBtn.addEventListener('click', startFight);
-
-  // Initial draw
-  draw();
 })();
 </script>
+
 </body>
 </html>
