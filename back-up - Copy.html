@@ -1,484 +1,376 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Echo Shard - First Person Office Stealth</title>
-<style>
-  body {
-    margin: 0;
-    overflow: hidden;
-    background-color: #121212;
-    font-family: monospace;
-  }
-  #instructions {
-    position: absolute;
-    top: 12px;
-    left: 12px;
-    color: white;
-    background: rgba(0,0,0,0.6);
-    padding: 12px;
-    border-radius: 8px;
-    max-width: 350px;
-    line-height: 1.5em;
-    user-select: none;
-    z-index: 10;
-  }
-  #crosshair {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 20px;
-    height: 20px;
-    margin-left: -10px;
-    margin-top: -10px;
-    pointer-events: none;
-    z-index: 9;
-  }
-  #crosshair:before, #crosshair:after {
-    content: '';
-    position: absolute;
-    background: white;
-  }
-  #crosshair:before {
-    left: 9px;
-    top: 0;
-    width: 2px;
-    height: 20px;
-  }
-  #crosshair:after {
-    top: 9px;
-    left: 0;
-    width: 20px;
-    height: 2px;
-  }
-  #blocker {
-    position: absolute;
-    top:0;
-    left:0;
-    width:100%;
-    height:100%;
-    background-color: rgba(0,0,0,0.9);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    color: white;
-    font-size: 20px;
-    cursor: pointer;
-    z-index: 20;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>3D Office Adventure Game</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    #instructions {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: Arial, sans-serif;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      max-width: 300px;
+      z-index: 10;
+    }
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 20px;
+      height: 20px;
+      margin-left: -10px;
+      margin-top: -10px;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #crosshair:before, #crosshair:after {
+      content: '';
+      position: absolute;
+      background: white;
+    }
+    #crosshair:before {
+      left: 50%;
+      top: 0;
+      width: 2px;
+      height: 20px;
+      margin-left: -1px;
+    }
+    #crosshair:after {
+      top: 50%;
+      left: 0;
+      width: 20px;
+      height: 2px;
+      margin-top: -1px;
+    }
+  </style>
 </head>
 <body>
-<div id="blocker">
-  Click to Play<br />
-  (WASD to move, mouse to look, E to interact, Shift to sprint)
-</div>
-<div id="instructions" style="display:none;">
-  <b>Objective:</b> Find the glowing crystal shard hidden in the office.<br />
-  Avoid the patrolling security guards.<br />
-  Press <b>R</b> to rewind a few seconds of your movement.<br />
-</div>
-<div id="crosshair"></div>
+  <div id="instructions">
+    Click to lock pointer.<br/>
+    WASD to move, Shift to sprint, Space to jump.<br/>
+    Hold R to rewind time.<br/>
+    Press Q to freeze/unfreeze time (with music).<br/>
+    Collect the glowing crystal to win.<br/>
+  </div>
+  <div id="crosshair"></div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+  <script>
+    // Setup basic scene, camera, renderer
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({antialias:true});
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/PointerLockControls.js"></script>
+    // Controls
+    const controls = new THREE.PointerLockControls(camera, document.body);
+    scene.add(controls.getObject());
 
-<script>
-  // Setup scene, camera, renderer
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x202030);
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 2);
+    scene.add(ambientLight);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5,10,5);
+    scene.add(directionalLight);
 
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-  
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+    // Movement vars
+    const playerVelocity = new THREE.Vector3();
+    let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+    let isSprinting = false;
+    let canJump = false;
+    const playerHeight = 1.8;
+    const moveSpeed = 5;
+    const sprintMultiplier = 1.5;
+    const gravity = -9.8;
 
-  // Pointer lock controls for first person
-  const controls = new THREE.PointerLockControls(camera, document.body);
+    // Walls
+    const walls = [];
 
-  const blocker = document.getElementById('blocker');
-  const instructions = document.getElementById('instructions');
+    // Create walls for office rooms and corridors
+    function createWalls() {
+      const wallMat = new THREE.MeshLambertMaterial({color:0x888888});
+      // Example walls, add more for full layout
+      const wallGeometry = new THREE.BoxGeometry(10, 2, 1);
 
-  blocker.addEventListener('click', () => {
-    controls.lock();
-  });
+      // Front corridor wall
+      const wall1 = new THREE.Mesh(wallGeometry, wallMat);
+      wall1.position.set(0,1,0);
+      scene.add(wall1);
+      walls.push(wall1);
 
-  controls.addEventListener('lock', () => {
-    blocker.style.display = 'none';
-    instructions.style.display = 'block';
-  });
+      // Side walls
+      const sideWallGeo = new THREE.BoxGeometry(1, 2, 10);
+      const wall2 = new THREE.Mesh(sideWallGeo, wallMat);
+      wall2.position.set(-5,1,5);
+      scene.add(wall2);
+      walls.push(wall2);
 
-  controls.addEventListener('unlock', () => {
-    blocker.style.display = 'flex';
-    instructions.style.display = 'none';
-  });
+      const wall3 = new THREE.Mesh(sideWallGeo, wallMat);
+      wall3.position.set(5,1,5);
+      scene.add(wall3);
+      walls.push(wall3);
 
-  // Lighting
-  const ambientLight = new THREE.AmbientLight(0x666666);
-  scene.add(ambientLight);
-  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  dirLight.position.set(10, 20, 10);
-  scene.add(dirLight);
-
-  // Floor
-  const floorGeo = new THREE.PlaneGeometry(100, 100);
-  const floorMat = new THREE.MeshPhongMaterial({color: 0x303040});
-  const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  // Walls - simple office corridors (multiple stages)
-  // We'll create modular office rooms connected with corridors
-
-  const walls = [];
-
-  function createWall(x, y, z, sx, sy, sz) {
-    const geo = new THREE.BoxGeometry(sx, sy, sz);
-    const mat = new THREE.MeshPhongMaterial({color: 0x404050});
-    const wall = new THREE.Mesh(geo, mat);
-    wall.position.set(x, y, z);
-    wall.castShadow = true;
-    wall.receiveShadow = true;
-    scene.add(wall);
-    walls.push(wall);
-    return wall;
-  }
-
-  // Build simple office layout (3 rooms connected by corridors)
-  // Room 1 walls
-  createWall(0, 2.5, -20, 20, 5, 1); // back wall
-  createWall(-10, 2.5, -10, 1, 5, 20); // left wall
-  createWall(10, 2.5, -10, 1, 5, 20);  // right wall
-  createWall(0, 2.5, 0, 20, 5, 1); // front wall with door gap
-
-  // Corridor to room 2
-  createWall(-10, 2.5, 10, 1, 5, 20);
-  createWall(10, 2.5, 10, 1, 5, 20);
-
-  // Room 2 walls
-  createWall(0, 2.5, 30, 20, 5, 1);
-  createWall(-10, 2.5, 20, 1, 5, 20);
-  createWall(10, 2.5, 20, 1, 5, 20);
-  createWall(0, 2.5, 40, 20, 5, 1);
-
-  // Room 3 walls
-  createWall(0, 2.5, 60, 20, 5, 1);
-  createWall(-10, 2.5, 50, 1, 5, 20);
-  createWall(10, 2.5, 50, 1, 5, 20);
-  createWall(0, 2.5, 70, 20, 5, 1);
-
-  // Player setup
-  const playerCollider = new THREE.Box3(
-    new THREE.Vector3(-0.25, 0, -0.25),
-    new THREE.Vector3(0.25, 1.8, 0.25)
-  );
-  const playerVelocity = new THREE.Vector3();
-  let canJump = false;
-
-  // Movement variables
-  const moveSpeed = 6.0;
-  const sprintMultiplier = 1.7;
-  let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
-  let isSprinting = false;
-
-  // Event listeners for movement keys
-  const onKeyDown = function(event) {
-    switch (event.code) {
-      case 'ArrowUp':
-      case 'KeyW':
-        moveForward = true;
-        break;
-      case 'ArrowLeft':
-      case 'KeyA':
-        moveLeft = true;
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        moveBackward = true;
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        moveRight = true;
-        break;
-      case 'ShiftLeft':
-      case 'ShiftRight':
-        isSprinting = true;
-        break;
-      case 'Space':
-        if (canJump === true) playerVelocity.y += 7;
-        canJump = false;
-        break;
-      case 'KeyR':
-        isRewinding = true;
-        break;
-      case 'KeyE':
-        interact();
-        break;
+      // More walls for 3 rooms and corridors can be added similarly...
     }
-  };
-  const onKeyUp = function(event) {
-    switch (event.code) {
-      case 'ArrowUp':
-      case 'KeyW':
-        moveForward = false;
-        break;
-      case 'ArrowLeft':
-      case 'KeyA':
-        moveLeft = false;
-        break;
-      case 'ArrowDown':
-      case 'KeyS':
-        moveBackward = false;
-        break;
-      case 'ArrowRight':
-      case 'KeyD':
-        moveRight = false;
-        break;
-      case 'ShiftLeft':
-      case 'ShiftRight':
-        isSprinting = false;
-        break;
-      case 'KeyR':
-        isRewinding = false;
-        break;
-    }
-  };
 
-  document.addEventListener('keydown', onKeyDown);
-  document.addEventListener('keyup', onKeyUp);
+    createWalls();
 
-  // Collision helper - check if player collides with walls
-  function checkCollision(newPos) {
-    const playerBox = new THREE.Box3(
-      new THREE.Vector3(newPos.x - 0.25, newPos.y, newPos.z - 0.25),
-      new THREE.Vector3(newPos.x + 0.25, newPos.y + 1.8, newPos.z + 0.25)
-    );
-    for (const wall of walls) {
-      const wallBox = new THREE.Box3().setFromObject(wall);
-      if (playerBox.intersectsBox(wallBox)) {
-        return true;
+    // Crystal collectible
+    const crystalGeo = new THREE.IcosahedronGeometry(0.6, 1);
+    const crystalMat = new THREE.MeshPhysicalMaterial({
+      color: 0x00aaff,
+      metalness: 0.5,
+      roughness: 0,
+      clearcoat: 1,
+      clearcoatRoughness: 0,
+      transmission: 1,
+      thickness: 1.5,
+      envMapIntensity: 2
+    });
+    const crystal = new THREE.Mesh(crystalGeo, crystalMat);
+    crystal.position.set(0,1,8);
+    scene.add(crystal);
+
+    // Enemy AI class
+    class Enemy {
+      constructor(position, patrolPoints) {
+        this.mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(1, 1.8, 1),
+          new THREE.MeshPhongMaterial({color: 0xff2222})
+        );
+        this.mesh.position.copy(position);
+        scene.add(this.mesh);
+
+        this.patrolPoints = patrolPoints;
+        this.currentPatrolIndex = 0;
+        this.speed = 2.5;
+        this.state = 'patrol';
+        this.searchTimer = 0;
+        this.chaseTarget = null;
+        this.detectionRadius = 6;
+        this.searchDuration = 5;
       }
-    }
-    return false;
-  }
-
-  // Crystal collectible with shiny glass material
-  const crystalGeo = new THREE.IcosahedronGeometry(0.6, 1);
-  const crystalMat = new THREE.MeshPhysicalMaterial({
-    color: 0x00aaff,
-    metalness: 0.5,
-    roughness: 0,
-    clearcoat: 1,
-    clearcoatRoughness: 0,
-    transmission: 1,  // glass effect
-    thickness: 1.5,
-    envMapIntensity: 2
-  });
-  const crystal = new THREE.Mesh(crystalGeo, crystalMat);
-  crystal.position.set(0, 1, 65); // inside last room
-  scene.add(crystal);
-
-  // Enemy class for smarter AI patrol/search
-  class Enemy {
-    constructor(position, patrolPoints) {
-      this.mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(1, 1.8, 1),
-        new THREE.MeshPhongMaterial({color: 0xff2222})
-      );
-      this.mesh.position.copy(position);
-      scene.add(this.mesh);
-
-      this.patrolPoints = patrolPoints; // array of Vector3 points
-      this.currentPatrolIndex = 0;
-      this.speed = 2.5;
-      this.state = 'patrol'; // patrol, chase, search
-      this.searchTimer = 0;
-      this.chaseTarget = null;
-      this.detectionRadius = 6;
-      this.searchDuration = 5; // seconds
-    }
-
-    update(delta, playerPos) {
-      if (this.state === 'patrol') {
-        const target = this.patrolPoints[this.currentPatrolIndex];
-        const dir = new THREE.Vector3().subVectors(target, this.mesh.position);
-        const dist = dir.length();
-        if (dist < 0.1) {
-          this.currentPatrolIndex = (this.currentPatrolIndex + 1) % this.patrolPoints.length;
-        } else {
-          dir.normalize();
-          this.mesh.position.addScaledVector(dir, this.speed * delta);
-        }
-        // Detect player
-        if (this.mesh.position.distanceTo(playerPos) < this.detectionRadius) {
-          this.state = 'chase';
-          this.chaseTarget = playerPos.clone();
-        }
-      } else if (this.state === 'chase') {
-        const dir = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
-        if (dir.length() > this.detectionRadius * 1.5) {
-          // lost player, start search
-          this.state = 'search';
-          this.searchTimer = this.searchDuration;
-          this.chaseTarget = null;
-        } else {
-          dir.normalize();
-          this.mesh.position.addScaledVector(dir, this.speed * 1.5 * delta);
-          // If very close, "catch" player - trigger lose
-          if (this.mesh.position.distanceTo(playerPos) < 1) {
-            alert("Caught by a security guard! Restarting...");
-            resetGame();
+      update(delta, playerPos) {
+        if (isFrozen) return; // Stop moving when time frozen
+        if (this.state === 'patrol') {
+          const target = this.patrolPoints[this.currentPatrolIndex];
+          const dir = new THREE.Vector3().subVectors(target, this.mesh.position);
+          const dist = dir.length();
+          if (dist < 0.1) {
+            this.currentPatrolIndex = (this.currentPatrolIndex + 1) % this.patrolPoints.length;
+          } else {
+            dir.normalize();
+            this.mesh.position.addScaledVector(dir, this.speed * delta);
           }
-        }
-      } else if (this.state === 'search') {
-        this.searchTimer -= delta;
-        if (this.searchTimer <= 0) {
-          this.state = 'patrol';
+          if (this.mesh.position.distanceTo(playerPos) < this.detectionRadius) {
+            this.state = 'chase';
+            this.chaseTarget = playerPos.clone();
+          }
+        } else if (this.state === 'chase') {
+          const dir = new THREE.Vector3().subVectors(playerPos, this.mesh.position);
+          if (dir.length() > this.detectionRadius * 1.5) {
+            this.state = 'search';
+            this.searchTimer = this.searchDuration;
+            this.chaseTarget = null;
+          } else {
+            dir.normalize();
+            this.mesh.position.addScaledVector(dir, this.speed * 1.5 * delta);
+            if (this.mesh.position.distanceTo(playerPos) < 1) {
+              alert("Caught by a security guard! Restarting...");
+              resetGame();
+            }
+          }
+        } else if (this.state === 'search') {
+          this.searchTimer -= delta;
+          if (this.searchTimer <= 0) this.state = 'patrol';
         }
       }
     }
-  }
 
-  // Create enemies with patrol routes
-  const enemies = [];
-  enemies.push(new Enemy(new THREE.Vector3(-5, 0.9, -15), [
-    new THREE.Vector3(-5, 0.9, -15),
-    new THREE.Vector3(5, 0.9, -15),
-  ]));
+    const enemies = [];
+    enemies.push(new Enemy(new THREE.Vector3(-3, 0.9, 2), [new THREE.Vector3(-3, 0.9, 2), new THREE.Vector3(3, 0.9, 2)]));
+    enemies.push(new Enemy(new THREE.Vector3(4, 0.9, 6), [new THREE.Vector3(4, 0.9, 6), new THREE.Vector3(-4, 0.9, 6)]));
 
-  enemies.push(new Enemy(new THREE.Vector3(7, 0.9, 25), [
-    new THREE.Vector3(7, 0.9, 25),
-    new THREE.Vector3(-7, 0.9, 25),
-  ]));
+    // Collision detection (simple bounding box)
+    function checkCollision(newPos) {
+      const playerBox = new THREE.Box3(
+        new THREE.Vector3(newPos.x - 0.25, newPos.y, newPos.z - 0.25),
+        new THREE.Vector3(newPos.x + 0.25, newPos.y + playerHeight, newPos.z + 0.25)
+      );
+      for (const wall of walls) {
+        const wallBox = new THREE.Box3().setFromObject(wall);
+        if (playerBox.intersectsBox(wallBox)) return true;
+      }
+      return false;
+    }
 
-  enemies.push(new Enemy(new THREE.Vector3(0, 0.9, 60), [
-    new THREE.Vector3(0, 0.9, 60),
-    new THREE.Vector3(10, 0.9, 60),
-    new THREE.Vector3(10, 0.9, 70),
-    new THREE.Vector3(0, 0.9, 70),
-  ]));
+    // Player starting position
+    controls.getObject().position.set(0, playerHeight, -5);
 
-  // Time rewind mechanic for player position history
-  let rewindBuffer = [];
-  const maxRewindFrames = 180; // ~3 seconds at 60fps
-  let isRewinding = false;
-
-  // Interact function placeholder (for future doors/switches)
-  function interact() {
-    // For now, no interactive objects implemented
-    // Could add door open/close here
-  }
-
-  // Reset game state
-  function resetGame() {
-    controls.getObject().position.set(0, 1.8, -10);
-    playerVelocity.set(0, 0, 0);
+    // Rewind mechanic variables
     rewindBuffer = [];
     isRewinding = false;
-    // Reset enemies positions and states
-    enemies.forEach((enemy, i) => {
-      enemy.mesh.position.copy(enemy.patrolPoints[0]);
-      enemy.currentPatrolIndex = 0;
-      enemy.state = 'patrol';
+
+    // Time freeze mechanic
+    isFrozen = false;
+
+    // Audio for freeze time music
+    const freezeMusic = new Audio('https://dl03.yt-dl.click/tunnel/?id=W82BxZI8qCrBQLbJAsx0E&exp=1755014290455&sig=s2y9TvuF4VPkgdDAQoQcmyq78bGpEfkevcPYbYye3TU&sec=HY5hysNiguBHIYv8xQhHxp4grYxvTvd8An7JhLcnO3o&iv=T0Vnf7Q2_IbzuYgnV0r01A');
+    freezeMusic.loop = true;
+    freezeMusic.volume = 0.5;
+
+    // Keyboard input handling
+    document.addEventListener('keydown', function(event) {
+      switch(event.code) {
+        case 'KeyW': moveForward = true; break;
+        case 'KeyS': moveBackward = true; break;
+        case 'KeyA': moveLeft = true; break;
+        case 'KeyD': moveRight = true; break;
+        case 'ShiftLeft':
+        case 'ShiftRight': isSprinting = true; break;
+        case 'Space':
+          if (canJump && !isRewinding && !isFrozen) {
+            playerVelocity.y = 8;
+            canJump = false;
+          }
+          break;
+        case 'KeyR':
+          isRewinding = true;
+          break;
+        case 'KeyQ':
+          isFrozen = !isFrozen;
+          if (isFrozen) {
+            freezeMusic.play();
+          } else {
+            freezeMusic.pause();
+            freezeMusic.currentTime = 0;
+          }
+          break;
+      }
     });
-    if (!scene.children.includes(crystal)) {
-      scene.add(crystal);
-    }
-  }
 
-  // Initialize player position
-  controls.getObject().position.set(0, 1.8, -10);
-  scene.add(controls.getObject());
-
-  // Gravity
-  const gravity = -9.8;
-
-  // Clock for delta time
-  const clock = new THREE.Clock();
-
-  function animate() {
-    const delta = clock.getDelta();
-
-    if (controls.isLocked === true) {
-      // Handle player movement physics
-      let speed = moveSpeed * (isSprinting ? sprintMultiplier : 1);
-      let direction = new THREE.Vector3();
-
-      if (moveForward) direction.z -= 1;
-      if (moveBackward) direction.z += 1;
-      if (moveLeft) direction.x -= 1;
-      if (moveRight) direction.x += 1;
-
-      direction.normalize();
-
-      // Calculate new position
-      let moveX = direction.x * speed * delta;
-      let moveZ = direction.z * speed * delta;
-
-      let newPosition = controls.getObject().position.clone();
-      newPosition.x += moveX;
-      newPosition.z += moveZ;
-
-      // Check collisions with walls
-      if (!checkCollision(new THREE.Vector3(newPosition.x, controls.getObject().position.y, controls.getObject().position.z))) {
-        controls.getObject().position.x = newPosition.x;
-      }
-      if (!checkCollision(new THREE.Vector3(controls.getObject().position.x, controls.getObject().position.y, newPosition.z))) {
-        controls.getObject().position.z = newPosition.z;
-      }
-
-      // Gravity & jumping
-      playerVelocity.y += gravity * delta;
-      controls.getObject().position.y += playerVelocity.y * delta;
-
-      if (controls.getObject().position.y < 1.8) {
-        playerVelocity.y = 0;
-        controls.getObject().position.y = 1.8;
-        canJump = true;
-      }
-
-      // Save positions for rewind buffer
-      if (!isRewinding) {
-        rewindBuffer.push(controls.getObject().position.clone());
-        if (rewindBuffer.length > maxRewindFrames) rewindBuffer.shift();
-      } else {
-        // Rewind player position
-        if (rewindBuffer.length > 0) {
-          let pastPos = rewindBuffer.pop();
-          controls.getObject().position.copy(pastPos);
-          playerVelocity.set(0, 0, 0);
-        } else {
+    document.addEventListener('keyup', function(event) {
+      switch(event.code) {
+        case 'KeyW': moveForward = false; break;
+        case 'KeyS': moveBackward = false; break;
+        case 'KeyA': moveLeft = false; break;
+        case 'KeyD': moveRight = false; break;
+        case 'ShiftLeft':
+        case 'ShiftRight': isSprinting = false; break;
+        case 'KeyR':
           isRewinding = false;
+          break;
+      }
+    });
+
+    // Reset game
+    function resetGame() {
+      controls.getObject().position.set(0, playerHeight, -5);
+      playerVelocity.set(0,0,0);
+      rewindBuffer = [];
+      isRewinding = false;
+      isFrozen = false;
+      freezeMusic.pause();
+      freezeMusic.currentTime = 0;
+      enemies.forEach(enemy => {
+        enemy.mesh.position.copy(enemy.patrolPoints[0]);
+        enemy.currentPatrolIndex = 0;
+        enemy.state = 'patrol';
+      });
+      if (!scene.children.includes(crystal)) scene.add(crystal);
+    }
+
+    // Clock and animation loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const delta = clock.getDelta();
+
+      if (controls.isLocked === true) {
+        if (!isFrozen) {
+          // Movement logic only when not frozen
+
+          // Movement direction
+          let direction = new THREE.Vector3();
+          if (moveForward) direction.z -= 1;
+          if (moveBackward) direction.z += 1;
+          if (moveLeft) direction.x -= 1;
+          if (moveRight) direction.x += 1;
+          direction.normalize();
+
+          let speed = moveSpeed * (isSprinting ? sprintMultiplier : 1);
+
+          // Calculate new position
+          let newPos = controls.getObject().position.clone();
+          newPos.x += direction.x * speed * delta;
+          newPos.z += direction.z * speed * delta;
+
+          // Collision check & update position
+          if (!checkCollision(new THREE.Vector3(newPos.x, controls.getObject().position.y, controls.getObject().position.z)))
+            controls.getObject().position.x = newPos.x;
+          if (!checkCollision(new THREE.Vector3(controls.getObject().position.x, controls.getObject().position.y, newPos.z)))
+            controls.getObject().position.z = newPos.z;
+
+          // Gravity
+          playerVelocity.y += gravity * delta;
+          controls.getObject().position.y += playerVelocity.y * delta;
+
+          if (controls.getObject().position.y < playerHeight) {
+            playerVelocity.y = 0;
+            controls.getObject().position.y = playerHeight;
+            canJump = true;
+          }
+
+          // Enemies update
+          enemies.forEach(enemy => enemy.update(delta, controls.getObject().position));
+        }
+
+        // Rewind logic
+        if (isRewinding) {
+          if (rewindBuffer.length > 0) {
+            // Pop last saved state and apply it
+            const lastState = rewindBuffer.pop();
+            controls.getObject().position.copy(lastState.position);
+            playerVelocity.copy(lastState.velocity);
+          }
+        } else {
+          // Save current state for rewind buffer, max limit
+          rewindBuffer.push({
+            position: controls.getObject().position.clone(),
+            velocity: playerVelocity.clone()
+          });
+          if (rewindBuffer.length > 180) rewindBuffer.shift();
+        }
+
+        // Check for crystal pickup
+        if (controls.getObject().position.distanceTo(crystal.position) < 1) {
+          alert("You collected the crystal and won! Restarting...");
+          resetGame();
         }
       }
 
-      // Update enemies AI
-      enemies.forEach(enemy => enemy.update(delta, controls.getObject().position));
-
-      // Check if player collected crystal
-      if (crystal && controls.getObject().position.distanceTo(crystal.position) < 1) {
-        alert("You found the Echo Shard crystal! You win!");
-        scene.remove(crystal);
-        resetGame();
-      }
+      renderer.render(scene, camera);
     }
 
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
-  }
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
 
-  // Window resize
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  resetGame();
-  animate();
-</script>
+    // Start game
+    init();
+    function init() {
+      controls.getObject().position.set(0, playerHeight, -5);
+      animate();
+    }
+  </script>
 </body>
 </html>
