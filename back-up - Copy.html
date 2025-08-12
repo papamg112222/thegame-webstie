@@ -1,72 +1,183 @@
-function castSpell() {
-  if (turn !== 'player') {
-    log('Not your turn!');
-    return;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Echo Shard Demo</title>
+<style>
+  body { margin: 0; overflow: hidden; background: #111; }
+  #info {
+    position: absolute; top: 10px; left: 10px;
+    color: white; font-family: monospace; 
+    background: rgba(0,0,0,0.5); padding: 10px;
+    max-width: 300px;
   }
-  const spell = spellInput.value.trim().toLowerCase();
-  if (!spell) return;
+</style>
+</head>
+<body>
+<div id="info">
+  WASD to move.<br/>
+  Hold R to rewind time (3 seconds buffer).<br/>
+  Avoid the patrolling enemy.<br/>
+  Collect the blue cube.<br/>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script>
 
-  // Simple command patterns:
-  // attack
-  // heal
-  // strong attack
-  // attack if enemy hp below N
-  // heal if player hp below N
+  // Basic Three.js setup
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x101020);
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 10, 20);
+  camera.lookAt(0,0,0);
 
-  let executed = false;
+  const renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-  // Heal command
-  if (/^heal$/.test(spell)) {
-    player.hp = Math.min(player.hp + 30, 100);
-    log(`You heal 30 HP! Player HP: ${player.hp}`);
-    executed = true;
-  } else if (/^attack$/.test(spell)) {
-    const dmg = 20;
-    enemy.hp -= dmg;
-    log(`You attack! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
-    executed = true;
-  } else if (/^strong attack$/.test(spell)) {
-    const dmg = 40;
-    enemy.hp -= dmg;
-    log(`Strong attack! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
-    executed = true;
-  } else {
-    // Conditional commands like: attack if enemy hp below 50
-    let m;
-    if (m = spell.match(/^attack if enemy hp below (\d+)$/)) {
-      const threshold = parseInt(m[1], 10);
-      if (enemy.hp < threshold) {
-        const dmg = 20;
-        enemy.hp -= dmg;
-        log(`Conditional attack! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
-      } else {
-        log(`Condition not met. Enemy HP is ${enemy.hp}, needs to be below ${threshold}`);
-      }
-      executed = true;
-    } else if (m = spell.match(/^heal if player hp below (\d+)$/)) {
-      const threshold = parseInt(m[1], 10);
-      if (player.hp < threshold) {
-        player.hp = Math.min(player.hp + 30, 100);
-        log(`Conditional heal! Player HP restored to ${player.hp}`);
-      } else {
-        log(`Condition not met. Player HP is ${player.hp}, needs to be below ${threshold}`);
-      }
-      executed = true;
+  // Lighting
+  const light = new THREE.PointLight(0xffffff, 1);
+  light.position.set(0, 20, 20);
+  scene.add(light);
+
+  // Floor
+  const floorGeometry = new THREE.PlaneGeometry(40, 40);
+  const floorMaterial = new THREE.MeshPhongMaterial({color: 0x222244});
+  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+  floor.rotation.x = -Math.PI/2;
+  scene.add(floor);
+
+  // Player cube
+  const playerGeometry = new THREE.BoxGeometry(1,1,1);
+  const playerMaterial = new THREE.MeshPhongMaterial({color: 0x44ff44});
+  const player = new THREE.Mesh(playerGeometry, playerMaterial);
+  player.position.set(0, 0.5, 0);
+  scene.add(player);
+
+  // Enemy cube (red) that patrols on X axis
+  const enemyGeometry = new THREE.BoxGeometry(1,1,1);
+  const enemyMaterial = new THREE.MeshPhongMaterial({color: 0xff4444});
+  const enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+  enemy.position.set(-8, 0.5, -5);
+  scene.add(enemy);
+
+  // Collectible blue cube
+  const collectGeometry = new THREE.BoxGeometry(1,1,1);
+  const collectMaterial = new THREE.MeshPhongMaterial({color: 0x4444ff});
+  const collectible = new THREE.Mesh(collectGeometry, collectMaterial);
+  collectible.position.set(7, 0.5, 5);
+  scene.add(collectible);
+
+  // Controls
+  const keys = {};
+  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+  // Player movement variables
+  const speed = 0.15;
+
+  // Enemy patrol variables
+  let enemyDirection = 1;
+  const enemySpeed = 0.05;
+
+  // Time rewind data (store last 180 frames ~3 seconds at 60fps)
+  const rewindBuffer = [];
+  const maxBufferLength = 180;
+  let isRewinding = false;
+
+  // Game state
+  let collected = false;
+
+  // Collision helper (simple box collision)
+  function checkCollision(a, b) {
+    const dist = a.position.distanceTo(b.position);
+    return dist < 1.5; // rough radius check for 1x1 cubes
+  }
+
+  function rewindUpdate() {
+    if (rewindBuffer.length > 0) {
+      const pastPos = rewindBuffer.pop();
+      player.position.copy(pastPos);
+    } else {
+      // No more rewind data, stop rewinding
+      isRewinding = false;
     }
   }
 
-  if (!executed) {
-    log('Unknown spell command. Try: attack, heal, strong attack, or use conditions like "attack if enemy hp below 50"');
-  } else {
-    if (enemy.hp <= 0) {
-      alert('Enemy defeated! You win!');
-      resetGame();
-      return;
+  function gameLoop() {
+    if (!isRewinding) {
+      // Store current position in buffer
+      rewindBuffer.push(player.position.clone());
+      if (rewindBuffer.length > maxBufferLength) {
+        rewindBuffer.shift();
+      }
+
+      // Player controls
+      if (keys['w'] || keys['arrowup']) player.position.z -= speed;
+      if (keys['s'] || keys['arrowdown']) player.position.z += speed;
+      if (keys['a'] || keys['arrowleft']) player.position.x -= speed;
+      if (keys['d'] || keys['arrowright']) player.position.x += speed;
+
+      // Clamp player position to floor bounds
+      player.position.x = THREE.MathUtils.clamp(player.position.x, -19, 19);
+      player.position.z = THREE.MathUtils.clamp(player.position.z, -19, 19);
+
+      // Enemy patrol
+      enemy.position.x += enemyDirection * enemySpeed;
+      if (enemy.position.x > 8) enemyDirection = -1;
+      else if (enemy.position.x < -8) enemyDirection = 1;
+
+      // Check collision with enemy
+      if (checkCollision(player, enemy)) {
+        alert("Caught by enemy! Restarting...");
+        resetGame();
+        return;
+      }
+
+      // Check collectible pickup
+      if (!collected && checkCollision(player, collectible)) {
+        collected = true;
+        scene.remove(collectible);
+        alert("You collected the echo shard! You win!");
+        resetGame();
+        return;
+      }
+    } else {
+      rewindUpdate();
     }
-    turn = 'enemy';
-    draw();
-    setTimeout(enemyTurn, 500);
+
+    // Check rewind key (R)
+    if (keys['r']) {
+      isRewinding = true;
+    } else {
+      isRewinding = false;
+    }
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(gameLoop);
   }
 
-  spellInput.value = '';
-}
+  function resetGame() {
+    player.position.set(0, 0.5, 0);
+    enemy.position.set(-8, 0.5, -5);
+    collected = false;
+    if (!scene.children.includes(collectible)) {
+      scene.add(collectible);
+    }
+    rewindBuffer.length = 0;
+    isRewinding = false;
+  }
+
+  resetGame();
+  gameLoop();
+
+  // Handle window resize
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
+
+</body>
+</html>
