@@ -48,7 +48,7 @@
   function randRange(min, max) { return Math.random() * (max - min) + min; }
   function easeOutQuad(t) { return t * (2 - t); }
   function easeInOutQuad(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
-
+  
   // --- Camera Shake ---
   class Camera {
     constructor() {
@@ -73,7 +73,6 @@
         this.offsetX = 0;
         this.offsetY = 0;
       }
-      // smooth zoom reset
       this.zoom += (this.zoomTarget - this.zoom) * this.zoomSpeed;
     }
   }
@@ -102,6 +101,32 @@
       const diff = this.targetAngle - this.angle;
       this.angle += diff * dt * 8;
     }
+  }
+  
+  // --- Particle system for impact effects ---
+  const particles = [];
+  class Particle {
+      constructor(x, y, color) {
+          this.pos = new Vec2(x, y);
+          this.vel = new Vec2(randRange(-200, 200), randRange(-200, 0));
+          this.color = color;
+          this.size = randRange(2, 6);
+          this.life = randRange(0.5, 1.5);
+          this.maxLife = this.life;
+      }
+      update(dt) {
+          this.pos.x += this.vel.x * dt;
+          this.pos.y += this.vel.y * dt;
+          this.vel.y += 500 * dt; // Gravity
+          this.life -= dt;
+      }
+      draw(ctx) {
+          const alpha = this.life / this.maxLife;
+          ctx.fillStyle = `rgba(${this.color.r},${this.color.g},${this.color.b},${alpha})`;
+          ctx.beginPath();
+          ctx.arc(this.pos.x, this.pos.y, this.size * alpha, 0, Math.PI * 2);
+          ctx.fill();
+      }
   }
 
   // --- Weapon Trail Effect ---
@@ -141,17 +166,17 @@
       this.pos = new Vec2(x, H - 120);
       this.vel = new Vec2();
       this.color = color;
-      this.weaponType = weaponType; // 'claw' or 'dagger'
+      this.weaponType = weaponType;
       this.health = 100;
       this.maxHealth = 100;
-      this.facing = 1; // 1 = right, -1 = left
+      this.facing = 1;
       this.animTimer = 0;
-      this.state = 'idle'; // idle, run, attack1, attack2, jump, dodge, hit
+      this.state = 'idle';
       this.attackTimer = 0;
       this.comboStage = 0;
       this.comboCooldown = 0;
+      this.dashDuration = 0;
 
-      // Body parts lengths (px)
       this.limbs = {
         upperArmL: new Limb(35, -0.5),
         lowerArmL: new Limb(30, -0.7),
@@ -161,7 +186,7 @@
         lowerLegL: new Limb(40, 1.7),
         upperLegR: new Limb(40, 1.5),
         lowerLegR: new Limb(40, 1.7),
-        neck: new Limb(30, 0), // long neck for green with scarf waving
+        neck: new Limb(30, 0),
         headRadius: 12,
         bodyHeight: 60,
       };
@@ -169,26 +194,53 @@
       this.attackHitFrame = 8;
       this.hasHit = false;
 
-      // Trail for weapons
       this.trailL = new Trail(color);
       this.trailR = new Trail(color);
 
-      // Scarf animation (green only)
       this.scarfOffset = 0;
       this.scarfSpeed = randRange(3,5);
 
       this.isHit = false;
       this.hitFlashTimer = 0;
 
-      // AI target
       this.target = null;
     }
 
     update(dt) {
       this.animTimer += dt*6;
       this.comboCooldown = Math.max(0, this.comboCooldown - dt);
+      
+      if(this.dashDuration > 0) {
+        this.dashDuration -= dt;
+        this.pos.x += this.vel.x * dt * 400; // Fast dash
+        this.pos.y += this.vel.y * dt;
+        if(this.dashDuration <= 0) {
+            this.state = 'idle';
+        }
+      } else {
+        if (this.pos.y < H - 120) {
+          this.vel.y += 700 * dt;
+        }
+        this.pos.x += this.vel.x * dt * 200;
+        this.pos.y += this.vel.y * dt;
+      }
+      
+      if (this.pos.y >= H - 120) {
+        this.pos.y = H - 120;
+        this.vel.y = 0;
+        if (this.state === 'jump') {
+            this.state = 'idle';
+        }
+      }
 
-      // Scarf sway if green
+      if (this.state === 'idle' || this.state === 'run') {
+        if (Math.abs(this.vel.x) > 0.1) {
+            this.state = 'run';
+        } else {
+            this.state = 'idle';
+        }
+      }
+
       if(this.color.g > 200) {
         this.scarfOffset = Math.sin(Date.now()/200)*5;
       }
@@ -201,32 +253,6 @@
     }
 
     updateState(dt) {
-      // Apply gravity if in the air
-      if (this.pos.y < H - 120) {
-        this.vel.y += 700 * dt;
-      }
-      
-      this.pos.x += this.vel.x * dt * 200;
-      this.pos.y += this.vel.y * dt;
-
-      // Ground collision
-      if (this.pos.y >= H - 120) {
-        this.pos.y = H - 120;
-        this.vel.y = 0;
-        if (this.state === 'jump') {
-            this.state = 'idle';
-        }
-      }
-
-      // State transitions based on velocity
-      if (this.state === 'idle' || this.state === 'run') {
-        if (Math.abs(this.vel.x) > 0.1) {
-            this.state = 'run';
-        } else {
-            this.state = 'idle';
-        }
-      }
-
       switch(this.state){
         case 'attack1':
         case 'attack2':
@@ -234,18 +260,10 @@
           if(this.attackTimer > 1) {
             this.attackTimer = 0;
             this.comboStage++;
-            if(this.comboStage > 2 || Math.random() > 0.7){ // Randomly end combo
+            if(this.comboStage > 2 || Math.random() > 0.7){
               this.comboStage = 0;
               this.state = 'idle';
             }
-          }
-          break;
-        case 'dodge':
-          this.pos.x += this.vel.x * dt * 400;
-          this.attackTimer += dt*10;
-          if(this.attackTimer > 0.6) {
-            this.attackTimer = 0;
-            this.state = 'idle';
           }
           break;
         case 'hit':
@@ -277,7 +295,15 @@
     startJump() {
         if(this.pos.y >= H - 120 && (this.state === 'idle' || this.state === 'run')){
             this.state = 'jump';
-            this.vel.y = -400; // Jump velocity
+            this.vel.y = -400;
+        }
+    }
+    
+    startDash() {
+        if (this.state === 'idle' || this.state === 'run') {
+            this.state = 'dash';
+            this.dashDuration = 0.3;
+            this.vel.x = this.facing * 1.5;
         }
     }
 
@@ -303,8 +329,6 @@
 
     updateLimbs(dt) {
       let t = this.animTimer % (Math.PI * 2);
-
-      // Legs movement for walking/running
       let legAngle = Math.sin(t) * 0.6;
       let legAngle2 = Math.cos(t) * 0.6;
       let bodyOffset = 0;
@@ -320,6 +344,16 @@
         this.limbs.lowerLegL.targetAngle = 2;
         this.limbs.upperLegR.targetAngle = 1;
         this.limbs.lowerLegR.targetAngle = 2;
+      } else if (this.state === 'dash') {
+          // Dash pose
+          this.limbs.upperLegL.targetAngle = 1.5;
+          this.limbs.lowerLegL.targetAngle = 1.7;
+          this.limbs.upperLegR.targetAngle = 1.5;
+          this.limbs.lowerLegR.targetAngle = 1.7;
+          this.limbs.upperArmL.targetAngle = -0.5;
+          this.limbs.lowerArmL.targetAngle = -0.7;
+          this.limbs.upperArmR.targetAngle = -0.5;
+          this.limbs.lowerArmR.targetAngle = -0.7;
       } else {
         this.limbs.upperLegL.targetAngle = 1.5;
         this.limbs.lowerLegL.targetAngle = 1.7;
@@ -327,7 +361,7 @@
         this.limbs.lowerLegR.targetAngle = 1.7;
       }
 
-      this.pos.y += bodyOffset; // subtle bobbing
+      this.pos.y += bodyOffset;
 
       if(this.state.startsWith('attack')){
         let atkProgress = (this.attackTimer % 1);
@@ -344,11 +378,11 @@
           this.limbs.upperArmR.targetAngle = -0.5 - swing/2;
           this.limbs.lowerArmR.targetAngle = -0.7 - swing/4;
         }
-      } else if(this.state === 'dodge') {
-        this.limbs.upperArmL.targetAngle = -1;
-        this.limbs.lowerArmL.targetAngle = -1;
-        this.limbs.upperArmR.targetAngle = -1;
-        this.limbs.lowerArmR.targetAngle = -1;
+      } else if(this.state === 'dash') {
+        this.limbs.upperArmL.targetAngle = -1.5;
+        this.limbs.lowerArmL.targetAngle = -1.8;
+        this.limbs.upperArmR.targetAngle = -1.5;
+        this.limbs.lowerArmR.targetAngle = -1.8;
       } else {
         this.limbs.upperArmL.targetAngle = -0.5 + Math.sin(t) * 0.1;
         this.limbs.lowerArmL.targetAngle = -0.7 + Math.sin(t) * 0.05;
@@ -498,18 +532,18 @@
 
     drawClaw(ctx, side) {
       ctx.save();
-      ctx.strokeStyle = 'lime';
-      ctx.fillStyle = 'rgba(0,255,0,0.8)';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,255,0,0.8)';
       ctx.shadowColor = 'lime';
-      ctx.shadowBlur = 12;
+      ctx.shadowBlur = 15;
+      ctx.lineWidth = 5;
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
 
-      const clawOffsets = [-10, 0, 10];
+      const clawOffsets = [-15, 0, 15];
       for(let offset of clawOffsets){
         ctx.beginPath();
         ctx.moveTo(0, 0);
-        ctx.quadraticCurveTo(offset/2, -15, offset, -30);
+        ctx.quadraticCurveTo(offset/2, -20, offset, -40);
         ctx.stroke();
       }
       ctx.restore();
@@ -518,22 +552,25 @@
     drawDagger(ctx, side) {
       ctx.save();
       ctx.fillStyle = 'cyan';
-      ctx.strokeStyle = 'cyan';
-      ctx.lineWidth = 2;
-      ctx.shadowColor = 'cyan';
-      ctx.shadowBlur = 10;
+      ctx.strokeStyle = '#00ffff';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#00ffff';
+      ctx.shadowBlur = 15;
+      ctx.lineJoin = 'bevel';
 
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(6, -20);
-      ctx.lineTo(-6, -20);
+      ctx.lineTo(8, -40);
+      ctx.lineTo(-8, -40);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-
+      
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#eee';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.rect(-3, 0, 6, 8);
-      ctx.fill();
+      ctx.rect(-4, 0, 8, 10);
       ctx.stroke();
       ctx.restore();
     }
@@ -592,72 +629,65 @@
       this.state = 'idle';
       this.cooldowns = {
         attack: 0,
-        dodge: 0,
+        dash: 0,
         jump: 0,
       };
-      this.personality = personality; // 'aggressive' or 'defensive'
+      this.personality = personality;
     }
 
     update(dt) {
-      // Reduce cooldowns
       for (const key in this.cooldowns) {
           this.cooldowns[key] = Math.max(0, this.cooldowns[key] - dt);
       }
       
       const dist = this.opponent.pos.x - this.stickman.pos.x;
       const absDist = Math.abs(dist);
-      const isFacingOpponent = (dist > 0 && this.stickman.facing === 1) || (dist < 0 && this.stickman.facing === -1);
       
       this.stickman.facing = dist > 0 ? 1 : -1;
 
-      // Always check for a dodge first if a hit is coming
-      if (this.shouldDodge(dist)) {
-          this.doDodge(dist);
+      if (this.shouldDash(dist)) {
+          this.doDash(dist);
       } 
-      // If we're not dodging, decide on a primary action
       else if (this.stickman.state === 'idle' || this.stickman.state === 'run' || this.stickman.state === 'jump') {
           if (absDist < 100) {
-              // Close range: attack or retreat
               if (this.shouldAttack()) {
                   this.doAttack();
               } else if (this.shouldRetreat(dist)) {
                   this.doRetreat(dist);
+              } else {
+                  this.doApproach(dist);
               }
           } else if (absDist < 300) {
-              // Medium range: approach or jump
               if (Math.random() < 0.2 && this.cooldowns.jump <= 0) {
                   this.doJump(dist);
               } else {
                   this.doApproach(dist);
               }
           } else {
-              // Long range: approach
               this.doApproach(dist);
           }
       }
     }
-
-    shouldDodge(dist) {
-      if (this.cooldowns.dodge > 0) return false;
+    
+    shouldDash(dist) {
+      if (this.cooldowns.dash > 0) return false;
       const opponentAttackState = this.opponent.state.startsWith('attack');
       const isOpponentClose = Math.abs(dist) < 80;
       
       if (opponentAttackState && isOpponentClose) {
-        // High chance to dodge when a nearby opponent is attacking
         return Math.random() > 0.3;
       }
       return false;
     }
     
-    doDodge(dist) {
-      this.stickman.state = 'dodge';
-      this.stickman.vel.x = -this.stickman.facing * 1.5; // Dodge backwards
-      this.cooldowns.dodge = 1;
+    doDash(dist) {
+      this.stickman.startDash();
+      this.stickman.vel.x = -this.stickman.facing * 1.5;
+      this.cooldowns.dash = 1.2;
     }
     
     shouldAttack() {
         if (this.cooldowns.attack > 0) return false;
-        // Aggressive stickmen attack more often
         const attackChance = this.personality === 'aggressive' ? 0.8 : 0.4;
         return Math.random() < attackChance;
     }
@@ -669,18 +699,16 @@
     
     shouldRetreat(dist) {
       if (this.personality === 'defensive' && this.stickman.health < 50) {
-        return Math.random() > 0.5; // High chance to retreat if defensive and low on health
+        return Math.random() > 0.5;
       }
       return false;
     }
 
     doRetreat(dist) {
-      this.stickman.state = 'run';
       this.stickman.vel.x = -this.stickman.facing * 1.2;
     }
 
     doApproach(dist) {
-        this.stickman.state = 'run';
         this.stickman.vel.x = this.stickman.facing * 1;
     }
     
@@ -698,12 +726,10 @@
       this.stickmanGreen.facing = 1;
       this.stickmanBlue.facing = -1;
 
-      // New AI controllers with personalities
       this.aiGreen = new AIController(this.stickmanGreen, this.stickmanBlue, 'aggressive');
       this.aiBlue = new AIController(this.stickmanBlue, this.stickmanGreen, 'defensive');
 
       this.impactFlash = new ImpactFlash();
-
       this.camera = new Camera();
       this.slowMotionTimer = 0;
       this.comboHits = 0;
@@ -722,7 +748,7 @@
     loop(t) {
       if(!this.running) return;
       let dt = (t - this.lastTime) / 1000;
-      dt = Math.min(dt, 0.016); // cap delta time to prevent physics glitches
+      dt = Math.min(dt, 0.016);
 
       if(this.slowMotionTimer > 0) {
         dt *= 0.3;
@@ -750,7 +776,9 @@
 
       this.stickmanGreen.update(dt);
       this.stickmanBlue.update(dt);
-
+      
+      particles.forEach(p => p.update(dt));
+      
       this.checkCollisions();
 
       this.impactFlash.update(dt);
@@ -759,6 +787,13 @@
       this.stickmanGreen.pos.x = clamp(this.stickmanGreen.pos.x, 60, W - 60);
       this.stickmanBlue.pos.x = clamp(this.stickmanBlue.pos.x, 60, W - 60);
     }
+    
+    // Add particles on impact
+    addParticles(x, y, color) {
+        for(let i = 0; i < 15; i++) {
+            particles.push(new Particle(x, y, color));
+        }
+    }
 
     checkCollisions() {
       [this.stickmanGreen, this.stickmanBlue].forEach((attacker, i) => {
@@ -766,27 +801,24 @@
           const defender = i === 0 ? this.stickmanBlue : this.stickmanGreen;
           const atkProgress = attacker.attackTimer;
           
-          // Check for collision on the 'hit' frame
           if(Math.floor(atkProgress*15) === attacker.attackHitFrame && !attacker.hasHit){
             attacker.hasHit = true;
             
             const handL = attacker.getHandPos('L');
             const handR = attacker.getHandPos('R');
             
-            // A simple circular collision check
             const distL = Math.sqrt(Math.pow(defender.pos.x - handL.x, 2) + Math.pow((defender.pos.y - defender.limbs.bodyHeight/2) - handL.y, 2));
             const distR = Math.sqrt(Math.pow(defender.pos.x - handR.x, 2) + Math.pow((defender.pos.y - defender.limbs.bodyHeight/2) - handR.y, 2));
 
-            const hitRange = 60; // Increased hit range for more reliable hits
+            const hitRange = 60;
             
-            if((distL < hitRange || distR < hitRange) && defender.state !== 'dodge') {
+            if((distL < hitRange || distR < hitRange) && defender.state !== 'dash') {
               defender.takeHit(15);
               this.triggerHitEffects(defender);
               
-              // Push back on hit
               defender.vel.x += attacker.facing * 200;
+              this.addParticles(defender.pos.x, defender.pos.y - defender.limbs.bodyHeight/2, attacker.color);
               
-              // Reset attacker combo for new hit
               attacker.comboCooldown = 0.1;
             }
           }
@@ -833,6 +865,8 @@
       ctx.moveTo(0, H-60);
       ctx.lineTo(W, H-60);
       ctx.stroke();
+      
+      particles.forEach(p => p.draw(ctx));
 
       this.stickmanGreen.draw(ctx);
       this.stickmanBlue.draw(ctx);
@@ -842,6 +876,9 @@
       ctx.restore();
 
       this.camera.zoomTarget = 1;
+      
+      // Filter out dead particles
+      particles.filter(p => p.life > 0);
     }
   }
 
