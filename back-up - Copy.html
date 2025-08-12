@@ -1,336 +1,507 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Stickman Showdown</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 0;
-            background-color: #1a1a1a;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            font-family: 'Arial', sans-serif;
-            color: white;
-            flex-direction: column;
-        }
-        canvas {
-            background-color: #333;
-            border: 2px solid #555;
-        }
-        #ui-container {
-            position: absolute;
-            top: 20px;
-            width: 80%;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .health-bar-container {
-            width: 300px;
-            height: 30px;
-            background-color: #555;
-            border: 2px solid white;
-            box-shadow: 0 0 10px rgba(0,0,0,0.5);
-            position: relative;
-        }
-        .health-bar {
-            height: 100%;
-            background-color: limegreen;
-            transition: width 0.3s ease-out;
-        }
-        #player1-health-bar {
-            border-right: none;
-        }
-        #player2-health-bar {
-            border-left: none;
-        }
-        #game-messages {
-            text-align: center;
-            font-size: 2em;
-            text-shadow: 2px 2px 4px #000;
-            width: 100%;
-        }
-        #start-button {
-            position: absolute;
-            padding: 15px 30px;
-            font-size: 1.5em;
-            cursor: pointer;
-            border: none;
-            background-color: #4CAF50;
-            color: white;
-            border-radius: 5px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            transition: background-color 0.3s ease;
-        }
-        #start-button:hover {
-            background-color: #45a049;
-        }
-    </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Stickman Fight</title>
+<style>
+  body {
+    margin: 0; background: #111; color: #eee; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh;
+  }
+  canvas {
+    background: #222;
+    border: 2px solid #555;
+    display: block;
+    margin-bottom: 12px;
+  }
+  #startBtn {
+    padding: 10px 22px;
+    font-size: 18px;
+    background: #0a74da;
+    border: none;
+    color: white;
+    border-radius: 5px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.3s ease;
+  }
+  #startBtn:hover {
+    background: #065ba4;
+  }
+  #message {
+    margin-top: 14px;
+    font-size: 22px;
+    font-weight: bold;
+    color: #0f0;
+    min-height: 28px;
+  }
+</style>
 </head>
 <body>
-    <canvas id="gameCanvas" width="1280" height="720"></canvas>
-    <div id="ui-container">
-        <div class="health-bar-container" id="player1-health-bar-container">
-            <div class="health-bar" id="player1-health-bar"></div>
-        </div>
-        <div id="game-messages">AI Showdown</div>
-        <div class="health-bar-container" id="player2-health-bar-container">
-            <div class="health-bar" id="player2-health-bar"></div>
-        </div>
-    </div>
-    <button id="start-button">Start Fight</button>
 
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
+<canvas id="game" width="800" height="400"></canvas>
+<button id="startBtn">Start Fight</button>
+<div id="message"></div>
 
-        const startButton = document.getElementById('start-button');
-        const messageDisplay = document.getElementById('game-messages');
-        const p1HealthBar = document.getElementById('player1-health-bar');
-        const p2HealthBar = document.getElementById('player2-health-bar');
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
 
-        let gameActive = false;
-        let lastFrameTime = 0;
-        const groundHeight = canvas.height - 50;
+  const WIDTH = canvas.width;
+  const HEIGHT = canvas.height;
 
-        let cameraShake = {
-            duration: 0,
-            strength: 0,
-            on: false
+  let animationId;
+  let slowMoFrames = 0;
+
+  // Utility easing for smooth motion trails
+  function lerp(a, b, t) {
+    return a + (b - a) * t;
+  }
+
+  // Stickman class
+  class Stickman {
+    constructor(x, y, color = 'white', facingRight = true) {
+      this.x = x;
+      this.y = y;
+      this.color = color;
+      this.facingRight = facingRight;
+      this.health = 100;
+      this.maxHealth = 100;
+      this.width = 20;
+      this.height = 60;
+
+      this.velX = 0;
+      this.velY = 0;
+      this.speed = 2.5;
+
+      this.onGround = true;
+      this.jumpPower = 8;
+
+      this.state = 'idle'; // idle, run, jump, attack, dash, hit, dead
+      this.stateTime = 0;
+
+      this.attackCooldown = 0;
+      this.hitCooldown = 0;
+
+      this.motionTrail = [];
+
+      this.armAngle = 0;
+      this.legAngle = 0;
+
+      this.currentAttack = null;
+      this.attackDuration = 20; // frames
+
+      this.dashDuration = 15; // frames
+      this.dashCooldown = 0;
+
+      this.isDashing = false;
+      this.isJumping = false;
+
+      this.comboSequence = [];
+      this.comboStep = 0;
+      this.comboCooldown = 0;
+    }
+
+    get centerX() {
+      return this.x;
+    }
+
+    get centerY() {
+      return this.y;
+    }
+
+    facingDir() {
+      return this.facingRight ? 1 : -1;
+    }
+
+    isAlive() {
+      return this.health > 0;
+    }
+
+    takeDamage(amount) {
+      if (this.hitCooldown > 0) return;
+      this.health -= amount;
+      this.hitCooldown = 30;
+      if (this.health < 0) this.health = 0;
+      // flash effect handled during draw
+    }
+
+    aiBehavior(opponent) {
+      if (!this.isAlive()) return;
+
+      // Reduce cooldowns
+      if (this.attackCooldown > 0) this.attackCooldown--;
+      if (this.hitCooldown > 0) this.hitCooldown--;
+      if (this.dashCooldown > 0) this.dashCooldown--;
+      if (this.comboCooldown > 0) this.comboCooldown--;
+
+      const distX = opponent.x - this.x;
+      const dist = Math.abs(distX);
+
+      // Decide facing
+      this.facingRight = distX > 0;
+
+      // AI states and logic
+      if (this.state === 'idle' || this.state === 'run') {
+        // Move closer if far
+        if (dist > 80) {
+          this.state = 'run';
+          this.velX = this.speed * this.facingDir();
+        } else {
+          this.state = 'idle';
+          this.velX = 0;
+          // Attack if cooldown allows
+          if (this.attackCooldown === 0 && !this.isDashing) {
+            // 50% chance to dash before attack
+            if (this.dashCooldown === 0 && Math.random() < 0.5) {
+              this.startDash();
+            } else {
+              this.startAttack();
+            }
+          }
+        }
+        // Random jump or dodge sometimes
+        if (this.onGround && Math.random() < 0.01) {
+          this.jump();
+        }
+      } else if (this.state === 'attack') {
+        this.velX = 0;
+      } else if (this.state === 'dash') {
+        // Dashing velocity set in startDash()
+      } else if (this.state === 'jump') {
+        // Horizontal velocity stays the same in air
+      }
+    }
+
+    startDash() {
+      if (this.dashCooldown > 0) return;
+      this.state = 'dash';
+      this.stateTime = 0;
+      this.isDashing = true;
+      this.dashCooldown = 60;
+      this.velX = this.speed * 5 * this.facingDir();
+    }
+
+    jump() {
+      if (!this.onGround) return;
+      this.velY = -this.jumpPower;
+      this.onGround = false;
+      this.state = 'jump';
+    }
+
+    startAttack() {
+      if (this.attackCooldown > 0) return;
+      this.state = 'attack';
+      this.stateTime = 0;
+      this.attackCooldown = 60;
+      // Randomly choose punch or kick for variety
+      if (Math.random() < 0.5) {
+        this.currentAttack = {
+          name: 'punch',
+          damage: 10,
+          duration: this.attackDuration,
+          hitbox: () => ({
+            x: this.x + this.facingDir() * 20,
+            y: this.y - 30,
+            w: 25,
+            h: 30
+          })
         };
+      } else {
+        this.currentAttack = {
+          name: 'kick',
+          damage: 14,
+          duration: this.attackDuration + 10,
+          hitbox: () => ({
+            x: this.x + this.facingDir() * 15,
+            y: this.y - 10,
+            w: 30,
+            h: 20
+          })
+        };
+      }
+    }
 
-        // --- Stickman Class ---
-        class Stickman {
-            constructor(x, y, color, direction) {
-                this.x = x;
-                this.y = y;
-                this.color = color;
-                this.direction = direction; // 1 for right, -1 for left
-                this.health = 100;
-                this.velocity = { x: 0, y: 0 };
-                this.isAttacking = false;
-                this.isJumping = false;
-                this.attackCooldown = 0;
-                this.lastAttackTime = 0;
-                this.attackBox = { x: 0, y: 0, width: 60, height: 20 };
-                this.dashing = false;
-                this.dashTrail = [];
-            }
+    update(opponent) {
+      if (!this.isAlive()) {
+        this.state = 'dead';
+        this.velX = 0;
+        this.velY = 0;
+      }
 
-            draw() {
-                ctx.save();
-                ctx.translate(this.x, this.y);
+      this.aiBehavior(opponent);
 
-                // Draw dash trail if dashing
-                if (this.dashing) {
-                    this.dashTrail.forEach((pos, index) => {
-                        ctx.save();
-                        ctx.globalAlpha = 0.5 - (index * 0.1);
-                        ctx.fillStyle = this.color;
-                        ctx.beginPath();
-                        ctx.arc(0, -40, 10, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.restore();
-                    });
-                }
+      // Apply physics
+      this.x += this.velX;
+      this.y += this.velY;
 
-                // Main stickman body
-                ctx.fillStyle = this.color;
-                ctx.strokeStyle = this.color;
-                ctx.lineWidth = 3;
+      // Gravity
+      if (!this.onGround) {
+        this.velY += 0.5; // gravity
+      }
 
-                // Head
-                ctx.beginPath();
-                ctx.arc(0, -40, 10, 0, Math.PI * 2);
-                ctx.fill();
+      // Ground collision
+      if (this.y > HEIGHT - 60) {
+        this.y = HEIGHT - 60;
+        this.velY = 0;
+        this.onGround = true;
+        if (this.state === 'jump') this.state = 'idle';
+      }
 
-                // Torso
-                ctx.beginPath();
-                ctx.moveTo(0, -30);
-                ctx.lineTo(0, 20);
-                ctx.stroke();
+      // Wall collision
+      if (this.x < 20) this.x = 20;
+      if (this.x > WIDTH - 20) this.x = WIDTH - 20;
 
-                // Arms (simple for now)
-                ctx.beginPath();
-                ctx.moveTo(0, -20);
-                ctx.lineTo(this.isAttacking ? 30 * this.direction : 20 * this.direction, -10);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(0, -20);
-                ctx.lineTo(this.isAttacking ? 20 * this.direction : -20 * this.direction, 10);
-                ctx.stroke();
+      // State timing
+      this.stateTime++;
 
-                // Legs
-                ctx.beginPath();
-                ctx.moveTo(0, 20);
-                ctx.lineTo(10 * this.direction, 50);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(0, 20);
-                ctx.lineTo(-10 * this.direction, 50);
-                ctx.stroke();
-
-                ctx.restore();
-            }
-
-            update(opponent) {
-                // Apply gravity
-                this.velocity.y += 0.5;
-                this.x += this.velocity.x;
-                this.y += this.velocity.y;
-
-                // Stop at ground
-                if (this.y > groundHeight) {
-                    this.y = groundHeight;
-                    this.velocity.y = 0;
-                    this.isJumping = false;
-                }
-
-                // AI Logic (simple version)
-                const distance = opponent.x - this.x;
-                const distanceAbs = Math.abs(distance);
-
-                // Attack logic
-                if (distanceAbs < 80 && !this.isAttacking && Date.now() - this.lastAttackTime > 1000) {
-                    this.attack();
-                } else if (distanceAbs > 150) {
-                    this.velocity.x = (distance > 0) ? 3 : -3;
-                } else if (distanceAbs < 100) {
-                    this.velocity.x = (distance > 0) ? -2 : 2;
-                } else {
-                    this.velocity.x = 0;
-                }
-
-                // Handle attacking
-                if (this.isAttacking) {
-                    this.attackCooldown--;
-                    if (this.attackCooldown <= 0) {
-                        this.isAttacking = false;
-                    }
-                }
-
-                // Dash logic
-                if (this.dashing) {
-                    this.dashTrail.unshift({ x: this.x, y: this.y });
-                    if (this.dashTrail.length > 5) {
-                        this.dashTrail.pop();
-                    }
-                    if (this.velocity.x === 0) {
-                        this.dashing = false;
-                        this.dashTrail = [];
-                    }
-                }
-            }
-
-            attack() {
-                this.isAttacking = true;
-                this.attackCooldown = 30; // Attack lasts for 30 frames
-                this.lastAttackTime = Date.now();
-                // Check for a hit
-                const opponent = (this === player1) ? player2 : player1;
-                if (this.checkCollision(opponent)) {
-                    opponent.takeDamage(10);
-                    startCameraShake(20, 5);
-                }
-            }
-            
-            takeDamage(amount) {
-                this.health -= amount;
-                if (this.health < 0) this.health = 0;
-                updateHealthBars();
-                if (this.health === 0) {
-                    // This is where you would trigger slow-mo
-                    endGame();
-                }
-            }
-
-            checkCollision(opponent) {
-                // Simple collision check
-                const attackX = this.x + (this.direction === 1 ? 20 : -80);
-                const attackY = this.y - 10;
-                return (
-                    attackX < opponent.x + 40 &&
-                    attackX + this.attackBox.width > opponent.x &&
-                    attackY < opponent.y + 40 &&
-                    attackY + this.attackBox.height > opponent.y
-                );
-            }
+      if (this.state === 'dash') {
+        if (this.stateTime > this.dashDuration) {
+          this.state = 'idle';
+          this.isDashing = false;
+          this.velX = 0;
         }
+      }
 
-        // --- Game Logic ---
-        let player1 = new Stickman(300, groundHeight, 'cyan', 1);
-        let player2 = new Stickman(canvas.width - 300, groundHeight, 'magenta', -1);
-
-        function animate(currentTime) {
-            if (!gameActive) return;
-
-            const deltaTime = currentTime - lastFrameTime;
-            lastFrameTime = currentTime;
-
-            ctx.save();
-
-            // Camera shake effect
-            if (cameraShake.on) {
-                if (cameraShake.duration > 0) {
-                    const shakeX = (Math.random() - 0.5) * cameraShake.strength;
-                    const shakeY = (Math.random() - 0.5) * cameraShake.strength;
-                    ctx.translate(shakeX, shakeY);
-                    cameraShake.duration--;
-                } else {
-                    cameraShake.on = false;
-                }
-            }
-
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            player1.update(player2);
-            player2.update(player1);
-            player1.draw();
-            player2.draw();
-
-            ctx.restore();
-
-            requestAnimationFrame(animate);
+      if (this.state === 'attack') {
+        // Attack hit frame at half duration
+        if (this.stateTime === Math.floor(this.currentAttack.duration / 2)) {
+          // Check hit on opponent
+          if (this.checkHit(opponent)) {
+            opponent.takeDamage(this.currentAttack.damage);
+            createHitEffect(opponent.x, opponent.y - 40);
+            shakeScreen(5);
+            // Slow mo if opponent dying
+            if (opponent.health <= 0) slowMoFrames = 60;
+          }
         }
-
-        function startCameraShake(duration, strength) {
-            cameraShake.duration = duration;
-            cameraShake.strength = strength;
-            cameraShake.on = true;
+        if (this.stateTime > this.currentAttack.duration) {
+          this.state = 'idle';
+          this.currentAttack = null;
         }
+      }
 
-        function updateHealthBars() {
-            p1HealthBar.style.width = player1.health + '%';
-            p2HealthBar.style.width = player2.health + '%';
-        }
+      // Update motion trail
+      this.motionTrail.push({ x: this.x, y: this.y, alpha: 1 });
+      if (this.motionTrail.length > 10) this.motionTrail.shift();
+    }
 
-        function startGame() {
-            player1.health = 100;
-            player2.health = 100;
-            updateHealthBars();
-            messageDisplay.textContent = 'FIGHT!';
-            startButton.style.display = 'none';
-            gameActive = true;
-            lastFrameTime = performance.now();
-            animate(lastFrameTime);
-        }
+    checkHit(opponent) {
+      const a = this.currentAttack.hitbox();
+      const b = {
+        x: opponent.x - 10,
+        y: opponent.y - 60,
+        w: 20,
+        h: 60
+      };
+      return !(a.x > b.x + b.w || a.x + a.w < b.x || a.y > b.y + b.h || a.y + a.h < b.y);
+    }
 
-        function endGame() {
-            gameActive = false;
-            const winner = player1.health > player2.health ? 'Player 1' : 'Player 2';
-            messageDisplay.textContent = `${winner} wins!`;
-            startButton.style.display = 'block';
-        }
+    draw(ctx) {
+      // Draw motion trail for dash
+      for (let i = 0; i < this.motionTrail.length; i++) {
+        const p = this.motionTrail[i];
+        ctx.strokeStyle = `rgba(0, 255, 255, ${p.alpha * 0.3})`;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y - 30, 15, 0, Math.PI * 2);
+        ctx.stroke();
+        p.alpha -= 0.1;
+      }
 
-        startButton.addEventListener('click', startGame);
+      ctx.save();
+      ctx.translate(this.x, this.y);
 
-        // Initial state
-        messageDisplay.textContent = 'AI Stickman Showdown';
-        updateHealthBars();
-    </script>
+      // Flip if facing left
+      ctx.scale(this.facingRight ? 1 : -1, 1);
+
+      // Flash on hit
+      if (this.hitCooldown > 0 && Math.floor(this.hitCooldown / 3) % 2 === 0) {
+        ctx.strokeStyle = 'red';
+        ctx.fillStyle = 'rgba(255,0,0,0.5)';
+      } else {
+        ctx.strokeStyle = this.color;
+        ctx.fillStyle = this.color;
+      }
+
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+
+      // Head
+      ctx.beginPath();
+      ctx.arc(0, -45, 10, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Body
+      ctx.beginPath();
+      ctx.moveTo(0, -35);
+      ctx.lineTo(0, 0);
+      ctx.stroke();
+
+      // Arms (basic swing on attack)
+      ctx.beginPath();
+      let armAngle = 0;
+      if (this.state === 'attack') {
+        const progress = this.stateTime / this.attackDuration;
+        armAngle = Math.sin(progress * Math.PI * 2) * 0.8;
+      } else {
+        armAngle = Math.sin(Date.now() * 0.005) * 0.3;
+      }
+      // Left arm
+      ctx.moveTo(0, -30);
+      ctx.lineTo(-15 * Math.cos(armAngle), -30 + 15 * Math.sin(armAngle));
+      // Right arm (attack arm)
+      ctx.moveTo(0, -30);
+      ctx.lineTo(15 * Math.cos(armAngle), -30 - 15 * Math.sin(armAngle));
+      ctx.stroke();
+
+      // Legs (walking animation)
+      ctx.beginPath();
+      let legAngle = 0;
+      if (this.state === 'run') {
+        legAngle = Math.sin(Date.now() * 0.01) * 0.7;
+      }
+      // Left leg
+      ctx.moveTo(0, 0);
+      ctx.lineTo(-15 * Math.cos(legAngle), 30 + 15 * Math.sin(legAngle));
+      // Right leg
+      ctx.moveTo(0, 0);
+      ctx.lineTo(15 * Math.cos(legAngle), 30 - 15 * Math.sin(legAngle));
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Health bar
+      const barWidth = 100;
+      const barHeight = 10;
+      const barX = this.x - barWidth / 2;
+      const barY = this.y - 80;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(barX, barY, barWidth, barHeight);
+      ctx.fillStyle = 'limegreen';
+      const healthWidth = (this.health / this.maxHealth) * barWidth;
+      ctx.fillRect(barX, barY, healthWidth, barHeight);
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
+    }
+  }
+
+  // Hit effect particles
+  let hitEffects = [];
+  function createHitEffect(x, y) {
+    for (let i = 0; i < 10; i++) {
+      hitEffects.push({
+        x: x + (Math.random() - 0.5) * 20,
+        y: y + (Math.random() - 0.5) * 20,
+        vx: (Math.random() - 0.5) * 4,
+        vy: (Math.random() - 0.5) * 4,
+        life: 20
+      });
+    }
+  }
+  function updateHitEffects() {
+    hitEffects.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life--;
+    });
+    hitEffects = hitEffects.filter(p => p.life > 0);
+  }
+  function drawHitEffects(ctx) {
+    ctx.fillStyle = 'orange';
+    hitEffects.forEach(p => {
+      ctx.globalAlpha = p.life / 20;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // Screen shake
+  let shakeDuration = 0;
+  let shakeMagnitude = 0;
+  function shakeScreen(mag) {
+    shakeDuration = 15;
+    shakeMagnitude = mag;
+  }
+  function applyShake() {
+    if (shakeDuration > 0) {
+      const dx = (Math.random() - 0.5) * shakeMagnitude;
+      const dy = (Math.random() - 0.5) * shakeMagnitude;
+      ctx.translate(dx, dy);
+      shakeDuration--;
+    }
+  }
+
+  // Game variables
+  let stickman1, stickman2;
+  let fightRunning = false;
+  let messageEl = document.getElementById('message');
+  let startBtn = document.getElementById('startBtn');
+
+  function resetGame() {
+    stickman1 = new Stickman(200, HEIGHT - 60, 'cyan', true);
+    stickman2 = new Stickman(600, HEIGHT - 60, 'orange', false);
+    fightRunning = false;
+    messageEl.textContent = '';
+  }
+
+  function startFight() {
+    if (fightRunning) return;
+    fightRunning = true;
+    messageEl.textContent = '';
+    slowMoFrames = 0;
+    animate();
+  }
+
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+
+    // Slow motion effect on hit
+    if (slowMoFrames > 0) {
+      slowMoFrames--;
+      if (slowMoFrames % 2 === 0) return; // skip frames for slow mo
+    }
+
+    ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+    ctx.save();
+    applyShake();
+
+    stickman1.update(stickman2);
+    stickman2.update(stickman1);
+
+    stickman1.draw(ctx);
+    stickman2.draw(ctx);
+
+    drawHitEffects(ctx);
+
+    ctx.restore();
+
+    updateHitEffects();
+
+    if (!stickman1.isAlive() || !stickman2.isAlive()) {
+      fightRunning = false;
+      cancelAnimationFrame(animationId);
+      messageEl.textContent = stickman1.isAlive() ? "Cyan Stickman Wins!" : "Orange Stickman Wins!";
+      startBtn.textContent = 'Restart Fight';
+    }
+  }
+
+  // Init
+  resetGame();
+
+  startBtn.addEventListener('click', () => {
+    resetGame();
+    startFight();
+  });
+})();
+</script>
+
 </body>
 </html>
