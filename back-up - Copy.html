@@ -1,209 +1,72 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>RogueByte Mini</title>
-<style>
-  body { font-family: monospace; background: #111; color: #eee; }
-  #game {
-    display: grid;
-    grid-template-columns: repeat(10, 40px);
-    grid-template-rows: repeat(10, 40px);
-    gap: 2px;
-    margin-bottom: 10px;
+function castSpell() {
+  if (turn !== 'player') {
+    log('Not your turn!');
+    return;
   }
-  .cell {
-    width: 40px; height: 40px;
-    background: #222;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    font-weight: bold;
-    font-size: 24px;
-    user-select: none;
-  }
-  .player { background: #4caf50; }
-  .enemy { background: #f44336; }
-  #log {
-    height: 100px;
-    overflow-y: auto;
-    background: #222;
-    padding: 5px;
-    border: 1px solid #444;
-  }
-  #spellInput {
-    width: 100%;
-    padding: 5px;
-    font-family: monospace;
-    font-size: 16px;
-    margin-bottom: 10px;
-  }
-  button {
-    padding: 6px 12px;
-    font-size: 16px;
-  }
-</style>
-</head>
-<body>
+  const spell = spellInput.value.trim().toLowerCase();
+  if (!spell) return;
 
-<h2>RogueByte Mini</h2>
-<div id="game"></div>
+  // Simple command patterns:
+  // attack
+  // heal
+  // strong attack
+  // attack if enemy hp below N
+  // heal if player hp below N
 
-<input id="spellInput" placeholder="Cast spell: e.g. if (enemy.hp < 50) fire();" />
-<button id="castBtn">Cast Spell</button>
+  let executed = false;
 
-<div id="log"></div>
-
-<script>
-  // Game state
-  const width = 10;
-  const height = 10;
-  let player = { x: 1, y: 1, hp: 100 };
-  let enemy = { x: 8, y: 8, hp: 100 };
-  let turn = 'player'; // 'player' or 'enemy'
-
-  const gameDiv = document.getElementById('game');
-  const logDiv = document.getElementById('log');
-  const spellInput = document.getElementById('spellInput');
-  const castBtn = document.getElementById('castBtn');
-
-  // Create grid cells
-  const cells = [];
-  for (let i = 0; i < width * height; i++) {
-    const cell = document.createElement('div');
-    cell.classList.add('cell');
-    gameDiv.appendChild(cell);
-    cells.push(cell);
-  }
-
-  // Utility: convert x,y to index
-  function idx(x, y) {
-    return y * width + x;
-  }
-
-  // Draw function
-  function draw() {
-    for (let i = 0; i < cells.length; i++) {
-      cells[i].textContent = '';
-      cells[i].className = 'cell';
-    }
-    cells[idx(player.x, player.y)].classList.add('player');
-    cells[idx(enemy.x, enemy.y)].classList.add('enemy');
-    cells[idx(player.x, player.y)].textContent = 'P';
-    cells[idx(enemy.x, enemy.y)].textContent = 'E';
-  }
-
-  // Log helper
-  function log(text) {
-    logDiv.innerHTML += text + '<br>';
-    logDiv.scrollTop = logDiv.scrollHeight;
-  }
-
-  // Enemy simple AI: moves towards player if not adjacent, else attacks
-  function enemyTurn() {
-    if (turn !== 'enemy') return;
-    const dx = player.x - enemy.x;
-    const dy = player.y - enemy.y;
-    if (Math.abs(dx) + Math.abs(dy) === 1) {
-      // Adjacent, attack
-      const dmg = 10;
-      player.hp -= dmg;
-      log(`Enemy attacks! Player loses ${dmg} HP (HP left: ${player.hp})`);
-      if (player.hp <= 0) {
-        alert('You died! Game Over.');
-        resetGame();
-        return;
-      }
-    } else {
-      // Move closer
-      if (Math.abs(dx) > Math.abs(dy)) {
-        enemy.x += Math.sign(dx);
+  // Heal command
+  if (/^heal$/.test(spell)) {
+    player.hp = Math.min(player.hp + 30, 100);
+    log(`You heal 30 HP! Player HP: ${player.hp}`);
+    executed = true;
+  } else if (/^attack$/.test(spell)) {
+    const dmg = 20;
+    enemy.hp -= dmg;
+    log(`You attack! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
+    executed = true;
+  } else if (/^strong attack$/.test(spell)) {
+    const dmg = 40;
+    enemy.hp -= dmg;
+    log(`Strong attack! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
+    executed = true;
+  } else {
+    // Conditional commands like: attack if enemy hp below 50
+    let m;
+    if (m = spell.match(/^attack if enemy hp below (\d+)$/)) {
+      const threshold = parseInt(m[1], 10);
+      if (enemy.hp < threshold) {
+        const dmg = 20;
+        enemy.hp -= dmg;
+        log(`Conditional attack! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
       } else {
-        enemy.y += Math.sign(dy);
+        log(`Condition not met. Enemy HP is ${enemy.hp}, needs to be below ${threshold}`);
       }
-      log(`Enemy moves closer.`);
+      executed = true;
+    } else if (m = spell.match(/^heal if player hp below (\d+)$/)) {
+      const threshold = parseInt(m[1], 10);
+      if (player.hp < threshold) {
+        player.hp = Math.min(player.hp + 30, 100);
+        log(`Conditional heal! Player HP restored to ${player.hp}`);
+      } else {
+        log(`Condition not met. Player HP is ${player.hp}, needs to be below ${threshold}`);
+      }
+      executed = true;
     }
-    turn = 'player';
-    draw();
   }
 
-  // Player movement (arrow keys)
-  window.addEventListener('keydown', e => {
-    if (turn !== 'player') return;
-    let moved = false;
-    if (e.key === 'ArrowUp' && player.y > 0) {
-      player.y--;
-      moved = true;
-    } else if (e.key === 'ArrowDown' && player.y < height - 1) {
-      player.y++;
-      moved = true;
-    } else if (e.key === 'ArrowLeft' && player.x > 0) {
-      player.x--;
-      moved = true;
-    } else if (e.key === 'ArrowRight' && player.x < width - 1) {
-      player.x++;
-      moved = true;
-    }
-    if (moved) {
-      log(`Player moves to (${player.x}, ${player.y})`);
-      turn = 'enemy';
-      draw();
-      setTimeout(enemyTurn, 500);
-    }
-  });
-
-  // Spell casting logic
-  function castSpell() {
-    if (turn !== 'player') {
-      log('Not your turn!');
+  if (!executed) {
+    log('Unknown spell command. Try: attack, heal, strong attack, or use conditions like "attack if enemy hp below 50"');
+  } else {
+    if (enemy.hp <= 0) {
+      alert('Enemy defeated! You win!');
+      resetGame();
       return;
     }
-    const spell = spellInput.value.trim();
-    if (!spell) return;
-    // Only support one spell: if (enemy.hp < N) fire();
-    // Parse spell: regex for if (enemy.hp < number) fire();
-    const regex = /^if\s*\(\s*enemy\.hp\s*<\s*(\d+)\s*\)\s*fire\s*\(\s*\)\s*;?$/;
-    const match = spell.match(regex);
-    if (match) {
-      const threshold = parseInt(match[1], 10);
-      if (enemy.hp < threshold) {
-        const dmg = 30;
-        enemy.hp -= dmg;
-        log(`Spell fires! Enemy loses ${dmg} HP (HP left: ${enemy.hp})`);
-        if (enemy.hp <= 0) {
-          alert('Enemy defeated! You win!');
-          resetGame();
-          return;
-        }
-      } else {
-        log(`Spell condition not met. Enemy HP is ${enemy.hp}, needs to be less than ${threshold}`);
-      }
-      turn = 'enemy';
-      draw();
-      setTimeout(enemyTurn, 500);
-    } else {
-      log('Invalid spell syntax. Try: if (enemy.hp < 50) fire();');
-    }
-    spellInput.value = '';
-  }
-
-  castBtn.addEventListener('click', castSpell);
-
-  // Reset game
-  function resetGame() {
-    player = { x: 1, y: 1, hp: 100 };
-    enemy = { x: 8, y: 8, hp: 100 };
-    turn = 'player';
-    logDiv.innerHTML = '';
+    turn = 'enemy';
     draw();
+    setTimeout(enemyTurn, 500);
   }
 
-  // Initial draw
-  draw();
-  log('Use arrow keys to move.');
-  log('Cast spells like: if (enemy.hp < 50) fire();');
-</script>
-
-</body>
-</html>
+  spellInput.value = '';
+}
