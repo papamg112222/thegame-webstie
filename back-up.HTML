@@ -468,18 +468,13 @@
     .pressure-gauge {
       margin: 20px 0;
       text-align: center;
+      position: relative;
     }
     .pressure-label {
       font-size: 1.2rem;
       font-weight: 600;
-      color: #FFD700;
+      color: #fff;
       margin-bottom: 5px;
-    }
-    .pressure-value {
-      font-size: 2.5rem;
-      font-weight: 900;
-      color: #FFD700;
-      text-shadow: 0 0 10px rgba(255, 215, 0, 0.7);
     }
     .gauge-container {
       position: relative;
@@ -491,22 +486,33 @@
       width: 150px;
       height: 150px;
       border-radius: 50%;
-      background: conic-gradient(#00cc00 0%, #ffff00 33%, #ff8c00 66%, #ff0000 100%);
+      background: conic-gradient(from -135deg,
+        #222 0deg,
+        #444 45deg,
+        #00cc00 45deg,
+        #00cc00 90deg,
+        #ffff00 90deg,
+        #ffff00 135deg,
+        #ff8c00 135deg,
+        #ff8c00 180deg,
+        #ff0000 180deg,
+        #ff0000 225deg,
+        #222 225deg,
+        #222 360deg
+      );
       position: absolute;
       top: 0;
       left: 0;
-      transform: rotate(-90deg);
-      transform-origin: 50% 100%;
     }
     .gauge-needle {
       position: absolute;
-      width: 60px;
-      height: 2px;
+      width: 70px;
+      height: 4px;
       background-color: #fff;
-      top: 75px;
-      left: 75px;
-      transform-origin: left;
-      transform: rotate(-135deg);
+      top: 73px;
+      left: 73px;
+      transform-origin: 0 0;
+      transform: rotate(45deg);
       transition: transform 0.2s ease-out;
       border-radius: 2px;
     }
@@ -518,8 +524,21 @@
       border-radius: 50%;
       top: 70px;
       left: 70px;
+      z-index: 10;
     }
-    
+    .gauge-label {
+      position: absolute;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #fff;
+      top: 80px;
+    }
+    .gauge-label.min { left: 0; transform: translateX(-50%); }
+    .gauge-label.max { right: 0; transform: translateX(50%); }
+    .gauge-label.mid { left: 50%; top: 5px; transform: translateX(-50%); }
+    .gauge-label.qtr1 { top: 20px; left: 10px; }
+    .gauge-label.qtr3 { top: 20px; right: 10px; }
+
     /* Media Queries for better mobile responsiveness */
     @media (max-width: 600px) {
         #mainMenu h1 {
@@ -644,16 +663,20 @@
       </div>
       <div class="pressure-gauge">
         <p class="pressure-label">Pressure</p>
-        <p id="pressureValue" class="pressure-value">1.00</p>
         <div class="gauge-container">
           <div class="gauge"></div>
           <div id="gaugeNeedle" class="gauge-needle"></div>
           <div class="gauge-center"></div>
+          <span class="gauge-label min">0</span>
+          <span class="gauge-label qtr1">1.0</span>
+          <span class="gauge-label mid">1.5</span>
+          <span class="gauge-label qtr3">2.5</span>
+          <span class="gauge-label max">3.0</span>
         </div>
       </div>
     </div>
 
-    <div class="container" style="width: 300px; height: 400px; position: relative;">
+    <div class="container" style="width: 300px; height: 400px; position: relative; border: 2px solid #FFD700;">
         <canvas id="boyleCanvas" style="width: 100%; height: 100%;"></canvas>
     </div>
 
@@ -843,49 +866,49 @@
 
     // === NEW BOYLE MODE SCRIPT ===
     const pistonSlider = document.getElementById('pistonSlider');
-    const pressureValueElement = document.getElementById('pressureValue');
     const gaugeNeedle = document.getElementById('gaugeNeedle');
     const boyleCanvas = document.getElementById('boyleCanvas');
     const bCtx = boyleCanvas.getContext('2d');
     
     let boyleBalls = [];
     let boyleAnimId;
-    let collisionCount = 0;
-    const TOTAL_COLLISION_SAMPLES = 600; // Number of frames to sample collisions over
-    const GAUGE_MAX_PRESSURE = 3.0; // Corresponds to max gauge value of 3.0
     
-    const PISTON_MIN_Y = 50; // Top of the container
-    const PISTON_MAX_Y = 350; // Bottom of the container
+    // Define the boundaries and initial conditions
+    const PISTON_MIN_Y_OFFSET = 10; // Space between top of container and initial piston position
+    const PISTON_MAX_Y_OFFSET = 300; // Max Y position of the piston
+    const BALL_SPEED = 2; // Constant speed for all particles
+    const NUM_BALLS = 20;
 
     function initBoyle() {
       const container = boyleCanvas.parentElement;
       boyleCanvas.width = container.clientWidth;
       boyleCanvas.height = container.clientHeight;
       
-      pistonSlider.value = 50;
-      updateBoyleSimulation();
-      createBoyleBalls(50); // Start with 50 particles
+      pistonSlider.value = 50; // Set initial slider position to 50
+      createBoyleBalls(NUM_BALLS);
+      updateBoyleSimulation(); // Initial update
       animateBoyle();
     }
 
     function updateBoyleSimulation() {
       const pistonValue = parseInt(pistonSlider.value);
-      const pistonY = PISTON_MIN_Y + ((100 - pistonValue) / 100) * (PISTON_MAX_Y - PISTON_MIN_Y);
+      const pistonY = PISTON_MIN_Y_OFFSET + (100 - pistonValue) / 100 * (PISTON_MAX_Y_OFFSET - PISTON_MIN_Y_OFFSET);
       
-      const currentPressure = calculatePressure();
+      const currentPressure = calculatePressure(pistonY);
       updatePressureGauge(currentPressure);
     }
 
     function createBoyleBalls(count) {
       boyleBalls = [];
-      const containerHeight = boyleCanvas.height;
+      const startPistonY = PISTON_MIN_Y_OFFSET + (100 - 50) / 100 * (PISTON_MAX_Y_OFFSET - PISTON_MIN_Y_OFFSET);
       for (let i = 0; i < count; i++) {
+        let angle = Math.random() * Math.PI * 2;
         boyleBalls.push({
           x: Math.random() * (boyleCanvas.width - 20) + 10,
-          y: Math.random() * (containerHeight - 20) + 10,
+          y: Math.random() * (boyleCanvas.height - 20 - startPistonY) + startPistonY + 10,
           radius: 5,
-          speedX: (Math.random() - 0.5) * 4,
-          speedY: (Math.random() - 0.5) * 4,
+          speedX: Math.cos(angle) * BALL_SPEED,
+          speedY: Math.sin(angle) * BALL_SPEED,
           color: 'rgba(255, 215, 0, 0.9)'
         });
       }
@@ -893,21 +916,20 @@
 
     function animateBoyle() {
       const pistonValue = parseInt(pistonSlider.value);
-      const pistonY = PISTON_MIN_Y + ((100 - pistonValue) / 100) * (PISTON_MAX_Y - PISTON_MIN_Y);
-      const gasRegionHeight = boyleCanvas.height - pistonY;
+      const pistonY = PISTON_MIN_Y_OFFSET + (100 - pistonValue) / 100 * (PISTON_MAX_Y_OFFSET - PISTON_MIN_Y_OFFSET);
       const wallThickness = 10;
       
       bCtx.clearRect(0, 0, boyleCanvas.width, boyleCanvas.height);
       
       // Draw container walls
       bCtx.fillStyle = '#444';
-      bCtx.fillRect(0, PISTON_MAX_Y, boyleCanvas.width, wallThickness); // Bottom wall
-      bCtx.fillRect(0, PISTON_Y, wallThickness, boyleCanvas.height - PISTON_Y); // Left wall
-      bCtx.fillRect(boyleCanvas.width - wallThickness, PISTON_Y, wallThickness, boyleCanvas.height - PISTON_Y); // Right wall
+      bCtx.fillRect(0, boyleCanvas.height - wallThickness, boyleCanvas.width, wallThickness); // Bottom wall
+      bCtx.fillRect(0, 0, wallThickness, boyleCanvas.height); // Left wall
+      bCtx.fillRect(boyleCanvas.width - wallThickness, 0, wallThickness, boyleCanvas.height); // Right wall
 
       // Draw the piston (barrier)
       bCtx.fillStyle = '#FFD700';
-      bCtx.fillRect(0, pistonY - wallThickness, boyleCanvas.width, wallThickness); // Top barrier (piston)
+      bCtx.fillRect(wallThickness, pistonY, boyleCanvas.width - 2 * wallThickness, wallThickness); // Top barrier (piston)
 
       // Move and draw balls
       boyleBalls.forEach(ball => {
@@ -915,16 +937,22 @@
         ball.y += ball.speedY;
         
         // Collisions with container walls
-        if (ball.x + ball.radius > boyleCanvas.width - wallThickness) { ball.x = boyleCanvas.width - wallThickness - ball.radius; ball.speedX *= -1; }
-        if (ball.x - ball.radius < wallThickness) { ball.x = wallThickness + ball.radius; ball.speedX *= -1; }
-        if (ball.y + ball.radius > PISTON_MAX_Y) { ball.y = PISTON_MAX_Y - ball.radius; ball.speedY *= -1; }
+        if (ball.x + ball.radius > boyleCanvas.width - wallThickness) { 
+            ball.x = boyleCanvas.width - wallThickness - ball.radius; 
+            ball.speedX *= -1; 
+        }
+        if (ball.x - ball.radius < wallThickness) { 
+            ball.x = wallThickness + ball.radius; 
+            ball.speedX *= -1; 
+        }
+        if (ball.y + ball.radius > boyleCanvas.height - wallThickness) { 
+            ball.y = boyleCanvas.height - wallThickness - ball.radius; 
+            ball.speedY *= -1; 
+        }
         
         // Collision with the piston
-        if (ball.y - ball.radius < pistonY) {
-            if (ball.speedY < 0) { // Only count if moving up
-                collisionCount++;
-            }
-            ball.y = pistonY + ball.radius;
+        if (ball.y - ball.radius < pistonY + wallThickness && ball.speedY < 0 && ball.x > wallThickness && ball.x < boyleCanvas.width - wallThickness) {
+            ball.y = pistonY + wallThickness + ball.radius;
             ball.speedY *= -1;
         }
 
@@ -934,28 +962,28 @@
         bCtx.fill();
       });
 
-      updatePressureGauge(calculatePressure());
+      updateBoyleSimulation();
       boyleAnimId = requestAnimationFrame(animateBoyle);
     }
     
     // This is the core logic for the pressure gauge
-    function calculatePressure() {
-      const pistonValue = parseInt(pistonSlider.value);
-      const gasHeightRatio = (100 - pistonValue) / 100;
-      const initialHeightRatio = 0.5; // Corresponds to slider value 50
-      
-      // Pressure is inversely proportional to volume.
-      // Here, volume is proportional to the height of the gas region.
-      // So, Pressure ~ 1/Height.
-      const pressure = (1 / gasHeightRatio);
-      return Math.min(pressure, GAUGE_MAX_PRESSURE);
+    function calculatePressure(pistonY) {
+        // Volume is proportional to the height of the gas region
+        const currentHeight = boyleCanvas.height - pistonY;
+        
+        // To make the numbers more reasonable, we use a reference height
+        const refHeight = boyleCanvas.height - (PISTON_MIN_Y_OFFSET + (100 - 50) / 100 * (PISTON_MAX_Y_OFFSET - PISTON_MIN_Y_OFFSET));
+        
+        // Pressure is inversely proportional to Volume, so P ~ 1/Volume ~ 1/Height
+        const pressure = (refHeight / currentHeight) * 1.5; // Start at 1.5 at initial position
+        return pressure;
     }
     
     function updatePressureGauge(pressure) {
-      const normalizedPressure = pressure / GAUGE_MAX_PRESSURE;
-      const rotationAngle = normalizedPressure * 180 - 135;
+      const maxPressure = 3.0;
+      const normalizedPressure = Math.min(pressure / maxPressure, 1.0);
+      const rotationAngle = 45 + normalizedPressure * 90; // Rotate from 45deg to 135deg
       gaugeNeedle.style.transform = `rotate(${rotationAngle}deg)`;
-      pressureValueElement.textContent = pressure.toFixed(2);
     }
 
     pistonSlider.oninput = updateBoyleSimulation;
