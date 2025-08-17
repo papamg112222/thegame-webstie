@@ -574,6 +574,9 @@
         color: white;
         text-shadow: 0 0 10px rgba(255,255,255,0.7);
     }
+    .main-boyle-container {
+        position: relative; /* Enables movement */
+    }
   </style>
 </head>
 <body>
@@ -593,12 +596,16 @@
   <div id="boyle" class="gameMode">
     <h2 class="game-mode-title boyle-title-glow">Boyle's Law</h2>
     <p class="explanation-text">
-      In Boyle's Law, when <strong>temperature</strong> and <strong>number of particles</strong> are constant, 
-      the <strong>pressure</strong> of a gas is inversely proportional to its <strong>volume</strong>.
-      Drag the piston to change the volume of the balloon and observe the pressure change.
+      When <strong>temperature</strong> and <strong>number of particles</strong> are constant, 
+      <strong>pressure</strong> is inversely proportional to <strong>volume</strong>.
     </p>
 
-    <div class="container">
+    <div class="slider-container">
+      <label>Move: <span id="boyleMoveVal">0</span></label>
+      <input type="range" id="boyleMove" min="-100" max="100" value="0">
+    </div>
+
+    <div id="mainBoyleContainer" class="main-boyle-container container" style="position: relative;">
       <div class="pressure-gauge">
         Pressure:<span id="boylePressureVal">0 kPa</span>
       </div>
@@ -607,6 +614,7 @@
       </div>
       <div class="balloon-container" style="justify-content:center; align-items:flex-end; height:100%; width:100%; padding-bottom: 20px;">
         <div id="boyleBalloon" class="balloon" style="animation: none;"></div>
+        <canvas id="boyleBalloonCanvas" style="position: absolute; top:0; left:0; z-index: 10;"></canvas>
       </div>
     </div>
     <button class="return-btn" onclick="returnToMenu()">Return to Menu</button>
@@ -793,51 +801,75 @@
       showMode('memberPage'); // This will handle hiding other modes and displaying memberPage
     }
 
-    // === BOYLE MODE ===
-    // MODIFIED: All Boyle's Law logic has been changed to support the new design.
-    
-    // Get new HTML elements
+    // === MODIFIED: BOYLE MODE WITH BALLOON, PARTICLES, AND MOVE SLIDER ===
     const boylePiston = document.getElementById('boylePiston');
     const boylePistonContainer = document.getElementById('boylePistonContainer');
     const boyleBalloon = document.getElementById('boyleBalloon');
     const boylePressureVal = document.getElementById('boylePressureVal');
+    const boyleMoveSlider = document.getElementById('boyleMove');
+    const boyleMoveVal = document.getElementById('boyleMoveVal');
+    const mainBoyleContainer = document.getElementById('mainBoyleContainer');
+    const boyleBalloonCanvas = document.getElementById('boyleBalloonCanvas');
+    const bCtx = boyleBalloonCanvas.getContext('2d');
 
-    // Game constants
-    const INITIAL_PRESSURE = 100; // kPa
-    let INITIAL_VOLUME;
+    // Game constants for Boyle's Law simulation
+    const INITIAL_PRESSURE = 100; // Starting pressure (kPa)
+    const NUM_BOYLE_BALLS = 50; // Number of particles
+    let boyleBalls = [];
+    let initialVolume;
     let currentVolume;
     let isPistonDragging = false;
     let pistonStartPos = 0;
     let initialPistonTop = 0;
+    let boyleAnimId = null;
 
     function initBoyle() {
-        // Set initial state
-        const container = document.querySelector('#boyle .container');
-        const containerHeight = container.clientHeight;
+        // Stop any previous animation loop
+        if (boyleAnimId) cancelAnimationFrame(boyleAnimId);
         
-        // Calculate the initial volume based on the container and piston position
-        INITIAL_VOLUME = containerHeight - boylePistonContainer.clientHeight;
+        // Set up the canvas dimensions to match the balloon's container
+        const container = boyleBalloon.parentElement;
+        boyleBalloonCanvas.width = container.clientWidth;
+        boyleBalloonCanvas.height = container.clientHeight;
+
+        // Calculate initial volume and update display
+        const mainContainerHeight = mainBoyleContainer.clientHeight;
+        initialVolume = mainContainerHeight - boylePistonContainer.clientHeight;
         boylePistonContainer.style.top = '0px';
-        currentVolume = INITIAL_VOLUME;
-
-        // Set initial balloon size
+        currentVolume = initialVolume;
         updateBoyleSimulation(currentVolume);
-
+        
+        // Initialize blue particles
+        boyleBalls = [];
+        for (let i = 0; i < NUM_BOYLE_BALLS; i++) {
+            boyleBalls.push({
+                x: Math.random() * boyleBalloonCanvas.width,
+                y: Math.random() * boyleBalloonCanvas.height,
+                radius: 4,
+                speedX: (Math.random() - 0.5) * 3,
+                speedY: (Math.random() - 0.5) * 3,
+                color: 'rgba(74, 144, 226, 0.9)' // Blue color for particles
+            });
+        }
+        
         // Add event listeners for dragging
         boylePiston.addEventListener('mousedown', startPistonDrag);
         boylePiston.addEventListener('touchstart', startPistonDrag);
-        
         document.addEventListener('mousemove', movePiston);
         document.addEventListener('touchmove', movePiston);
-        
         document.addEventListener('mouseup', endPistonDrag);
         document.addEventListener('touchend', endPistonDrag);
         document.addEventListener('touchcancel', endPistonDrag);
+        
+        // Add event listener for the new 'move' slider
+        boyleMoveSlider.addEventListener('input', updateBoyleMove);
+        
+        // Start the animation loop
+        animateBoyleParticles();
     }
 
     function startPistonDrag(e) {
         isPistonDragging = true;
-        // Use either mouse or touch position
         pistonStartPos = e.clientY || e.touches[0].clientY;
         initialPistonTop = boylePistonContainer.offsetTop;
         boylePiston.style.cursor = 'grabbing';
@@ -845,22 +877,18 @@
 
     function movePiston(e) {
         if (!isPistonDragging) return;
-        const container = document.querySelector('#boyle .container');
-        const containerHeight = container.clientHeight;
-
-        // Get current mouse or touch position
+        const mainContainerHeight = mainBoyleContainer.clientHeight;
         const currentPos = e.clientY || e.touches[0].clientY;
         const deltaY = currentPos - pistonStartPos;
         let newTop = initialPistonTop + deltaY;
         
-        // Clamp the piston position to prevent it from going outside the container
-        const maxTop = containerHeight - boylePistonContainer.clientHeight;
+        const maxTop = mainContainerHeight - boylePistonContainer.clientHeight;
         newTop = Math.max(0, Math.min(newTop, maxTop));
         
         boylePistonContainer.style.top = newTop + 'px';
         
         // Calculate the new volume based on the piston's position
-        currentVolume = containerHeight - newTop - boylePistonContainer.clientHeight;
+        currentVolume = mainContainerHeight - newTop - boylePistonContainer.clientHeight;
         updateBoyleSimulation(currentVolume);
     }
     
@@ -870,27 +898,67 @@
     }
 
     function updateBoyleSimulation(volume) {
-        // Calculate the new pressure using Boyle's Law: P2 = (P1 * V1) / V2
-        const newPressure = (INITIAL_PRESSURE * INITIAL_VOLUME) / volume;
+        const newPressure = (INITIAL_PRESSURE * initialVolume) / volume;
         boylePressureVal.textContent = `${newPressure.toFixed(0)} kPa`;
 
-        // Calculate the new balloon size
         const minBalloonHeight = 80;
-        const maxBalloonHeight = boylePistonContainer.offsetTop - 20; // Ensure some space from the piston
-        const balloonScale = volume / INITIAL_VOLUME;
+        const maxBalloonHeight = boylePistonContainer.offsetTop - 20;
+        const balloonScale = volume / initialVolume;
         const newHeight = Math.max(minBalloonHeight, maxBalloonHeight * balloonScale);
         
         boyleBalloon.style.height = newHeight + 'px';
-        boyleBalloon.style.width = newHeight * 0.8 + 'px'; // Maintain aspect ratio
+        boyleBalloon.style.width = newHeight * 0.8 + 'px';
     }
     
-    function cancelBoyleAnimation() {
-        // No animation to cancel in this new version
+    function animateBoyleParticles() {
+        bCtx.clearRect(0, 0, boyleBalloonCanvas.width, boyleBalloonCanvas.height);
+        
+        const balloonRect = boyleBalloon.getBoundingClientRect();
+        const containerRect = boyleBalloon.parentElement.getBoundingClientRect();
+
+        boyleBalls.forEach(ball => {
+            // Update position
+            ball.x += ball.speedX;
+            ball.y += ball.speedY;
+
+            // Check collision with the balloon's boundaries (simple circular approximation)
+            const relativeX = (ball.x - containerRect.left) - (balloonRect.left - containerRect.left);
+            const relativeY = (ball.y - containerRect.top) - (balloonRect.top - containerRect.top);
+            const centerX = balloonRect.width / 2;
+            const centerY = balloonRect.height / 2;
+            
+            // Check if ball is outside balloon
+            if (
+                relativeX < 0 || relativeX > balloonRect.width ||
+                relativeY < 0 || relativeY > balloonRect.height
+            ) {
+                // Bounce off "walls" of the bounding box
+                if (ball.x + ball.radius > balloonRect.right) ball.speedX *= -1;
+                if (ball.x - ball.radius < balloonRect.left) ball.speedX *= -1;
+                if (ball.y + ball.radius > balloonRect.bottom) ball.speedY *= -1;
+                if (ball.y - ball.radius < balloonRect.top) ball.speedY *= -1;
+            }
+            
+            // Draw the ball relative to the canvas
+            bCtx.fillStyle = ball.color;
+            bCtx.beginPath();
+            bCtx.arc(ball.x - boyleBalloonCanvas.getBoundingClientRect().left, ball.y - boyleBalloonCanvas.getBoundingClientRect().top, ball.radius, 0, Math.PI * 2);
+            bCtx.fill();
+        });
+        
+        boyleAnimId = requestAnimationFrame(animateBoyleParticles);
     }
 
-    // REMOVED: No more listeners for mass or temp sliders.
-    // boyleMassSlider.oninput = ...
-    // boyleTempSlider.oninput = ...
+    function updateBoyleMove() {
+        const moveValue = parseInt(boyleMoveSlider.value);
+        boyleMoveVal.textContent = moveValue;
+        mainBoyleContainer.style.transform = `translateX(${moveValue}px)`;
+    }
+
+    function cancelBoyleAnimation() {
+        if (boyleAnimId) cancelAnimationFrame(boyleAnimId);
+        boyleAnimId = null;
+    }
 
     // === CHARLES MODE ===
     const charlesTempSlider = document.getElementById('charlesTemp');
