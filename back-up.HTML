@@ -421,82 +421,6 @@
         border-radius:12px;
         flex-grow: 1; /* Allow canvas to take available space */
     }
-    
-    /* NEW STYLES FOR BOYLE'S LAW APPARATUS */
-    .simulation-container {
-      position: relative;
-      width: 400px;
-      height: 450px;
-      max-width: 90vw;
-      max-height: 100vw;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      margin-top: 20px;
-    }
-    .apparatus-image {
-      width: 100%;
-      height: auto;
-      object-fit: contain;
-    }
-    .pressure-gauge-overlay {
-      position: absolute;
-      top: 40%;
-      left: 70%;
-      width: 120px;
-      height: 120px;
-    }
-    .temperature-gauge-overlay {
-      position: absolute;
-      top: 40%;
-      left: 10%;
-      width: 120px;
-      height: 120px;
-    }
-    .needle {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform-origin: 0% 0%;
-      width: 50px;
-      height: 2px;
-      background-color: #ff0000;
-      transition: transform 0.5s ease-in-out;
-    }
-    .piston-overlay {
-        position: absolute;
-        width: 120px;
-        height: 10px;
-        background-color: #8c8c8c;
-        transition: top 0.5s ease-in-out;
-        z-index: 10;
-        left: 50%;
-        transform: translateX(-50%);
-        border-radius: 5px;
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    .piston-handle {
-        position: absolute;
-        width: 100px;
-        height: 20px;
-        background-color: #8c8c8c;
-        top: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 11;
-        border-radius: 5px 5px 0 0;
-        box-shadow: 0 0 10px rgba(0,0,0,0.5);
-    }
-    .volume-scale-text {
-        position: absolute;
-        top: 30%;
-        left: 30%;
-        font-size: 1.5rem;
-        color: white;
-        text-shadow: 1px 1px 2px #000;
-        transition: top 0.5s ease-in-out;
-    }
-    /* END OF NEW BOYLE'S LAW STYLES */
 
     /* Text for explanations in game modes */
     .explanation-text {
@@ -522,6 +446,11 @@
     }
     .slider-label-explanation strong {
         color: #eee;
+    }
+
+    .formula-display {
+      margin-top: 10px;
+      margin-bottom: 20px;
     }
 
     /* Media Queries for better mobile responsiveness */
@@ -639,26 +568,25 @@
     <p class="explanation-text">
       In Boyle's Law, when <strong>temperature</strong> and <strong>number of particles</strong> are constant, 
       the <strong>pressure</strong> of a gas is inversely proportional to its <strong>volume</strong>.
-      Watch how decreasing the container size (volume) affects the pressure.
+      Watch how increasing the pressure on the balloon decreases its volume.
     </p>
 
-    <div class="simulation-container">
-        <img src="https://i.ibb.co/L5k6s5c/Boyle-s-law-apparatus.png" class="apparatus-image" alt="Boyle's Law Apparatus">
-        <div class="pressure-gauge-overlay">
-            <div id="pressureNeedle" class="needle"></div>
-        </div>
-        <div class="temperature-gauge-overlay">
-            <div id="temperatureNeedle" class="needle"></div>
-        </div>
-        <div class="piston-handle"></div>
-        <div class="piston-overlay" style="top: 15%;"></div>
-        <div class="volume-scale-text" id="volumeScaleText">5</div>
+    <div class="formula-display">
+      <p class="formula-text" style="color: #FFD700; font-size: 1.5rem; text-shadow: 0 0 5px #FFD700;">
+        P₁V₁ = P₂V₂
+      </p>
+    </div>
+
+    <div class="container">
+      <div class="balloon-container" style="justify-content:center; align-items:center;">
+        <div id="boyleBalloon" class="balloon"></div>
+      </div>
     </div>
 
     <div class="slider-container">
-      <label>Volume: <span id="volumeVal"></span></label>
-      <p class="slider-label-explanation">Adjusts the **volume** of the gas in the container.</p>
-      <input type="range" id="volumeSlider" min="1" max="6" step="0.1" value="5">
+      <label>Pressure (au): <span id="pressureVal"></span></label>
+      <p class="slider-label-explanation">Adjusts the **pressure** exerted on the balloon.</p>
+      <input type="range" id="pressureSlider" min="0.5" max="3" step="0.1" value="1">
     </div>
 
     <button class="return-btn" onclick="returnToMenu()">Return to Menu</button>
@@ -846,52 +774,41 @@
     }
 
     // === BOYLE MODE (NEW) ===
-    const volumeSlider = document.getElementById('volumeSlider');
-    const volumeVal = document.getElementById('volumeVal');
-    const pressureNeedle = document.getElementById('pressureNeedle');
-    const temperatureNeedle = document.getElementById('temperatureNeedle');
-    const pistonOverlay = document.querySelector('.piston-overlay');
-    const pistonHandle = document.querySelector('.piston-handle');
-    const volumeScaleText = document.getElementById('volumeScaleText');
+    const pressureSlider = document.getElementById('pressureSlider');
+    const pressureVal = document.getElementById('pressureVal');
+    const boyleBalloon = document.getElementById('boyleBalloon');
+    const formulaText = document.querySelector('#boyle .formula-text');
 
-    const PISTON_TOP_MIN = 260; // Approximate top position for max volume
-    const PISTON_TOP_MAX = 500;  // Approximate top position for min volume
+    const INITIAL_PRESSURE = 1.0;
+    const INITIAL_VOLUME = 150;
+    const MIN_VOLUME = 50; // To prevent the balloon from disappearing
 
     function initBoyle() {
-        // Set initial positions based on the volume slider
         updateBoyleSimulation();
-
-        // Set the temperature needle to a constant position since T is constant
-        temperatureNeedle.style.transform = 'translate(-50%, -50%) rotate(0deg)'; 
     }
 
     function updateBoyleSimulation() {
-        const volume = parseFloat(volumeSlider.value);
-        volumeVal.textContent = volume.toFixed(1);
+        const pressure = parseFloat(pressureSlider.value);
+        pressureVal.textContent = pressure.toFixed(1);
 
-        // Map volume to piston position (linear mapping for visual effect)
-        const pistonPosition = PISTON_TOP_MIN + (6 - volume) / 5 * (PISTON_TOP_MAX - PISTON_TOP_MIN);
-        pistonOverlay.style.top = `${pistonPosition}px`;
-        pistonHandle.style.top = `${pistonPosition - 20}px`;
+        // Boyle's Law: P1*V1 = P2*V2  =>  V2 = (P1*V1) / P2
+        let volume = (INITIAL_PRESSURE * INITIAL_VOLUME) / pressure;
 
-        // Map volume to pressure (Boyle's Law: P ∝ 1/V)
-        const initialVolume = 5; // The initial volume from your image
-        const initialPressure = 1.0; // The initial pressure from your image
-        const pressure = initialPressure * (initialVolume / volume);
-        
-        // Map pressure value to needle rotation (0 to 2.5 on the gauge)
-        const maxPressureGauge = 2.5; // Max value on the gauge
-        const maxRotation = 180; // Total degrees of rotation for the needle
-        const rotationAngle = (pressure / maxPressureGauge) * maxRotation;
-        
-        pressureNeedle.style.transform = `translate(-50%, -50%) rotate(${rotationAngle}deg)`;
+        // Ensure volume doesn't get too small
+        if (volume < MIN_VOLUME) {
+            volume = MIN_VOLUME;
+        }
 
-        // Update volume scale text position
-        volumeScaleText.textContent = volume.toFixed(1);
-        volumeScaleText.style.top = `${pistonPosition + 25}px`;
+        // Map volume to balloon size
+        const sizeScale = volume / INITIAL_VOLUME;
+        boyleBalloon.style.width = `${100 * sizeScale}px`;
+        boyleBalloon.style.height = `${150 * sizeScale}px`;
+
+        // Update the formula text
+        formulaText.textContent = `P₁V₁ = P₂V₂  =>  ${INITIAL_PRESSURE.toFixed(1)} * ${INITIAL_VOLUME.toFixed(1)} = ${pressure.toFixed(1)} * ${volume.toFixed(1)}`;
     }
 
-    volumeSlider.oninput = () => {
+    pressureSlider.oninput = () => {
         updateBoyleSimulation();
     };
 
@@ -1186,7 +1103,7 @@
     function cancelAvogadroIncrease() {
       clearInterval(increaseInterval);
     }
-    
+
   </script>
 
 </body>
