@@ -1,92 +1,580 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>24 Game</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin-top: 40px;
-    }
-    .numbers {
-      font-size: 24px;
-      margin: 20px 0;
-    }
-    input[type="text"] {
-      width: 300px;
-      font-size: 18px;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 18px;
-      margin: 10px;
-    }
-    .result {
-      margin-top: 20px;
-      font-size: 20px;
-      font-weight: bold;
-    }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Hard Fusion Math Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --tile-size: min(22vw, 150px);
+            --gap-size: 8px;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            background-color: #0d1117;
+        }
+
+        /* Falling background */
+        @keyframes fall {
+            0% { transform: translateY(-20vh) rotate(0deg) scale(0.9); opacity: 0.08; filter: blur(0px); }
+            40% { opacity: 0.45; filter: blur(0.3px); }
+            100% { transform: translateY(120vh) rotate(360deg) scale(1.05); opacity: 0; filter: blur(1px); }
+        }
+
+        .math-symbol {
+            position: absolute;
+            color: rgba(80, 140, 200, 0.18);
+            font-size: 2.5rem;
+            pointer-events: none;
+            user-select: none;
+            animation: fall linear infinite;
+            will-change: transform, opacity;
+            text-shadow: 0 0 6px rgba(80,140,200,0.06);
+        }
+
+        /* Game board and tiles */
+        .game-grid {
+            width: calc(var(--tile-size) * 2 + 3 * var(--gap-size));
+            height: calc(var(--tile-size) * 2 + 3 * var(--gap-size));
+            background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+            grid-template-columns: repeat(2, var(--tile-size));
+            grid-template-rows: repeat(2, var(--tile-size));
+            display: grid;
+            gap: var(--gap-size);
+            padding: var(--gap-size);
+            border-radius: 1.5rem;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.6);
+            position: relative;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .tile-container { border-radius: 0.75rem; display:flex; justify-content:center; align-items:center; }
+
+        .value-tile {
+            position: absolute;
+            transition: transform 0.18s cubic-bezier(.2,.9,.2,1), left 0.18s ease, top 0.18s ease;
+            width: var(--tile-size);
+            height: var(--tile-size);
+            z-index: 5;
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            border-radius: 0.75rem;
+        }
+
+        .tile-value { font-size: 2.5rem; font-weight:700; color:#e2e8f0; transition: transform 0.12s; }
+
+        /* Tile palette */
+        .tile-2    { background-color: #3b526d; color: #e2e8f0; }
+        .tile-4    { background-color: #4a6685; color: #e2e8f0; }
+        .tile-8    { background-color: #6383a8; color: #f9f6f2; }
+        .tile-16   { background-color: #799fc9; color: #f9f6f2; }
+        .tile-32   { background-color: #8fbcdf; color: #f9f6f2; }
+        .tile-64   { background-color: #f65e3b; color: #f9f6f2; }
+        .tile-128  { background-color: #edcf72; color: #f9f6f2; }
+        .tile-256  { background-color: #edc951; color: #f9f6f2; }
+        .tile-512  { background-color: #edc53f; color: #f9f6f2; }
+        .tile-1024 { background-color: #edc22c; color: #f9f6f2; }
+        .tile-2048 { background-color: #ff9900; color: #f9f6f2; }
+
+        .tile-0 {
+            background-color: #1f2937;
+            border: 1px solid #374151;
+            z-index:1;
+            width:100%;
+            height:100%;
+        }
+        .tile-0 .tile-value { display:none; }
+
+        .operator-display {
+            display:flex;
+            flex-direction:column;
+            gap:1.5rem;
+            padding:1.5rem;
+            background-color: rgba(255,255,255,0.03);
+            border-radius:1.5rem;
+            box-shadow:0 6px 18px rgba(0,0,0,0.45);
+            margin-left:1.5rem;
+        }
+        .operator-symbol {
+            font-size:2.4rem;
+            font-weight:800;
+            color:#4a90e2;
+            text-shadow: 0 0 8px rgba(74,144,226,0.4)
+        }
+
+        /* Fusing and magnet effect */
+        .fusing-source {
+            animation: shrinkFade 0.35s ease-in forwards;
+            z-index: 12;
+        }
+        @keyframes shrinkFade {
+            0% { transform: scale(1) translateZ(0); opacity:1; }
+            100% { transform: scale(0.12) translateZ(0); opacity:0; }
+        }
+
+        .fusing-target .tile-value { animation: pop 0.35s ease-out; }
+        @keyframes pop {
+            0% { transform: scale(0.85); }
+            50% { transform: scale(1.12); }
+            100% { transform: scale(1); }
+        }
+
+        /* Magnet animation for the slow pull toward merge center */
+        .magnet-source {
+            transition: left 0.45s cubic-bezier(.2,.8,.2,1), top 0.45s cubic-bezier(.2,.8,.2,1), transform 0.45s cubic-bezier(.2,.8,.2,1);
+            z-index: 11;
+        }
+        .magnet-highlight {
+            box-shadow: 0 12px 30px rgba(74,144,226,0.25), inset 0 0 14px rgba(255,255,255,0.02);
+            transform-origin: center;
+        }
+
+        @media (max-width: 640px) {
+            :root { --tile-size: 25vw; --gap-size: 6px; }
+            .tile-value { font-size: 1.5rem; }
+            .operator-display { display: none; }
+        }
+    </style>
 </head>
-<body>
-  <h1>24 Game</h1>
-  <div class="numbers" id="numbersDisplay"></div>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+    <div id="math-background" class="absolute inset-0 z-0"></div>
 
-  <div>
-    <input type="text" id="expression" placeholder="Enter your expression here">
-  </div>
-  <div>
-    <button onclick="checkResult()">Check</button>
-    <button onclick="generateNumbers()">New Numbers</button>
-  </div>
-  <div class="result" id="result"></div>
+    <main class="z-10 flex flex-col items-center space-y-6">
+        <h1 class="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-2">2x2 Fusion</h1>
+        <p class="text-sm text-gray-400 font-medium">Click and Drag (then release) to move — pull tiles together & fuse 'em slow!</p>
 
-  <script>
-    let numbers = [];
+        <div class="flex items-start">
+            <div id="game-board" class="game-grid grid"></div>
 
-    function generateNumbers() {
-      numbers = [];
-      for (let i = 0; i < 4; i++) {
-        numbers.push(Math.floor(Math.random() * 9) + 1);
-      }
-      document.getElementById('numbersDisplay').innerText = "Numbers: " + numbers.join(", ");
-      document.getElementById('expression').value = "";
-      document.getElementById('result').innerText = "";
-    }
+            <div class="operator-display hidden sm:flex">
+                <span class="operator-symbol">+</span>
+                <span class="operator-symbol">−</span>
+                <span class="operator-symbol">×</span>
+                <span class="operator-symbol">÷</span>
+            </div>
+        </div>
 
-    function checkResult() {
-      const expr = document.getElementById('expression').value;
-      try {
-        // Evaluate expression
-        const result = eval(expr);
+        <div id="game-message" class="text-xl font-bold text-red-500 hidden transition-all duration-500"></div>
 
-        // Check if result is 24
-        if (Math.abs(result - 24) > 0.0001) {
-          document.getElementById('result').innerText = "❌ Result is not 24.";
-          return;
+        <div class="flex gap-4">
+            <button id="restart-button" class="mt-4 px-6 py-2 bg-purple-600 text-white font-semibold rounded-full shadow-lg hover:bg-purple-700 transition duration-300 transform hover:scale-105" onclick="setupGame()">Restart Game</button>
+            <button id="hint-button" class="mt-4 px-4 py-2 bg-slate-700 text-white rounded-full" onclick="showHint()">Hint</button>
+        </div>
+
+        <p class="text-xs text-gray-500 mt-4">Target: 24 — harder start (4 initial tiles) & more 4s spawn. Good luck!</p>
+    </main>
+
+    <script>
+        const GRID_SIZE = 2;
+        let board = [];
+        let score = 0;
+        let isGameOver = false;
+        let isMoving = false;
+
+        const boardElement = document.getElementById('game-board');
+        const messageElement = document.getElementById('game-message');
+
+        let TILE_SIZE = 0;
+        let GAP_SIZE = 0;
+
+        let touchstartX = 0, touchstartY = 0;
+        const MIN_DRAG_DISTANCE = 40;
+
+        function updateLayoutConstants() {
+            TILE_SIZE = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tile-size'));
+            GAP_SIZE = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--gap-size').replace('px',''), 10);
         }
 
-        // Extract numbers used
-        const usedNumbers = expr.match(/\d+/g)?.map(Number) || [];
+        const getTileClass = (value) => `tile-${value}`;
 
-        // Check if same numbers used
-        const sortedUsed = usedNumbers.slice().sort((a, b) => a - b);
-        const sortedOriginal = numbers.slice().sort((a, b) => a - b);
+        const getTilePosition = (r, c) => {
+            return {
+                left: c * (TILE_SIZE + GAP_SIZE) + GAP_SIZE,
+                top: r * (TILE_SIZE + GAP_SIZE) + GAP_SIZE,
+            };
+        };
 
-        if (JSON.stringify(sortedUsed) !== JSON.stringify(sortedOriginal)) {
-          document.getElementById('result').innerText = "❌ You must use all 4 numbers exactly once.";
-          return;
+        function setupGame() {
+            updateLayoutConstants();
+            board = Array(GRID_SIZE).fill(0).map(()=>Array(GRID_SIZE).fill(0));
+            score = 0;
+            isGameOver = false;
+            messageElement.classList.add('hidden');
+            messageElement.textContent = '';
+
+            boardElement.innerHTML = '';
+            createEmptyTiles();
+
+            // spawn 4 initial tiles to make it harder (or until board full)
+            for (let i=0;i<4;i++) spawnTile();
+
+            // draw final initial state
+            setTimeout(()=> drawBoard(true), 80);
         }
 
-        document.getElementById('result').innerText = "✅ Correct! You made 24!";
-      } catch (e) {
-        document.getElementById('result').innerText = "❌ Invalid expression.";
-      }
-    }
+        function spawnTile() {
+            if (isBoardFull()) return;
+            let r,c;
+            do { r = Math.floor(Math.random()*GRID_SIZE); c = Math.floor(Math.random()*GRID_SIZE); }
+            while (board[r][c] !== 0);
 
-    // Start with numbers
-    generateNumbers();
-  </script>
+            // HARDER: higher chance to get 4s
+            board[r][c] = Math.random() < 0.6 ? 2 : 4; // 60% 2, 40% 4
+        }
+
+        function isBoardFull() {
+            return board.every(row => row.every(v=>v!==0));
+        }
+
+        function checkGameOver() {
+            if (!isBoardFull()) return false;
+            for (let r=0;r<GRID_SIZE;r++){
+                for (let c=0;c<GRID_SIZE;c++){
+                    const cur = board[r][c];
+                    if (c < GRID_SIZE-1 && board[r][c+1] === cur) return false;
+                    if (r < GRID_SIZE-1 && board[r+1][c] === cur) return false;
+                }
+            }
+            isGameOver = true;
+            messageElement.textContent = "GAME OVER! You're stuck.";
+            messageElement.classList.remove('hidden');
+            return true;
+        }
+
+        async function handleMove(direction) {
+            if (isGameOver || isMoving) return;
+            isMoving = true;
+
+            const oldBoard = board.map(row => [...row]);
+            let hasMoved = false;
+
+            // moveLine returns { line, merges } where merges are indices that merged into target index
+            const moveLine = (line) => {
+                let nonZero = line.filter(v=>v!==0);
+                let merges = []; // pairs: {sourceIndices: [i1,i2], targetIndex}
+                // merging left-to-right (we'll reverse externally for right/down)
+                for (let i=0;i<nonZero.length-1;i++){
+                    if (nonZero[i] === nonZero[i+1]) {
+                        nonZero[i] *= 2;
+                        nonZero[i+1] = 0;
+                        merges.push({sourcePos: i, mergedToPos: i}); // record logical positions in the compressed array
+                    }
+                }
+                nonZero = nonZero.filter(v=>v!==0);
+                let zeros = Array(GRID_SIZE - nonZero.length).fill(0);
+                return {
+                    line: (direction === 'right' || direction === 'down') ? [...zeros, ...nonZero] : [...nonZero, ...zeros],
+                    // merges will need mapping back to full line indices by caller
+                    merges
+                };
+            };
+
+            // extract lines for direction
+            const lines = [];
+            if (direction === 'up' || direction === 'down') {
+                for (let c=0;c<GRID_SIZE;c++){
+                    const col = [];
+                    for (let r=0;r<GRID_SIZE;r++) col.push(board[r][c]);
+                    lines.push(col);
+                }
+            } else {
+                for (let r=0;r<GRID_SIZE;r++){
+                    lines.push([...board[r]]);
+                }
+            }
+
+            // Process each line
+            const newLines = [];
+            for (let idx=0; idx<lines.length; idx++){
+                let line = [...lines[idx]];
+                let reversed = (direction === 'right' || direction === 'down');
+                if (reversed) line.reverse();
+                const res = moveLine(line);
+                let newLine = res.line.slice();
+                if (reversed) newLine.reverse();
+                newLines.push(newLine);
+            }
+
+            // write back into board
+            if (direction === 'up' || direction === 'down') {
+                for (let c=0;c<GRID_SIZE;c++){
+                    for (let r=0;r<GRID_SIZE;r++){
+                        if (board[r][c] !== newLines[c][r]) hasMoved = true;
+                        board[r][c] = newLines[c][r];
+                    }
+                }
+            } else {
+                for (let r=0;r<GRID_SIZE;r++){
+                    for (let c=0;c<GRID_SIZE;c++){
+                        if (board[r][c] !== newLines[r][c]) hasMoved = true;
+                        board[r][c] = newLines[r][c];
+                    }
+                }
+            }
+
+            if (hasMoved) {
+                // animate movement with oldBoard as reference, enabling magnet animation for merges
+                await drawBoard(false, oldBoard);
+                // wait for animations to run
+                await new Promise(res => setTimeout(res, 520));
+                spawnTile();
+                drawBoard(true);
+
+                if (board.some(row => row.includes(24))) {
+                    messageElement.textContent = "YOU WON! Target 24 achieved!";
+                    messageElement.classList.remove('hidden');
+                    isGameOver = true;
+                }
+            }
+
+            checkGameOver();
+            isMoving = false;
+        }
+
+        function createEmptyTiles(){
+            for (let r=0;r<GRID_SIZE;r++){
+                for (let c=0;c<GRID_SIZE;c++){
+                    const id = `empty-tile-${r}-${c}`;
+                    if (document.getElementById(id)) continue;
+                    const tile = document.createElement('div');
+                    tile.id = id;
+                    tile.dataset.r = r;
+                    tile.dataset.c = c;
+                    tile.dataset.value = 0;
+                    tile.className = `tile-container ${getTileClass(0)}`;
+                    boardElement.appendChild(tile);
+                }
+            }
+        }
+
+        function createTileElement(r,c,value,isNew=false){
+            const tile = document.createElement('div');
+            tile.id = `tile-${Math.random().toString(36).slice(2,9)}`; // unique id to avoid collisions
+            tile.dataset.value = value;
+            tile.dataset.r = r;
+            tile.dataset.c = c;
+
+            const pos = getTilePosition(r,c);
+            tile.style.left = `${pos.left}px`;
+            tile.style.top  = `${pos.top}px`;
+
+            tile.className = `tile-container value-tile ${getTileClass(value)} shadow-md`;
+            tile.style.width = `${TILE_SIZE}px`;
+            tile.style.height = `${TILE_SIZE}px`;
+
+            const span = document.createElement('span');
+            span.className = 'tile-value';
+            span.textContent = value;
+            tile.appendChild(span);
+
+            if (isNew) {
+                tile.style.transform = 'scale(0)';
+                setTimeout(()=> tile.style.transform = 'scale(1)', 20);
+            }
+            return tile;
+        }
+
+        function findRealTileAt(r,c) {
+            return boardElement.querySelector(`.value-tile[data-r="${r}"][data-c="${c}"]`);
+        }
+
+        // find all positions in a board with a given value
+        function findPositionsWithValue(bd, val) {
+            const res = [];
+            for (let r=0;r<GRID_SIZE;r++) for (let c=0;c<GRID_SIZE;c++) if (bd[r][c] === val) res.push([r,c]);
+            return res;
+        }
+
+        // Given oldBoard and newBoard, find merge targets and source lists
+        function computeMergeMappings(oldB, newB){
+            // returns map keyed by targetPos 'r,c' -> array of source positions [ [r,c], ... ]
+            const map = {};
+            // for each value in oldB, see if newB has 2*value
+            for (let r=0;r<GRID_SIZE;r++){
+                for (let c=0;c<GRID_SIZE;c++){
+                    const v = oldB[r][c];
+                    if (v === 0) continue;
+                    // find any cell in newB with 2*v that also wasn't 2v before (or simply exists)
+                }
+            }
+            // simpler approach: for each target cell in newB where newVal > 0,
+            // see how many sources in oldB with value = newVal/2 exist and were consumed (i.e., old positions not present in newB)
+            for (let tr=0; tr<GRID_SIZE; tr++){
+                for (let tc=0; tc<GRID_SIZE; tc++){
+                    const newVal = newB[tr][tc];
+                    if (newVal > 0) {
+                        const half = newVal/2;
+                        if (!Number.isInteger(half)) continue;
+                        const sources = findPositionsWithValue(oldB, half);
+                        if (sources.length === 0) continue;
+                        // Check how many of these source positions are no longer present as same-value in newB
+                        const consumed = sources.filter(([sr,sc]) => {
+                            // if newB at same coordinate is not the same half value, it was moved/consumed
+                            return newB[sr][sc] !== half;
+                        });
+                        if (consumed.length >= 1) {
+                            // assign consumed as merge sources for this target
+                            map[`${tr},${tc}`] = consumed.slice(0,2); // we only need up to 2
+                        }
+                    }
+                }
+            }
+            return map;
+        }
+
+        async function drawBoard(isFinalDraw=false, oldBoard=null){
+            const occupiedPositions = new Set();
+            for (let r=0;r<GRID_SIZE;r++){
+                for (let c=0;c<GRID_SIZE;c++){
+                    const value = board[r][c];
+                    if (value > 0) {
+                        occupiedPositions.add(`${r},${c}`);
+                        let existingTile = findRealTileAt(r,c);
+                        const isNew = isFinalDraw && !existingTile;
+                        if (!existingTile) {
+                            const el = createTileElement(r,c,value,isNew);
+                            el.dataset.r = r; el.dataset.c = c; el.dataset.value = value;
+                            boardElement.appendChild(el);
+                        } else {
+                            // update dataset & value text
+                            existingTile.dataset.r = r; existingTile.dataset.c = c;
+                            existingTile.dataset.value = value;
+                            const span = existingTile.querySelector('.tile-value');
+                            if (span) span.textContent = value;
+
+                            // update tile class -> remove old tile-* classes then add new
+                            existingTile.className = existingTile.className.split(' ').filter(cl => !cl.startsWith('tile-')).join(' ');
+                            existingTile.classList.add(getTileClass(value),'value-tile','shadow-md');
+                            // ensure correct positioning
+                            const pos = getTilePosition(r,c);
+                            existingTile.style.left = `${pos.left}px`;
+                            existingTile.style.top = `${pos.top}px`;
+                        }
+                    }
+                }
+            }
+
+            // If we have an oldBoard and not finalDraw, compute merges for magnet animation
+            const mergeMap = (oldBoard && !isFinalDraw) ? computeMergeMappings(oldBoard, board) : {};
+
+            // remove orphan tiles (sources that moved/merged). Animate those that are merging (magnet) or fusing normally
+            Array.from(boardElement.querySelectorAll('.value-tile')).forEach(tile => {
+                const tr = tile.dataset.r;
+                const tc = tile.dataset.c;
+                const tilePosKey = `${tr},${tc}`;
+                const tileVal = parseInt(tile.dataset.value);
+
+                // if tile still present in logical board at same pos with same value -> keep it
+                if (occupiedPositions.has(tilePosKey) && board[tr][tc] === tileVal) return;
+
+                // otherwise tile is orphaned (moved away or consumed)
+                if (oldBoard && !isFinalDraw) {
+                    // find a merge target this tile should head toward
+                    const possibleTarget = findMergeTarget(parseInt(tile.dataset.r), parseInt(tile.dataset.c), tileVal, board);
+                    if (possibleTarget) {
+                        const [tR,tC] = possibleTarget;
+                        // check mergeMap for target to get all sources (so both are animated)
+                        const sources = mergeMap[`${tR},${tC}`] || [[tile.dataset.r, tile.dataset.c]];
+                        // if multiple sources, animate both to center slowly (magnet)
+                        const targetPos = getTilePosition(tR,tC);
+                        tile.classList.add('magnet-source','magnet-highlight');
+                        tile.style.transition = 'left 0.45s cubic-bezier(.2,.8,.2,1), top 0.45s cubic-bezier(.2,.8,.2,1), transform 0.45s cubic-bezier(.2,.8,.2,1)';
+                        tile.style.left = `${targetPos.left + (TILE_SIZE*0.5 - TILE_SIZE*0.5)}px`; // center align
+                        tile.style.top  = `${targetPos.top}px`;
+                        tile.style.transform = 'scale(0.95) rotate(3deg)';
+                        // remove after animation
+                        setTimeout(()=> {
+                            tile.remove();
+                        }, 480);
+                        return;
+                    }
+                }
+
+                // default removal (no animation)
+                tile.remove();
+            });
+        }
+
+        // findMergeTarget: search newBoard for a cell that equals oldValue*2
+        function findMergeTarget(oldR, oldC, oldValue, newBoard) {
+            for (let r=0;r<GRID_SIZE;r++){
+                for (let c=0;c<GRID_SIZE;c++){
+                    if (newBoard[r][c] === oldValue*2) {
+                        return [r,c];
+                    }
+                }
+            }
+            return null;
+        }
+
+        function setupMouseControls() {
+            boardElement.addEventListener('mousedown', handleDragStart, false);
+            document.addEventListener('mouseup', handleDragEnd, false);
+            boardElement.addEventListener('touchstart', handleDragStart, false);
+            document.addEventListener('touchend', handleDragEnd, false);
+        }
+
+        function handleDragStart(event){
+            if (isMoving || isGameOver) return;
+            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+            touchstartX = clientX; touchstartY = clientY;
+            if (event.cancelable) event.preventDefault();
+        }
+
+        function handleDragEnd(event){
+            if (isMoving || isGameOver) return;
+            const touchendX = event.changedTouches ? event.changedTouches[0].clientX : event.clientX;
+            const touchendY = event.changedTouches ? event.changedTouches[0].clientY : event.clientY;
+            const diffX = touchendX - touchstartX;
+            const diffY = touchendY - touchstartY;
+            touchstartX = 0; touchstartY = 0;
+            if (Math.abs(diffX) < MIN_DRAG_DISTANCE && Math.abs(diffY) < MIN_DRAG_DISTANCE) return;
+            let direction = null;
+            if (Math.abs(diffX) > Math.abs(diffY)) direction = diffX > 0 ? 'right' : 'left';
+            else direction = diffY > 0 ? 'down' : 'up';
+            if (direction) handleMove(direction);
+        }
+
+        // background symbols
+        function setupMathBackground(){
+            const symbols = ['Σ','∫','∂','π','√','x²','log','∞','Δ','θ','=','≥','∑','f(x)','e^{x}'];
+            const bg = document.getElementById('math-background');
+            const total = 60;
+            for (let i=0;i<total;i++){
+                const s = document.createElement('div');
+                s.className = 'math-symbol';
+                s.innerHTML = symbols[Math.floor(Math.random()*symbols.length)];
+                // distribution
+                s.style.left = `${Math.random()*100}vw`;
+                const size = (Math.random()*1.6 + 0.8).toFixed(2);
+                s.style.fontSize = `${size}rem`;
+                s.style.animationDelay = `${Math.random()*8}s`;
+                // slower, more dreamy durations
+                s.style.animationDuration = `${Math.random()*18 + 14}s`;
+                s.style.opacity = (Math.random()*0.4 + 0.05);
+                bg.appendChild(s);
+            }
+        }
+
+        // small helpful hint
+        function showHint() {
+            messageElement.textContent = "Hint: Try to fuse the two equal tiles into a center — watch them slowly pull together.";
+            messageElement.classList.remove('hidden');
+            setTimeout(()=> messageElement.classList.add('hidden'), 2400);
+        }
+
+        window.onload = () => {
+            setupMathBackground();
+            updateLayoutConstants();
+            setupGame();
+            setupMouseControls();
+            window.addEventListener('resize', updateLayoutConstants);
+        };
+    </script>
 </body>
 </html>
