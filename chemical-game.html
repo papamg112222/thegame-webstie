@@ -153,7 +153,7 @@
     <div id="crosshair"></div>
 
     <div id="console">
-        <input type="text" id="console-input" placeholder="Type command (e.g., /set crystal 149) and press Enter" />
+        <input type="text" id="console-input" placeholder="Type command (e.g., /freecam, /unfreecam, /set crystal 149) and press Enter" />
     </div>
 
     <div id="message-box">
@@ -174,10 +174,15 @@
         document.body.appendChild(minimap);
 
         // --- Console/Cheat Variables ---
-        // RESTORED
         let isConsoleOpen = false; 
         const consoleElement = document.getElementById('console');
         const consoleInput = document.getElementById('console-input');
+        
+        // --- Freecam Variables ---
+        let isFreeCam = false; // NEW
+        let moveUp = false;    // NEW (Q)
+        let moveDown = false;  // NEW (E)
+        const FREECAM_SPEED = 500; // NEW - Super fast movement for freecam
 
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
@@ -185,7 +190,7 @@
         
         let offsetX, offsetZ;
         
-        // Speed Definitions (From previous version)
+        // Speed Definitions
         const WALK_SPEED = 32;
         const GHOST_WANDER_SPEED = 15; 
         const GHOST_SPEED = 150; 
@@ -428,7 +433,7 @@
             });
             controls.addEventListener('unlock', () => {
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    if (!isConsoleOpen) { // Keep info screen hidden if console is open
+                    if (!isConsoleOpen && !isFreeCam) { // Only show info if neither console nor freecam is active
                          infoElement.style.display = 'block';
                     }
                 }
@@ -451,14 +456,16 @@
             document.addEventListener('keyup', onKeyUp, false);
             window.addEventListener('resize', onWindowResize, false);
 
-            // RESTORED Console event listener
             consoleInput.addEventListener('keydown', (event) => {
                 if (event.code === 'Enter') {
                     processCommand(consoleInput.value);
                     consoleInput.value = '';
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
-                    controls.lock(); // Re-lock controls after command
+                    
+                    if (!isFreeCam) {
+                        controls.lock(); // Re-lock controls after command only if not in FreeCam
+                    }
                 }
             });
         }
@@ -486,12 +493,11 @@
                         wall.userData.isWall = true;
                         scene.add(wall);
                         wallObjects.push(wall);
-                    } else if (cellType === 2) { // Exit (Now acts as the open door/portal)
+                    } else if (cellType === 2) { // Exit 
                         const exitMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
                         const exitGeometry = new THREE.PlaneGeometry(CELL_SIZE * 0.9, WALL_HEIGHT * 0.9);
                         const exitPortal = new THREE.Mesh(exitGeometry, exitMaterial);
 
-                        // Determine door orientation based on exit position
                         let doorRotation = 0; 
                         if (EXIT_COL === 1 || EXIT_COL === MAX_COL - 2) {
                             doorRotation = Math.PI / 2;
@@ -501,7 +507,6 @@
                         exitPortal.position.set(x, WALL_HEIGHT / 2, z);
                         exitPortal.userData.isExit = true;
                         
-                        // Hide portal until 150 crystals are collected (Frenzy Mode)
                         exitPortal.visible = false;
                         
                         const exitLight = new THREE.PointLight(0x00ff00, 0, 25);
@@ -512,18 +517,16 @@
                         scene.add(exitPortal);
                         winPosition = exitPortal;
 
-                        // Create the CLOSED DOOR placeholder (Acts as a temporary wall)
-                        const doorMaterial = new THREE.MeshPhongMaterial({ color: 0x5c3317, shininess: 10 }); // Simple brown door color
+                        const doorMaterial = new THREE.MeshPhongMaterial({ color: 0x5c3317, shininess: 10 }); 
                         const doorGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, WALL_HEIGHT, 1);
                         const closedDoor = new THREE.Mesh(doorGeometry, doorMaterial);
                         closedDoor.position.set(x, WALL_HEIGHT / 2, z);
                         closedDoor.rotation.y = doorRotation;
                         closedDoor.userData.isDoor = true;
-                        closedDoor.userData.isWall = true; // IMPORTANT: Makes it a physical barrier
+                        closedDoor.userData.isWall = true; 
                         scene.add(closedDoor);
                         wallObjects.push(closedDoor);
                         
-                        // Store door references for removal
                         winPosition.userData.closedDoor = closedDoor;
                     }
                 }
@@ -607,7 +610,6 @@
 
             const direction = new THREE.Vector3().subVectors(ghostPosition, playerPosition).normalize();
             raycaster.set(playerPosition, direction);
-            // Check intersection with all walls *except* the closed door (which will be removed anyway)
             const objectsToIntersect = wallObjects.filter(obj => !obj.userData.isDoor); 
             const intersects = raycaster.intersectObjects(objectsToIntersect);
 
@@ -620,6 +622,8 @@
         }
 
         function moveGhosts(delta) {
+            if (isFreeCam) return; // Freeze ghosts when freecam is active
+            
             const currentTime = clock.getElapsedTime();
             
             const shouldUpdatePath = ghostUpdateTimer >= GHOST_UPDATE_INTERVAL;
@@ -654,14 +658,12 @@
                 } 
                 // --- 2. REGULAR AI MODE ---
                 else {
-                    // --- AI State Update ---
                     if (ghostIsSeeingPlayer) {
                         ghostMesh.userData.chasing = true; 
                     } else if (ghostPath.length === 0) {
                          ghostMesh.userData.chasing = false; 
                     }
 
-                    // --- Path Calculation ---
                     if (ghostMesh.userData.chasing) {
                         moveSpeed = GHOST_CHASE_SPEED;
                         if (shouldUpdatePath) { 
@@ -674,7 +676,7 @@
                         }
                     } else {
                         moveSpeed = GHOST_WANDER_SPEED;
-                        if (ghostPath.length === 0 && shouldUpdatePath) { // Wander
+                        if (ghostPath.length === 0 && shouldUpdatePath) { 
                             const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
                             const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
                             const validNeighbors = directions.map(([dr, dc]) => [ghostGridPos.r + dr, ghostGridPos.c + dc])
@@ -718,6 +720,8 @@
         }
 
         function checkCatchCondition(ghostPosition) { 
+            if (isFreeCam) return; // Cannot be caught in freecam
+            
             const catchDistance = 3; 
             const dist = camera.position.distanceTo(ghostPosition);
 
@@ -725,17 +729,19 @@
                 showAlert("CAUGHT! A Ghost found you in the deep maze.", false);
             }
         }
-        
+
         function openExitPortal() {
             const door = winPosition.userData.closedDoor;
             scene.remove(door);
             wallObjects = wallObjects.filter(obj => obj.uuid !== door.uuid);
 
-            winPosition.visible = true; // Show the glowing portal
-            winPosition.userData.light.intensity = 5; // Turn on the light
+            winPosition.visible = true; 
+            winPosition.userData.light.intensity = 5; 
         }
 
         function checkCrystalCollection() {
+            if (isFreeCam) return; 
+
             const playerPos = camera.position;
             const collectionRadius = 5; 
 
@@ -753,7 +759,7 @@
                         ghostsGoFrenzy = true; 
                         playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
                         playerStatus.classList.add('sprinting'); 
-                        openExitPortal(); // Open the door/portal
+                        openExitPortal();
                     }
 
                     return;
@@ -761,7 +767,7 @@
             }
         }
         
-        // --- CHEAT FUNCTIONS - RESTORED ---
+        // --- CHEAT FUNCTIONS ---
         function setCrystalCount(count) {
             crystalsCollected = count;
             
@@ -773,13 +779,29 @@
                 playerStatus.classList.add('sprinting'); 
                 openExitPortal();
             } else {
-                // To safely reset the game state if crystals are reduced
                 window.location.reload(); 
             }
             
             updateStatusBar();
             if (crystalsCollected >= TOTAL_CRYSTALS) {
                 minimap.style.display = 'block'; 
+            }
+        }
+
+        function toggleFreeCam(activate) { // NEW
+            if (isFreeCam === activate) return; 
+
+            isFreeCam = activate;
+            
+            if (isFreeCam) {
+                 // Nothing special needed here, movement logic in animate() handles the rest
+            } else {
+                // Return to normal mode: snap player back to floor and reset vertical movement
+                if (camera.position.y < PLAYER_HEIGHT) {
+                    camera.position.y = PLAYER_HEIGHT;
+                }
+                moveUp = moveDown = false;
+                controls.lock(); // Immediately lock controls to resume play
             }
         }
         
@@ -795,6 +817,12 @@
                 } else {
                     console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
                 }
+            } else if (command === '/freecam') { // NEW
+                toggleFreeCam(true);
+                console.log(`[Cheat] FreeCam Activated.`);
+            } else if (command === '/unfreecam') { // NEW
+                toggleFreeCam(false);
+                console.log(`[Cheat] FreeCam Deactivated.`);
             }
         }
         // --- END CHEAT FUNCTIONS ---
@@ -841,7 +869,7 @@
             }
 
             // Draw Exit (Green dot)
-            ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; // Green when open, Brown/Door when closed
+            ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; 
             ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
             
             // Draw Ghosts
@@ -864,21 +892,22 @@
             ctx.fill();
         }
 
-        // --- Input Handlers - RESTORED '/' LOGIC ---
+        // --- Input Handlers - UPDATED ---
         function onKeyDown(event) {
-            // 1. Console commands handler
             if (isConsoleOpen) {
                 if (event.code === 'Escape') {
                     event.preventDefault(); 
                     consoleInput.value = '';
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
-                    controls.lock(); // Re-lock controls
+                    
+                    if (!isFreeCam) {
+                         controls.lock(); 
+                    }
                 }
                 return; 
             }
             
-            // 2. Open console on "/"
             if (event.code === 'Slash' && !event.shiftKey && controls.isLocked) {
                 event.preventDefault(); 
                 controls.unlock();
@@ -896,6 +925,9 @@
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                // NEW: Freecam vertical movement
+                case 'KeyQ': moveUp = true; break; 
+                case 'KeyE': moveDown = true; break; 
             }
         }
 
@@ -907,6 +939,9 @@
                 case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = false; break;
                 case 'ArrowRight': case 'KeyD': moveRight = false; break;
+                // NEW: Freecam vertical movement
+                case 'KeyQ': moveUp = false; break;
+                case 'KeyE': moveDown = false; break;
             }
         }
         
@@ -916,77 +951,96 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Game Loop and Logic (Minor animation update) ---
+        // --- Game Loop and Logic - UPDATED FOR FREECAM ---
 
         function animate() {
             requestAnimationFrame(animate);
 
             const delta = clock.getDelta();
 
-            if (controls.isLocked === true && gameActive) {
+            if (controls.isLocked === true || isFreeCam) {
                 
                 updatePlayerGridPosition(); 
                 
-                let ghostInSight = false;
-                if (!ghostsGoFrenzy) {
-                    ghosts.forEach(ghost => {
-                        if(isGhostVisible(ghost)) {
-                            ghostInSight = true;
-                        }
-                    });
-                }
-                
-                moveGhosts(delta); 
-                checkCrystalCollection();
-
-                // --- Sprint Logic ---
-                if (!ghostsGoFrenzy) {
-                    if (ghostInSight) {
-                        effectiveSpeed = SPRINT_SPEED;
-                        sprintDelayTimer = SPRINT_DELAY_DURATION; 
-                        playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
-                        playerStatus.classList.add('sprinting');
-                    } else if (sprintDelayTimer > 0) {
-                        sprintDelayTimer -= delta;
-                        sprintDelayTimer = Math.max(0, sprintDelayTimer);
-                        effectiveSpeed = SPRINT_SPEED;
-                        playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
-                        playerStatus.classList.add('sprinting');
-                    } else {
-                        effectiveSpeed = WALK_SPEED;
-                        playerStatus.textContent = "Status: Walking...";
-                        playerStatus.classList.remove('sprinting');
+                // If in freecam, skip all game logic (ghosts, crystal collection, sprint logic)
+                if (!isFreeCam) { 
+                    let ghostInSight = false;
+                    if (!ghostsGoFrenzy) {
+                        ghosts.forEach(ghost => {
+                            if(isGhostVisible(ghost)) {
+                                ghostInSight = true;
+                            }
+                        });
                     }
-                } else {
-                    effectiveSpeed = SPRINT_SPEED; 
-                }
-                
-                updateStatusBar();
+                    
+                    moveGhosts(delta); 
+                    checkCrystalCollection();
 
+                    // --- Sprint Logic ---
+                    if (!ghostsGoFrenzy) {
+                        if (ghostInSight) {
+                            effectiveSpeed = SPRINT_SPEED;
+                            sprintDelayTimer = SPRINT_DELAY_DURATION; 
+                            playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
+                            playerStatus.classList.add('sprinting');
+                        } else if (sprintDelayTimer > 0) {
+                            sprintDelayTimer -= delta;
+                            sprintDelayTimer = Math.max(0, sprintDelayTimer);
+                            effectiveSpeed = SPRINT_SPEED;
+                            playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
+                            playerStatus.classList.add('sprinting');
+                        } else {
+                            effectiveSpeed = WALK_SPEED;
+                            playerStatus.textContent = "Status: Walking...";
+                            playerStatus.classList.remove('sprinting');
+                        }
+                    } else {
+                        effectiveSpeed = SPRINT_SPEED; 
+                    }
+                    
+                    updateStatusBar();
+                } else {
+                    // Freecam active, update status to reflect
+                    playerStatus.textContent = "Status: FREECAM ACTIVE";
+                    playerStatus.classList.remove('sprinting');
+                    ghostProximity.textContent = `Threat: PAUSED | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
+                }
+
+
+                let currentSpeed = isFreeCam ? FREECAM_SPEED : effectiveSpeed;
+                
                 // Movement Calculation
                 const velocity = new THREE.Vector3();
-                if (moveForward) velocity.z -= effectiveSpeed * delta;
-                if (moveBackward) velocity.z += effectiveSpeed * delta;
-                if (moveLeft) velocity.x -= effectiveSpeed * delta;
-                if (moveRight) velocity.x += effectiveSpeed * delta;
+                if (moveForward) velocity.z -= currentSpeed * delta;
+                if (moveBackward) velocity.z += currentSpeed * delta;
+                if (moveLeft) velocity.x -= currentSpeed * delta;
+                if (moveRight) velocity.x += currentSpeed * delta;
+                
+                // NEW: Freecam vertical movement
+                if (isFreeCam) {
+                    if (moveUp) velocity.y += currentSpeed * delta;
+                    if (moveDown) velocity.y -= currentSpeed * delta;
+                    camera.position.y += velocity.y; 
+                }
 
                 const oldPosition = camera.position.clone();
                 
                 controls.moveRight(velocity.x); 
                 controls.moveForward(-velocity.z);
 
-                // Collision Detection
-                const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
+                // Collision Detection: Only run if NOT in freecam mode
+                if (!isFreeCam) { 
+                    const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
+                    const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
 
-                if (isColliding(currentGridX, currentGridZ, oldPosition)) {
-                    camera.position.copy(oldPosition);
-                }
-
-                // Win Condition
-                checkWinCondition();
+                    if (isColliding(currentGridX, currentGridZ, oldPosition)) {
+                        camera.position.copy(oldPosition);
+                    }
+                    
+                    checkWinCondition();
+                } 
                 
-                // Animate exit light pulse & crystals
+                // Animate lights & crystals (always on)
                 if (winPosition && winPosition.visible && winPosition.userData.light) {
                     winPosition.userData.light.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
                     winPosition.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
@@ -1003,13 +1057,14 @@
         }
 
         function isColliding(gridX, gridZ, oldPosition) {
+            if (isFreeCam) return false; // NEW: No collision in freecam
+            
             if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
                 return true;
             }
 
             if (mazeGrid[gridZ][gridX] === 1) {
                 
-                // Perform X-revert test
                 const tempX = oldPosition.x;
                 const tempZ = camera.position.z;
                 
@@ -1020,7 +1075,6 @@
                     camera.position.z = oldPosition.z; 
                 }
                 
-                // Perform Z-revert test 
                 const tempX_2 = camera.position.x;
                 const tempZ_2 = oldPosition.z;
 
@@ -1031,7 +1085,6 @@
                     camera.position.x = oldPosition.x; 
                 }
 
-                // Final check after partial reverts
                 const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
                 const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
                 
@@ -1043,6 +1096,7 @@
         }
 
         function checkWinCondition() {
+            if (isFreeCam) return; // Cannot win in freecam
             if (!winPosition || !winPosition.visible) return;
             
             const distanceToExit = camera.position.distanceTo(winPosition.position);
