@@ -153,7 +153,7 @@
     <div id="crosshair"></div>
 
     <div id="console">
-        <input type="text" id="console-input" placeholder="Type command (e.g., /freecam, /unfreecam, /set crystal 149) and press Enter" />
+        <input type="text" id="console-input" placeholder="Type command (e.g., /freecam, /flyspeed 50, /set crystal 149) and press Enter" />
     </div>
 
     <div id="message-box">
@@ -179,10 +179,13 @@
         const consoleInput = document.getElementById('console-input');
         
         // --- Freecam Variables ---
-        let isFreeCam = false; // NEW
-        let moveUp = false;    // NEW (Q)
-        let moveDown = false;  // NEW (E)
-        const FREECAM_SPEED = 500; // NEW - Super fast movement for freecam
+        let isFreeCam = false; 
+        let moveUp = false;    
+        let moveDown = false;  
+        
+        // NEW: Fly Speed Variables
+        const MAX_FREECAM_SPEED = 500; // Base speed for the 100 level
+        let flySpeedMultiplier = 10; // Default speed level (10%)
 
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
@@ -432,8 +435,9 @@
                 gameActive = true;
             });
             controls.addEventListener('unlock', () => {
+                // Keep the info screen hidden if in freecam mode
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    if (!isConsoleOpen && !isFreeCam) { // Only show info if neither console nor freecam is active
+                    if (!isConsoleOpen && !isFreeCam) { 
                          infoElement.style.display = 'block';
                     }
                 }
@@ -463,9 +467,8 @@
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
                     
-                    if (!isFreeCam) {
-                        controls.lock(); // Re-lock controls after command only if not in FreeCam
-                    }
+                    // FIX: Always attempt to re-lock controls after console input to restore mouse control
+                    controls.lock(); 
                 }
             });
         }
@@ -622,7 +625,7 @@
         }
 
         function moveGhosts(delta) {
-            if (isFreeCam) return; // Freeze ghosts when freecam is active
+            if (isFreeCam) return; 
             
             const currentTime = clock.getElapsedTime();
             
@@ -720,7 +723,7 @@
         }
 
         function checkCatchCondition(ghostPosition) { 
-            if (isFreeCam) return; // Cannot be caught in freecam
+            if (isFreeCam) return; 
             
             const catchDistance = 3; 
             const dist = camera.position.distanceTo(ghostPosition);
@@ -788,20 +791,20 @@
             }
         }
 
-        function toggleFreeCam(activate) { // NEW
+        function toggleFreeCam(activate) { 
             if (isFreeCam === activate) return; 
 
             isFreeCam = activate;
             
             if (isFreeCam) {
-                 // Nothing special needed here, movement logic in animate() handles the rest
+                 // Nothing specific needed here, controls.lock() handles the mouse look
             } else {
                 // Return to normal mode: snap player back to floor and reset vertical movement
                 if (camera.position.y < PLAYER_HEIGHT) {
                     camera.position.y = PLAYER_HEIGHT;
                 }
                 moveUp = moveDown = false;
-                controls.lock(); // Immediately lock controls to resume play
+                // Note: controls.lock() is handled when the console closes, or when ESC/unlock is exited.
             }
         }
         
@@ -817,18 +820,28 @@
                 } else {
                     console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
                 }
-            } else if (command === '/freecam') { // NEW
+            } else if (command === '/freecam') { 
                 toggleFreeCam(true);
                 console.log(`[Cheat] FreeCam Activated.`);
-            } else if (command === '/unfreecam') { // NEW
+            } else if (command === '/unfreecam') { 
                 toggleFreeCam(false);
                 console.log(`[Cheat] FreeCam Deactivated.`);
+            } else if (command === '/flyspeed') { // NEW
+                const speedLevel = parseInt(parts[1]);
+                if (!isNaN(speedLevel) && speedLevel >= 1 && speedLevel <= 100) {
+                    flySpeedMultiplier = speedLevel;
+                    console.log(`[Cheat] Fly speed set to ${flySpeedMultiplier}.`);
+                } else {
+                    console.log(`[Cheat] Invalid speed level. Must be between 1 and 100.`);
+                }
             }
         }
         // --- END CHEAT FUNCTIONS ---
 
 
         function updateStatusBar() {
+            if (isFreeCam) return; // Status is updated in animate() when in freecam
+
             let closestDist = Infinity;
             ghosts.forEach(ghost => {
                 const dist = camera.position.distanceTo(ghost.position);
@@ -892,7 +905,7 @@
             ctx.fill();
         }
 
-        // --- Input Handlers - UPDATED ---
+        // --- Input Handlers (Unchanged) ---
         function onKeyDown(event) {
             if (isConsoleOpen) {
                 if (event.code === 'Escape') {
@@ -901,9 +914,7 @@
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
                     
-                    if (!isFreeCam) {
-                         controls.lock(); 
-                    }
+                    controls.lock(); 
                 }
                 return; 
             }
@@ -919,13 +930,11 @@
                 return;
             }
 
-            // 3. Game movement keys
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = true; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
-                // NEW: Freecam vertical movement
                 case 'KeyQ': moveUp = true; break; 
                 case 'KeyE': moveDown = true; break; 
             }
@@ -939,7 +948,6 @@
                 case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = false; break;
                 case 'ArrowRight': case 'KeyD': moveRight = false; break;
-                // NEW: Freecam vertical movement
                 case 'KeyQ': moveUp = false; break;
                 case 'KeyE': moveDown = false; break;
             }
@@ -951,7 +959,7 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Game Loop and Logic - UPDATED FOR FREECAM ---
+        // --- Game Loop and Logic - UPDATED FOR FREECAM SPEED ---
 
         function animate() {
             requestAnimationFrame(animate);
@@ -962,7 +970,8 @@
                 
                 updatePlayerGridPosition(); 
                 
-                // If in freecam, skip all game logic (ghosts, crystal collection, sprint logic)
+                let currentSpeed;
+                
                 if (!isFreeCam) { 
                     let ghostInSight = false;
                     if (!ghostsGoFrenzy) {
@@ -998,16 +1007,17 @@
                         effectiveSpeed = SPRINT_SPEED; 
                     }
                     
-                    updateStatusBar();
+                    currentSpeed = effectiveSpeed;
+                    updateStatusBar(); // Update regular status bar
                 } else {
-                    // Freecam active, update status to reflect
-                    playerStatus.textContent = "Status: FREECAM ACTIVE";
+                    // Freecam active, update status and set speed
+                    currentSpeed = (MAX_FREECAM_SPEED / 100) * flySpeedMultiplier;
+                    playerStatus.textContent = `Status: FREECAM ACTIVE (Speed: ${flySpeedMultiplier})`;
                     playerStatus.classList.remove('sprinting');
                     ghostProximity.textContent = `Threat: PAUSED | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
                 }
 
 
-                let currentSpeed = isFreeCam ? FREECAM_SPEED : effectiveSpeed;
                 
                 // Movement Calculation
                 const velocity = new THREE.Vector3();
@@ -1016,7 +1026,7 @@
                 if (moveLeft) velocity.x -= currentSpeed * delta;
                 if (moveRight) velocity.x += currentSpeed * delta;
                 
-                // NEW: Freecam vertical movement
+                // Freecam vertical movement
                 if (isFreeCam) {
                     if (moveUp) velocity.y += currentSpeed * delta;
                     if (moveDown) velocity.y -= currentSpeed * delta;
@@ -1040,7 +1050,7 @@
                     checkWinCondition();
                 } 
                 
-                // Animate lights & crystals (always on)
+                // Animate lights & crystals 
                 if (winPosition && winPosition.visible && winPosition.userData.light) {
                     winPosition.userData.light.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
                     winPosition.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
@@ -1057,7 +1067,7 @@
         }
 
         function isColliding(gridX, gridZ, oldPosition) {
-            if (isFreeCam) return false; // NEW: No collision in freecam
+            if (isFreeCam) return false; 
             
             if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
                 return true;
@@ -1096,7 +1106,7 @@
         }
 
         function checkWinCondition() {
-            if (isFreeCam) return; // Cannot win in freecam
+            if (isFreeCam) return; 
             if (!winPosition || !winPosition.visible) return;
             
             const distanceToExit = camera.position.distanceTo(winPosition.position);
