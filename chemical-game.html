@@ -15,7 +15,6 @@
             color: #E0E0E0;
             user-select: none;
             overflow: hidden;
-            /* Ensure the body and html take up full viewport */
             margin: 0;
             padding: 0;
             height: 100vh;
@@ -129,6 +128,36 @@
             font-size: 16px;
             outline: none;
         }
+        
+        /* --- Item Bar Styles --- */
+        .item-slot {
+            width: 40px;
+            height: 40px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid #00ffff;
+            border-radius: 0.25rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            transition: border-color 0.1s;
+        }
+
+        /* --- Floating Text Style --- */
+        #floating-text {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 3rem;
+            font-weight: bold;
+            color: #00ffcc;
+            text-shadow: 0 0 10px #00ffcc;
+            opacity: 0;
+            transition: opacity 0.5s, transform 0.5s;
+            z-index: 100;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -138,11 +167,31 @@
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
             **Walk**: **W** / **A** / **S** / **D**<br>
-            **Sprint**: Automatic when a Ghost is sighted (or **always** after 150 crystals).<br>
+            **Sprint**: Automatic when a Ghost is sighted.<br>
             **Look**: **Mouse** Movement<br>
+            **Interact**: **F** (Near Motors)<br>
+            **Use Item**: **1** - **5** (Inventory Slot)<br>
             **Cheat Console**: Press **/**
         </p>
         <button class="action-button">ENTER</button>
+    </div>
+
+    <div id="floating-text"></div>
+
+    <div id="item-bar" style="position: absolute; right: 20px; bottom: 50px; z-index: 10;">
+        <h2 class="text-sm font-bold mb-1 text-[#00ffff] text-right">INVENTORY</h2>
+        <div id="item-slots" class="flex flex-col space-y-2">
+            </div>
+    </div>
+    
+    <div id="minigame-box" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.9); border: 2px solid #00ff00; padding: 2rem; border-radius: 0.75rem; text-align: center; z-index: 5001; box-shadow: 0 0 25px rgba(0, 255, 0, 0.7); display: none;">
+        <h2 id="minigame-title" class="text-2xl font-bold mb-4 text-[#00ff00]">MOTOR HACK: STAGE 1/10</h2>
+        <div id="timing-bar-container" style="width: 300px; height: 30px; background: #333; margin: 0 auto 1rem; border: 1px solid #00ffff; position: relative; overflow: hidden;">
+            <div id="timing-cursor" style="position: absolute; top: 0; left: 0; width: 5px; height: 100%; background: #ff0000;"></div>
+            <div id="timing-target" style="position: absolute; top: 0; height: 100%; background: rgba(0, 255, 0, 0.5);"></div>
+        </div>
+        <p id="minigame-status" class="mb-4 text-sm">Press **Space** to attempt!</p>
+        <button id="minigame-close" class="action-button" onclick="endMiniGame(false)" style="background: #444;">CLOSE</button>
     </div>
 
     <div id="status-bar">
@@ -169,6 +218,7 @@
         const crosshair = document.getElementById('crosshair');
         const playerStatus = document.getElementById('player-status');
         const ghostProximity = document.getElementById('ghost-proximity');
+        const floatingText = document.getElementById('floating-text');
         const minimap = document.createElement('canvas'); 
         minimap.id = 'minimap';
         document.body.appendChild(minimap);
@@ -228,6 +278,40 @@
         let playerGridPos = { r: 0, c: 0 }; 
         let ghostUpdateTimer = 0;
         const GHOST_UPDATE_INTERVAL = 0.5; 
+        
+        // --- NEW GAME MECHANIC VARIABLES ---
+        const INVENTORY_SIZE = 5;
+        let inventory = new Array(INVENTORY_SIZE).fill(null); 
+        let motorObjects = [];
+        let activeMotor = null;
+        const INTERACT_DISTANCE = 5; 
+        
+        // Item Definitions
+        const GHOST_POT = { type: 'ghost_pot', icon: '👻', color: '#ff00ff', maxInventory: 2, captureDuration: 40 };
+        const CAPTURE_RANGE = 15; // Range to use the pot
+        const MOTOR_COOLDOWN_TIME = 300; // 5 minutes
+
+        // Motor Fix Progression
+        let motorsFixedCount = 0;
+        const MOTORS_NEEDED_FOR_POT = 4;
+        
+        // --- MiniGame Variables ---
+        let isMiniGameActive = false;
+        let currentMiniGameStage = 1;
+        const MAX_MINIGAME_STAGES = 10;
+        let cursorSpeed = 150; 
+        let cursorDirection = 1; 
+        let cursorPosition = 0; 
+        let targetPosition = 0; 
+        let targetWidth = 0; 
+        const timingBarContainer = document.getElementById('timing-bar-container');
+        const timingCursor = document.getElementById('timing-cursor');
+        const timingTarget = document.getElementById('timing-target');
+        const minigameBox = document.getElementById('minigame-box');
+        const minigameTitle = document.getElementById('minigame-title');
+        const minigameStatus = document.getElementById('minigame-status');
+        const minigameClose = document.getElementById('minigame-close');
+
 
         // Maze Grid Definitions
         const MAX_COL = 51;
@@ -348,6 +432,17 @@
             window.location.reload();
         }
 
+        function showFloatingText(message) {
+            floatingText.textContent = message;
+            floatingText.style.opacity = 1;
+            floatingText.style.transform = 'translate(-50%, -50%) scale(1)';
+
+            setTimeout(() => {
+                floatingText.style.opacity = 0;
+                floatingText.style.transform = 'translate(-50%, -50%) scale(0.9)';
+            }, 3000); 
+        }
+
         // --- Pathfinding (Unchanged) ---
         function findPath(startR, startC, endR, endC) {
             if (startR === endR && startC === endC) return [];
@@ -438,9 +533,8 @@
                 gameActive = true;
             });
             controls.addEventListener('unlock', () => {
-                // Keep the info screen hidden if in freecam mode or console is open
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    if (!isConsoleOpen && !isFreeCam) { 
+                    if (!isConsoleOpen && !isFreeCam && !isMiniGameActive) { 
                          infoElement.style.display = 'block';
                     }
                 }
@@ -455,10 +549,11 @@
             buildMaze(offsetX, offsetZ);
             addGhosts();
             addCrystals();
+            addMotors(); 
+            setupItemBar(); 
             
             minimap.width = 150;
             minimap.height = 150;
-            // Minimap is initially hidden via CSS display: none
 
             document.addEventListener('keydown', onKeyDown, false);
             document.addEventListener('keyup', onKeyUp, false);
@@ -555,6 +650,7 @@
                 const ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
                 ghostMesh.userData.isGhost = true;
                 ghostMesh.userData.chasing = false; 
+                ghostMesh.userData.capturedUntil = 0; // Timestamp when capture ends
                 
                 const ghostWorldPos = toWorldPosition(startPos.r, startPos.c);
                 ghostMesh.position.copy(ghostWorldPos);
@@ -602,6 +698,279 @@
                 }
             }
         }
+        
+        // --- Motor Functionality ---
+        function addMotors() {
+            motorObjects = [];
+            const possibleMotorPos = [
+                { r: EXIT_ROW + 2, c: EXIT_COL },
+                { r: START_ROW - 2, c: START_COL },
+                { r: 1, c: MAX_COL - 6 },
+                { r: MAX_ROW - 6, c: 1 },
+                { r: Math.floor(MAX_ROW / 2), c: 1 },
+                { r: Math.floor(MAX_ROW / 2), c: MAX_COL - 2 }
+            ];
+
+            possibleMotorPos.forEach((pos, index) => {
+                if (mazeGrid[pos.r] && mazeGrid[pos.r][pos.c] === 0) {
+                    const motorGeometry = new THREE.BoxGeometry(3, 3, 1);
+                    const motorMaterial = new THREE.MeshBasicMaterial({ color: 0xffaa00 });
+                    const motorMesh = new THREE.Mesh(motorGeometry, motorMaterial);
+                    
+                    const worldPos = toWorldPosition(pos.r, pos.c);
+                    
+                    let rotationY = 0;
+                    let positionX = worldPos.x;
+                    let positionZ = worldPos.z;
+
+                    if (pos.c === 1) { // Left Wall
+                        positionX += CELL_SIZE / 2 - 0.5;
+                        rotationY = -Math.PI / 2;
+                    } else if (pos.c === MAX_COL - 2 || pos.c === EXIT_COL) { // Right Wall
+                        positionX -= CELL_SIZE / 2 - 0.5;
+                        rotationY = Math.PI / 2;
+                    } else if (pos.r === 1) { // Top Wall
+                        positionZ += CELL_SIZE / 2 - 0.5;
+                        rotationY = Math.PI;
+                    } else if (pos.r === MAX_ROW - 2 || pos.r === START_ROW - 2) { // Bottom Wall
+                        positionZ -= CELL_SIZE / 2 - 0.5;
+                        rotationY = 0;
+                    }
+
+                    motorMesh.position.set(positionX, PLAYER_HEIGHT / 2, positionZ);
+                    motorMesh.rotation.y = rotationY;
+                    
+                    motorMesh.userData.isMotor = true;
+                    motorMesh.userData.r = pos.r;
+                    motorMesh.userData.c = pos.c;
+                    motorMesh.userData.fixed = false;
+                    motorMesh.userData.cooldownEnd = 0; // Timestamp
+                    motorMesh.userData.light = new THREE.PointLight(0xffaa00, 4, 10);
+                    motorMesh.add(motorMesh.userData.light);
+
+                    scene.add(motorMesh);
+                    motorObjects.push(motorMesh);
+                }
+            });
+        }
+
+        // --- Inventory Functionality ---
+        function setupItemBar() {
+            const itemSlotsContainer = document.getElementById('item-slots');
+            for (let i = 0; i < INVENTORY_SIZE; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'item-slot';
+                slot.id = `item-slot-${i}`;
+                slot.textContent = i + 1; // Number for keybind reference
+                itemSlotsContainer.appendChild(slot);
+            }
+            updateItemBar();
+        }
+
+        function updateItemBar() {
+            inventory.forEach((item, index) => {
+                const slot = document.getElementById(`item-slot-${index}`);
+                if (item) {
+                    slot.textContent = item.icon; 
+                    slot.style.borderColor = item.color; 
+                } else {
+                    slot.textContent = index + 1;
+                    slot.style.borderColor = '#00ffff';
+                }
+            });
+        }
+        
+        function addItem(itemType, itemIcon, itemColor, maxCount) {
+            const currentCount = inventory.filter(item => item && item.type === itemType).length;
+            if (currentCount >= maxCount) {
+                showFloatingText(`CANNOT HOLD MORE THAN ${maxCount} ${itemType.toUpperCase()}`);
+                return false;
+            }
+
+            const emptyIndex = inventory.findIndex(item => item === null);
+            if (emptyIndex !== -1) {
+                inventory[emptyIndex] = { type: itemType, icon: itemIcon, color: itemColor };
+                updateItemBar();
+                // console.log(`[Item] Collected: ${itemType}`);
+                return true;
+            }
+            return false;
+        }
+
+        function useItem(slotIndex) {
+            const item = inventory[slotIndex];
+            if (!item) return;
+
+            if (item.type === GHOST_POT.type) {
+                
+                const closestGhost = findClosestCapturableGhost();
+                
+                if (closestGhost) {
+                    // Use the pot
+                    inventory[slotIndex] = null;
+                    updateItemBar();
+                    
+                    // Capture the ghost
+                    const captureTime = clock.getElapsedTime() + GHOST_POT.captureDuration;
+                    closestGhost.userData.capturedUntil = captureTime;
+                    
+                    closestGhost.material.opacity = 0.1; 
+                    closestGhost.userData.light.intensity = 0.5;
+                    closestGhost.userData.chasing = false; // Stop chasing logic
+                    
+                    showFloatingText(`GHOST CAPTURED! (${GHOST_POT.captureDuration}s)`);
+                } else {
+                    showFloatingText(`No visible ghost within ${CAPTURE_RANGE} units!`);
+                }
+            }
+            // Add other item uses here later
+        }
+
+        function findClosestCapturableGhost() {
+            let closestGhost = null;
+            let minDist = CAPTURE_RANGE;
+
+            ghosts.forEach(ghost => {
+                const dist = camera.position.distanceTo(ghost.position);
+                const isCaptured = ghost.userData.capturedUntil > clock.getElapsedTime();
+
+                if (dist < minDist && !isCaptured) {
+                    // Check line of sight (optional, but good for strategy)
+                    if (isGhostVisible(ghost)) { 
+                        minDist = dist;
+                        closestGhost = ghost;
+                    }
+                }
+            });
+            return closestGhost;
+        }
+        // --- END Inventory Functionality ---
+
+
+        // --- Mini-Game Logic ---
+        function startMiniGame(motorMesh) {
+            if (isFreeCam || isMiniGameActive || controls.isLocked === false) return;
+            
+            const currentTime = clock.getElapsedTime();
+            if (motorMesh.userData.cooldownEnd > currentTime) {
+                const remaining = motorMesh.userData.cooldownEnd - currentTime;
+                showFloatingText(`MOTOR ON COOLDOWN: ${Math.ceil(remaining)}s`);
+                return;
+            }
+
+            controls.unlock();
+            gameActive = false;
+            isMiniGameActive = true;
+            activeMotor = motorMesh;
+            currentMiniGameStage = 1;
+
+            document.addEventListener('keydown', handleMiniGameInput, false);
+
+            minigameBox.style.display = 'block';
+            minigameClose.style.display = 'block';
+            
+            setupMiniGameStage();
+        }
+
+        function setupMiniGameStage() {
+            // Target width decreases by 3 pixels per stage, starts at 40px
+            targetWidth = 40 - (currentMiniGameStage - 1) * 3; 
+            targetWidth = Math.max(10, targetWidth); 
+            
+            // Randomly position the target (300px width - targetWidth)
+            targetPosition = Math.random() * (300 - targetWidth);
+            
+            timingTarget.style.left = `${targetPosition}px`;
+            timingTarget.style.width = `${targetWidth}px`;
+            timingTarget.style.backgroundColor = 'rgba(0, 255, 0, 0.5)';
+            timingCursor.style.backgroundColor = '#ff0000';
+
+            cursorPosition = 0;
+            cursorDirection = 1;
+            timingCursor.style.left = '0px';
+            cursorSpeed = 150 + (currentMiniGameStage - 1) * 10; 
+
+            minigameTitle.textContent = `MOTOR HACK: STAGE ${currentMiniGameStage}/${MAX_MINIGAME_STAGES}`;
+            minigameStatus.textContent = "Press **Space** to attempt!";
+        }
+
+        function updateMiniGame(delta) {
+            if (!isMiniGameActive) return;
+
+            // Update cursor position and bounce off edges
+            cursorPosition += cursorDirection * cursorSpeed * delta;
+            
+            if (cursorPosition >= 300 - 5) { 
+                cursorPosition = 300 - 5;
+                cursorDirection = -1;
+            } else if (cursorPosition <= 0) {
+                cursorPosition = 0;
+                cursorDirection = 1;
+            }
+
+            timingCursor.style.left = `${cursorPosition}px`;
+        }
+
+        function checkHit() {
+            const cursorCenter = cursorPosition + 2.5; 
+            
+            if (cursorCenter >= targetPosition && cursorCenter <= targetPosition + targetWidth) {
+                // SUCCESS
+                minigameStatus.textContent = 'SUCCESS! Moving to next stage...';
+                
+                currentMiniGameStage++;
+                if (currentMiniGameStage > MAX_MINIGAME_STAGES) {
+                    endMiniGame(true); // Win the mini-game
+                } else {
+                    setTimeout(setupMiniGameStage, 500);
+                }
+                
+            } else {
+                // FAIL
+                minigameStatus.textContent = 'FAILED! Try again...';
+                timingCursor.style.backgroundColor = '#00ffff'; 
+                setTimeout(setupMiniGameStage, 500); // Retry the current stage
+            }
+        }
+
+        function handleMiniGameInput(event) {
+            if (isMiniGameActive && event.code === 'Space') {
+                event.preventDefault();
+                checkHit();
+            }
+        }
+
+        window.endMiniGame = function(isWin) {
+            isMiniGameActive = false;
+            document.removeEventListener('keydown', handleMiniGameInput, false);
+            minigameBox.style.display = 'none';
+            playerStatus.textContent = playerStatus.textContent.replace(" (Press F to Interact)", ""); 
+
+            if (isWin) {
+                const motorMesh = activeMotor;
+                if (motorMesh) {
+                    motorMesh.userData.fixed = true;
+                    motorMesh.userData.cooldownEnd = clock.getElapsedTime() + MOTOR_COOLDOWN_TIME;
+                    motorMesh.userData.light.intensity = 0.1;
+                    motorMesh.material.color.set(0x00ff00); // Change motor color to green
+                    motorsFixedCount++;
+                    
+                    showFloatingText(`MOTOR FIXED: ${motorsFixedCount}/${MOTORS_NEEDED_FOR_POT}`);
+
+                    if (motorsFixedCount >= MOTORS_NEEDED_FOR_POT) {
+                        const acquired = addItem(GHOST_POT.type, GHOST_POT.icon, GHOST_POT.color, GHOST_POT.maxInventory);
+                        if (acquired) {
+                            motorsFixedCount = 0; // Reset counter for the next item
+                            showFloatingText('GHOST POT ACQUIRED! (Use 1-5)');
+                        }
+                    }
+                }
+            }
+            
+            activeMotor = null;
+            controls.lock();
+        }
+        // --- END Mini-Game Logic ---
 
         function isGhostVisible(ghostMesh) {
             if (!ghostMesh) return false;
@@ -621,331 +990,26 @@
 
             if (intersects.length > 0) {
                 const distanceToWall = intersects[0].distance;
-                return dist < distanceToWall - 0.5;
+                return dist < distanceToWall + 1; 
             }
-            
-            return true;
+            return true; 
         }
 
-        function moveGhosts(delta) {
-            if (isFreeCam) return; 
-            
-            const currentTime = clock.getElapsedTime();
-            
-            const shouldUpdatePath = ghostUpdateTimer >= GHOST_UPDATE_INTERVAL;
-            
-            if (shouldUpdatePath) {
-                ghostUpdateTimer = 0;
-            } else {
-                ghostUpdateTimer += delta;
-            }
-
-            const GHOST_CHASE_SPEED = GHOST_SPEED; 
-            
-            ghosts.forEach((ghostMesh, index) => {
-                const ghostWorldPos = ghostMesh.position;
-                const ghostIsSeeingPlayer = isGhostVisible(ghostMesh); 
-                let ghostPath = ghostPaths[index]; 
-                let moveSpeed;
-                
-                // --- 1. FRENZY MODE CHECK ---
-                if (ghostsGoFrenzy) {
-                    moveSpeed = GHOST_FRENZY_SPEED;
-                    ghostMesh.userData.chasing = true; 
-                    
-                    if (shouldUpdatePath || ghostPath.length === 0) {
-                        const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
-                        ghostPath = findPath(
-                            ghostGridPos.r, ghostGridPos.c, 
-                            playerGridPos.r, playerGridPos.c
-                        );
-                        ghostPaths[index] = ghostPath; 
-                    }
-                } 
-                // --- 2. REGULAR AI MODE ---
-                else {
-                    if (ghostIsSeeingPlayer) {
-                        ghostMesh.userData.chasing = true; 
-                    } else if (ghostPath.length === 0) {
-                         ghostMesh.userData.chasing = false; 
-                    }
-
-                    if (ghostMesh.userData.chasing) {
-                        moveSpeed = GHOST_CHASE_SPEED;
-                        if (shouldUpdatePath) { 
-                            const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
-                            ghostPath = findPath(
-                                ghostGridPos.r, ghostGridPos.c, 
-                                playerGridPos.r, playerGridPos.c
-                            );
-                            ghostPaths[index] = ghostPath; 
-                        }
-                    } else {
-                        moveSpeed = GHOST_WANDER_SPEED;
-                        if (ghostPath.length === 0 && shouldUpdatePath) { 
-                            const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
-                            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-                            const validNeighbors = directions.map(([dr, dc]) => [ghostGridPos.r + dr, ghostGridPos.c + dc])
-                                .filter(([r, c]) => mazeGrid[r] && mazeGrid[r][c] === 0);
-
-                            if (validNeighbors.length > 0) {
-                                const [targetR, targetC] = validNeighbors[Math.floor(Math.random() * validNeighbors.length)];
-                                ghostPath.push([targetR, targetC]);
-                                ghostPaths[index] = ghostPath;
-                            }
-                        }
-                    }
-                }
-
-                // 3. Movement Execution
-                if (ghostPath.length > 0) {
-                    const [nextR, nextC] = ghostPath[0];
-                    const targetWorldPos = toWorldPosition(nextR, nextC);
-                    const moveDistance = moveSpeed * delta; 
-                    
-                    if (ghostWorldPos.distanceTo(targetWorldPos) < moveDistance) {
-                        ghostWorldPos.x = targetWorldPos.x;
-                        ghostWorldPos.z = targetWorldPos.z;
-                        ghostPath.shift(); 
-                    } else {
-                        const direction = new THREE.Vector3().subVectors(targetWorldPos, ghostWorldPos).normalize();
-                        ghostWorldPos.addScaledVector(direction, moveDistance);
-                    }
-                    
-                    if (ghostPath.length > 0) {
-                        const lookAtTarget = toWorldPosition(ghostPath[0][0], ghostPath[0][1]);
-                        ghostMesh.lookAt(lookAtTarget.x, ghostWorldPos.y, lookAtTarget.z);
-                    }
-                }
-                
-                ghostMesh.rotation.y += 1.0 * delta;
-                ghostMesh.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(currentTime * 3 + index) * 0.5;
-
-                checkCatchCondition(ghostWorldPos);
-            });
+        // --- Event Handlers ---
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function checkCatchCondition(ghostPosition) { 
-            if (isFreeCam) return; 
-            
-            const catchDistance = 3; 
-            const dist = camera.position.distanceTo(ghostPosition);
-
-            if (dist < catchDistance) {
-                showAlert("CAUGHT! A Ghost found you in the deep maze.", false);
-            }
-        }
-
-        function openExitPortal() {
-            const door = winPosition.userData.closedDoor;
-            scene.remove(door);
-            wallObjects = wallObjects.filter(obj => obj.uuid !== door.uuid);
-
-            winPosition.visible = true; 
-            winPosition.userData.light.intensity = 5; 
-        }
-
-        function checkCrystalCollection() {
-            if (isFreeCam) return; 
-
-            const playerPos = camera.position;
-            const collectionRadius = 5; 
-
-            for (let i = crystals.length - 1; i >= 0; i--) {
-                const crystal = crystals[i];
-                if (playerPos.distanceTo(crystal.position) < collectionRadius) {
-                    scene.remove(crystal);
-                    crystals.splice(i, 1);
-                    crystalsCollected++;
-                    
-                    updateStatusBar(); 
-
-                    if (crystalsCollected >= TOTAL_CRYSTALS) {
-                        minimap.style.display = 'block'; // Always force show minimap on win condition
-                        isMinimapVisible = true; // Update state
-                        ghostsGoFrenzy = true; 
-                        playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
-                        playerStatus.classList.add('sprinting'); 
-                        openExitPortal();
-                    }
-
-                    return;
-                }
-            }
-        }
-        
-        // --- CHEAT FUNCTIONS ---
-        function setCrystalCount(count) {
-            crystalsCollected = count;
-            
-            if (count >= TOTAL_CRYSTALS) {
-                crystals.forEach(crystal => scene.remove(crystal));
-                crystals = [];
-                ghostsGoFrenzy = true; 
-                playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
-                playerStatus.classList.add('sprinting'); 
-                openExitPortal();
-                minimap.style.display = 'block'; // Ensure minimap is visible
-                isMinimapVisible = true;
-            } else {
-                // To safely reset the game state if crystals are set lower than total, 
-                // we reload, which resets all game objects and state variables cleanly.
-                window.location.reload(); 
-            }
-            
-            updateStatusBar();
-        }
-
-        function toggleFreeCam(activate) { 
-            if (isFreeCam === activate) return; 
-
-            isFreeCam = activate;
-            
-            if (!isFreeCam) {
-                // Return to normal mode: snap player back to floor and reset vertical movement
-                if (camera.position.y < PLAYER_HEIGHT) {
-                    camera.position.y = PLAYER_HEIGHT;
-                }
-                moveUp = moveDown = false;
-            }
-            controls.lock(); // Re-lock immediately to ensure mouse look works
-        }
-        
-        function setFlySpeed(speedLevel) {
-            flySpeedMultiplier = Math.max(1, Math.min(100, speedLevel));
-            console.log(`[Cheat] Fly speed set to ${flySpeedMultiplier}.`);
-        }
-
-        function toggleMinimap(show) {
-            isMinimapVisible = show;
-            minimap.style.display = isMinimapVisible ? 'block' : 'none';
-        }
-
-        function processCommand(commandText) {
-            const parts = commandText.trim().toLowerCase().split(/\s+/);
-            const command = parts[0];
-
-            if (command === '/set' && parts[1] === 'crystal') {
-                const count = parseInt(parts[2]);
-                if (!isNaN(count) && count >= 0 && count <= TOTAL_CRYSTALS) {
-                    setCrystalCount(count);
-                    console.log(`[Cheat] Crystals set to ${count}.`);
-                } else {
-                    console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
-                }
-            } else if (command === '/freecam') { 
-                toggleFreeCam(true);
-                console.log(`[Cheat] FreeCam Activated.`);
-            } else if (command === '/unfreecam') { 
-                toggleFreeCam(false);
-                console.log(`[Cheat] FreeCam Deactivated.`);
-            } else if (command === '/flyspeed') { 
-                const speedLevel = parseInt(parts[1]);
-                if (!isNaN(speedLevel)) {
-                    setFlySpeed(speedLevel);
-                } else {
-                    console.log(`[Cheat] Invalid speed level. Must be between 1 and 100.`);
-                }
-            } else if (command === '/showminimap' || command === '/showmm') { 
-                toggleMinimap(true);
-                console.log(`[Cheat] Minimap shown.`);
-            } else if (command === '/unshowminimap' || command === '/unshowmm') { 
-                toggleMinimap(false);
-                console.log(`[Cheat] Minimap hidden.`);
-            }
-        }
-        // --- END CHEAT FUNCTIONS ---
-
-
-        function updateStatusBar() {
-            if (isFreeCam) return; 
-
-            let closestDist = Infinity;
-            ghosts.forEach(ghost => {
-                const dist = camera.position.distanceTo(ghost.position);
-                closestDist = Math.min(closestDist, dist);
-            });
-
-            let threatText;
-            if (ghostsGoFrenzy) {
-                threatText = "THREAT: FRENZY! (THEY KNOW)";
-            } else if (closestDist > CELL_SIZE * 10) {
-                 threatText = "Threat: Distant";
-            } else if (closestDist > CELL_SIZE * 4) {
-                 threatText = "Threat: Nearby";
-            } else {
-                 threatText = "THREAT: IMMINENT!";
-            }
-            ghostProximity.textContent = `${threatText} | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
-        }
-
-        function updateMinimap() {
-            if (minimap.style.display === 'none') return;
-
-            const ctx = minimap.getContext('2d');
-            const mapSize = minimap.width;
-            const cellMapSize = mapSize / MAX_COL;
-
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-            ctx.fillRect(0, 0, mapSize, mapSize);
-
-            // Draw Walls
-            ctx.fillStyle = '#111111'; 
-            for (let r = 0; r < MAX_ROW; r++) {
-                for (let c = 0; c < MAX_COL; c++) {
-                    if (mazeGrid[r][c] === 1) {
-                        ctx.fillRect(c * cellMapSize, r * cellMapSize, cellMapSize, cellMapSize);
-                    }
-                }
-            }
-
-            // Draw Exit (Green dot)
-            ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; 
-            ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
-            
-            // Draw Ghosts
-            ghosts.forEach(ghost => {
-                const ghostGridPos = toGridPosition(ghost.position.x, ghost.position.z);
-                ctx.fillStyle = ghost.userData.chasing ? '#ff0000' : '#aa00ff';
-                ctx.beginPath();
-                const ghostMapX = ghostGridPos.c * cellMapSize + cellMapSize / 2;
-                const ghostMapY = ghostGridPos.r * cellMapSize + cellMapSize / 2;
-                ctx.arc(ghostMapX, ghostMapY, cellMapSize * 0.3, 0, 2 * Math.PI);
-                ctx.fill();
-            });
-
-            // Draw Player (Red dot)
-            ctx.fillStyle = '#ff0000';
-            ctx.beginPath();
-            const playerMapX = playerGridPos.c * cellMapSize + cellMapSize / 2;
-            const playerMapY = playerGridPos.r * cellMapSize + cellMapSize / 2;
-            ctx.arc(playerMapX, playerMapY, cellMapSize * 0.4, 0, 2 * Math.PI);
-            ctx.fill();
-        }
-
-        // --- Input Handlers - FIX APPLIED HERE ---
         function onKeyDown(event) {
-            if (isConsoleOpen) {
-                if (event.code === 'Escape') {
-                    event.preventDefault(); 
-                    consoleInput.value = '';
-                    consoleElement.style.display = 'none';
-                    isConsoleOpen = false;
-                    
-                    controls.lock(); // FIX: Re-lock controls when closing console with ESC
-                }
-                return; 
-            }
+            if (isConsoleOpen) return;
             
-            if (event.code === 'Slash' && !event.shiftKey && controls.isLocked) {
-                event.preventDefault(); 
-                controls.unlock();
-                gameActive = false;
-                
-                consoleElement.style.display = 'block';
-                isConsoleOpen = true;
-                consoleInput.focus();
-                return;
+            // Check for item use keys
+            const itemSlot = parseInt(event.key, 10);
+            if (itemSlot >= 1 && itemSlot <= INVENTORY_SIZE) {
+                useItem(itemSlot - 1);
+                return; 
             }
 
             switch (event.code) {
@@ -954,180 +1018,293 @@
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
                 case 'KeyQ': moveUp = true; break; 
-                case 'KeyE': moveDown = true; break; 
+                case 'KeyE': moveDown = true; break;
+                
+                case 'KeyF':
+                    if (activeMotor) {
+                        startMiniGame(activeMotor);
+                    }
+                    break;
+
+                case 'Slash': // "/" key for console
+                    if (controls.isLocked) {
+                        controls.unlock();
+                        isConsoleOpen = true;
+                        consoleElement.style.display = 'block';
+                        consoleInput.focus();
+                        event.preventDefault(); 
+                    }
+                    break;
             }
         }
 
         function onKeyUp(event) {
-            if (isConsoleOpen) return; 
-            
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = false; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = false; break;
                 case 'ArrowRight': case 'KeyD': moveRight = false; break;
-                case 'KeyQ': moveUp = false; break;
+                case 'KeyQ': moveUp = false; break; 
                 case 'KeyE': moveDown = false; break;
             }
         }
         
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+        // --- Main Game Logic ---
 
-        // --- Game Loop and Logic ---
+        function updatePlayerMovement(delta) {
+            const currentSpeed = isFreeCam ? flySpeedMultiplier * 10 : effectiveSpeed;
+            const velocity = new THREE.Vector3(0, 0, 0);
+            const direction = new THREE.Vector3(0, 0, 0);
 
-        function animate() {
-            requestAnimationFrame(animate);
+            if (moveForward) direction.z -= 1;
+            if (moveBackward) direction.z += 1;
+            if (moveLeft) direction.x -= 1;
+            if (moveRight) direction.x += 1;
 
-            const delta = clock.getDelta();
-
-            // The main game loop runs if controls are locked OR if in freecam mode.
-            if (controls.isLocked === true || isFreeCam) {
-                
-                updatePlayerGridPosition(); 
-                
-                let currentSpeed;
-                
-                if (!isFreeCam) { 
-                    // --- GAMEPLAY LOGIC ---
-                    let ghostInSight = false;
-                    if (!ghostsGoFrenzy) {
-                        ghosts.forEach(ghost => {
-                            if(isGhostVisible(ghost)) {
-                                ghostInSight = true;
-                            }
-                        });
-                    }
-                    
-                    moveGhosts(delta); 
-                    checkCrystalCollection();
-
-                    // Sprint Logic
-                    if (!ghostsGoFrenzy) {
-                        if (ghostInSight) {
-                            effectiveSpeed = SPRINT_SPEED;
-                            sprintDelayTimer = SPRINT_DELAY_DURATION; 
-                            playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
-                            playerStatus.classList.add('sprinting');
-                        } else if (sprintDelayTimer > 0) {
-                            sprintDelayTimer -= delta;
-                            sprintDelayTimer = Math.max(0, sprintDelayTimer);
-                            effectiveSpeed = SPRINT_SPEED;
-                            playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
-                            playerStatus.classList.add('sprinting');
-                        } else {
-                            effectiveSpeed = WALK_SPEED;
-                            playerStatus.textContent = "Status: Walking...";
-                            playerStatus.classList.remove('sprinting');
-                        }
-                    } else {
-                        effectiveSpeed = SPRINT_SPEED; 
-                    }
-                    
-                    currentSpeed = effectiveSpeed;
-                    updateStatusBar(); 
-                } else {
-                    // --- FREECAM LOGIC ---
-                    currentSpeed = (MAX_FREECAM_SPEED / 100) * flySpeedMultiplier;
-                    playerStatus.textContent = `Status: FREECAM ACTIVE (Speed: ${flySpeedMultiplier})`;
-                    playerStatus.classList.remove('sprinting');
-                    ghostProximity.textContent = `Threat: PAUSED | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
-                }
-
-
-                
-                // Movement Calculation (Applies to both modes)
-                const velocity = new THREE.Vector3();
-                if (moveForward) velocity.z -= currentSpeed * delta;
-                if (moveBackward) velocity.z += currentSpeed * delta;
-                if (moveLeft) velocity.x -= currentSpeed * delta;
-                if (moveRight) velocity.x += currentSpeed * delta;
-                
-                // Freecam vertical movement
-                if (isFreeCam) {
-                    if (moveUp) velocity.y += currentSpeed * delta;
-                    if (moveDown) velocity.y -= currentSpeed * delta;
-                    camera.position.y += velocity.y; 
-                }
-
-                const oldPosition = camera.position.clone();
-                
-                controls.moveRight(velocity.x); 
-                controls.moveForward(-velocity.z);
-
-                // Collision Detection: Only run if NOT in freecam mode
-                if (!isFreeCam) { 
-                    const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                    const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-
-                    if (isColliding(currentGridX, currentGridZ, oldPosition)) {
-                        camera.position.copy(oldPosition);
-                    }
-                    
-                    checkWinCondition();
-                } 
-                
-                // Animate lights & crystals 
-                if (winPosition && winPosition.visible && winPosition.userData.light) {
-                    winPosition.userData.light.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
-                    winPosition.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
-                }
-                crystals.forEach(crystal => {
-                    crystal.rotation.y += 2 * delta;
-                    crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
-                });
-
-                // Only draw the minimap if the collected crystal count triggers it OR the user has manually toggled it.
-                if (isMinimapVisible || crystalsCollected >= TOTAL_CRYSTALS) {
-                    minimap.style.display = 'block';
-                    updateMinimap();
-                } else {
-                    minimap.style.display = 'none';
-                }
+            if (direction.lengthSq() > 0) {
+                direction.normalize();
+                velocity.copy(direction).multiplyScalar(currentSpeed * delta);
             }
-
-            renderer.render(scene, camera);
-        }
-
-        function isColliding(gridX, gridZ, oldPosition) {
-            if (isFreeCam) return false; 
             
-            if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
-                return true;
+            if (isFreeCam) {
+                if (moveUp) camera.position.y += currentSpeed * delta;
+                if (moveDown) camera.position.y -= currentSpeed * delta;
+
+                // Apply horizontal movement
+                controls.getObject().translateX(velocity.x);
+                controls.getObject().translateZ(velocity.z);
+            } else {
+                const oldPosition = camera.position.clone();
+
+                controls.getObject().translateX(velocity.x);
+                controls.getObject().translateZ(velocity.z);
+                
+                checkCollision(oldPosition);
+            }
+        }
+        
+        function updateSprintState(delta) {
+            let ghostSighted = false;
+            
+            if (ghostsGoFrenzy) {
+                effectiveSpeed = SPRINT_SPEED;
+                playerStatus.className = 'sprinting';
+                playerStatus.textContent = 'Status: FRENZY SPRINT!';
+                sprintDelayTimer = 0;
+                return;
+            }
+            
+            // Check if any *uncaptured* ghost is visible
+            for (const ghost of ghosts) {
+                 if (ghost.userData.capturedUntil <= clock.getElapsedTime() && isGhostVisible(ghost)) {
+                     ghostSighted = true;
+                     break;
+                 }
             }
 
-            if (mazeGrid[gridZ][gridX] === 1) {
-                
-                const tempX = oldPosition.x;
-                const tempZ = camera.position.z;
-                
-                let testGridX = Math.floor((tempX - offsetX) / CELL_SIZE);
-                let testGridZ = Math.floor((tempZ - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[testGridZ] && mazeGrid[testGridZ][testGridX] === 1) {
-                    camera.position.z = oldPosition.z; 
-                }
-                
-                const tempX_2 = camera.position.x;
-                const tempZ_2 = oldPosition.z;
-
-                let testGridX_2 = Math.floor((tempX_2 - offsetX) / CELL_SIZE);
-                let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                    camera.position.x = oldPosition.x; 
-                }
-
-                const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[finalGridZ] && mazeGrid[finalGridZ][finalGridX] === 1) {
-                    return true; 
-                }
+            if (ghostSighted) {
+                sprintDelayTimer = SPRINT_DELAY_DURATION;
             }
+
+            if (sprintDelayTimer > 0) {
+                effectiveSpeed = SPRINT_SPEED;
+                playerStatus.className = 'sprinting';
+                playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
+                sprintDelayTimer -= delta;
+            } else {
+                effectiveSpeed = WALK_SPEED;
+                playerStatus.className = '';
+                playerStatus.textContent = 'Status: Walking...';
+            }
+        }
+
+        function updateGhosts(delta) {
+            ghostUpdateTimer += delta;
+            
+            const playerPos = camera.position;
+            const playerGrid = playerGridPos;
+
+            ghosts.forEach((ghost, index) => {
+                const isCaptured = ghost.userData.capturedUntil > clock.getElapsedTime();
+                
+                if (isCaptured) {
+                    const remaining = ghost.userData.capturedUntil - clock.getElapsedTime();
+                    // Update light/visual based on remaining time (e.g., blink faster)
+                    ghost.userData.light.intensity = 0.5 + Math.sin(clock.getElapsedTime() * 10) * 0.2;
+                    
+                    if (remaining <= 0) {
+                        // Release the ghost
+                        ghost.userData.capturedUntil = 0;
+                        ghost.material.opacity = 0.5;
+                        ghost.userData.light.intensity = 4;
+                        showFloatingText('GHOST RELEASED!');
+                    }
+                    return; // Skip movement and proximity check
+                }
+                
+                const ghostGrid = toGridPosition(ghost.position.x, ghost.position.z);
+                let currentGhostSpeed = ghostsGoFrenzy ? GHOST_FRENZY_SPEED : GHOST_SPEED;
+                
+                let isChasing = false;
+                
+                // 1. Check Line of Sight for Chasing (priority 1)
+                if (isGhostVisible(ghost)) {
+                    isChasing = true;
+                    ghost.userData.chasing = true;
+                    
+                    if (ghostUpdateTimer >= GHOST_UPDATE_INTERVAL) {
+                        // Re-path quickly when sighted
+                        const newPath = findPath(ghostGrid.r, ghostGrid.c, playerGrid.r, playerGrid.c);
+                        if (newPath.length > 0) {
+                            ghostPaths[index] = newPath;
+                        }
+                    }
+                } else if (ghost.userData.chasing) {
+                    // 2. Continue Chasing briefly (priority 2)
+                    isChasing = true;
+                    currentGhostSpeed = GHOST_WANDER_SPEED * 1.5; 
+                    
+                    if (ghostUpdateTimer >= GHOST_UPDATE_INTERVAL * 2 && ghostPaths[index].length === 0) {
+                        // Ghost lost player, start wandering again
+                        ghost.userData.chasing = false;
+                    }
+                } else {
+                    // 3. Wandering (priority 3)
+                    currentGhostSpeed = GHOST_WANDER_SPEED;
+                    if (ghostPaths[index].length === 0) {
+                        let targetR, targetC;
+                        do {
+                            targetR = Math.floor(Math.random() * MAX_ROW);
+                            targetC = Math.floor(Math.random() * MAX_COL);
+                        } while (mazeGrid[targetR][targetC] !== 0);
+                        
+                        ghostPaths[index] = findPath(ghostGrid.r, ghostGrid.c, targetR, targetC);
+                    }
+                }
+                
+                // --- Movement Execution ---
+                if (ghostPaths[index].length > 0) {
+                    const [nextR, nextC] = ghostPaths[index][0];
+                    const targetPos = toWorldPosition(nextR, nextC);
+                    
+                    const direction = new THREE.Vector3().subVectors(targetPos, ghost.position).normalize();
+                    const moveDistance = currentGhostSpeed * delta;
+                    
+                    if (ghost.position.distanceTo(targetPos) < moveDistance) {
+                        ghost.position.copy(targetPos);
+                        ghostPaths[index].shift(); 
+                    } else {
+                        ghost.position.add(direction.multiplyScalar(moveDistance));
+                    }
+                }
+
+                // --- Collision/Game Over Check ---
+                const distToPlayer = ghost.position.distanceTo(playerPos);
+                if (distToPlayer < 3) {
+                    showAlert('CAUGHT! A Ghost found you.', false);
+                }
+            });
+
+            if (ghostUpdateTimer >= GHOST_UPDATE_INTERVAL) {
+                ghostUpdateTimer = 0;
+            }
+        }
+        
+        function updateProximity() {
+            let minDistance = Infinity;
+
+            ghosts.forEach(ghost => {
+                const isCaptured = ghost.userData.capturedUntil > clock.getElapsedTime();
+                if (!isCaptured) {
+                    const dist = camera.position.distanceTo(ghost.position);
+                    minDistance = Math.min(minDistance, dist);
+                }
+            });
+
+            let threatLevel = 'Distant';
+            if (minDistance < CELL_SIZE * 3) {
+                threatLevel = 'IMMINENT!';
+            } else if (minDistance < CELL_SIZE * 6) {
+                threatLevel = 'Nearby';
+            } else if (minDistance < CELL_SIZE * 10) {
+                threatLevel = 'Seen';
+            }
+
+            if (ghostsGoFrenzy) {
+                threatLevel = 'FRENZY!';
+            }
+
+            ghostProximity.textContent = `Threat: ${threatLevel} | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
+        }
+        
+        function checkMotorInteraction() {
+            if (isFreeCam || isMiniGameActive) return;
+            
+            let closestMotor = null;
+            let minDist = Infinity;
+            
+            motorObjects.forEach(motor => {
+                const dist = camera.position.distanceTo(motor.position);
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestMotor = motor;
+                }
+            });
+            
+            let promptText = '';
+            
+            if (minDist < INTERACT_DISTANCE) {
+                const currentTime = clock.getElapsedTime();
+                const motorCooldownEnd = closestMotor.userData.cooldownEnd;
+
+                if (motorCooldownEnd > currentTime) {
+                    const remaining = Math.ceil(motorCooldownEnd - currentTime);
+                    promptText = ` (COOLDOWN: ${remaining}s)`;
+                    activeMotor = null;
+                } else {
+                    promptText = " (Press F to Interact)";
+                    activeMotor = closestMotor;
+                }
+            } else {
+                activeMotor = null;
+            }
+            
+            // Update status bar display
+            const currentText = playerStatus.textContent.split(' (Press F to Interact)')[0].split(' (COOLDOWN:')[0];
+            playerStatus.textContent = currentText + promptText;
+        }
+
+        function checkCollision(oldPosition) {
+            // Check collision with walls in a box around the player
+            // Use a simplified grid check for collision
+            
+            const tempZ_1 = camera.position.z;
+            const tempX_1 = oldPosition.x;
+
+            let testGridZ_1 = Math.floor((tempZ_1 - offsetZ) / CELL_SIZE);
+            let testGridX_1 = Math.floor((tempX_1 - offsetX) / CELL_SIZE);
+            
+            if (mazeGrid[testGridZ_1] && mazeGrid[testGridZ_1][testGridX_1] === 1) {
+                camera.position.z = oldPosition.z; 
+            }
+            
+            const tempX_2 = camera.position.x;
+            const tempZ_2 = oldPosition.z;
+
+            let testGridX_2 = Math.floor((tempX_2 - offsetX) / CELL_SIZE);
+            let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
+            
+            if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
+                camera.position.x = oldPosition.x; 
+            }
+
+            const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
+            const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
+            
+            if (mazeGrid[finalGridZ] && mazeGrid[finalGridZ][finalGridX] === 1) {
+                return true; 
+            }
+
             return false;
         }
 
@@ -1141,13 +1318,168 @@
                 showAlert("SUCCESS! You escaped the deep maze and the Ghost's sight!", true);
             }
         }
+        
+        function checkCrystals() {
+            for (let i = crystals.length - 1; i >= 0; i--) {
+                const crystal = crystals[i];
+                if (camera.position.distanceTo(crystal.position) < 3) {
+                    scene.remove(crystal);
+                    crystals.splice(i, 1);
+                    crystalsCollected++;
+                    
+                    if (crystalsCollected === TOTAL_CRYSTALS) {
+                        ghostsGoFrenzy = true; 
+                        
+                        if (winPosition && winPosition.userData.closedDoor) {
+                            scene.remove(winPosition.userData.closedDoor);
+                            winPosition.visible = true;
+                            winPosition.userData.light.intensity = 10;
+                            showFloatingText('EXIT OPEN! GHOSTS GO FRENZY!');
+                        }
+                    }
+                }
+            }
+        }
 
-        // --- Start the App ---
-        window.onload = function () {
-            init();
-            animate();
-        };
+        function processCommand(command) {
+            const parts = command.toLowerCase().trim().split(/\s+/);
+            const cmd = parts[0];
 
+            if (cmd === '/showminimap' || cmd === '/showmm') {
+                isMinimapVisible = true;
+                minimap.style.display = 'block';
+            } else if (cmd === '/unshowminimap' || cmd === '/unshowmm') {
+                isMinimapVisible = false;
+                minimap.style.display = 'none';
+            } else if (cmd === '/freecam') {
+                isFreeCam = true;
+                showFloatingText('FreeCam ON');
+            } else if (cmd === '/unfreecam') {
+                isFreeCam = false;
+                // Snap player position down to floor height
+                camera.position.y = PLAYER_HEIGHT; 
+                showFloatingText('FreeCam OFF');
+            } else if (cmd === '/flyspeed' && parts.length === 2) {
+                const speed = parseInt(parts[1], 10);
+                if (!isNaN(speed) && speed >= 1 && speed <= 100) {
+                    flySpeedMultiplier = speed;
+                    showFloatingText(`Fly Speed Multiplier set to ${speed}`);
+                } else {
+                    showFloatingText('Invalid flyspeed. Must be between 1 and 100.');
+                }
+            } else if (cmd === '/set' && parts.length === 3 && parts[1] === 'crystal') {
+                const amount = parseInt(parts[2], 10);
+                if (!isNaN(amount) && amount >= 0 && amount <= TOTAL_CRYSTALS) {
+                    crystalsCollected = amount;
+                    showFloatingText(`Crystals set to ${amount}/${TOTAL_CRYSTALS}`);
+                    if (amount === TOTAL_CRYSTALS) {
+                        ghostsGoFrenzy = true; 
+                        if (winPosition && winPosition.userData.closedDoor) {
+                            scene.remove(winPosition.userData.closedDoor);
+                            winPosition.visible = true;
+                            winPosition.userData.light.intensity = 10;
+                            showFloatingText('EXIT OPEN! (Cheat)');
+                        }
+                    } else if (amount < TOTAL_CRYSTALS && ghostsGoFrenzy) {
+                         // Reset frenzy mode if crystals are reduced
+                        window.location.reload(); 
+                    }
+                } else {
+                    showFloatingText(`Invalid crystal amount. Must be 0 to ${TOTAL_CRYSTALS}.`);
+                }
+            } else {
+                showFloatingText('Unknown command: ' + cmd);
+            }
+        }
+
+        function drawMinimap() {
+            if (!isMinimapVisible) return;
+
+            const ctx = minimap.getContext('2d');
+            const mapSize = 150;
+            const scale = mapSize / Math.max(MAX_ROW, MAX_COL);
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, mapSize, mapSize);
+            ctx.lineWidth = 1;
+
+            const playerScreenX = playerGridPos.c * scale;
+            const playerScreenY = playerGridPos.r * scale;
+
+            // Draw visible walls around the player
+            const visibleRadius = 15;
+            for (let r = 0; r < MAX_ROW; r++) {
+                for (let c = 0; c < MAX_COL; c++) {
+                    const dist = Math.abs(r - playerGridPos.r) + Math.abs(c - playerGridPos.c);
+                    if (dist < visibleRadius) {
+                        if (mazeGrid[r][c] === 1 || (winPosition && winPosition.userData.closedDoor && mazeGrid[r][c] === 2)) {
+                            ctx.fillStyle = '#333333';
+                            ctx.fillRect(c * scale, r * scale, scale, scale);
+                        } else if (mazeGrid[r][c] === 2 && winPosition && winPosition.visible) {
+                             ctx.fillStyle = '#00ff00';
+                            ctx.fillRect(c * scale, r * scale, scale, scale);
+                        }
+                    }
+                }
+            }
+
+            // Draw player
+            ctx.fillStyle = '#00ffff';
+            ctx.beginPath();
+            ctx.arc(playerScreenX + scale / 2, playerScreenY + scale / 2, scale * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw Ghosts
+            ghosts.forEach(ghost => {
+                const isCaptured = ghost.userData.capturedUntil > clock.getElapsedTime();
+                const ghostGrid = toGridPosition(ghost.position.x, ghost.position.z);
+                const ghostScreenX = ghostGrid.c * scale;
+                const ghostScreenY = ghostGrid.r * scale;
+
+                if (Math.abs(ghostGrid.r - playerGridPos.r) < visibleRadius && 
+                    Math.abs(ghostGrid.c - playerGridPos.c) < visibleRadius) {
+
+                    ctx.fillStyle = isCaptured ? 'rgba(255, 0, 255, 0.3)' : 'rgba(255, 0, 255, 0.8)';
+                    ctx.beginPath();
+                    ctx.arc(ghostScreenX + scale / 2, ghostScreenY + scale / 2, scale * 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // The main game loop runs if controls are locked OR if in freecam mode.
+            if (controls.isLocked === true || isFreeCam) {
+                
+                if (isMiniGameActive) { 
+                    updateMiniGame(delta); 
+                    renderer.render(scene, camera);
+                    return; 
+                }
+
+                updatePlayerGridPosition(); 
+                updatePlayerMovement(delta);
+                updateSprintState(delta); 
+                updateGhosts(delta);
+                updateProximity();
+                checkCrystals();
+                checkWinCondition();
+                checkMotorInteraction(); // Check motor interaction and cooldown
+                
+                if (isMinimapVisible) {
+                    drawMinimap();
+                }
+            }
+            
+            renderer.render(scene, camera); 
+        }
+
+        init();
+        animate(); 
     </script>
 </body>
 </html>
