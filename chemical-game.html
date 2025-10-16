@@ -153,7 +153,7 @@
     <div id="crosshair"></div>
 
     <div id="console">
-        <input type="text" id="console-input" placeholder="Type command (e.g., /freecam, /flyspeed 50, /set crystal 149) and press Enter" />
+        <input type="text" id="console-input" placeholder="Type command (e.g., /showmm, /unshowmm, /freecam) and press Enter" />
     </div>
 
     <div id="message-box">
@@ -183,9 +183,12 @@
         let moveUp = false;    
         let moveDown = false;  
         
-        // NEW: Fly Speed Variables
-        const MAX_FREECAM_SPEED = 500; // Base speed for the 100 level
-        let flySpeedMultiplier = 10; // Default speed level (10%)
+        // Fly Speed Variables
+        const MAX_FREECAM_SPEED = 500; 
+        let flySpeedMultiplier = 10; 
+
+        // NEW: Minimap Toggle Variable
+        let isMinimapVisible = false; // Tracks console toggle state
 
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
@@ -435,7 +438,7 @@
                 gameActive = true;
             });
             controls.addEventListener('unlock', () => {
-                // Keep the info screen hidden if in freecam mode
+                // Keep the info screen hidden if in freecam mode or console is open
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
                     if (!isConsoleOpen && !isFreeCam) { 
                          infoElement.style.display = 'block';
@@ -455,6 +458,7 @@
             
             minimap.width = 150;
             minimap.height = 150;
+            // Minimap is initially hidden via CSS display: none
 
             document.addEventListener('keydown', onKeyDown, false);
             document.addEventListener('keyup', onKeyUp, false);
@@ -467,7 +471,6 @@
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
                     
-                    // FIX: Always attempt to re-lock controls after console input to restore mouse control
                     controls.lock(); 
                 }
             });
@@ -750,7 +753,7 @@
 
             for (let i = crystals.length - 1; i >= 0; i--) {
                 const crystal = crystals[i];
-                if (playerPos.distanceTo(crystal.position) < collectionRadius) {
+                if (playerPos.position.distanceTo(crystal.position) < collectionRadius) {
                     scene.remove(crystal);
                     crystals.splice(i, 1);
                     crystalsCollected++;
@@ -758,7 +761,8 @@
                     updateStatusBar(); 
 
                     if (crystalsCollected >= TOTAL_CRYSTALS) {
-                        minimap.style.display = 'block'; 
+                        minimap.style.display = 'block'; // Always force show minimap on win condition
+                        isMinimapVisible = true; // Update state
                         ghostsGoFrenzy = true; 
                         playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
                         playerStatus.classList.add('sprinting'); 
@@ -781,14 +785,13 @@
                 playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
                 playerStatus.classList.add('sprinting'); 
                 openExitPortal();
+                minimap.style.display = 'block'; // Ensure minimap is visible
+                isMinimapVisible = true;
             } else {
                 window.location.reload(); 
             }
             
             updateStatusBar();
-            if (crystalsCollected >= TOTAL_CRYSTALS) {
-                minimap.style.display = 'block'; 
-            }
         }
 
         function toggleFreeCam(activate) { 
@@ -796,18 +799,26 @@
 
             isFreeCam = activate;
             
-            if (isFreeCam) {
-                 // Nothing specific needed here, controls.lock() handles the mouse look
-            } else {
+            if (!isFreeCam) {
                 // Return to normal mode: snap player back to floor and reset vertical movement
                 if (camera.position.y < PLAYER_HEIGHT) {
                     camera.position.y = PLAYER_HEIGHT;
                 }
                 moveUp = moveDown = false;
-                // Note: controls.lock() is handled when the console closes, or when ESC/unlock is exited.
             }
+            controls.lock(); // Re-lock immediately to ensure mouse look works
         }
         
+        function setFlySpeed(speedLevel) {
+            flySpeedMultiplier = Math.max(1, Math.min(100, speedLevel));
+            console.log(`[Cheat] Fly speed set to ${flySpeedMultiplier}.`);
+        }
+
+        function toggleMinimap(show) {
+            isMinimapVisible = show;
+            minimap.style.display = isMinimapVisible ? 'block' : 'none';
+        }
+
         function processCommand(commandText) {
             const parts = commandText.trim().toLowerCase().split(/\s+/);
             const command = parts[0];
@@ -826,21 +837,26 @@
             } else if (command === '/unfreecam') { 
                 toggleFreeCam(false);
                 console.log(`[Cheat] FreeCam Deactivated.`);
-            } else if (command === '/flyspeed') { // NEW
+            } else if (command === '/flyspeed') { 
                 const speedLevel = parseInt(parts[1]);
-                if (!isNaN(speedLevel) && speedLevel >= 1 && speedLevel <= 100) {
-                    flySpeedMultiplier = speedLevel;
-                    console.log(`[Cheat] Fly speed set to ${flySpeedMultiplier}.`);
+                if (!isNaN(speedLevel)) {
+                    setFlySpeed(speedLevel);
                 } else {
                     console.log(`[Cheat] Invalid speed level. Must be between 1 and 100.`);
                 }
+            } else if (command === '/showminimap' || command === '/showmm') { // NEW
+                toggleMinimap(true);
+                console.log(`[Cheat] Minimap shown.`);
+            } else if (command === '/unshowminimap' || command === '/unshowmm') { // NEW
+                toggleMinimap(false);
+                console.log(`[Cheat] Minimap hidden.`);
             }
         }
         // --- END CHEAT FUNCTIONS ---
 
 
         function updateStatusBar() {
-            if (isFreeCam) return; // Status is updated in animate() when in freecam
+            if (isFreeCam) return; 
 
             let closestDist = Infinity;
             ghosts.forEach(ghost => {
@@ -959,13 +975,14 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Game Loop and Logic - UPDATED FOR FREECAM SPEED ---
+        // --- Game Loop and Logic ---
 
         function animate() {
             requestAnimationFrame(animate);
 
             const delta = clock.getDelta();
 
+            // If controls are locked (gameplay) OR freecam is active (controls are functionally locked)
             if (controls.isLocked === true || isFreeCam) {
                 
                 updatePlayerGridPosition(); 
@@ -973,6 +990,7 @@
                 let currentSpeed;
                 
                 if (!isFreeCam) { 
+                    // --- GAMEPLAY LOGIC ---
                     let ghostInSight = false;
                     if (!ghostsGoFrenzy) {
                         ghosts.forEach(ghost => {
@@ -985,7 +1003,7 @@
                     moveGhosts(delta); 
                     checkCrystalCollection();
 
-                    // --- Sprint Logic ---
+                    // Sprint Logic
                     if (!ghostsGoFrenzy) {
                         if (ghostInSight) {
                             effectiveSpeed = SPRINT_SPEED;
@@ -1008,9 +1026,9 @@
                     }
                     
                     currentSpeed = effectiveSpeed;
-                    updateStatusBar(); // Update regular status bar
+                    updateStatusBar(); 
                 } else {
-                    // Freecam active, update status and set speed
+                    // --- FREECAM LOGIC ---
                     currentSpeed = (MAX_FREECAM_SPEED / 100) * flySpeedMultiplier;
                     playerStatus.textContent = `Status: FREECAM ACTIVE (Speed: ${flySpeedMultiplier})`;
                     playerStatus.classList.remove('sprinting');
@@ -1019,7 +1037,7 @@
 
 
                 
-                // Movement Calculation
+                // Movement Calculation (Applies to both modes)
                 const velocity = new THREE.Vector3();
                 if (moveForward) velocity.z -= currentSpeed * delta;
                 if (moveBackward) velocity.z += currentSpeed * delta;
@@ -1060,7 +1078,13 @@
                     crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
                 });
 
-                updateMinimap();
+                // Only draw the minimap if the collected crystal count triggers it OR the user has manually toggled it.
+                if (isMinimapVisible || crystalsCollected >= TOTAL_CRYSTALS) {
+                    minimap.style.display = 'block';
+                    updateMinimap();
+                } else {
+                    minimap.style.display = 'none';
+                }
             }
 
             renderer.render(scene, camera);
