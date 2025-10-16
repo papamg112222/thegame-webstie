@@ -3,13 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Maze Explorer: The Sprint</title>
-    <!-- Tailwind CSS for modern, responsive layout -->
+    <title>3D Maze Explorer: The Ghost Hunt</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Three.js PointerLockControls for first-person camera handling -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
     <style>
         body {
             background-color: #050508;
@@ -43,7 +41,7 @@
             border-radius: 50%;
             z-index: 999;
             pointer-events: none;
-            opacity: 0; 
+            opacity: 0;
         }
         #message-box {
             position: absolute;
@@ -96,38 +94,49 @@
             font-weight: bold;
             text-shadow: 0 0 8px #ff0000;
         }
+        #crystal-status {
+            color: #00ffaa;
+            font-size: 14px;
+        }
+        #map-canvas {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            border: 2px solid #00ffaa;
+            display: none; /* Initially hidden */
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            box-shadow: 0 0 10px #00ffaa;
+        }
     </style>
 </head>
 <body>
-    <!-- Canvas is added by Three.js -->
-
-    <!-- Info/Start Screen -->
     <div id="info">
-        <h1 class="text-3xl font-bold mb-4 text-[#ff4444]">THE DEEP LABYRINTH</h1>
-        <p class="text-sm mb-4">Click to enter the darkness. Walk normally until you see **It**.</p>
+        <h1 class="text-3xl font-bold mb-4 text-[#ff4444]">THE DEEP LABYRINTH: GHOST HUNT</h1>
+        <p class="text-sm mb-4">Escape requires **50 Crystals** to unlock the map and find the random exit!</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
             **Walk**: **W** / **A** / **S** / **D** (Slower pace)<br>
-            **Sprint**: Automatically triggers when the **Ghost** is in sight, and lasts for 3 seconds after you hide!<br>
-            **Look**: **Mouse** Movement
+            **Sprint**: Automatically triggers when a **Ghost** is in sight, and lasts for 3 seconds after you hide!<br>
+            **Goal**: Collect all **Crystals** and find the **Exit**.
         </p>
         <button class="action-button">ENTER</button>
     </div>
 
-    <!-- Status Bar -->
     <div id="status-bar">
         <span id="player-status">Status: Walking...</span>
+        <span id="crystal-status">Crystals: 0 / 50</span>
         <span id="ghost-proximity">Threat: Distant</span>
     </div>
 
-    <!-- Crosshair -->
     <div id="crosshair"></div>
 
-    <!-- Custom Modal for Alerts -->
     <div id="message-box">
         <p id="message-text" class="text-xl font-bold mb-4"></p>
         <button class="action-button" onclick="closeAlert()">RESTART</button>
     </div>
+    
+    <canvas id="map-canvas" width="200" height="200"></canvas>
 
     <script type="module">
         // --- 3D Setup Variables ---
@@ -137,16 +146,16 @@
         const crosshair = document.getElementById('crosshair');
         const playerStatus = document.getElementById('player-status');
         const ghostProximity = document.getElementById('ghost-proximity');
+        const crystalStatus = document.getElementById('crystal-status'); 
 
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
-        const PLAYER_HEIGHT = 6; 
+        const PLAYER_HEIGHT = 6;
         
-        // World Offset (Calculated in init, but declared globally for access)
         let offsetX, offsetZ;
         
         // Speed Definitions
-        const WALK_SPEED = 32; 
+        const WALK_SPEED = 32;
         const GHOST_SPEED = 80; // Fast speed for the Ghost AI
         const SPRINT_SPEED = GHOST_SPEED; // Player matches Ghost speed when seen
         let effectiveSpeed = WALK_SPEED;
@@ -161,38 +170,44 @@
         let moveRight = false;
         let gameActive = false;
         let winPosition = null;
-        let ghostMesh = null;
         let wallObjects = [];
 
-        // Ghost AI state
-        let ghostPath = []; // Array of [row, col] for the ghost to follow
+        // Ghost AI state (Modified for multiple ghosts)
+        let ghosts = []; // Array to hold multiple ghost objects
         let lastPathUpdateTime = 0;
         
-        let playerGridPos = { r: 0, c: 0 }; // Updated in animate loop
-        let ghostGridPos = { r: 35, c: 35 }; // Starting cell for the ghost
+        let playerGridPos = { r: 0, c: 0 }; 
 
         // Maze Grid Definitions
         const MAX_COL = 71;
         const MAX_ROW = 71;
-        const START_COL = 1; 
-        const START_ROW = MAX_ROW - 2; 
-        const EXIT_COL = MAX_COL - 2;
-        const EXIT_ROW = 1;
+        const START_COL = 1;
+        const START_ROW = MAX_ROW - 2;
+        let EXIT_COL = 0; // Will be set randomly in buildMaze
+        let EXIT_ROW = 0; // Will be set randomly in buildMaze
+
+        // --- Crystal & Map Variables (NEW) ---
+        // *** REVISED CRYSTAL COUNT HERE ***
+        const MAX_CRYSTALS = 50; 
+        // **********************************
+        let crystalsCollected = 0;
+        let crystals = []; // Array to hold the collectible meshes
+        let mapActive = false;
+        const mapCanvas = document.getElementById('map-canvas');
+        const mapCtx = mapCanvas.getContext('2d');
+        const MAP_SCALE = 200 / MAX_ROW; // Scale to fit a 200x200 canvas
 
         // Generate the complex, non-linear maze structure
         const mazeGrid = generateTrueMaze(MAX_ROW, MAX_COL);
         
         // --- Maze Generation (Recursive Backtracker + Aggressive Looping) ---
-        /**
-         * Generates a complex, non-linear maze structure using a carving algorithm.
-         */
         function generateTrueMaze(rows, cols) {
             const grid = Array(rows).fill(0).map(() => Array(cols).fill(1));
             const stack = [];
 
             // 2. Start carving from the START cell
             stack.push([START_ROW, START_COL]);
-            grid[START_ROW][START_COL] = 0; 
+            grid[START_ROW][START_COL] = 0;
 
             while (stack.length > 0) {
                 const [r, c] = stack[stack.length - 1];
@@ -200,8 +215,8 @@
                 const neighbors = [
                     [r - 2, c, r - 1, c], [r + 2, c, r + 1, c],
                     [r, c - 2, r, c - 1], [r, c + 2, r, c + 1]
-                ].filter(([nr, nc]) => 
-                    nr > 0 && nr < rows - 1 && nc > 0 && nc < cols - 1 && grid[nr][nc] === 1 
+                ].filter(([nr, nc]) =>
+                    nr > 0 && nr < rows - 1 && nc > 0 && nc < cols - 1 && grid[nr][nc] === 1
                 );
 
                 if (neighbors.length > 0) {
@@ -210,19 +225,29 @@
                     grid[wr][wc] = 0;
                     stack.push([nr, nc]);
                 } else {
-                    stack.pop(); 
+                    stack.pop();
                 }
             }
 
-            // 3. Set the Exit point
-            grid[EXIT_ROW][EXIT_COL] = 2; 
+            // 3. Set the Exit point (Random placement)
+            let exitSet = false;
+            while (!exitSet) {
+                // Keep trying a random inner cell until we find an empty path cell (0)
+                EXIT_ROW = Math.floor(Math.random() * (rows - 2)) + 1;
+                EXIT_COL = Math.floor(Math.random() * (cols - 2)) + 1;
+                // Ensure exit is not the start cell
+                if (grid[EXIT_ROW][EXIT_COL] === 0 && !(EXIT_ROW === START_ROW && EXIT_COL === START_COL)) {
+                    grid[EXIT_ROW][EXIT_COL] = 2; // Exit marker
+                    exitSet = true;
+                }
+            }
 
             // 4. Introduce LOOPS for complexity
-            const LOOP_PERCENTAGE = 0.20; 
+            const LOOP_PERCENTAGE = 0.20;
             for (let r = 1; r < rows - 1; r++) {
                 for (let c = 1; c < cols - 1; c++) {
                     if (grid[r][c] === 1 && Math.random() < LOOP_PERCENTAGE) {
-                        grid[r][c] = 0; 
+                        grid[r][c] = 0;
                     }
                 }
             }
@@ -230,35 +255,22 @@
         }
 
         // --- Utility Functions for Grid/World Conversion ---
-
-        /**
-         * Converts world coordinates to maze grid coordinates.
-         */
         function toGridPosition(worldX, worldZ) {
             const r = Math.floor((worldZ - offsetZ) / CELL_SIZE);
             const c = Math.floor((worldX - offsetX) / CELL_SIZE);
             return { r, c };
         }
 
-        /**
-         * Converts grid coordinates to world coordinates (center of the cell).
-         */
         function toWorldPosition(r, c) {
             const x = (c + 0.5) * CELL_SIZE + offsetX;
             const z = (r + 0.5) * CELL_SIZE + offsetZ;
             return new THREE.Vector3(x, PLAYER_HEIGHT, z);
         }
 
-        /**
-         * Updates the player's current grid position.
-         */
         function updatePlayerGridPosition() {
             playerGridPos = toGridPosition(camera.position.x, camera.position.z);
         }
         
-        /**
-         * Custom alert to avoid window.alert in the iframe.
-         */
         function showAlert(message, isWin) {
             gameActive = false;
             controls.unlock();
@@ -276,6 +288,7 @@
 
             messageBox.style.display = 'block';
             crosshair.style.opacity = 0;
+            mapCanvas.style.display = 'none'; // Hide map on game end
         }
 
         window.closeAlert = function() {
@@ -284,11 +297,6 @@
         }
 
         // --- Pathfinding (Breadth-First Search) ---
-
-        /**
-         * Uses Breadth-First Search (BFS) to find the shortest path from start to end.
-         * Returns an array of grid coordinates (excluding start, including end).
-         */
         function findPath(startR, startC, endR, endC) {
             if (startR === endR && startC === endC) return [];
             
@@ -296,7 +304,7 @@
             const cols = mazeGrid[0].length;
             const queue = [`${startR},${startC}`];
             const visited = new Set();
-            const parent = {}; // Stores { 'r,c': 'parentR,parentC' }
+            const parent = {}; 
             
             visited.add(`${startR},${startC}`);
             let goalKey = null;
@@ -310,7 +318,6 @@
                     break;
                 }
 
-                // Neighbors (N, S, E, W)
                 const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
                 for (const [dr, dc] of directions) {
@@ -320,39 +327,34 @@
                     if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
                         const neighborKey = `${nr},${nc}`;
                         
-                        // If not a solid wall (1) and not visited
                         if (mazeGrid[nr][nc] !== 1 && !visited.has(neighborKey)) {
                             visited.add(neighborKey);
-                            parent[neighborKey] = currentKey; // The current cell is the parent of the neighbor
+                            parent[neighborKey] = currentKey; 
                             queue.push(neighborKey);
                         }
                     }
                 }
             }
 
-            // Path reconstruction
             if (!goalKey) return [];
 
             const fullPath = [];
             let tempKey = goalKey;
             
-            // Loop backward from goal until reaching the start cell
             while (parent[tempKey]) {
                 fullPath.unshift(tempKey.split(',').map(Number));
                 tempKey = parent[tempKey];
             }
             
-            // fullPath now contains: [[nextR, nextC], ..., [endR, endC]]
-            return fullPath; 
+            return fullPath;
         }
 
         // --- Initialization ---
-
         function init() {
             // 1. Scene setup
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x050508);
-            scene.fog = new THREE.Fog(0x050508, CELL_SIZE * 5, CELL_SIZE * 30); 
+            scene.fog = new THREE.Fog(0x050508, CELL_SIZE * 5, CELL_SIZE * 30);
 
             // 2. Camera setup
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -373,397 +375,511 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
-            // 4. Lighting
-            const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
-            scene.add(ambientLight);
-
-            // Flashlight effect
-            const pointLight = new THREE.PointLight(0xffffff, 1, 50);
-            camera.add(pointLight); 
-            scene.add(camera);
-
-            // 5. Controls
+            // 4. Controls setup
             controls = new THREE.PointerLockControls(camera, document.body);
-
-            controls.addEventListener('lock', () => {
-                infoElement.style.display = 'none';
-                crosshair.style.opacity = 1;
-                gameActive = true;
-            });
-            controls.addEventListener('unlock', () => {
-                if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    infoElement.style.display = 'block';
-                }
-                gameActive = false;
-                crosshair.style.opacity = 0;
-            });
-
-            document.getElementById('info').addEventListener('click', () => {
+            
+            infoElement.querySelector('button').addEventListener('click', () => {
                 controls.lock();
             });
 
-            // 6. Build the Maze and Ghost
-            buildMaze(offsetX, offsetZ);
-            addGhost();
+            controls.addEventListener('lock', function () {
+                infoElement.style.display = 'none';
+                crosshair.style.opacity = 1;
+                gameActive = true;
+                if (mapActive) mapCanvas.style.display = 'block';
+            });
 
-            // 7. Event listeners
+            controls.addEventListener('unlock', function () {
+                if (gameActive) {
+                    infoElement.style.display = 'block';
+                    crosshair.style.opacity = 0;
+                    mapCanvas.style.display = 'none';
+                }
+            });
+
+            // 5. Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            scene.add(ambientLight);
+            
+            const pointLight = new THREE.PointLight(0xffffff, 20, CELL_SIZE * 2);
+            camera.add(pointLight); // Attach light to camera for flashlight effect
+            scene.add(camera);
+
+            // 6. Build the maze geometry and crystals
+            buildMaze();
+            
+            // 7. Add Ghost NPCs
+            addGhosts(5); // Add 5 ghosts
+
+            // 8. Event listeners
             document.addEventListener('keydown', onKeyDown, false);
             document.addEventListener('keyup', onKeyUp, false);
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        /**
-         * Builds the 3D geometry for the maze.
-         */
-        function buildMaze(offsetX, offsetZ) {
-            const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 10 });
-            const floorMaterial = new THREE.MeshPhongMaterial({ color: 0x1f1f2a });
-            const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
-            
+        // --- Maze Building and Crystal Placement ---
+        function buildMaze() {
+            const floorTexture = new THREE.TextureLoader().load('https://threejs.org/examples/textures/hardwood2_diffuse.jpg');
+            floorTexture.wrapS = THREE.RepeatWrapping;
+            floorTexture.wrapT = THREE.RepeatWrapping;
+            floorTexture.repeat.set(MAX_COL * 2, MAX_ROW * 2);
+
             // Floor
             const floorGeometry = new THREE.PlaneGeometry(MAX_COL * CELL_SIZE, MAX_ROW * CELL_SIZE);
+            const floorMaterial = new THREE.MeshLambertMaterial({ map: floorTexture, color: 0x303030 });
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
+            floor.position.set(0, 0, 0);
             scene.add(floor);
 
-            for (let i = 0; i < mazeGrid.length; i++) {
-                for (let j = 0; j < mazeGrid[i].length; j++) {
-                    const cellType = mazeGrid[i][j];
-                    const x = j * CELL_SIZE + offsetX + CELL_SIZE / 2;
-                    const z = i * CELL_SIZE + offsetZ + CELL_SIZE / 2;
+            // Wall Material (Dark, slightly glowing)
+            const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x220000, emissive: 0x220000, emissiveIntensity: 0.1 });
+            const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
+            const exitWallMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00, transparent: true, opacity: 0.5 });
+            
+            const wallMap = [];
+            const crystalPositions = [];
 
-                    if (cellType === 1) { // Wall
+            for (let r = 0; r < MAX_ROW; r++) {
+                wallMap[r] = [];
+                for (let c = 0; c < MAX_COL; c++) {
+                    const worldPos = toWorldPosition(r, c);
+                    
+                    if (mazeGrid[r][c] === 1) { // Wall
                         const wall = new THREE.Mesh(wallGeometry, wallMaterial);
-                        wall.position.set(x, WALL_HEIGHT / 2, z);
-                        wall.userData.isWall = true;
+                        wall.position.set(worldPos.x, WALL_HEIGHT / 2, worldPos.z);
                         scene.add(wall);
                         wallObjects.push(wall);
-                    } else if (cellType === 2) { // Exit
-                        const exitMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
-                        const exitGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.8, WALL_HEIGHT / 4, CELL_SIZE * 0.8);
-                        const exitCube = new THREE.Mesh(exitGeometry, exitMaterial);
-                        exitCube.position.set(x, 0.1, z);
-                        exitCube.userData.isExit = true;
-                        
-                        const exitLight = new THREE.PointLight(0x00ff00, 2, 25);
-                        exitLight.position.set(x, 5, z);
-                        scene.add(exitLight);
-                        exitCube.userData.light = exitLight;
-
-                        scene.add(exitCube);
-                        winPosition = exitCube;
+                        wallMap[r][c] = wall;
+                    } else if (mazeGrid[r][c] === 2) { // Exit
+                        const exitWall = new THREE.Mesh(wallGeometry, exitWallMaterial);
+                        exitWall.position.set(worldPos.x, WALL_HEIGHT / 2, worldPos.z);
+                        scene.add(exitWall);
+                        winPosition = exitWall;
+                        winPosition.userData = { isExit: true };
+                    } else if (mazeGrid[r][c] === 0) { // Path - Place Crystal
+                        crystalPositions.push({r, c});
                     }
+                }
+            }
+            
+            // Scatter crystals, placing a maximum of MAX_CRYSTALS
+            let crystalCount = 0;
+            const crystalGeometry = new THREE.OctahedronGeometry(1);
+            const crystalMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x00ffaa, 
+                emissive: 0x00ffaa, 
+                emissiveIntensity: 0.2
+            });
+
+            // Randomly select cells for crystal placement to match MAX_CRYSTALS
+            const cellsToPlace = [];
+            let tempPositions = [...crystalPositions]; // Clone the array
+            const placementLimit = Math.min(MAX_CRYSTALS, tempPositions.length);
+
+            for (let i = 0; i < placementLimit; i++) {
+                const index = Math.floor(Math.random() * tempPositions.length);
+                cellsToPlace.push(tempPositions[index]);
+                tempPositions.splice(index, 1); // Remove it so we don't pick the same cell twice
+            }
+
+            for (const pos of cellsToPlace) {
+                const worldPos = toWorldPosition(pos.r, pos.c);
+                const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
+                
+                // Randomize position slightly within the cell
+                const slightOffset = (Math.random() - 0.5) * (CELL_SIZE / 3);
+                crystal.position.set(worldPos.x + slightOffset, PLAYER_HEIGHT / 2, worldPos.z - slightOffset);
+                crystal.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+                
+                // Add a glowing point light for each crystal
+                const crystalLight = new THREE.PointLight(0x00ffaa, 2, 5);
+                crystalLight.position.copy(crystal.position);
+                scene.add(crystalLight);
+
+                crystal.userData = { isCrystal: true, light: crystalLight, r: pos.r, c: pos.c };
+                crystals.push(crystal);
+                scene.add(crystal);
+                crystalCount++;
+            }
+            // Update the display for the total possible crystals (now 50)
+            crystalStatus.textContent = `Crystals: 0 / ${MAX_CRYSTALS}`;
+        }
+        
+        // --- Ghost NPC Logic ---
+        function createGhost(r, c) {
+            const worldPos = toWorldPosition(r, c);
+            const ghostGeometry = new THREE.SphereGeometry(PLAYER_HEIGHT / 2, 8, 8);
+            const ghostMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xff0000, 
+                transparent: true, 
+                opacity: 0.7,
+                wireframe: true 
+            });
+            const ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
+            ghostMesh.position.set(worldPos.x, PLAYER_HEIGHT / 2, worldPos.z);
+            
+            const ghostLight = new THREE.PointLight(0xff0000, 10, CELL_SIZE * 3);
+            ghostLight.position.copy(ghostMesh.position);
+            
+            scene.add(ghostMesh);
+            scene.add(ghostLight);
+
+            return {
+                mesh: ghostMesh,
+                light: ghostLight,
+                gridPos: { r, c },
+                path: [],
+                target: null, // Player's last seen position grid coordinates
+                isHunting: false, // True if ghost has player in sight
+                cooldown: 0, // Delay before hunting can resume
+                currentCellCenter: toWorldPosition(r, c)
+            };
+        }
+        
+        function addGhosts(count) {
+            const potentialGhostCells = [];
+            for (let r = 1; r < MAX_ROW - 1; r++) {
+                for (let c = 1; c < MAX_COL - 1; c++) {
+                    if (mazeGrid[r][c] === 0 && (r !== START_ROW || c !== START_COL)) {
+                         potentialGhostCells.push({r, c});
+                    }
+                }
+            }
+
+            for (let i = 0; i < count; i++) {
+                if (potentialGhostCells.length === 0) break;
+                
+                const index = Math.floor(Math.random() * potentialGhostCells.length);
+                const { r, c } = potentialGhostCells.splice(index, 1)[0]; 
+                
+                const ghost = createGhost(r, c);
+                ghosts.push(ghost);
+            }
+        }
+        
+        function updateGhost(ghost, delta) {
+            const ghostPos = ghost.mesh.position;
+            const playerPos = camera.position;
+            const distToPlayer = ghostPos.distanceTo(playerPos);
+            
+            // Check line of sight to player (Raycaster)
+            const direction = playerPos.clone().sub(ghostPos).normalize();
+            raycaster.set(ghostPos, direction);
+            raycaster.far = distToPlayer;
+            const intersects = raycaster.intersectObjects(wallObjects, true);
+
+            const playerVisible = intersects.length === 0;
+
+            if (playerVisible && distToPlayer < CELL_SIZE * 15 && ghost.cooldown <= 0) {
+                // Ghost sees player - initiate hunt!
+                ghost.isHunting = true;
+                ghost.target = playerGridPos;
+                ghost.path = findPath(ghost.gridPos.r, ghost.gridPos.c, ghost.target.r, ghost.target.c);
+                ghost.mesh.material.color.set(0xff0000);
+                ghost.light.color.set(0xff0000);
+            } else if (ghost.isHunting && distToPlayer > CELL_SIZE * 20) {
+                // Ghost loses player in the distance
+                ghost.isHunting = false;
+                ghost.cooldown = 5; // 5 second cool-down before next hunt
+                ghost.mesh.material.color.set(0xff8888);
+                ghost.light.color.set(0xff8888);
+            }
+            
+            if (ghost.cooldown > 0) {
+                ghost.cooldown -= delta;
+            }
+
+            if (ghost.isHunting) {
+                // Check if path is stale (needs recalculation)
+                if (Date.now() - lastPathUpdateTime > 1000) { // Recalculate every 1 second
+                    ghost.path = findPath(ghost.gridPos.r, ghost.gridPos.c, playerGridPos.r, playerGridPos.c);
+                    lastPathUpdateTime = Date.now();
+                }
+
+                // If a path exists, move along it
+                if (ghost.path.length > 0) {
+                    const [nextR, nextC] = ghost.path[0];
+                    const nextWorldPos = toWorldPosition(nextR, nextC);
+                    
+                    // Simple linear interpolation movement
+                    const movementStep = GHOST_SPEED * delta;
+                    ghost.mesh.position.lerp(nextWorldPos, movementStep / ghost.mesh.position.distanceTo(nextWorldPos));
+                    
+                    // Check if ghost has reached the center of the next cell
+                    if (ghost.mesh.position.distanceTo(nextWorldPos) < 1) {
+                        ghost.gridPos = { r: nextR, c: nextC };
+                        ghost.path.shift(); // Move to the next cell in the path
+                    }
+                } else {
+                    // Path lost or target reached - remain idle or patrol
+                    ghost.isHunting = false;
+                    ghost.cooldown = 3;
+                    ghost.mesh.material.color.set(0xff8888);
+                    ghost.light.color.set(0xff8888);
+                }
+            } else {
+                // Passive (Idle) state - just float up and down
+                ghost.mesh.position.y = PLAYER_HEIGHT / 2 + Math.sin(clock.getElapsedTime() * 2) * 0.5;
+            }
+
+            // Ghost contact check (Game Over)
+            if (distToPlayer < PLAYER_HEIGHT * 0.5) { 
+                showAlert('CAUGHT! The spectral hunter caught up to you in the darkness.', false);
+                return;
+            }
+        }
+        
+        // --- Input Handling ---
+        const onKeyDown = function (event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = true; break;
+                case 'KeyA': moveLeft = true; break;
+                case 'KeyS': moveBackward = true; break;
+                case 'KeyD': moveRight = true; break;
+            }
+        };
+
+        const onKeyUp = function (event) {
+            switch (event.code) {
+                case 'KeyW': moveForward = false; break;
+                case 'KeyA': moveLeft = false; break;
+                case 'KeyS': moveBackward = false; break;
+                case 'KeyD': moveRight = false; break;
+            }
+        };
+
+        // --- Player Movement and Collision ---
+        function updateMovement(delta) {
+            if (!gameActive) return;
+
+            const inputActive = moveForward || moveBackward || moveLeft || moveRight;
+            let ghostProximityStatus = "Threat: Distant";
+
+            // Determine if player is visible to any ghost
+            const visibleToGhost = ghosts.some(ghost => {
+                const ghostPos = ghost.mesh.position;
+                const playerPos = camera.position;
+                const distToGhost = ghostPos.distanceTo(playerPos);
+                
+                if (distToGhost > CELL_SIZE * 15) return false;
+
+                const direction = playerPos.clone().sub(ghostPos).normalize();
+                raycaster.set(ghostPos, direction);
+                raycaster.far = distToGhost;
+                const intersects = raycaster.intersectObjects(wallObjects, true);
+
+                if (intersects.length === 0) {
+                    ghostProximityStatus = "Threat: Hunting!";
+                    return true;
+                }
+                return false;
+            });
+            
+            // Sprint Logic: Auto-sprint when seen, with a 3-second delay after hiding.
+            if (visibleToGhost) {
+                effectiveSpeed = SPRINT_SPEED;
+                sprintDelayTimer = SPRINT_DELAY_DURATION;
+                playerStatus.textContent = "Status: Sprinting!";
+                playerStatus.classList.add('sprinting');
+            } else if (sprintDelayTimer > 0) {
+                effectiveSpeed = SPRINT_SPEED;
+                sprintDelayTimer -= delta;
+                playerStatus.textContent = `Status: Sprinting (${sprintDelayTimer.toFixed(1)}s)`;
+            } else {
+                effectiveSpeed = WALK_SPEED;
+                playerStatus.textContent = "Status: Walking...";
+                playerStatus.classList.remove('sprinting');
+            }
+            ghostProximity.textContent = ghostProximityStatus;
+
+
+            // Apply Movement
+            const velocity = new THREE.Vector3();
+            if (moveForward) velocity.z -= effectiveSpeed * delta;
+            if (moveBackward) velocity.z += effectiveSpeed * delta;
+            if (moveLeft) velocity.x -= effectiveSpeed * delta;
+            if (moveRight) velocity.x += effectiveSpeed * delta;
+
+            const prevPosition = camera.position.clone();
+
+            controls.getObject().translateX(velocity.x);
+            controls.getObject().translateZ(velocity.z);
+
+            // Collision Detection
+            const movementVector = camera.position.clone().sub(prevPosition);
+            if (movementVector.lengthSq() > 0) {
+                const center = camera.position.clone();
+                center.y = 0; 
+                
+                // Define 4 collision check points around the player
+                const radius = CELL_SIZE * 0.3; // Collision radius (slightly smaller than a cell)
+                const checkPoints = [
+                    new THREE.Vector3(center.x + radius, PLAYER_HEIGHT, center.z + radius),
+                    new THREE.Vector3(center.x + radius, PLAYER_HEIGHT, center.z - radius),
+                    new THREE.Vector3(center.x - radius, PLAYER_HEIGHT, center.z + radius),
+                    new THREE.Vector3(center.x - radius, PLAYER_HEIGHT, center.z - radius)
+                ];
+
+                let collisionDetected = false;
+                
+                for (const point of checkPoints) {
+                    const { r, c } = toGridPosition(point.x, point.z);
+                    
+                    if (mazeGrid[r] && mazeGrid[r][c] === 1) { // Hit a wall
+                        collisionDetected = true;
+                        break;
+                    }
+                }
+
+                if (collisionDetected) {
+                    // Revert position on collision
+                    camera.position.copy(prevPosition);
+                }
+            }
+            
+            updatePlayerGridPosition();
+            checkCollectibles();
+            checkWinCondition();
+        }
+        
+        // --- Crystal Collection and Win/Map Check ---
+        function checkCollectibles() {
+            // Find current cell crystals
+            const { r, c } = playerGridPos;
+            
+            const collectedIndices = [];
+            for (let i = 0; i < crystals.length; i++) {
+                const crystal = crystals[i];
+                if (!crystal.userData.isCollected) {
+                    const crystalDist = camera.position.distanceTo(crystal.position);
+                    
+                    if (crystalDist < PLAYER_HEIGHT * 1.5) { // Collectible distance
+                        crystal.userData.isCollected = true;
+                        collectedIndices.push(i);
+                        crystalsCollected++;
+                        
+                        // Remove from scene visually
+                        scene.remove(crystal);
+                        scene.remove(crystal.userData.light);
+                        
+                        crystalStatus.textContent = `Crystals: ${crystalsCollected} / ${MAX_CRYSTALS}`;
+                    }
+                }
+            }
+            
+            // Clean up the crystal array (remove collected ones)
+            crystals = crystals.filter((_, index) => !collectedIndices.includes(index));
+            
+            // Check for map unlock
+            if (!mapActive && crystalsCollected >= MAX_CRYSTALS) {
+                mapActive = true;
+                mapCanvas.style.display = 'block';
+                // Change exit door color to active
+                if (winPosition) {
+                     winPosition.material.color.set(0x00ff00);
+                     winPosition.material.opacity = 0.9;
                 }
             }
         }
         
-        /**
-         * Adds the ghost entity to the scene.
-         */
-        function addGhost() {
-            const ghostMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0xaa00ff, // Magenta/Purple/Menacing
-                transparent: true,
-                opacity: 0.5,
-                blending: THREE.AdditiveBlending 
-            });
-            const ghostGeometry = new THREE.SphereGeometry(2, 16, 16);
-            ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
-            ghostMesh.userData.isGhost = true;
+        function checkWinCondition() {
+            if (!winPosition) return;
             
-            // Start the ghost at the defined grid position (e.g., cell 35, 35)
-            const ghostWorldPos = toWorldPosition(ghostGridPos.r, ghostGridPos.c);
-            ghostMesh.position.copy(ghostWorldPos);
+            const { r, c } = playerGridPos;
+            const exitR = EXIT_ROW;
+            const exitC = EXIT_COL;
             
-            scene.add(ghostMesh);
-
-            // Add a point light to make it glow
-            const ghostLight = new THREE.PointLight(0xaa00aa, 4, 50);
-            ghostMesh.add(ghostLight);
-        }
-
-        /**
-         * Checks if the ghost is in direct line of sight (pure check).
-         */
-        function isGhostVisible() {
-            if (!ghostMesh) return false;
-
-            const playerPosition = camera.position.clone();
-            const ghostPosition = ghostMesh.position.clone();
-
-            // Check if distance is too far to bother with raycasting
-            const dist = playerPosition.distanceTo(ghostPosition);
-            if (dist > CELL_SIZE * 10) {
-                 return false;
-            }
-
-            // Direction vector from player to ghost
-            const direction = new THREE.Vector3().subVectors(ghostPosition, playerPosition).normalize();
-
-            // Setup Raycaster
-            raycaster.set(playerPosition, direction);
-
-            // Check for intersections with walls
-            const intersects = raycaster.intersectObjects(wallObjects);
-
-            // If intersections exist, check the distance
-            if (intersects.length > 0) {
-                const distanceToWall = intersects[0].distance;
-                
-                // If distance to ghost is less than distance to the closest wall, the ghost is visible.
-                return dist < distanceToWall - 0.5;
-            }
-            
-            return true; // No wall between
-        }
-
-        /**
-         * Handles the Ghost's movement and AI.
-         */
-        function moveGhost(delta) {
-            if (!ghostMesh) return;
-
-            const currentTime = clock.getElapsedTime();
-            const ghostWorldPos = ghostMesh.position;
-            const ghostIsSeeingPlayer = isGhostVisible();
-
-            // --- Smart AI Update Logic: Only update path if player is visible ---
-            if (ghostIsSeeingPlayer) {
-                // If the ghost sees the player, recalculate the direct shortest path immediately.
-                ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
-                
-                // Find path from ghost's current cell to the player's current cell
-                ghostPath = findPath(
-                    ghostGridPos.r, ghostGridPos.c, 
-                    playerGridPos.r, playerGridPos.c
-                );
-                // Reset timer when path is updated (sighting)
-                lastPathUpdateTime = currentTime;
-            }
-            // The ghost continues to follow the last path if it loses sight, 
-            // simulating it heading towards the last known location.
-
-            // --- Movement Execution ---
-            if (ghostPath.length > 0) {
-                // The first cell in the path is the next target cell
-                const [nextR, nextC] = ghostPath[0];
-                const targetWorldPos = toWorldPosition(nextR, nextC);
-                
-                // Use vector interpolation for smooth movement
-                const moveDistance = GHOST_SPEED * delta;
-                
-                // Check if we will overshoot the target
-                if (ghostWorldPos.distanceTo(targetWorldPos) < moveDistance) {
-                    // Snap to target and remove this cell from the path
-                    ghostWorldPos.x = targetWorldPos.x;
-                    ghostWorldPos.z = targetWorldPos.z;
-                    ghostPath.shift(); 
+            if (r === exitR && c === exitC) {
+                if (mapActive) {
+                    showAlert(`VICTORY! You collected all ${MAX_CRYSTALS} crystals and found the random exit!`, true);
                 } else {
-                    // Move towards the target position
-                    const direction = new THREE.Vector3().subVectors(targetWorldPos, ghostWorldPos).normalize();
-                    ghostWorldPos.addScaledVector(direction, moveDistance);
+                    // Player reached exit but map is not active
+                    const wallPos = winPosition.position;
+                    // Nudge player back
+                    const cameraPos = camera.position;
+                    const awayDir = cameraPos.clone().sub(wallPos).normalize();
+                    cameraPos.add(awayDir.multiplyScalar(CELL_SIZE * 0.1)); 
                 }
-                
-                // Make the ghost face the direction of movement
-                if (ghostPath.length > 0) {
-                    const lookAtTarget = toWorldPosition(ghostPath[0][0], ghostPath[0][1]);
-                    ghostMesh.lookAt(lookAtTarget.x, ghostWorldPos.y, lookAtTarget.z);
+            }
+        }
+
+        // --- Map Drawing Logic (NEW) ---
+        function drawMap() {
+            if (!mapActive) return;
+
+            mapCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            mapCtx.fillRect(0, 0, 200, 200);
+
+            for (let r = 0; r < MAX_ROW; r++) {
+                for (let c = 0; c < MAX_COL; c++) {
+                    const x = c * MAP_SCALE;
+                    const y = r * MAP_SCALE;
+                    const w = MAP_SCALE;
+                    const h = MAP_SCALE;
+
+                    if (mazeGrid[r][c] === 1) {
+                        mapCtx.fillStyle = '#111'; // Wall color
+                        mapCtx.fillRect(x, y, w, h);
+                    } else if (r === EXIT_ROW && c === EXIT_COL) {
+                        mapCtx.fillStyle = '#00ff00'; // Exit color
+                        mapCtx.fillRect(x, y, w, h);
+                    } else if (r === START_ROW && c === START_COL) {
+                        mapCtx.fillStyle = '#00ffff'; // Start color
+                        mapCtx.fillRect(x, y, w, h);
+                    }
                 }
+            }
+
+            // Draw crystals (faded, not needed once collected)
+            crystals.forEach(crystal => {
+                const { r, c } = crystal.userData;
+                mapCtx.fillStyle = 'rgba(0, 255, 170, 0.4)';
+                mapCtx.beginPath();
+                mapCtx.arc((c + 0.5) * MAP_SCALE, (r + 0.5) * MAP_SCALE, MAP_SCALE * 0.3, 0, Math.PI * 2);
+                mapCtx.fill();
+            });
+
+            // Draw player position
+            const pX = (playerGridPos.c + 0.5) * MAP_SCALE;
+            const pY = (playerGridPos.r + 0.5) * MAP_SCALE;
+            mapCtx.fillStyle = '#ff0000';
+            mapCtx.beginPath();
+            mapCtx.arc(pX, pY, MAP_SCALE * 0.4, 0, Math.PI * 2);
+            mapCtx.fill();
+        }
+
+        // --- Main Game Loop ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            if (gameActive) {
+                updateMovement(delta);
+                ghosts.forEach(ghost => updateGhost(ghost, delta));
+                if (mapActive) drawMap();
             }
             
-            // Simple bobbing and rotation (always on)
-            ghostMesh.rotation.y += 1.0 * delta;
-            ghostMesh.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(currentTime * 3) * 0.5;
+            // Rotate crystals for visual effect
+            crystals.forEach(crystal => {
+                 crystal.rotation.x += delta * 0.5;
+                 crystal.rotation.y += delta * 0.8;
+            });
 
-            // --- Check for Game Over ---
-            checkCatchCondition(ghostWorldPos);
+            renderer.render(scene, camera);
         }
 
-        /**
-         * Checks if the Ghost has caught the player (Game Over condition).
-         */
-        function checkCatchCondition(ghostPosition) {
-            const catchDistance = 3; // Catch if distance is less than 3 units
-            const dist = camera.position.distanceTo(ghostPosition);
-
-            if (dist < catchDistance) {
-                showAlert("CAUGHT! The Ghost found you in the dark maze.", false);
-            }
-        }
-
-
-        // --- Input Handlers (Unchanged) ---
-
-        function onKeyDown(event) {
-            switch (event.code) {
-                case 'ArrowUp': case 'KeyW': moveForward = true; break;
-                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
-                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
-                case 'ArrowRight': case 'KeyD': moveRight = true; break;
-            }
-        }
-
-        function onKeyUp(event) {
-            switch (event.code) {
-                case 'ArrowUp': case 'KeyW': moveForward = false; break;
-                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
-                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
-                case 'ArrowRight': case 'KeyD': moveRight = false; break;
-            }
-        }
-
+        // --- Window Resize Handling ---
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Game Loop and Logic ---
-
-        function animate() {
-            requestAnimationFrame(animate);
-
-            const delta = clock.getDelta();
-
-            if (controls.isLocked === true && gameActive) {
-                
-                // 1. Update Player position
-                updatePlayerGridPosition(); 
-                
-                // Check Ghost vision (now a pure boolean)
-                const ghostInSight = isGhostVisible(); 
-                
-                // 2. Ghost AI Movement
-                moveGhost(delta); 
-
-                // --- Sprint Logic (With 3-second delay) ---
-                
-                if (ghostInSight) {
-                    // Ghost is in sight: Sprint immediately, reset delay timer
-                    effectiveSpeed = SPRINT_SPEED;
-                    sprintDelayTimer = SPRINT_DELAY_DURATION; 
-                    playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
-                    playerStatus.classList.add('sprinting');
-                } else if (sprintDelayTimer > 0) {
-                    // Ghost is out of sight, but delay is active: Keep sprinting
-                    sprintDelayTimer -= delta;
-                    // Clamp timer to prevent negative display numbers
-                    sprintDelayTimer = Math.max(0, sprintDelayTimer);
-                    effectiveSpeed = SPRINT_SPEED;
-                    playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
-                    playerStatus.classList.add('sprinting');
-                } else {
-                    // Delay expired or never triggered: Walk
-                    effectiveSpeed = WALK_SPEED;
-                    playerStatus.textContent = "Status: Walking...";
-                    playerStatus.classList.remove('sprinting');
-                }
-                
-                // --- Proximity Status Update ---
-                const dist = camera.position.distanceTo(ghostMesh.position);
-                if (dist > CELL_SIZE * 10) {
-                     ghostProximity.textContent = "Threat: Distant";
-                } else if (dist > CELL_SIZE * 4) {
-                     ghostProximity.textContent = "Threat: Nearby";
-                } else {
-                     ghostProximity.textContent = "THREAT: IMMINENT!";
-                }
-
-                // --- Movement Calculation ---
-                const velocity = new THREE.Vector3();
-                if (moveForward) velocity.z -= effectiveSpeed * delta;
-                if (moveBackward) velocity.z += effectiveSpeed * delta;
-                if (moveLeft) velocity.x -= effectiveSpeed * delta;
-                if (moveRight) velocity.x += effectiveSpeed * delta;
-
-                const oldPosition = camera.position.clone();
-                
-                // Apply movement
-                controls.moveRight(velocity.x); 
-                controls.moveForward(-velocity.z);
-
-                // --- Collision Detection ---
-                const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-
-                if (isColliding(currentGridX, currentGridZ, oldPosition)) {
-                    camera.position.copy(oldPosition);
-                }
-
-                // --- Win Condition ---
-                checkWinCondition();
-                
-                // Animate exit light pulse
-                if (winPosition && winPosition.userData.light) {
-                    winPosition.userData.light.intensity = 2 + Math.sin(clock.getElapsedTime() * 5) * 1;
-                }
-            }
-
-            renderer.render(scene, camera);
-        }
-
-        /**
-         * Checks the player's position against the maze grid for walls.
-         */
-        function isColliding(gridX, gridZ, oldPosition) {
-            // Check bounds 
-            if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
-                return true;
-            }
-
-            if (mazeGrid[gridZ][gridX] === 1) {
-                
-                // Attempt to revert movement along one axis to unstick the player
-                
-                // Test X-revert:
-                const tempX = oldPosition.x;
-                const tempZ = camera.position.z;
-                
-                let testGridX = Math.floor((tempX - offsetX) / CELL_SIZE);
-                let testGridZ = Math.floor((tempZ - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[testGridZ] && mazeGrid[testGridZ][testGridX] === 1) {
-                    camera.position.z = oldPosition.z;
-                }
-                
-                // Test Z-revert:
-                const tempX_2 = camera.position.x;
-                const tempZ_2 = oldPosition.z;
-
-                let testGridX_2 = Math.floor((tempX_2 - offsetX) / CELL_SIZE);
-                let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                    camera.position.x = oldPosition.x;
-                }
-
-                // Final check after partial reverts
-                const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[finalGridZ] && mazeGrid[finalGridZ][finalGridX] === 1) {
-                    return true; 
-                }
-            }
-            return false;
-        }
-
-        function checkWinCondition() {
-            if (!winPosition) return;
-            
-            const distanceToExit = camera.position.distanceTo(winPosition.position);
-            
-            if (distanceToExit < CELL_SIZE / 2) {
-                showAlert("SUCCESS! You escaped the deep maze and the Ghost's sight!", true);
-            }
-        }
-
-        // --- Start the App ---
-        window.onload = function () {
-            init();
-            animate();
-        };
-
+        // Start the game initialization
+        init();
+        animate();
     </script>
 </body>
 </html>
