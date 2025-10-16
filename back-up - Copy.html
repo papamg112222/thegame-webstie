@@ -133,7 +133,7 @@
         /* --- Inventory Styles --- */
         #inventory-container {
             position: absolute;
-            bottom: 50px; /* Above the status bar */
+            bottom: 50px; 
             right: 20px;
             display: flex;
             gap: 5px;
@@ -159,6 +159,17 @@
             background-color: rgba(0, 0, 0, 0.9);
             color: #00ffff;
         }
+        
+        /* --- Battery Status --- */
+        #battery-status {
+            color: #ffcc00;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(255, 204, 0, 0.5);
+        }
+        .battery-low {
+            color: #ff4444 !important;
+            text-shadow: 0 0 5px rgba(255, 68, 68, 0.7) !important;
+        }
     </style>
 </head>
 <body>
@@ -177,12 +188,16 @@
 
     <div id="status-bar">
         <span id="player-status">Status: Walking...</span>
-        <span id="ghost-proximity">Threat: Distant | Crystals: 0/150</span>
+        <div>
+            <span id="battery-status">Battery: N/A</span> | 
+            <span id="ghost-proximity">Threat: Distant | Crystals: 0/150</span>
+        </div>
     </div>
 
     <div id="crosshair"></div>
     
     <div id="inventory-container"></div>
+
     <div id="console">
         <input type="text" id="console-input" placeholder="Type command (e.g., /showmm, /unshowmm, /freecam) and press Enter" />
     </div>
@@ -200,9 +215,13 @@
         const crosshair = document.getElementById('crosshair');
         const playerStatus = document.getElementById('player-status');
         const ghostProximity = document.getElementById('ghost-proximity');
+        const batteryStatus = document.getElementById('battery-status');
         const minimap = document.createElement('canvas'); 
         minimap.id = 'minimap';
         document.body.appendChild(minimap);
+
+        // --- Constants for Lighting ---
+        const MAX_FLASHLIGHT_INTENSITY = 1.5; // NEW: Reduced max intensity for 'a bit brighter' effect
 
         // --- Console/Cheat Variables ---
         let isConsoleOpen = false; 
@@ -242,12 +261,19 @@
         let winPosition = null;
         let wallObjects = [];
 
-        // --- NEW INVENTORY/ITEM VARIABLES ---
+        // --- INVENTORY/ITEM VARIABLES ---
         let flashlightObject = null; 
+        let firstPersonFlashlightModel = null; 
         let hasFlashlight = false;
+        let isFlashlightOn = true; 
+        let batteryLevel = 100; 
+        const BATTERY_DRAIN_RATE = 1.0; 
+        const BATTERY_COLLECTION_AMOUNT = 50; 
+        let batteries = []; 
+
         let inventory = [];
         const MAX_INVENTORY_SLOTS = 5;
-        // --- END NEW INVENTORY/ITEM VARIABLES ---
+        // --- END INVENTORY/ITEM VARIABLES ---
 
         // --- GAME OBJECT ARRAYS ---
         let ghosts = []; 
@@ -450,7 +476,6 @@
             camera.position.set(startX, PLAYER_HEIGHT, startZ);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            // Enable shadows
             renderer.shadowMap.enabled = true; 
             renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
             
@@ -458,10 +483,16 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
-            const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
+            // --- RESTORED ORIGINAL DIM LIGHTING ---
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.5); // Slightly dim ambient
             scene.add(ambientLight);
 
-            // The Flashlight SpotLight is NOT added here; it's added on collection (see addFlashlightToCamera)
+            // Add a very dim PointLight to the camera for the initial darkness
+            const baseLight = new THREE.PointLight(0xffffff, 0.2, 30); // Intensity 0.2 (very dim)
+            camera.add(baseLight);
+            camera.userData.baseLight = baseLight; 
+            // ----------------------------------------
+
             scene.add(camera);
 
             controls = new THREE.PointerLockControls(camera, document.body);
@@ -486,10 +517,11 @@
             });
 
             buildMaze(offsetX, offsetZ);
-            addFlashlight(); // NEW: Spawn the flashlight object and beacon
+            addFlashlight(); 
+            addBatteries(); 
             addGhosts();
             addCrystals();
-            updateInventoryUI(); // Initialize the empty inventory slots
+            updateInventoryUI(); 
             
             minimap.width = 150;
             minimap.height = 150;
@@ -519,7 +551,7 @@
             const floorGeometry = new THREE.PlaneGeometry(MAX_COL * CELL_SIZE, MAX_ROW * CELL_SIZE);
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
-            floor.receiveShadow = true; // NEW: Floor receives shadows
+            floor.receiveShadow = true; 
             scene.add(floor);
 
             for (let i = 0; i < mazeGrid.length; i++) {
@@ -532,8 +564,8 @@
                         const wall = new THREE.Mesh(wallGeometry, wallMaterial);
                         wall.position.set(x, WALL_HEIGHT / 2, z);
                         wall.userData.isWall = true;
-                        wall.castShadow = true;   // NEW: Wall casts shadows
-                        wall.receiveShadow = true; // NEW: Wall receives shadows
+                        wall.castShadow = true;   
+                        wall.receiveShadow = true; 
                         scene.add(wall);
                         wallObjects.push(wall);
                     } else if (cellType === 2) { // Exit 
@@ -567,8 +599,8 @@
                         closedDoor.rotation.y = doorRotation;
                         closedDoor.userData.isDoor = true;
                         closedDoor.userData.isWall = true; 
-                        closedDoor.castShadow = true;   // NEW: Door casts shadows
-                        closedDoor.receiveShadow = true; // NEW: Door receives shadows
+                        closedDoor.castShadow = true;   
+                        closedDoor.receiveShadow = true; 
                         scene.add(closedDoor);
                         wallObjects.push(closedDoor);
                         
@@ -578,7 +610,7 @@
             }
         }
         
-        // NEW FUNCTION: Spawns the physical flashlight object and beacon
+        // Flashlight Spawn
         function addFlashlight() {
             let r, c;
             // Find a random, open cell that is not the start or exit
@@ -589,7 +621,7 @@
 
             const worldPos = toWorldPosition(r, c);
             
-            // 1. Physical Flashlight Mesh (The item the player collects)
+            // 1. Physical Flashlight Mesh
             const geometry = new THREE.CylinderGeometry(0.5, 0.5, 3, 16); 
             const material = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0xdddddd, emissiveIntensity: 0.8 });
             flashlightObject = new THREE.Mesh(geometry, material);
@@ -615,24 +647,116 @@
             scene.add(beacon);
         }
 
-        // NEW FUNCTION: Adds the SpotLight to the player's camera
-        function addFlashlightToCamera() {
-            const flashlight = new THREE.SpotLight(0xffffff, 6, 100, Math.PI / 6, 0.5, 2);
-            flashlight.position.set(0, 0, 0); 
-            flashlight.target.position.set(0, 0, -1); 
+        // NEW FUNCTION: Spawn Batteries
+        function addBatteries() {
+            const batteryMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff00, emissive: 0x004400, shininess: 50 });
+            const batteryGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1, 8); 
+            
+            const numBatteries = 15;
+            for (let i = 0; i < numBatteries; i++) {
+                let r, c;
+                do {
+                    r = Math.floor(Math.random() * MAX_ROW);
+                    c = Math.floor(Math.random() * MAX_COL);
+                } while (mazeGrid[r][c] !== 0);
+
+                const worldPos = toWorldPosition(r, c);
+                
+                const batteryMesh = new THREE.Mesh(batteryGeometry, batteryMaterial);
+                batteryMesh.rotation.x = Math.PI / 2;
+                batteryMesh.position.set(worldPos.x, 0.5, worldPos.z);
+                batteryMesh.userData.isCollectible = true;
+                batteryMesh.userData.name = "Battery";
+                
+                scene.add(batteryMesh);
+                batteries.push(batteryMesh);
+            }
+        }
+
+
+        // Flashlight Model and Light Setup
+        function createFirstPersonModel() {
+            const group = new THREE.Group();
+
+            // 1. Arm (Simple Cube)
+            const armGeometry = new THREE.BoxGeometry(1, 1, 3);
+            const armMaterial = new THREE.MeshPhongMaterial({ color: 0x8d745c });
+            const arm = new THREE.Mesh(armGeometry, armMaterial);
+            arm.position.set(2, -3, -1); // Positioned low and to the right
+            arm.rotation.z = Math.PI / 4; 
+            arm.rotation.y = -Math.PI / 10;
+            arm.castShadow = true;
+            group.add(arm);
+
+            // 2. Flashlight Body (Cylinder)
+            const flBodyGeometry = new THREE.CylinderGeometry(0.2, 0.2, 3, 16);
+            const flBodyMaterial = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            const flBody = new THREE.Mesh(flBodyGeometry, flBodyMaterial);
+            flBody.position.set(1, 0, 0);
+            flBody.rotation.z = -Math.PI / 2;
+            flBody.castShadow = true;
+            arm.add(flBody);
+
+            // 3. Flashlight Head (Cone)
+            const flHeadGeometry = new THREE.ConeGeometry(0.4, 0.5, 16);
+            const flHeadMaterial = new THREE.MeshPhongMaterial({ color: 0x666666 });
+            const flHead = new THREE.Mesh(flHeadGeometry, flHeadMaterial);
+            flHead.position.set(2.5, 0, 0);
+            flHead.rotation.z = -Math.PI / 2;
+            flBody.add(flHead);
+
+            // 4. SpotLight (The actual light source)
+            const flashlight = new THREE.SpotLight(0xffffff, 0, 100, Math.PI / 6, 0.5, 2);
+            flashlight.position.set(2.5, 0, 0); // Position at the head of the model
+            flashlight.target.position.set(2.5, 0, -1); // Aiming forward
+            flashlight.target.updateMatrixWorld();
+            
             flashlight.castShadow = true; 
             flashlight.shadow.mapSize.width = 1024;
             flashlight.shadow.mapSize.height = 1024;
             flashlight.shadow.camera.near = 0.5;
             flashlight.shadow.camera.far = 100;
+
+            flBody.add(flashlight);
+            flBody.add(flashlight.target);
+
+            group.userData.flashlightMesh = flBody;
+            group.userData.spotLight = flashlight;
             
-            camera.userData.flashlight = flashlight; 
-            
-            camera.add(flashlight);
-            camera.add(flashlight.target);
+            return group;
         }
 
-        // NEW FUNCTIONS: Inventory Management
+        // Adds the SpotLight and the arm model to the player's camera
+        function addFlashlightToCamera() {
+            firstPersonFlashlightModel = createFirstPersonModel();
+            
+            // Attach the whole model group to the camera
+            camera.add(firstPersonFlashlightModel); 
+            
+            // Initial light intensity update based on full battery
+            updateFlashlightPower();
+        }
+        
+        function updateFlashlightPower() {
+            if (!hasFlashlight || !firstPersonFlashlightModel) return;
+            
+            const spotLight = firstPersonFlashlightModel.userData.spotLight;
+            
+            // Intensity scales with battery level, max intensity is now 1.5 (MAX_FLASHLIGHT_INTENSITY)
+            let intensity = (batteryLevel / 100) * MAX_FLASHLIGHT_INTENSITY;
+            intensity = Math.max(0, intensity); 
+
+            spotLight.intensity = intensity;
+            
+            // Update battery status bar color
+            if (batteryLevel < 20) {
+                batteryStatus.classList.add('battery-low');
+            } else {
+                batteryStatus.classList.remove('battery-low');
+            }
+        }
+
+        // Inventory Management
         function addToInventory(itemName) {
             if (inventory.length < MAX_INVENTORY_SLOTS) {
                 inventory.push(itemName);
@@ -649,7 +773,7 @@
                 slot.className = 'inventory-slot';
                 
                 if (inventory[i]) {
-                    slot.textContent = inventory[i].substring(0, 2); // Show first two letters (FL for Flashlight)
+                    slot.textContent = inventory[i].substring(0, 2); // Show first two letters (FL or BA)
                     slot.title = inventory[i];
                     slot.classList.add('filled');
                 } else {
@@ -658,39 +782,254 @@
                 inventoryContainer.appendChild(slot);
             }
         }
-        // END NEW FUNCTIONS
 
         function addGhosts() {
-            // Ghost setup remains the same...
-            // (omitted for brevity, keep your existing addGhosts code here)
-            // ...
+            const ghostMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0xaa00ff,
+                transparent: true,
+                opacity: 0.5,
+                blending: THREE.AdditiveBlending 
+            });
+            const ghostGeometry = new THREE.SphereGeometry(2, 16, 16);
+            
+            ghosts = [];
+            ghostPaths = [];
+            
+            GHOST_START_POSITIONS.forEach((startPos, index) => {
+                const ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
+                ghostMesh.userData.isGhost = true;
+                ghostMesh.userData.chasing = false; 
+                
+                const ghostWorldPos = toWorldPosition(startPos.r, startPos.c);
+                ghostMesh.position.copy(ghostWorldPos);
+                
+                const ghostLight = new THREE.PointLight(0xaa00aa, 4, 50);
+                ghostMesh.add(ghostLight);
+                
+                scene.add(ghostMesh);
+                ghosts.push(ghostMesh);
+                ghostPaths.push([]); 
+            });
         }
 
         function addCrystals() {
-            // Crystal setup remains the same...
-            // (omitted for brevity, keep your existing addCrystals code here)
-            // ...
+            const crystalMaterial = new THREE.MeshPhongMaterial({
+                color: 0x00ffff,
+                emissive: 0x00ffff,
+                emissiveIntensity: 0.5,
+                specular: 0xffffff,
+                shininess: 100,
+                transparent: true,
+                opacity: 0.9
+            });
+            const crystalGeometry = new THREE.DodecahedronGeometry(1); 
+            
+            let count = 0;
+            for (let i = 1; i < MAX_ROW - 1; i++) { 
+                for (let j = 1; j < MAX_COL - 1; j++) {
+                    if (mazeGrid[i][j] === 0) { 
+                        if (count >= TOTAL_CRYSTALS) return;
+                        
+                        if (Math.random() < 0.1) { 
+                            const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
+                            const worldPos = toWorldPosition(i, j);
+                            crystal.position.set(worldPos.x + (Math.random() - 0.5) * 5, 
+                                                PLAYER_HEIGHT / 2, 
+                                                worldPos.z + (Math.random() - 0.5) * 5);
+                            crystal.userData.isCrystal = true;
+                            
+                            scene.add(crystal);
+                            crystals.push(crystal);
+                            count++;
+                        }
+                    }
+                }
+            }
         }
 
         function isGhostVisible(ghostMesh) {
-            // ... (keep original function) ...
+            if (!ghostMesh) return false;
+
+            const playerPosition = camera.position.clone();
+            const ghostPosition = ghostMesh.position.clone();
+
+            const dist = playerPosition.distanceTo(ghostPosition);
+            if (dist > CELL_SIZE * 10) {
+                 return false;
+            }
+
+            const direction = new THREE.Vector3().subVectors(ghostPosition, playerPosition).normalize();
+            raycaster.set(playerPosition, direction);
+            const objectsToIntersect = wallObjects.filter(obj => !obj.userData.isDoor); 
+            const intersects = raycaster.intersectObjects(objectsToIntersect);
+
+            if (intersects.length > 0) {
+                const distanceToWall = intersects[0].distance;
+                return dist < distanceToWall - 0.5;
+            }
+            
+            return true;
         }
 
         function moveGhosts(delta) {
-            // ... (keep original function) ...
+            if (isFreeCam) return; 
+            
+            const currentTime = clock.getElapsedTime();
+            
+            const shouldUpdatePath = ghostUpdateTimer >= GHOST_UPDATE_INTERVAL;
+            
+            if (shouldUpdatePath) {
+                ghostUpdateTimer = 0;
+            } else {
+                ghostUpdateTimer += delta;
+            }
+
+            const GHOST_CHASE_SPEED = GHOST_SPEED; 
+            
+            ghosts.forEach((ghostMesh, index) => {
+                const ghostWorldPos = ghostMesh.position;
+                const ghostIsSeeingPlayer = isGhostVisible(ghostMesh); 
+                let ghostPath = ghostPaths[index]; 
+                let moveSpeed;
+                
+                // --- 1. FRENZY MODE CHECK ---
+                if (ghostsGoFrenzy) {
+                    moveSpeed = GHOST_FRENZY_SPEED;
+                    ghostMesh.userData.chasing = true; 
+                    
+                    if (shouldUpdatePath || ghostPath.length === 0) {
+                        const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
+                        ghostPath = findPath(
+                            ghostGridPos.r, ghostGridPos.c, 
+                            playerGridPos.r, playerGridPos.c
+                        );
+                        ghostPaths[index] = ghostPath; 
+                    }
+                } 
+                // --- 2. REGULAR AI MODE ---
+                else {
+                    if (ghostIsSeeingPlayer) {
+                        ghostMesh.userData.chasing = true; 
+                    } else if (ghostPath.length === 0) {
+                         ghostMesh.userData.chasing = false; 
+                    }
+
+                    if (ghostMesh.userData.chasing) {
+                        moveSpeed = GHOST_CHASE_SPEED;
+                        if (shouldUpdatePath) { 
+                            const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
+                            ghostPath = findPath(
+                                ghostGridPos.r, ghostGridPos.c, 
+                                playerGridPos.r, playerGridPos.c
+                            );
+                            ghostPaths[index] = ghostPath; 
+                        }
+                    } else {
+                        moveSpeed = GHOST_WANDER_SPEED;
+                        if (ghostPath.length === 0 && shouldUpdatePath) { 
+                            const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
+                            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                            const validNeighbors = directions.map(([dr, dc]) => [ghostGridPos.r + dr, ghostGridPos.c + dc])
+                                .filter(([r, c]) => mazeGrid[r] && mazeGrid[r][c] === 0);
+
+                            if (validNeighbors.length > 0) {
+                                const [targetR, targetC] = validNeighbors[Math.floor(Math.random() * validNeighbors.length)];
+                                ghostPath.push([targetR, targetC]);
+                                ghostPaths[index] = ghostPath;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Movement Execution
+                if (ghostPath.length > 0) {
+                    const [nextR, nextC] = ghostPath[0];
+                    const targetWorldPos = toWorldPosition(nextR, nextC);
+                    const moveDistance = moveSpeed * delta; 
+                    
+                    if (ghostWorldPos.distanceTo(targetWorldPos) < moveDistance) {
+                        ghostWorldPos.x = targetWorldPos.x;
+                        ghostWorldPos.z = targetWorldPos.z;
+                        ghostPath.shift(); 
+                    } else {
+                        const direction = new THREE.Vector3().subVectors(targetWorldPos, ghostWorldPos).normalize();
+                        ghostWorldPos.addScaledVector(direction, moveDistance);
+                    }
+                    
+                    if (ghostPath.length > 0) {
+                        const lookAtTarget = toWorldPosition(ghostPath[0][0], ghostPath[0][1]);
+                        ghostMesh.lookAt(lookAtTarget.x, ghostWorldPos.y, lookAtTarget.z);
+                    }
+                }
+                
+                ghostMesh.rotation.y += 1.0 * delta;
+                ghostMesh.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(currentTime * 3 + index) * 0.5;
+
+                checkCatchCondition(ghostWorldPos);
+            });
         }
 
         function checkCatchCondition(ghostPosition) { 
-            // ... (keep original function) ...
+            if (isFreeCam) return; 
+            
+            const catchDistance = 3; 
+            const dist = camera.position.distanceTo(ghostPosition);
+
+            if (dist < catchDistance) {
+                showAlert("CAUGHT! A Ghost found you in the deep maze.", false);
+            }
         }
 
         function openExitPortal() {
-            // ... (keep original function) ...
+            const door = winPosition.userData.closedDoor;
+            scene.remove(door);
+            wallObjects = wallObjects.filter(obj => obj.uuid !== door.uuid);
+
+            winPosition.visible = true; 
+            winPosition.userData.light.intensity = 5; 
         }
 
-        function checkCrystalCollection() {
+        function checkCollectibles() {
             if (isFreeCam) return; 
 
+            const playerPos = camera.position;
+            const collectionRadius = 5; 
+
+            // 1. Check Crystals
+            checkCrystalCollection();
+
+            // 2. Check Flashlight
+            if (!hasFlashlight && flashlightObject) {
+                if (playerPos.distanceTo(flashlightObject.position) < collectionRadius) {
+                    scene.remove(flashlightObject.userData.beacon);
+                    scene.remove(flashlightObject);
+                    flashlightObject = null;
+                    
+                    addFlashlightToCamera();
+                    
+                    hasFlashlight = true;
+                    addToInventory("Flashlight");
+                }
+            }
+
+            // 3. Check Batteries
+            for (let i = batteries.length - 1; i >= 0; i--) {
+                const battery = batteries[i];
+                if (playerPos.distanceTo(battery.position) < collectionRadius) {
+                    scene.remove(battery);
+                    batteries.splice(i, 1);
+                    
+                    // Restore battery level
+                    batteryLevel = Math.min(100, batteryLevel + BATTERY_COLLECTION_AMOUNT);
+                    updateFlashlightPower();
+                    
+                    updateStatusBar(); 
+                    return;
+                }
+            }
+        }
+        
+        function checkCrystalCollection() {
             const playerPos = camera.position;
             const collectionRadius = 5; 
 
@@ -711,36 +1050,234 @@
                         playerStatus.classList.add('sprinting'); 
                         openExitPortal();
                     }
-
                     return;
                 }
             }
         }
+
+
+        // --- CHEAT FUNCTIONS (Unchanged) ---
+        function setBatteryLevel(level) {
+            batteryLevel = Math.max(0, Math.min(100, level));
+            updateFlashlightPower();
+            updateStatusBar();
+            console.log(`[Cheat] Battery level set to ${batteryLevel}%.`);
+        }
+
+        function setCrystalCount(count) {
+            crystalsCollected = count;
+            // Force game state update if threshold is passed
+            if (crystalsCollected >= TOTAL_CRYSTALS) {
+                if (!ghostsGoFrenzy) {
+                    ghostsGoFrenzy = true;
+                    openExitPortal();
+                }
+            } else {
+                ghostsGoFrenzy = false;
+                if (winPosition) {
+                    winPosition.visible = false;
+                    winPosition.userData.closedDoor.visible = true; 
+                    winPosition.userData.light.intensity = 0;
+                }
+            }
+            updateStatusBar();
+        }
         
-        // --- CHEAT FUNCTIONS ---
-        // ... (keep original functions) ...
+        function toggleFreeCam(enable) {
+            isFreeCam = enable;
+            if (enable) {
+                controls.unlock(); 
+                playerStatus.textContent = "Status: FREECAM ACTIVE";
+                playerStatus.classList.remove('sprinting');
+                crosshair.style.opacity = 0; 
+                gameActive = false; 
+            } else {
+                camera.position.y = PLAYER_HEIGHT; 
+                controls.lock(); 
+            }
+        }
+
+        function setFlySpeed(level) {
+            flySpeedMultiplier = Math.max(1, Math.min(100, level));
+            console.log(`[Cheat] FlySpeed multiplier set to ${flySpeedMultiplier}.`);
+        }
+        
+        function toggleMinimap(visible) {
+            isMinimapVisible = visible;
+            minimap.style.display = visible ? 'block' : 'none';
+        }
+
+
+        function processCommand(commandText) {
+            const parts = commandText.trim().toLowerCase().split(/\s+/);
+            const command = parts[0];
+
+            if (command === '/set' && parts[1] === 'crystal') {
+                const count = parseInt(parts[2]);
+                if (!isNaN(count) && count >= 0 && count <= TOTAL_CRYSTALS) {
+                    setCrystalCount(count);
+                    console.log(`[Cheat] Crystals set to ${count}.`);
+                } else {
+                    console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
+                }
+            } else if (command === '/set' && parts[1] === 'battery') { 
+                const level = parseInt(parts[2]);
+                if (!isNaN(level) && hasFlashlight) {
+                    setBatteryLevel(level);
+                } else if (!hasFlashlight) {
+                    console.log(`[Cheat] Cannot set battery: Flashlight not yet collected.`);
+                } else {
+                    console.log(`[Cheat] Invalid battery level. Must be between 0 and 100.`);
+                }
+            } else if (command === '/freecam') { 
+                toggleFreeCam(true);
+                console.log(`[Cheat] FreeCam Activated.`);
+            } else if (command === '/unfreecam') { 
+                toggleFreeCam(false);
+                console.log(`[Cheat] FreeCam Deactivated.`);
+            } else if (command === '/flyspeed') { 
+                const speedLevel = parseInt(parts[1]);
+                if (!isNaN(speedLevel)) {
+                    setFlySpeed(speedLevel);
+                } else {
+                    console.log(`[Cheat] Invalid speed level. Must be between 1 and 100.`);
+                }
+            } else if (command === '/showminimap' || command === '/showmm') { 
+                toggleMinimap(true);
+                console.log(`[Cheat] Minimap shown.`);
+            } else if (command === '/unshowminimap' || command === '/unshowmm') { 
+                toggleMinimap(false);
+                console.log(`[Cheat] Minimap hidden.`);
+            }
+        }
         // --- END CHEAT FUNCTIONS ---
 
 
         function updateStatusBar() {
-            // ... (keep original function) ...
+            if (isFreeCam) return; 
+
+            let closestDist = Infinity;
+            ghosts.forEach(ghost => {
+                const dist = camera.position.distanceTo(ghost.position);
+                closestDist = Math.min(closestDist, dist);
+            });
+
+            let threatText;
+            if (ghostsGoFrenzy) {
+                threatText = "THREAT: FRENZY! (THEY KNOW)";
+            } else if (closestDist > CELL_SIZE * 10) {
+                 threatText = "Threat: Distant";
+            } else if (closestDist > CELL_SIZE * 4) {
+                 threatText = "Threat: Nearby";
+            } else {
+                 threatText = "THREAT: IMMINENT!";
+            }
+            ghostProximity.textContent = `${threatText} | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
+            
+            // Update Battery Status
+            if (hasFlashlight) {
+                batteryStatus.textContent = `Battery: ${batteryLevel.toFixed(0)}%`;
+            } else {
+                batteryStatus.textContent = `Battery: N/A`;
+            }
         }
 
         function updateMinimap() {
-            // ... (keep original function) ...
+            if (minimap.style.display === 'none') return;
+
+            const ctx = minimap.getContext('2d');
+            const mapSize = minimap.width;
+            const cellMapSize = mapSize / MAX_COL;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, mapSize, mapSize);
+
+            // Draw Walls
+            ctx.fillStyle = '#111111'; 
+            for (let r = 0; r < MAX_ROW; r++) {
+                for (let c = 0; c < MAX_COL; c++) {
+                    if (mazeGrid[r][c] === 1) {
+                        ctx.fillRect(c * cellMapSize, r * cellMapSize, cellMapSize, cellMapSize);
+                    }
+                }
+            }
+
+            // Draw Exit (Green dot)
+            ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; 
+            ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
+            
+            // Draw Ghosts
+            ghosts.forEach(ghost => {
+                const ghostGridPos = toGridPosition(ghost.position.x, ghost.position.z);
+                ctx.fillStyle = ghost.userData.chasing ? '#ff0000' : '#aa00ff';
+                ctx.beginPath();
+                const ghostMapX = ghostGridPos.c * cellMapSize + cellMapSize / 2;
+                const ghostMapY = ghostGridPos.r * cellMapSize + cellMapSize / 2;
+                ctx.arc(ghostMapX, ghostMapY, cellMapSize * 0.3, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // Draw Player (Red dot)
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            const playerMapX = playerGridPos.c * cellMapSize + cellMapSize / 2;
+            const playerMapY = playerGridPos.r * cellMapSize + cellMapSize / 2;
+            ctx.arc(playerMapX, playerMapY, cellMapSize * 0.4, 0, 2 * Math.PI);
+            ctx.fill();
         }
 
         // --- Input Handlers (Unchanged) ---
         function onKeyDown(event) {
-            // ... (keep original function) ...
+            if (isConsoleOpen) {
+                if (event.code === 'Escape') {
+                    event.preventDefault(); 
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    isConsoleOpen = false;
+                    
+                    controls.lock(); 
+                }
+                return; 
+            }
+            
+            if (event.code === 'Slash' && !event.shiftKey && controls.isLocked) {
+                event.preventDefault(); 
+                controls.unlock();
+                gameActive = false;
+                
+                consoleElement.style.display = 'block';
+                consoleInput.focus(); 
+                isConsoleOpen = true;
+                return;
+            }
+
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'KeyQ': moveUp = true; break; 
+                case 'KeyE': moveDown = true; break; 
+            }
         }
 
         function onKeyUp(event) {
-            // ... (keep original function) ...
+            if (isConsoleOpen) return; 
+            
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+                case 'KeyQ': moveUp = false; break;
+                case 'KeyE': moveDown = false; break;
+            }
         }
         
         function onWindowResize() {
-            // ... (keep original function) ...
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         // --- Game Loop and Logic ---
@@ -768,43 +1305,50 @@
                     }
                     
                     moveGhosts(delta); 
-                    
-                    // --- NEW FLASHILGHT COLLECTION CHECK ---
-                    if (!hasFlashlight && flashlightObject) {
-                        const playerPos = camera.position;
-                        const itemPos = flashlightObject.position;
-                        const collectionRadius = 5;
+                    checkCollectibles(); 
 
-                        if (playerPos.distanceTo(itemPos) < collectionRadius) {
-                            // 1. Remove the physical objects
-                            scene.remove(flashlightObject.userData.beacon);
-                            scene.remove(flashlightObject);
-                            flashlightObject = null;
-                            
-                            // 2. Add the light to the player (Spawns the functional light on the camera)
-                            addFlashlightToCamera();
-                            
-                            // 3. Update game state and inventory
-                            hasFlashlight = true;
-                            addToInventory("Flashlight");
-                        }
+                    // Flashlight Battery Drain Logic
+                    if (hasFlashlight && isFlashlightOn && batteryLevel > 0) {
+                        batteryLevel -= BATTERY_DRAIN_RATE * delta;
+                        batteryLevel = Math.max(0, batteryLevel);
+                        updateFlashlightPower();
+                    } else if (hasFlashlight && batteryLevel <= 0) {
+                        updateFlashlightPower(); 
                     }
-                    // --- END NEW CHECK ---
-                    
-                    checkCrystalCollection();
+
 
                     // Sprint Logic
-                    // ... (keep original sprint logic) ...
+                    if (!ghostsGoFrenzy) {
+                        if (ghostInSight) {
+                            effectiveSpeed = SPRINT_SPEED;
+                            sprintDelayTimer = SPRINT_DELAY_DURATION; 
+                            playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
+                            playerStatus.classList.add('sprinting');
+                        } else if (sprintDelayTimer > 0) {
+                            sprintDelayTimer -= delta;
+                            sprintDelayTimer = Math.max(0, sprintDelayTimer);
+                            effectiveSpeed = SPRINT_SPEED;
+                            playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
+                            playerStatus.classList.add('sprinting');
+                        } else {
+                            effectiveSpeed = WALK_SPEED;
+                            playerStatus.textContent = "Status: Walking...";
+                            playerStatus.classList.remove('sprinting');
+                        }
+                    } else {
+                        effectiveSpeed = SPRINT_SPEED; 
+                    }
                     
                     currentSpeed = effectiveSpeed;
                     updateStatusBar(); 
                 } else {
                     // --- FREECAM LOGIC ---
-                    // ... (keep original freecam logic) ...
+                    currentSpeed = (MAX_FREECAM_SPEED / 100) * flySpeedMultiplier;
+                    playerStatus.textContent = `Status: FREECAM ACTIVE (Speed: ${flySpeedMultiplier})`;
+                    playerStatus.classList.remove('sprinting');
+                    ghostProximity.textContent = `Threat: PAUSED | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
                 }
 
-
-                
                 // Movement Calculation (Applies to both modes)
                 const velocity = new THREE.Vector3();
                 if (moveForward) velocity.z -= currentSpeed * delta;
@@ -821,49 +1365,9 @@
 
                 const oldPosition = camera.position.clone();
                 
-                // **FIX 1: Anti-Tunneling/Collision Constraint Logic**
-                let moveX = 0;
-                let moveZ = 0;
-                
-                // 1. Check X-axis movement
-                if (velocity.x !== 0) {
-                    const tempCamera = camera.clone();
-                    tempCamera.position.copy(camera.position);
-                    
-                    controls.moveRight(velocity.x);
-                    
-                    const newGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                    const newGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-                    
-                    if (isFreeCam || (mazeGrid[newGridZ] && mazeGrid[newGridZ][newGridX] !== 1)) {
-                        moveX = camera.position.x - oldPosition.x;
-                    }
-                    
-                    camera.position.copy(oldPosition);
-                }
-
-                // 2. Check Z-axis movement
-                if (velocity.z !== 0) {
-                    const tempCamera = camera.clone();
-                    tempCamera.position.copy(camera.position);
-
-                    controls.moveForward(-velocity.z);
-
-                    const newGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                    const newGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-
-                    if (isFreeCam || (mazeGrid[newGridZ] && mazeGrid[newGridZ][newGridX] !== 1)) {
-                        moveZ = camera.position.z - oldPosition.z;
-                    }
-                    
-                    camera.position.copy(oldPosition);
-                }
-                
-                // 3. Apply the constrained movement
-                camera.position.x += moveX;
-                camera.position.z += moveZ;
-                // **END FIX 1**
-                
+                // --- PLAYER MOVEMENT FIX: Use controls for movement, then check collision ---
+                controls.moveForward(-velocity.z);
+                controls.moveRight(velocity.x);
                 
                 // Final Check and Win Condition: Only run if NOT in freecam mode
                 if (!isFreeCam) { 
@@ -872,14 +1376,33 @@
                     const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
                     
                     if (isColliding(finalGridX, finalGridZ)) {
+                         // If collision detected, revert to old position
                          camera.position.copy(oldPosition);
                     }
 
                     checkWinCondition();
                 } 
+                // -----------------------------------------------------------------------------
                 
                 // Animate lights & crystals 
-                // ... (keep original animation logic) ...
+                if (winPosition && winPosition.visible && winPosition.userData.light) {
+                    winPosition.userData.light.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
+                    winPosition.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
+                }
+                crystals.forEach(crystal => {
+                    crystal.rotation.y += 2 * delta;
+                    crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
+                });
+                
+                batteries.forEach(battery => {
+                    battery.rotation.z += 2 * delta;
+                    battery.position.y = 0.5 + 0.2 + Math.sin(clock.getElapsedTime() * 4) * 0.1;
+                });
+                
+                // Animate First-person model arm bob
+                if (firstPersonFlashlightModel) {
+                    firstPersonFlashlightModel.position.z = Math.sin(clock.getElapsedTime() * 6) * 0.05;
+                }
 
                 if (isMinimapVisible || crystalsCollected >= TOTAL_CRYSTALS) {
                     minimap.style.display = 'block';
@@ -892,7 +1415,7 @@
             renderer.render(scene, camera);
         }
 
-        // **FIX 2: Simplified isColliding function**
+        // Simplified isColliding function
         function isColliding(gridX, gridZ) {
             if (isFreeCam) return false; 
             
@@ -905,8 +1428,6 @@
             }
             return false;
         }
-        // **END FIX 2**
-
 
         function checkWinCondition() {
             if (isFreeCam) return; 
