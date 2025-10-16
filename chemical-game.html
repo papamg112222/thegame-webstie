@@ -108,6 +108,27 @@
             display: none; 
             z-index: 100;
         }
+        
+        /* --- Console Styles --- */
+        #console {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            z-index: 5000;
+            display: none;
+        }
+        #console input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #00ffff;
+            color: #00ff00;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            outline: none;
+        }
     </style>
 </head>
 <body>
@@ -116,9 +137,10 @@
         <p class="text-sm mb-4">Click to enter the darkness. Collect the 150 crystals before the 6 Ghosts find you!</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
-            **Walk**: **W** / **A** / **S** / **D** (Slower pace)<br>
-            **Sprint**: Automatically triggers when a **Ghost** is in sight, and lasts for 3 seconds after you hide!<br>
-            **Look**: **Mouse** Movement
+            **Walk**: **W** / **A** / **S** / **D**<br>
+            **Sprint**: Automatic when a Ghost is sighted (or **always** after 150 crystals).<br>
+            **Look**: **Mouse** Movement<br>
+            **Cheat Console**: Press **/**
         </p>
         <button class="action-button">ENTER</button>
     </div>
@@ -129,6 +151,10 @@
     </div>
 
     <div id="crosshair"></div>
+
+    <div id="console">
+        <input type="text" id="console-input" placeholder="Type command (e.g., /set crystal 149) and press Enter" />
+    </div>
 
     <div id="message-box">
         <p id="message-text" class="text-xl font-bold mb-4"></p>
@@ -147,17 +173,23 @@
         minimap.id = 'minimap';
         document.body.appendChild(minimap);
 
+        // --- Console/Cheat Variables ---
+        // RESTORED
+        let isConsoleOpen = false; 
+        const consoleElement = document.getElementById('console');
+        const consoleInput = document.getElementById('console-input');
+
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
         const PLAYER_HEIGHT = 6;
         
         let offsetX, offsetZ;
         
-        // Speed Definitions
+        // Speed Definitions (From previous version)
         const WALK_SPEED = 32;
         const GHOST_WANDER_SPEED = 15; 
-        const GHOST_SPEED = 150; // CHANGE 1: Faster chasing speed
-        const GHOST_FRENZY_SPEED = 300; // CHANGE 2: Extremely fast final speed
+        const GHOST_SPEED = 150; 
+        const GHOST_FRENZY_SPEED = 300; 
         const SPRINT_SPEED = GHOST_SPEED; 
         let effectiveSpeed = WALK_SPEED;
         
@@ -180,7 +212,6 @@
         let crystalsCollected = 0;
         const TOTAL_CRYSTALS = 150; 
         
-        // NEW: Final Frenzy State Flag
         let ghostsGoFrenzy = false; 
         
         let playerGridPos = { r: 0, c: 0 }; 
@@ -210,7 +241,6 @@
         // Filter Ghost start positions after maze generation
         GHOST_START_POSITIONS.forEach(pos => {
             if (mazeGrid[pos.r][pos.c] === 1) {
-                // Try to find a nearby open cell
                 for (let dr = -1; dr <= 1; dr++) {
                     for (let dc = -1; dc <= 1; dc++) {
                         const nr = pos.r + dr;
@@ -225,7 +255,7 @@
             }
         });
         
-        // --- Maze Generation (Recursive Backtracker + Aggressive Looping) ---
+        // --- Maze Generation (Unchanged) ---
         function generateTrueMaze(rows, cols) {
             const grid = Array(rows).fill(0).map(() => Array(cols).fill(1));
             const stack = [];
@@ -266,7 +296,7 @@
             return grid;
         }
 
-        // --- Utility Functions for Grid/World Conversion ---
+        // --- Utility Functions (Unchanged) ---
         function toGridPosition(worldX, worldZ) {
             const r = Math.floor((worldZ - offsetZ) / CELL_SIZE);
             const c = Math.floor((worldX - offsetX) / CELL_SIZE);
@@ -307,7 +337,7 @@
             window.location.reload();
         }
 
-        // --- Pathfinding ---
+        // --- Pathfinding (Unchanged) ---
         function findPath(startR, startC, endR, endC) {
             if (startR === endR && startC === endC) return [];
             
@@ -360,7 +390,7 @@
             return fullPath; 
         }
 
-        // --- Initialization ---
+        // --- Initialization (Unchanged) ---
 
         function init() {
             scene = new THREE.Scene();
@@ -398,7 +428,9 @@
             });
             controls.addEventListener('unlock', () => {
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    infoElement.style.display = 'block';
+                    if (!isConsoleOpen) { // Keep info screen hidden if console is open
+                         infoElement.style.display = 'block';
+                    }
                 }
                 gameActive = false;
                 crosshair.style.opacity = 0;
@@ -418,6 +450,17 @@
             document.addEventListener('keydown', onKeyDown, false);
             document.addEventListener('keyup', onKeyUp, false);
             window.addEventListener('resize', onWindowResize, false);
+
+            // RESTORED Console event listener
+            consoleInput.addEventListener('keydown', (event) => {
+                if (event.code === 'Enter') {
+                    processCommand(consoleInput.value);
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    isConsoleOpen = false;
+                    controls.lock(); // Re-lock controls after command
+                }
+            });
         }
 
         function buildMaze(offsetX, offsetZ) {
@@ -443,20 +486,45 @@
                         wall.userData.isWall = true;
                         scene.add(wall);
                         wallObjects.push(wall);
-                    } else if (cellType === 2) { // Exit
+                    } else if (cellType === 2) { // Exit (Now acts as the open door/portal)
                         const exitMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
-                        const exitGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.8, WALL_HEIGHT / 4, CELL_SIZE * 0.8);
-                        const exitCube = new THREE.Mesh(exitGeometry, exitMaterial);
-                        exitCube.position.set(x, 0.1, z);
-                        exitCube.userData.isExit = true;
+                        const exitGeometry = new THREE.PlaneGeometry(CELL_SIZE * 0.9, WALL_HEIGHT * 0.9);
+                        const exitPortal = new THREE.Mesh(exitGeometry, exitMaterial);
+
+                        // Determine door orientation based on exit position
+                        let doorRotation = 0; 
+                        if (EXIT_COL === 1 || EXIT_COL === MAX_COL - 2) {
+                            doorRotation = Math.PI / 2;
+                        }
+
+                        exitPortal.rotation.y = doorRotation;
+                        exitPortal.position.set(x, WALL_HEIGHT / 2, z);
+                        exitPortal.userData.isExit = true;
                         
-                        const exitLight = new THREE.PointLight(0x00ff00, 2, 25);
+                        // Hide portal until 150 crystals are collected (Frenzy Mode)
+                        exitPortal.visible = false;
+                        
+                        const exitLight = new THREE.PointLight(0x00ff00, 0, 25);
                         exitLight.position.set(x, 5, z);
                         scene.add(exitLight);
-                        exitCube.userData.light = exitLight;
+                        exitPortal.userData.light = exitLight;
 
-                        scene.add(exitCube);
-                        winPosition = exitCube;
+                        scene.add(exitPortal);
+                        winPosition = exitPortal;
+
+                        // Create the CLOSED DOOR placeholder (Acts as a temporary wall)
+                        const doorMaterial = new THREE.MeshPhongMaterial({ color: 0x5c3317, shininess: 10 }); // Simple brown door color
+                        const doorGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, WALL_HEIGHT, 1);
+                        const closedDoor = new THREE.Mesh(doorGeometry, doorMaterial);
+                        closedDoor.position.set(x, WALL_HEIGHT / 2, z);
+                        closedDoor.rotation.y = doorRotation;
+                        closedDoor.userData.isDoor = true;
+                        closedDoor.userData.isWall = true; // IMPORTANT: Makes it a physical barrier
+                        scene.add(closedDoor);
+                        wallObjects.push(closedDoor);
+                        
+                        // Store door references for removal
+                        winPosition.userData.closedDoor = closedDoor;
                     }
                 }
             }
@@ -539,7 +607,9 @@
 
             const direction = new THREE.Vector3().subVectors(ghostPosition, playerPosition).normalize();
             raycaster.set(playerPosition, direction);
-            const intersects = raycaster.intersectObjects(wallObjects);
+            // Check intersection with all walls *except* the closed door (which will be removed anyway)
+            const objectsToIntersect = wallObjects.filter(obj => !obj.userData.isDoor); 
+            const intersects = raycaster.intersectObjects(objectsToIntersect);
 
             if (intersects.length > 0) {
                 const distanceToWall = intersects[0].distance;
@@ -568,15 +638,13 @@
                 let ghostPath = ghostPaths[index]; 
                 let moveSpeed;
                 
-                // --- 1. FRENZY MODE CHECK (Activated at 150 crystals) ---
+                // --- 1. FRENZY MODE CHECK ---
                 if (ghostsGoFrenzy) {
                     moveSpeed = GHOST_FRENZY_SPEED;
-                    ghostMesh.userData.chasing = true; // Force chase state
+                    ghostMesh.userData.chasing = true; 
                     
-                    // Ghost always knows player's location, so always calculate path to player's current cell
                     if (shouldUpdatePath || ghostPath.length === 0) {
                         const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
-                        // Force pathfinding to player's current position (THEY KNOW!)
                         ghostPath = findPath(
                             ghostGridPos.r, ghostGridPos.c, 
                             playerGridPos.r, playerGridPos.c
@@ -588,9 +656,9 @@
                 else {
                     // --- AI State Update ---
                     if (ghostIsSeeingPlayer) {
-                        ghostMesh.userData.chasing = true; // Start chasing
+                        ghostMesh.userData.chasing = true; 
                     } else if (ghostPath.length === 0) {
-                         ghostMesh.userData.chasing = false; // Stop chasing if path finished
+                         ghostMesh.userData.chasing = false; 
                     }
 
                     // --- Path Calculation ---
@@ -657,6 +725,15 @@
                 showAlert("CAUGHT! A Ghost found you in the deep maze.", false);
             }
         }
+        
+        function openExitPortal() {
+            const door = winPosition.userData.closedDoor;
+            scene.remove(door);
+            wallObjects = wallObjects.filter(obj => obj.uuid !== door.uuid);
+
+            winPosition.visible = true; // Show the glowing portal
+            winPosition.userData.light.intensity = 5; // Turn on the light
+        }
 
         function checkCrystalCollection() {
             const playerPos = camera.position;
@@ -672,16 +749,56 @@
                     updateStatusBar(); 
 
                     if (crystalsCollected >= TOTAL_CRYSTALS) {
-                        minimap.style.display = 'block'; // Show the map!
-                        ghostsGoFrenzy = true; // NEW: Activate frenzy mode!
+                        minimap.style.display = 'block'; 
+                        ghostsGoFrenzy = true; 
                         playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
-                        playerStatus.classList.add('sprinting'); // Keep player sprinting
+                        playerStatus.classList.add('sprinting'); 
+                        openExitPortal(); // Open the door/portal
                     }
 
                     return;
                 }
             }
         }
+        
+        // --- CHEAT FUNCTIONS - RESTORED ---
+        function setCrystalCount(count) {
+            crystalsCollected = count;
+            
+            if (count >= TOTAL_CRYSTALS) {
+                crystals.forEach(crystal => scene.remove(crystal));
+                crystals = [];
+                ghostsGoFrenzy = true; 
+                playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
+                playerStatus.classList.add('sprinting'); 
+                openExitPortal();
+            } else {
+                // To safely reset the game state if crystals are reduced
+                window.location.reload(); 
+            }
+            
+            updateStatusBar();
+            if (crystalsCollected >= TOTAL_CRYSTALS) {
+                minimap.style.display = 'block'; 
+            }
+        }
+        
+        function processCommand(commandText) {
+            const parts = commandText.trim().toLowerCase().split(/\s+/);
+            const command = parts[0];
+
+            if (command === '/set' && parts[1] === 'crystal') {
+                const count = parseInt(parts[2]);
+                if (!isNaN(count) && count >= 0 && count <= TOTAL_CRYSTALS) {
+                    setCrystalCount(count);
+                    console.log(`[Cheat] Crystals set to ${count}.`);
+                } else {
+                    console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
+                }
+            }
+        }
+        // --- END CHEAT FUNCTIONS ---
+
 
         function updateStatusBar() {
             let closestDist = Infinity;
@@ -724,7 +841,7 @@
             }
 
             // Draw Exit (Green dot)
-            ctx.fillStyle = '#00ff00';
+            ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; // Green when open, Brown/Door when closed
             ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
             
             // Draw Ghosts
@@ -747,9 +864,33 @@
             ctx.fill();
         }
 
-        // --- Input Handlers (Unchanged) ---
-
+        // --- Input Handlers - RESTORED '/' LOGIC ---
         function onKeyDown(event) {
+            // 1. Console commands handler
+            if (isConsoleOpen) {
+                if (event.code === 'Escape') {
+                    event.preventDefault(); 
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    isConsoleOpen = false;
+                    controls.lock(); // Re-lock controls
+                }
+                return; 
+            }
+            
+            // 2. Open console on "/"
+            if (event.code === 'Slash' && !event.shiftKey && controls.isLocked) {
+                event.preventDefault(); 
+                controls.unlock();
+                gameActive = false;
+                
+                consoleElement.style.display = 'block';
+                isConsoleOpen = true;
+                consoleInput.focus();
+                return;
+            }
+
+            // 3. Game movement keys
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = true; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
@@ -759,6 +900,8 @@
         }
 
         function onKeyUp(event) {
+            if (isConsoleOpen) return; 
+            
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = false; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
@@ -766,14 +909,14 @@
                 case 'ArrowRight': case 'KeyD': moveRight = false; break;
             }
         }
-
+        
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Game Loop and Logic ---
+        // --- Game Loop and Logic (Minor animation update) ---
 
         function animate() {
             requestAnimationFrame(animate);
@@ -785,17 +928,18 @@
                 updatePlayerGridPosition(); 
                 
                 let ghostInSight = false;
-                ghosts.forEach(ghost => {
-                    if(isGhostVisible(ghost)) {
-                        ghostInSight = true;
-                    }
-                });
+                if (!ghostsGoFrenzy) {
+                    ghosts.forEach(ghost => {
+                        if(isGhostVisible(ghost)) {
+                            ghostInSight = true;
+                        }
+                    });
+                }
                 
                 moveGhosts(delta); 
-
                 checkCrystalCollection();
 
-                // --- Sprint Logic (Only runs if frenzy mode is OFF) ---
+                // --- Sprint Logic ---
                 if (!ghostsGoFrenzy) {
                     if (ghostInSight) {
                         effectiveSpeed = SPRINT_SPEED;
@@ -814,7 +958,6 @@
                         playerStatus.classList.remove('sprinting');
                     }
                 } else {
-                    // In frenzy mode, player is forced to sprint to match the ghost speed
                     effectiveSpeed = SPRINT_SPEED; 
                 }
                 
@@ -844,8 +987,9 @@
                 checkWinCondition();
                 
                 // Animate exit light pulse & crystals
-                if (winPosition && winPosition.userData.light) {
-                    winPosition.userData.light.intensity = 2 + Math.sin(clock.getElapsedTime() * 5) * 1;
+                if (winPosition && winPosition.visible && winPosition.userData.light) {
+                    winPosition.userData.light.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
+                    winPosition.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
                 }
                 crystals.forEach(crystal => {
                     crystal.rotation.y += 2 * delta;
@@ -865,9 +1009,7 @@
 
             if (mazeGrid[gridZ][gridX] === 1) {
                 
-                // Attempt to revert movement along one axis to unstick the player
-                
-                // Test X-revert:
+                // Perform X-revert test
                 const tempX = oldPosition.x;
                 const tempZ = camera.position.z;
                 
@@ -875,10 +1017,10 @@
                 let testGridZ = Math.floor((tempZ - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[testGridZ] && mazeGrid[testGridZ][testGridX] === 1) {
-                    camera.position.z = oldPosition.z;
+                    camera.position.z = oldPosition.z; 
                 }
                 
-                // Test Z-revert:
+                // Perform Z-revert test 
                 const tempX_2 = camera.position.x;
                 const tempZ_2 = oldPosition.z;
 
@@ -886,7 +1028,7 @@
                 let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                    camera.position.x = oldPosition.x;
+                    camera.position.x = oldPosition.x; 
                 }
 
                 // Final check after partial reverts
@@ -901,7 +1043,7 @@
         }
 
         function checkWinCondition() {
-            if (!winPosition) return;
+            if (!winPosition || !winPosition.visible) return;
             
             const distanceToExit = camera.position.distanceTo(winPosition.position);
             
