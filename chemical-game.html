@@ -1,4 +1,4 @@
-<!DOCTYPE html><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -160,11 +160,6 @@
             color: #fff;
             transition: border-color 0.1s, transform 0.1s, box-shadow 0.1s;
         }
-        /* Highlight border for selected slot */
-        .item-slot:hover {
-            border-color: #ffaa00;
-            box-shadow: 0 0 8px #ffaa00;
-        }
 
         /* --- Floating Text Style --- */
         #floating-text {
@@ -186,7 +181,7 @@
 <body>
     <div id="info">
         <h1 class="text-3xl font-bold mb-4 text-[#ff4444]">THE DEEP LABYRINTH</h1>
-        <p class="text-sm mb-4">Click to enter the darkness. Collect the 150 crystals before the 6 Ghosts find you!</p>
+        <p class="text-sm mb-4">Click to enter the darkness. Collect the 150 crystals, repair motors, and avoid the 6 Ghosts!</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
             **Walk**: **W** / **A** / **S** / **D**<br>
@@ -822,7 +817,7 @@
         }
 
         function useItem(slotIndex) {
-            if (!controls.isLocked) return;
+            if (!controls.isLocked || isMiniGameActive) return;
             
             const item = inventory[slotIndex];
             if (!item) return;
@@ -926,7 +921,7 @@
             // FIX: Cursor movement logic
             cursorPosition += cursorDirection * cursorSpeed * delta;
             
-            if (cursorPosition >= 300 - 5) { 
+            if (cursorPosition >= 300 - 5) { // 300px bar width - 5px cursor width
                 cursorPosition = 300 - 5;
                 cursorDirection = -1;
             } else if (cursorPosition <= 0) {
@@ -938,7 +933,7 @@
         }
 
         function checkHit() {
-            const cursorCenter = cursorPosition + 2.5; 
+            const cursorCenter = cursorPosition + 2.5; // Center of the 5px cursor
             
             if (cursorCenter >= targetPosition && cursorCenter <= targetPosition + targetWidth) {
                 // SUCCESS
@@ -1045,7 +1040,7 @@
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
                 
-                // Q/E (Vertical Movement) only affect freecam, so we only track them if freecam is active
+                // Q/E (Vertical Movement) are now ONLY active when in FreeCam
                 case 'KeyQ': if(isFreeCam) moveUp = true; break; 
                 case 'KeyE': if(isFreeCam) moveDown = true; break;
                 
@@ -1112,6 +1107,11 @@
                 controls.getObject().translateZ(velocity.z);
                 
                 checkCollision(oldPosition);
+                
+                // IMPORTANT: Reset Y position in case of unexpected lift/fall
+                if (camera.position.y !== PLAYER_HEIGHT) {
+                    camera.position.y = PLAYER_HEIGHT;
+                }
             }
         }
         
@@ -1164,6 +1164,7 @@
                     
                     // Ghost is captured - keep it still and update visuals
                     ghost.userData.light.intensity = 0.5 + Math.sin(clock.getElapsedTime() * 10) * 0.2;
+                    ghost.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(clock.getElapsedTime() * 4 + index) * 0.5;
                     
                     if (remaining <= 0) {
                         // Release the ghost
@@ -1209,7 +1210,7 @@
                         do {
                             targetR = Math.floor(Math.random() * MAX_ROW);
                             targetC = Math.floor(Math.random() * MAX_COL);
-                        } while (mazeGrid[targetR][targetC] !== 0);
+                        } while (mazeGrid[targetR] === undefined || mazeGrid[targetR][targetC] !== 0);
                         
                         ghostPaths[index] = findPath(ghostGrid.r, ghostGrid.c, targetR, targetC);
                     }
@@ -1231,6 +1232,9 @@
                     }
                 }
 
+                // --- Visuals ---
+                ghost.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(clock.getElapsedTime() * 4 + index) * 0.5;
+                
                 // --- Collision/Game Over Check ---
                 const distToPlayer = ghost.position.distanceTo(playerPos);
                 if (distToPlayer < 3) {
@@ -1294,6 +1298,9 @@
                 if (motorCooldownEnd > currentTime) {
                     const remaining = Math.ceil(motorCooldownEnd - currentTime);
                     promptText = ` (COOLDOWN: ${remaining}s)`;
+                } else if (closestMotor.userData.fixed) {
+                     promptText = " (FIXED! Cooldown ready)";
+                     activeMotor = closestMotor; // Still allow interaction to reset for another pot
                 } else {
                     promptText = " (Press F to Interact)";
                     activeMotor = closestMotor;
@@ -1301,41 +1308,64 @@
             }
             
             // Update status bar display
-            const currentText = playerStatus.textContent.split(' (Press F to Interact)')[0].split(' (COOLDOWN:')[0];
+            const currentText = playerStatus.textContent.split(' (Press F to Interact)')[0].split(' (COOLDOWN:')[0].split(' (FIXED!')[0];
             playerStatus.textContent = currentText + promptText;
         }
 
         function checkCollision(oldPosition) {
-            // Simplified grid check for collision
+            // Check collisions using raycasting for better precision than grid check alone
             
-            const tempZ_1 = camera.position.z;
-            const tempX_1 = oldPosition.x;
+            const playerRadius = 1.5; 
+            const directionVector = new THREE.Vector3();
+            const collisionRays = [
+                new THREE.Vector3(0, 0, 1),
+                new THREE.Vector3(0, 0, -1),
+                new THREE.Vector3(1, 0, 0),
+                new THREE.Vector3(-1, 0, 0)
+            ];
 
-            let testGridZ_1 = Math.floor((tempZ_1 - offsetZ) / CELL_SIZE);
-            let testGridX_1 = Math.floor((tempX_1 - offsetX) / CELL_SIZE);
+            // Filter out the door from collision detection if the exit is open
+            const activeWallObjects = winPosition && winPosition.visible && winPosition.userData.closedDoor 
+                ? wallObjects.filter(obj => obj.uuid !== winPosition.userData.closedDoor.uuid)
+                : wallObjects;
+
+            let collision = false;
             
-            if (mazeGrid[testGridZ_1] && mazeGrid[testGridZ_1][testGridX_1] === 1) {
-                camera.position.z = oldPosition.z; 
+            // Revert movement and check X, Z independently
+            const newPosition = camera.position.clone();
+            camera.position.copy(oldPosition); // Revert to old position
+
+            // 1. Try X movement
+            camera.position.x = newPosition.x;
+            raycaster.set(camera.position, collisionRays[2]); // +X
+            let intersects = raycaster.intersectObjects(activeWallObjects);
+            if (intersects.length > 0 && intersects[0].distance < playerRadius) {
+                camera.position.x = oldPosition.x; // Block X movement
+                collision = true;
             }
-            
-            const tempX_2 = camera.position.x;
-            const tempZ_2 = oldPosition.z;
-
-            let testGridX_2 = Math.floor((tempX_2 - offsetX) / CELL_SIZE);
-            let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
-            
-            if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                camera.position.x = oldPosition.x; 
+            raycaster.set(camera.position, collisionRays[3]); // -X
+            intersects = raycaster.intersectObjects(activeWallObjects);
+            if (intersects.length > 0 && intersects[0].distance < playerRadius) {
+                camera.position.x = oldPosition.x; // Block X movement
+                collision = true;
             }
 
-            const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-            const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-            
-            if (mazeGrid[finalGridZ] && mazeGrid[finalGridZ][finalGridX] === 1) {
-                return true; 
+            // 2. Try Z movement
+            camera.position.z = newPosition.z;
+            raycaster.set(camera.position, collisionRays[0]); // +Z
+            intersects = raycaster.intersectObjects(activeWallObjects);
+            if (intersects.length > 0 && intersects[0].distance < playerRadius) {
+                camera.position.z = oldPosition.z; // Block Z movement
+                collision = true;
+            }
+            raycaster.set(camera.position, collisionRays[1]); // -Z
+            intersects = raycaster.intersectObjects(activeWallObjects);
+            if (intersects.length > 0 && intersects[0].distance < playerRadius) {
+                camera.position.z = oldPosition.z; // Block Z movement
+                collision = true;
             }
 
-            return false;
+            return collision;
         }
 
         function checkWinCondition() {
@@ -1378,9 +1408,11 @@
             if (cmd === '/showminimap' || cmd === '/showmm') {
                 isMinimapVisible = true;
                 minimap.style.display = 'block';
+                showFloatingText('Minimap ON');
             } else if (cmd === '/unshowminimap' || cmd === '/unshowmm') {
                 isMinimapVisible = false;
                 minimap.style.display = 'none';
+                showFloatingText('Minimap OFF');
             } else if (cmd === '/freecam') {
                 isFreeCam = true;
                 showFloatingText('FreeCam ON');
@@ -1483,7 +1515,7 @@
             if (controls.isLocked === true || isFreeCam) {
                 
                 if (isMiniGameActive) { 
-                    updateMiniGame(delta); // FIX: Ensure updateMiniGame is called
+                    updateMiniGame(delta); 
                     renderer.render(scene, camera);
                     return; 
                 }
@@ -1497,8 +1529,11 @@
                 checkWinCondition();
                 checkMotorInteraction(); 
                 
-                if (isMinimapVisible) {
+                if (isMinimapVisible || (crystalsCollected >= TOTAL_CRYSTALS && !isFreeCam)) {
+                    minimap.style.display = 'block';
                     drawMinimap();
+                } else {
+                    minimap.style.display = 'none';
                 }
                 
                 // Animate lights & crystals 
@@ -1515,8 +1550,10 @@
             renderer.render(scene, camera); 
         }
 
-        init();
-        animate(); 
+        window.onload = function () {
+            init();
+            animate();
+        };
     </script>
 </body>
 </html>
