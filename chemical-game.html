@@ -15,6 +15,11 @@
             color: #E0E0E0;
             user-select: none;
             overflow: hidden;
+            /* Ensure the body and html take up full viewport */
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
         }
         #info {
             position: absolute;
@@ -22,7 +27,7 @@
             left: 50%;
             transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.9);
-            border: 2px solid #ff4444; /* Scary border color */
+            border: 2px solid #ff4444; 
             padding: 2rem;
             border-radius: 0.75rem;
             text-align: center;
@@ -94,17 +99,36 @@
             font-weight: bold;
             text-shadow: 0 0 8px #ff0000;
         }
-        /* --- NEW MINIMAP STYLE --- */
         #minimap {
             position: absolute;
             top: 20px;
             right: 20px;
-            border: 2px solid #00ffff; /* Aqua border */
+            border: 2px solid #00ffff; 
             background: rgba(0, 0, 0, 0.8);
-            display: none; /* Initially hidden */
+            display: none; 
             z-index: 100;
         }
-        /* -------------------------- */
+        
+        /* --- NEW Console Styles --- */
+        #console {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            z-index: 5000;
+            display: none;
+        }
+        #console input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #00ffff;
+            color: #00ff00;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            outline: none;
+        }
     </style>
 </head>
 <body>
@@ -115,7 +139,8 @@
         <p class="mb-4 text-left mx-auto max-w-xs">
             **Walk**: **W** / **A** / **S** / **D** (Slower pace)<br>
             **Sprint**: Automatically triggers when a **Ghost** is in sight, and lasts for 3 seconds after you hide!<br>
-            **Look**: **Mouse** Movement
+            **Look**: **Mouse** Movement<br>
+            **Cheat Console**: Press **/** (forward slash)
         </p>
         <button class="action-button">ENTER</button>
     </div>
@@ -126,6 +151,10 @@
     </div>
 
     <div id="crosshair"></div>
+
+    <div id="console">
+        <input type="text" id="console-input" placeholder="Type command (e.g., /set crystal 149) and press Enter" />
+    </div>
 
     <div id="message-box">
         <p id="message-text" class="text-xl font-bold mb-4"></p>
@@ -140,59 +169,65 @@
         const crosshair = document.getElementById('crosshair');
         const playerStatus = document.getElementById('player-status');
         const ghostProximity = document.getElementById('ghost-proximity');
-        // NEW: Create and append the minimap canvas
         const minimap = document.createElement('canvas'); 
         minimap.id = 'minimap';
         document.body.appendChild(minimap);
+
+        // --- Console/Cheat Variables ---
+        let isFreeCam = false;
+        const consoleElement = document.getElementById('console');
+        const consoleInput = document.getElementById('console-input');
+        const FREECAM_SPEED = 100;
 
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
         const PLAYER_HEIGHT = 6;
         
-        // World Offset (Calculated in init, but declared globally for access)
         let offsetX, offsetZ;
         
         // Speed Definitions
         const WALK_SPEED = 32;
-        const GHOST_WANDER_SPEED = 15; // NEW: Slower speed for wandering
-        const GHOST_SPEED = 80; // Fast speed for the Ghost AI
-        const SPRINT_SPEED = GHOST_SPEED; // Player matches Ghost speed when seen
+        const GHOST_WANDER_SPEED = 15; 
+        const GHOST_SPEED = 80; 
+        const SPRINT_SPEED = GHOST_SPEED; 
         let effectiveSpeed = WALK_SPEED;
         
         // Sprint Delay Variables
-        const SPRINT_DELAY_DURATION = 3.0; // 3 seconds delay
+        const SPRINT_DELAY_DURATION = 3.0; 
         let sprintDelayTimer = 0;
 
         let moveForward = false;
         let moveBackward = false;
         let moveLeft = false;
         let moveRight = false;
+        // New FreeCam movement flags
+        let moveUp = false;
+        let moveDown = false;
+
         let gameActive = false;
         let winPosition = null;
         let wallObjects = [];
 
-        // --- NEW OBJECT ARRAYS ---
-        let ghosts = []; // Array to hold all ghost meshes
-        let ghostPaths = []; // Array to hold path for each ghost
-        let crystals = []; // Array to hold all collectible crystal meshes
+        // --- GAME OBJECT ARRAYS ---
+        let ghosts = []; 
+        let ghostPaths = []; 
+        let crystals = []; 
         let crystalsCollected = 0;
-        const TOTAL_CRYSTALS = 150; // OPTIMIZATION: Reduced from 250
+        const TOTAL_CRYSTALS = 150; 
         
-        let playerGridPos = { r: 0, c: 0 }; // Updated in animate loop
-        
-        // NEW: Timer to control how often the ghosts update their path
+        let playerGridPos = { r: 0, c: 0 }; 
         let ghostUpdateTimer = 0;
-        const GHOST_UPDATE_INTERVAL = 0.5; // Update path every 0.5 seconds
+        const GHOST_UPDATE_INTERVAL = 0.5; 
 
         // Maze Grid Definitions
-        const MAX_COL = 51; // OPTIMIZATION: Reduced from 71
-        const MAX_ROW = 51; // OPTIMIZATION: Reduced from 71
+        const MAX_COL = 51;
+        const MAX_ROW = 51;
         const START_COL = 1;
         const START_ROW = MAX_ROW - 2;
         const EXIT_COL = MAX_COL - 2;
         const EXIT_ROW = 1;
 
-        // Ghost starting positions (must be open cells)
+        // Ghost starting positions 
         const GHOST_START_POSITIONS = [
             { r: MAX_ROW - 2, c: MAX_COL - 2 },
             { r: 1, c: 1 },
@@ -202,13 +237,10 @@
             { r: 10, c: MAX_COL - 10 }
         ];
 
-        // Generate the complex, non-linear maze structure
         const mazeGrid = generateTrueMaze(MAX_ROW, MAX_COL);
 
-        // Filter Ghost start positions after maze generation
         GHOST_START_POSITIONS.forEach(pos => {
             if (mazeGrid[pos.r][pos.c] === 1) {
-                // Try to find a nearby open cell
                 for (let dr = -1; dr <= 1; dr++) {
                     for (let dc = -1; dc <= 1; dc++) {
                         const nr = pos.r + dr;
@@ -224,14 +256,10 @@
         });
         
         // --- Maze Generation (Recursive Backtracker + Aggressive Looping) ---
-        /**
-         * Generates a complex, non-linear maze structure using a carving algorithm.
-         */
         function generateTrueMaze(rows, cols) {
             const grid = Array(rows).fill(0).map(() => Array(cols).fill(1));
             const stack = [];
 
-            // 2. Start carving from the START cell
             stack.push([START_ROW, START_COL]);
             grid[START_ROW][START_COL] = 0; 
 
@@ -255,10 +283,8 @@
                 }
             }
 
-            // 3. Set the Exit point
             grid[EXIT_ROW][EXIT_COL] = 2; 
 
-            // 4. Introduce LOOPS for complexity
             const LOOP_PERCENTAGE = 0.20; 
             for (let r = 1; r < rows - 1; r++) {
                 for (let c = 1; c < cols - 1; c++) {
@@ -271,35 +297,22 @@
         }
 
         // --- Utility Functions for Grid/World Conversion ---
-
-        /**
-         * Converts world coordinates to maze grid coordinates.
-         */
         function toGridPosition(worldX, worldZ) {
             const r = Math.floor((worldZ - offsetZ) / CELL_SIZE);
             const c = Math.floor((worldX - offsetX) / CELL_SIZE);
             return { r, c };
         }
 
-        /**
-         * Converts grid coordinates to world coordinates (center of the cell).
-         */
         function toWorldPosition(r, c) {
             const x = (c + 0.5) * CELL_SIZE + offsetX;
             const z = (r + 0.5) * CELL_SIZE + offsetZ;
             return new THREE.Vector3(x, PLAYER_HEIGHT, z);
         }
 
-        /**
-         * Updates the player's current grid position.
-         */
         function updatePlayerGridPosition() {
             playerGridPos = toGridPosition(camera.position.x, camera.position.z);
         }
         
-        /**
-         * Custom alert to avoid window.alert in the iframe.
-         */
         function showAlert(message, isWin) {
             gameActive = false;
             controls.unlock();
@@ -325,10 +338,6 @@
         }
 
         // --- Pathfinding (Breadth-First Search) ---
-
-        /**
-         * Uses Breadth-First Search (BFS) to find the shortest path from start to end.
-         */
         function findPath(startR, startC, endR, endC) {
             if (startR === endR && startC === endC) return [];
             
@@ -350,7 +359,6 @@
                     break;
                 }
 
-                // Neighbors (N, S, E, W)
                 const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
                 for (const [dr, dc] of directions) {
@@ -360,7 +368,6 @@
                     if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
                         const neighborKey = `${nr},${nc}`;
                         
-                        // If not a solid wall (1) and not visited
                         if (mazeGrid[nr][nc] !== 1 && !visited.has(neighborKey)) {
                             visited.add(neighborKey);
                             parent[neighborKey] = currentKey;
@@ -370,7 +377,6 @@
                 }
             }
 
-            // Path reconstruction
             if (!goalKey) return [];
 
             const fullPath = [];
@@ -387,46 +393,42 @@
         // --- Initialization ---
 
         function init() {
-            // 1. Scene setup
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x050508);
             scene.fog = new THREE.Fog(0x050508, CELL_SIZE * 5, CELL_SIZE * 30); 
 
-            // 2. Camera setup
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             raycaster = new THREE.Raycaster();
             
-            // Calculate and assign world offset for use in grid conversions
             offsetX = -(mazeGrid[0].length * CELL_SIZE) / 2;
             offsetZ = -(mazeGrid.length * CELL_SIZE) / 2;
 
-            // Start position
             const startX = (START_COL + 0.5) * CELL_SIZE + offsetX;
             const startZ = (START_ROW + 0.5) * CELL_SIZE + offsetZ;
             camera.position.set(startX, PLAYER_HEIGHT, startZ);
 
-            // 3. Renderer setup
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(window.innerWidth, window.innerHeight); 
             renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
-            // 4. Lighting
             const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
             scene.add(ambientLight);
 
-            // Flashlight effect
             const pointLight = new THREE.PointLight(0xffffff, 1, 50);
             camera.add(pointLight); 
             scene.add(camera);
 
-            // 5. Controls
             controls = new THREE.PointerLockControls(camera, document.body);
 
             controls.addEventListener('lock', () => {
                 infoElement.style.display = 'none';
                 crosshair.style.opacity = 1;
                 gameActive = true;
+                if (isFreeCam) {
+                    // If FreeCam was active, lock restores normal controls, so turn it off
+                    toggleFreeCam(); 
+                }
             });
             controls.addEventListener('unlock', () => {
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
@@ -440,30 +442,23 @@
                 controls.lock();
             });
 
-            // 6. Build the Maze, Ghosts, and Crystals
             buildMaze(offsetX, offsetZ);
             addGhosts();
             addCrystals();
             
-            // 7. Mini-map Styling Initialization
             minimap.width = 150;
             minimap.height = 150;
 
-            // 8. Event listeners
             document.addEventListener('keydown', onKeyDown, false);
             document.addEventListener('keyup', onKeyUp, false);
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        /**
-         * Builds the 3D geometry for the maze.
-         */
         function buildMaze(offsetX, offsetZ) {
             const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 10 });
             const floorMaterial = new THREE.MeshPhongMaterial({ color: 0x1f1f2a });
             const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
             
-            // Floor
             const floorGeometry = new THREE.PlaneGeometry(MAX_COL * CELL_SIZE, MAX_ROW * CELL_SIZE);
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
@@ -475,13 +470,13 @@
                     const x = j * CELL_SIZE + offsetX + CELL_SIZE / 2;
                     const z = i * CELL_SIZE + offsetZ + CELL_SIZE / 2;
 
-                    if (cellType === 1) { // Wall
+                    if (cellType === 1) { 
                         const wall = new THREE.Mesh(wallGeometry, wallMaterial);
                         wall.position.set(x, WALL_HEIGHT / 2, z);
                         wall.userData.isWall = true;
                         scene.add(wall);
                         wallObjects.push(wall);
-                    } else if (cellType === 2) { // Exit
+                    } else if (cellType === 2) { 
                         const exitMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
                         const exitGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.8, WALL_HEIGHT / 4, CELL_SIZE * 0.8);
                         const exitCube = new THREE.Mesh(exitGeometry, exitMaterial);
@@ -500,9 +495,6 @@
             }
         }
         
-        /**
-         * Adds ALL six ghost entities to the scene.
-         */
         function addGhosts() {
             const ghostMaterial = new THREE.MeshBasicMaterial({ 
                 color: 0xaa00ff,
@@ -518,7 +510,7 @@
             GHOST_START_POSITIONS.forEach((startPos, index) => {
                 const ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
                 ghostMesh.userData.isGhost = true;
-                ghostMesh.userData.chasing = false; // NEW: AI state flag
+                ghostMesh.userData.chasing = false; 
                 
                 const ghostWorldPos = toWorldPosition(startPos.r, startPos.c);
                 ghostMesh.position.copy(ghostWorldPos);
@@ -532,9 +524,6 @@
             });
         }
 
-        /**
-         * Adds the collectible crystal objects to the scene (up to TOTAL_CRYSTALS).
-         */
         function addCrystals() {
             const crystalMaterial = new THREE.MeshPhongMaterial({
                 color: 0x00ffff,
@@ -548,17 +537,14 @@
             const crystalGeometry = new THREE.DodecahedronGeometry(1); 
             
             let count = 0;
-            // Iterate over all open cells in the maze
             for (let i = 1; i < MAX_ROW - 1; i++) { 
                 for (let j = 1; j < MAX_COL - 1; j++) {
-                    if (mazeGrid[i][j] === 0) { // Check for open path cells (0)
+                    if (mazeGrid[i][j] === 0) { 
                         if (count >= TOTAL_CRYSTALS) return;
                         
-                        // Use a low probability to scatter crystals realistically
                         if (Math.random() < 0.1) { 
                             const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
                             const worldPos = toWorldPosition(i, j);
-                            // Slightly randomize position within the cell
                             crystal.position.set(worldPos.x + (Math.random() - 0.5) * 5, 
                                                 PLAYER_HEIGHT / 2, 
                                                 worldPos.z + (Math.random() - 0.5) * 5);
@@ -573,9 +559,6 @@
             }
         }
 
-        /**
-         * Checks if a single ghost is in direct line of sight.
-         */
         function isGhostVisible(ghostMesh) {
             if (!ghostMesh) return false;
 
@@ -589,7 +572,6 @@
 
             const direction = new THREE.Vector3().subVectors(ghostPosition, playerPosition).normalize();
             raycaster.set(playerPosition, direction);
-            // This raycast against wallObjects is still expensive, but necessary for visual LOS.
             const intersects = raycaster.intersectObjects(wallObjects);
 
             if (intersects.length > 0) {
@@ -600,14 +582,9 @@
             return true;
         }
 
-        /**
-         * Handles the movement and AI for ALL six ghosts.
-         * OPTIMIZATION: Implements distinct Wander/Chase states to reduce pathfinding.
-         */
         function moveGhosts(delta) {
             const currentTime = clock.getElapsedTime();
             
-            // Check if it's time to update ghost paths (more aggressive AI)
             const shouldUpdatePath = ghostUpdateTimer >= GHOST_UPDATE_INTERVAL;
             
             if (shouldUpdatePath) {
@@ -616,26 +593,27 @@
                 ghostUpdateTimer += delta;
             }
 
-            const GHOST_CHASE_SPEED = GHOST_SPEED; // 80
+            const GHOST_CHASE_SPEED = GHOST_SPEED; 
             
             ghosts.forEach((ghostMesh, index) => {
                 const ghostWorldPos = ghostMesh.position;
-                const ghostIsSeeingPlayer = isGhostVisible(ghostMesh);
+                // If in freecam, ghosts cannot see the player
+                const ghostIsSeeingPlayer = isFreeCam ? false : isGhostVisible(ghostMesh);
                 let ghostPath = ghostPaths[index]; 
                 
                 // --- 1. AI State Update ---
                 if (ghostIsSeeingPlayer) {
-                    ghostMesh.userData.chasing = true; // Start chasing
+                    ghostMesh.userData.chasing = true; 
                 } else if (ghostPath.length === 0) {
-                     ghostMesh.userData.chasing = false; // Stop chasing if path finished
+                     ghostMesh.userData.chasing = false; 
                 }
 
-                // --- 2. Path Calculation (Only if path is empty or chasing) ---
+                // --- 2. Path Calculation ---
                 let moveSpeed = GHOST_WANDER_SPEED;
                 
                 if (ghostMesh.userData.chasing) {
                     moveSpeed = GHOST_CHASE_SPEED;
-                    if (shouldUpdatePath) { // Recalculate chase path frequently (every 0.5s)
+                    if (shouldUpdatePath) { 
                         const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
                         ghostPath = findPath(
                             ghostGridPos.r, ghostGridPos.c, 
@@ -648,7 +626,6 @@
                     if (ghostPath.length === 0 && shouldUpdatePath) { // Wander
                         const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
                         const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-                        // Pick a random valid neighbor to move to next (much cheaper than BFS)
                         const validNeighbors = directions.map(([dr, dc]) => [ghostGridPos.r + dr, ghostGridPos.c + dc])
                             .filter(([r, c]) => mazeGrid[r] && mazeGrid[r][c] === 0);
 
@@ -664,7 +641,7 @@
                 if (ghostPath.length > 0) {
                     const [nextR, nextC] = ghostPath[0];
                     const targetWorldPos = toWorldPosition(nextR, nextC);
-                    const moveDistance = moveSpeed * delta; // Use calculated speed
+                    const moveDistance = moveSpeed * delta; 
                     
                     if (ghostWorldPos.distanceTo(targetWorldPos) < moveDistance) {
                         ghostWorldPos.x = targetWorldPos.x;
@@ -681,19 +658,16 @@
                     }
                 }
                 
-                // Simple bobbing and rotation
                 ghostMesh.rotation.y += 1.0 * delta;
                 ghostMesh.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(currentTime * 3 + index) * 0.5;
 
-                // Check for Game Over (Catch)
                 checkCatchCondition(ghostWorldPos);
             });
         }
 
-        /**
-         * Checks if the Ghost has caught the player (Game Over condition).
-         */
-        function checkCatchCondition(ghostPosition) {
+        function checkCatchCondition(ghostPosition) { 
+            if (isFreeCam) return; // IGNORE CATCH IN FREECAM
+            
             const catchDistance = 3; 
             const dist = camera.position.distanceTo(ghostPosition);
 
@@ -702,12 +676,8 @@
             }
         }
 
-        /**
-         * Checks if the player is collecting a crystal.
-         */
         function checkCrystalCollection() {
             const playerPos = camera.position;
-            // INCREASED: The radius is now larger to make crystal collection easier
             const collectionRadius = 5; 
 
             for (let i = crystals.length - 1; i >= 0; i--) {
@@ -720,7 +690,7 @@
                     updateStatusBar(); 
 
                     if (crystalsCollected >= TOTAL_CRYSTALS) {
-                        minimap.style.display = 'block'; // Show the map!
+                        minimap.style.display = 'block'; 
                     }
 
                     return;
@@ -728,9 +698,6 @@
             }
         }
 
-        /**
-         * Updates the status bar with current game info.
-         */
         function updateStatusBar() {
             let closestDist = Infinity;
             ghosts.forEach(ghost => {
@@ -739,7 +706,9 @@
             });
 
             let threatText;
-            if (closestDist > CELL_SIZE * 10) {
+            if (isFreeCam) {
+                threatText = "Threat: IGNORED (FreeCam)";
+            } else if (closestDist > CELL_SIZE * 10) {
                  threatText = "Threat: Distant";
             } else if (closestDist > CELL_SIZE * 4) {
                  threatText = "Threat: Nearby";
@@ -749,9 +718,6 @@
             ghostProximity.textContent = `${threatText} | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
         }
 
-        /**
-         * Draws the minimap if unlocked.
-         */
         function updateMinimap() {
             if (minimap.style.display === 'none') return;
 
@@ -776,6 +742,17 @@
             ctx.fillStyle = '#00ff00';
             ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
             
+            // Draw Ghosts
+            ghosts.forEach(ghost => {
+                const ghostGridPos = toGridPosition(ghost.position.x, ghost.position.z);
+                ctx.fillStyle = ghost.userData.chasing ? '#ff0000' : '#aa00ff';
+                ctx.beginPath();
+                const ghostMapX = ghostGridPos.c * cellMapSize + cellMapSize / 2;
+                const ghostMapY = ghostGridPos.r * cellMapSize + cellMapSize / 2;
+                ctx.arc(ghostMapX, ghostMapY, cellMapSize * 0.3, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
             // Draw Player (Red dot)
             ctx.fillStyle = '#ff0000';
             ctx.beginPath();
@@ -785,24 +762,110 @@
             ctx.fill();
         }
 
+        // --- CHEAT FUNCTIONS ---
 
-        // --- Input Handlers (Unchanged) ---
+        function setCrystalCount(count) {
+            crystalsCollected = count;
+            
+            // Remove all remaining crystals if the goal is met/exceeded
+            if (count >= TOTAL_CRYSTALS) {
+                crystals.forEach(crystal => scene.remove(crystal));
+                crystals = [];
+            }
+            
+            updateStatusBar();
+            if (crystalsCollected >= TOTAL_CRYSTALS) {
+                minimap.style.display = 'block'; 
+            }
+        }
+
+        function toggleFreeCam() {
+            isFreeCam = !isFreeCam;
+            
+            if (isFreeCam) {
+                controls.enabled = false;
+                controls.unlock();
+                crosshair.style.opacity = 0;
+                playerStatus.textContent = "Status: FreeCam Mode (FLYING)";
+                playerStatus.classList.add('sprinting');
+            } else {
+                controls.enabled = true;
+                // If the console was used, the player is still unlocked, so status goes to "Walking"
+                playerStatus.textContent = "Status: Walking...";
+                playerStatus.classList.remove('sprinting');
+                gameActive = false; 
+                infoElement.style.display = 'block';
+            }
+        }
+
+        function processCommand(commandText) {
+            const parts = commandText.trim().toLowerCase().split(/\s+/);
+            const command = parts[0];
+
+            if (command === '/set' && parts[1] === 'crystal') {
+                const count = parseInt(parts[2]);
+                if (!isNaN(count) && count >= 0 && count <= TOTAL_CRYSTALS) {
+                    setCrystalCount(count);
+                } else {
+                    console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
+                }
+            } else if (command === '/freecam') {
+                toggleFreeCam();
+            }
+        }
+
+
+        // --- Input Handlers (Modified for Console) ---
 
         function onKeyDown(event) {
+            // Check for console commands first
+            if (consoleElement.style.display === 'block') {
+                if (event.code === 'Escape') {
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    controls.lock();
+                    gameActive = true;
+                } else if (event.code === 'Enter') {
+                    processCommand(consoleInput.value);
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    controls.lock();
+                    gameActive = true;
+                }
+                return; 
+            }
+            
+            // Open console on "/"
+            if (event.code === 'Slash' && !event.shiftKey) {
+                event.preventDefault(); 
+                controls.unlock();
+                gameActive = false;
+                consoleElement.style.display = 'block';
+                consoleInput.focus();
+                return;
+            }
+
+            // Game movement keys
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = true; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'ShiftLeft': case 'ShiftRight': if (isFreeCam) moveDown = true; break; 
+                case 'Space': if (isFreeCam) moveUp = true; break; 
             }
         }
 
         function onKeyUp(event) {
+            if (consoleElement.style.display === 'block') return; 
+            
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = false; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = false; break;
                 case 'ArrowRight': case 'KeyD': moveRight = false; break;
+                case 'ShiftLeft': case 'ShiftRight': if (isFreeCam) moveDown = false; break; 
+                case 'Space': if (isFreeCam) moveUp = false; break; 
             }
         }
 
@@ -818,13 +881,36 @@
             requestAnimationFrame(animate);
 
             const delta = clock.getDelta();
+            
+            // --- FREE CAM LOGIC ---
+            if (isFreeCam) {
+                const speed = FREECAM_SPEED * delta;
+                
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+                
+                if (moveForward) camera.position.addScaledVector(forward, speed);
+                if (moveBackward) camera.position.addScaledVector(forward, -speed);
+                if (moveLeft) camera.position.addScaledVector(right, -speed);
+                if (moveRight) camera.position.addScaledVector(right, speed);
+                
+                if (moveUp) camera.position.y += speed;
+                if (moveDown) camera.position.y -= speed;
 
+                updatePlayerGridPosition(); 
+                moveGhosts(delta); 
+                updateStatusBar();
+                updateMinimap();
+
+                renderer.render(scene, camera);
+                return;
+            }
+
+            // --- STANDARD GAME LOGIC ---
             if (controls.isLocked === true && gameActive) {
                 
-                // 1. Update Player position
                 updatePlayerGridPosition(); 
                 
-                // Check Ghost vision (checking ALL six ghosts)
                 let ghostInSight = false;
                 ghosts.forEach(ghost => {
                     if(isGhostVisible(ghost)) {
@@ -832,14 +918,10 @@
                     }
                 });
                 
-                // 2. Ghost AI Movement 
                 moveGhosts(delta); 
-
-                // 3. Crystal Collection Check
                 checkCrystalCollection();
 
-                // --- Sprint Logic (With 3-second delay) ---
-                
+                // Sprint Logic
                 if (ghostInSight) {
                     effectiveSpeed = SPRINT_SPEED;
                     sprintDelayTimer = SPRINT_DELAY_DURATION; 
@@ -857,10 +939,9 @@
                     playerStatus.classList.remove('sprinting');
                 }
                 
-                // --- Status Bar Update ---
                 updateStatusBar();
 
-                // 4. Movement Calculation
+                // Movement Calculation (W/A/S/D)
                 const velocity = new THREE.Vector3();
                 if (moveForward) velocity.z -= effectiveSpeed * delta;
                 if (moveBackward) velocity.z += effectiveSpeed * delta;
@@ -869,11 +950,10 @@
 
                 const oldPosition = camera.position.clone();
                 
-                // Apply movement
                 controls.moveRight(velocity.x); 
                 controls.moveForward(-velocity.z);
 
-                // --- Collision Detection ---
+                // Collision Detection
                 const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
                 const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
 
@@ -881,10 +961,8 @@
                     camera.position.copy(oldPosition);
                 }
 
-                // --- Win Condition ---
                 checkWinCondition();
                 
-                // Animate exit light pulse & crystals
                 if (winPosition && winPosition.userData.light) {
                     winPosition.userData.light.intensity = 2 + Math.sin(clock.getElapsedTime() * 5) * 1;
                 }
@@ -893,27 +971,19 @@
                     crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
                 });
 
-                // 5. Update Minimap
                 updateMinimap();
             }
 
             renderer.render(scene, camera);
         }
 
-        /**
-         * Checks the player's position against the maze grid for walls.
-         */
         function isColliding(gridX, gridZ, oldPosition) {
-            // Check bounds 
             if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
                 return true;
             }
 
             if (mazeGrid[gridZ][gridX] === 1) {
                 
-                // Attempt to revert movement along one axis to unstick the player
-                
-                // Test X-revert:
                 const tempX = oldPosition.x;
                 const tempZ = camera.position.z;
                 
@@ -924,7 +994,6 @@
                     camera.position.z = oldPosition.z;
                 }
                 
-                // Test Z-revert:
                 const tempX_2 = camera.position.x;
                 const tempZ_2 = oldPosition.z;
 
@@ -935,7 +1004,6 @@
                     camera.position.x = oldPosition.x;
                 }
 
-                // Final check after partial reverts
                 const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
                 const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
                 
@@ -949,14 +1017,15 @@
         function checkWinCondition() {
             if (!winPosition) return;
             
-            const distanceToExit = camera.position.distanceTo(winPosition.position);
-            
-            if (distanceToExit < CELL_SIZE / 2) {
-                showAlert("SUCCESS! You escaped the deep maze and the Ghost's sight!", true);
+            if (crystalsCollected >= TOTAL_CRYSTALS) {
+                const distanceToExit = camera.position.distanceTo(winPosition.position);
+                
+                if (distanceToExit < CELL_SIZE / 2) {
+                    showAlert("SUCCESS! You escaped the deep maze and the Ghost's sight!", true);
+                }
             }
         }
 
-        // --- Start the App ---
         window.onload = function () {
             init();
             animate();
