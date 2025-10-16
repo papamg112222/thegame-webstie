@@ -170,6 +170,10 @@
             color: #ff4444 !important;
             text-shadow: 0 0 5px rgba(255, 68, 68, 0.7) !important;
         }
+        .flashlight-off {
+            color: #444444 !important;
+            text-shadow: none !important;
+        }
     </style>
 </head>
 <body>
@@ -180,6 +184,7 @@
         <p class="mb-4 text-left mx-auto max-w-xs">
             **Walk**: **W** / **A** / **S** / **D**<br>
             **Sprint**: Automatic when a Ghost is sighted.<br>
+            **Flashlight**: **F** (Toggle On/Off)<br>
             **Look**: **Mouse** Movement<br>
             **Cheat Console**: Press **/**
         </p>
@@ -221,7 +226,8 @@
         document.body.appendChild(minimap);
 
         // --- Constants for Lighting ---
-        const MAX_FLASHLIGHT_INTENSITY = 1.5; // NEW: Reduced max intensity for 'a bit brighter' effect
+        const MAX_FLASHLIGHT_INTENSITY = 1.5; 
+        const COLLECTION_RADIUS = 7; // Increased collection radius for easier pickup
 
         // --- Console/Cheat Variables ---
         let isConsoleOpen = false; 
@@ -265,7 +271,7 @@
         let flashlightObject = null; 
         let firstPersonFlashlightModel = null; 
         let hasFlashlight = false;
-        let isFlashlightOn = true; 
+        let isFlashlightOn = true; // NEW: Flashlight starts ON when collected
         let batteryLevel = 100; 
         const BATTERY_DRAIN_RATE = 1.0; 
         const BATTERY_COLLECTION_AMOUNT = 50; 
@@ -483,12 +489,13 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
-            // --- RESTORED ORIGINAL DIM LIGHTING ---
-            const ambientLight = new THREE.AmbientLight(0x404040, 0.5); // Slightly dim ambient
+            // --- REVERTED DARKER LIGHTING ---
+            // Reduced intensity significantly for a very dark scene
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.1); 
             scene.add(ambientLight);
 
             // Add a very dim PointLight to the camera for the initial darkness
-            const baseLight = new THREE.PointLight(0xffffff, 0.2, 30); // Intensity 0.2 (very dim)
+            const baseLight = new THREE.PointLight(0xffffff, 0.2, 30); 
             camera.add(baseLight);
             camera.userData.baseLight = baseLight; 
             // ----------------------------------------
@@ -543,7 +550,8 @@
         }
 
         function buildMaze(offsetX, offsetZ) {
-            const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 10 });
+            // Darkened wall color
+            const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x151515, shininess: 10 }); 
             const floorMaterial = new THREE.MeshPhongMaterial({ color: 0x1f1f2a });
             const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, WALL_HEIGHT, CELL_SIZE);
             
@@ -734,7 +742,22 @@
             camera.add(firstPersonFlashlightModel); 
             
             // Initial light intensity update based on full battery
+            isFlashlightOn = true;
             updateFlashlightPower();
+        }
+
+        // NEW FUNCTION: Toggles the flashlight on/off
+        function toggleFlashlight() {
+            if (!hasFlashlight) return;
+            
+            isFlashlightOn = !isFlashlightOn;
+            
+            if (isFlashlightOn) {
+                updateFlashlightPower(); // Restore light intensity based on battery
+            } else {
+                firstPersonFlashlightModel.userData.spotLight.intensity = 0;
+            }
+            updateStatusBar();
         }
         
         function updateFlashlightPower() {
@@ -742,7 +765,13 @@
             
             const spotLight = firstPersonFlashlightModel.userData.spotLight;
             
-            // Intensity scales with battery level, max intensity is now 1.5 (MAX_FLASHLIGHT_INTENSITY)
+            // If the flashlight is toggled off, we don't adjust the intensity here
+            if (!isFlashlightOn) {
+                spotLight.intensity = 0;
+                return;
+            }
+            
+            // Intensity scales with battery level
             let intensity = (batteryLevel / 100) * MAX_FLASHLIGHT_INTENSITY;
             intensity = Math.max(0, intensity); 
 
@@ -993,10 +1022,10 @@
             if (isFreeCam) return; 
 
             const playerPos = camera.position;
-            const collectionRadius = 5; 
+            const collectionRadius = COLLECTION_RADIUS; // Use the increased radius
 
             // 1. Check Crystals
-            checkCrystalCollection();
+            checkCrystalCollection(playerPos, collectionRadius);
 
             // 2. Check Flashlight
             if (!hasFlashlight && flashlightObject) {
@@ -1029,10 +1058,7 @@
             }
         }
         
-        function checkCrystalCollection() {
-            const playerPos = camera.position;
-            const collectionRadius = 5; 
-
+        function checkCrystalCollection(playerPos, collectionRadius) {
             for (let i = crystals.length - 1; i >= 0; i--) {
                 const crystal = crystals[i];
                 if (playerPos.distanceTo(crystal.position) < collectionRadius) {
@@ -1176,9 +1202,15 @@
             
             // Update Battery Status
             if (hasFlashlight) {
-                batteryStatus.textContent = `Battery: ${batteryLevel.toFixed(0)}%`;
+                batteryStatus.textContent = `Battery: ${batteryLevel.toFixed(0)}% (${isFlashlightOn ? 'ON' : 'OFF'})`;
+                if (!isFlashlightOn) {
+                    batteryStatus.classList.add('flashlight-off');
+                } else {
+                    batteryStatus.classList.remove('flashlight-off');
+                }
             } else {
                 batteryStatus.textContent = `Battery: N/A`;
+                batteryStatus.classList.remove('flashlight-off');
             }
         }
 
@@ -1226,7 +1258,7 @@
             ctx.fill();
         }
 
-        // --- Input Handlers (Unchanged) ---
+        // --- Input Handlers (Updated) ---
         function onKeyDown(event) {
             if (isConsoleOpen) {
                 if (event.code === 'Escape') {
@@ -1258,6 +1290,7 @@
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
                 case 'KeyQ': moveUp = true; break; 
                 case 'KeyE': moveDown = true; break; 
+                case 'KeyF': toggleFlashlight(); break; // NEW: Flashlight toggle
             }
         }
 
@@ -1307,12 +1340,14 @@
                     moveGhosts(delta); 
                     checkCollectibles(); 
 
-                    // Flashlight Battery Drain Logic
+                    // Flashlight Battery Drain Logic: Only drain if collected AND ON
                     if (hasFlashlight && isFlashlightOn && batteryLevel > 0) {
                         batteryLevel -= BATTERY_DRAIN_RATE * delta;
                         batteryLevel = Math.max(0, batteryLevel);
                         updateFlashlightPower();
                     } else if (hasFlashlight && batteryLevel <= 0) {
+                        // If battery hits zero, turn the light off
+                        isFlashlightOn = false;
                         updateFlashlightPower(); 
                     }
 
