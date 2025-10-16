@@ -129,52 +129,21 @@
             font-size: 16px;
             outline: none;
         }
-        /* New Style for Motor Minigame Prompt */
-        #motor-prompt {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(17, 17, 17, 0.95);
-            border: 3px solid #00ffcc;
-            padding: 1.5rem 3rem;
-            border-radius: 0.5rem;
-            text-align: center;
-            z-index: 3000;
-            box-shadow: 0 0 40px rgba(0, 255, 204, 0.8);
-            display: none;
-            color: #00ffcc;
-        }
-        #motor-sequence {
-            font-size: 3rem;
-            font-weight: bold;
-            margin: 1rem 0;
-            letter-spacing: 15px;
-            color: #ffcc00;
-            text-shadow: 0 0 10px #ffcc00;
-        }
     </style>
 </head>
 <body>
     <div id="info">
         <h1 class="text-3xl font-bold mb-4 text-[#ff4444]">THE DEEP LABYRINTH</h1>
-        <p class="text-sm mb-4">Click to enter the darkness. Your objective is to survive and escape.</p>
+        <p class="text-sm mb-4">Click to enter the darkness. Collect the 150 crystals before the 6 Ghosts find you!</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
             **Walk**: **W** / **A** / **S** / **D**<br>
-            **Objective**: Collect **150 Crystals** to unlock the Exit.<br>
-            **Interact**: Walk into glowing items to collect or use them.
+            **Sprint**: Automatic when a Ghost is sighted (or **always** after 150 crystals).<br>
+            **Look**: **Mouse** Movement<br>
+            **Cheat Console**: Press **/**
         </p>
         <button class="action-button">ENTER</button>
     </div>
-    
-    <div id="motor-prompt">
-        <p class="text-lg mb-2">FIX THE MOTOR: QUICK-TIME EVENT</p>
-        <p class="text-sm mb-2">Type the following sequence fast!</p>
-        <div id="motor-sequence"></div>
-        <p id="motor-timer" class="text-sm mt-2">Time Remaining: 3.0s</p>
-    </div>
-
 
     <div id="status-bar">
         <span id="player-status">Status: Walking...</span>
@@ -259,18 +228,6 @@
         let playerGridPos = { r: 0, c: 0 }; 
         let ghostUpdateTimer = 0;
         const GHOST_UPDATE_INTERVAL = 0.5; 
-
-        // --- MOTOR MINIGAME VARIABLES (NEW) ---
-        let motorObject = null;
-        let isMotorFixed = false;
-        let isMinigameActive = false;
-        let motorSequence = [];
-        let sequenceIndex = 0;
-        let minigameTimer = 0;
-        const MINIGAME_DURATION = 3.0;
-        const MOTOR_FIX_R = 15; 
-        const MOTOR_FIX_C = 15;
-        // --- END MOTOR MINIGAME VARIABLES ---
 
         // Maze Grid Definitions
         const MAX_COL = 51;
@@ -483,7 +440,7 @@
             controls.addEventListener('unlock', () => {
                 // Keep the info screen hidden if in freecam mode or console is open
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    if (!isConsoleOpen && !isFreeCam && !isMinigameActive) { 
+                    if (!isConsoleOpen && !isFreeCam) { 
                          infoElement.style.display = 'block';
                     }
                 }
@@ -498,7 +455,6 @@
             buildMaze(offsetX, offsetZ);
             addGhosts();
             addCrystals();
-            addMotor(); // ADDED: Motor object
             
             minimap.width = 150;
             minimap.height = 150;
@@ -515,7 +471,7 @@
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
                     
-                    controls.lock(); // FIX: Ensures controls re-lock immediately after command 
+                    controls.lock(); 
                 }
             });
         }
@@ -583,58 +539,6 @@
             }
         }
         
-        // --- ADDED: MOTOR CREATION FUNCTION ---
-        function addMotor() {
-            const motorWorldPos = toWorldPosition(MOTOR_FIX_R, MOTOR_FIX_C);
-
-            // Detailed Motor Shape (Group for complexity)
-            const motorGroup = new THREE.Group();
-            
-            // Main Body (Iron-like)
-            const bodyGeometry = new THREE.BoxGeometry(3, 3, 5);
-            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x4a4a4a, shininess: 30 });
-            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-            body.position.set(0, 1.5, 0);
-            motorGroup.add(body);
-
-            // Casing (Copper/Brass detail)
-            const casingGeometry = new THREE.CylinderGeometry(1.5, 1.5, 4, 16);
-            const casingMaterial = new THREE.MeshPhongMaterial({ color: 0xb87333, shininess: 50 });
-            const casing = new THREE.Mesh(casingGeometry, casingMaterial);
-            casing.position.set(0, 1.5, 2.7);
-            casing.rotation.x = Math.PI / 2;
-            motorGroup.add(casing);
-
-            // Sparks/Glow (Indicates it needs fixing)
-            const sparkLight = new THREE.PointLight(0xff0000, 3, 5);
-            sparkLight.position.set(0, 3, 1.5);
-            motorGroup.add(sparkLight);
-
-            // Bolts (The minigame targets, simple spheres)
-            const boltMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-            const boltPositions = [
-                { x: 1.5, y: 3, z: 1 }, { x: -1.5, y: 3, z: 1 },
-                { x: 1.5, y: 3, z: -1 }, { x: -1.5, y: 3, z: -1 }
-            ];
-            boltPositions.forEach((pos, index) => {
-                const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), boltMaterial);
-                bolt.position.set(pos.x, pos.y, pos.z);
-                bolt.userData.boltIndex = index + 1;
-                motorGroup.add(bolt);
-            });
-
-
-            motorGroup.position.copy(motorWorldPos);
-            motorGroup.userData.isMotor = true;
-            motorGroup.userData.isFixed = false;
-            motorGroup.userData.sparkLight = sparkLight;
-            
-            scene.add(motorGroup);
-            motorObject = motorGroup;
-        }
-        // --- END ADDED: MOTOR CREATION FUNCTION ---
-
-
         function addGhosts() {
             const ghostMaterial = new THREE.MeshBasicMaterial({ 
                 color: 0xaa00ff,
@@ -724,7 +628,7 @@
         }
 
         function moveGhosts(delta) {
-            if (isFreeCam || isMinigameActive) return; 
+            if (isFreeCam) return; 
             
             const currentTime = clock.getElapsedTime();
             
@@ -822,7 +726,7 @@
         }
 
         function checkCatchCondition(ghostPosition) { 
-            if (isFreeCam || isMinigameActive) return; 
+            if (isFreeCam) return; 
             
             const catchDistance = 3; 
             const dist = camera.position.distanceTo(ghostPosition);
@@ -842,7 +746,7 @@
         }
 
         function checkCrystalCollection() {
-            if (isFreeCam || isMinigameActive) return; 
+            if (isFreeCam) return; 
 
             const playerPos = camera.position;
             const collectionRadius = 5; 
@@ -869,116 +773,7 @@
                 }
             }
         }
-
-        // --- ADDED: MOTOR INTERACTION LOGIC ---
-        function startMotorMinigame() {
-            if (isMotorFixed || isMinigameActive || !controls.isLocked) return;
-            
-            isMinigameActive = true;
-            controls.unlock();
-            gameActive = false;
-
-            motorSequence = [];
-            for (let i = 0; i < 4; i++) {
-                motorSequence.push(Math.floor(Math.random() * 4) + 1); // Sequence of 1, 2, 3, or 4
-            }
-            sequenceIndex = 0;
-            minigameTimer = MINIGAME_DURATION;
-
-            const motorPrompt = document.getElementById('motor-prompt');
-            document.getElementById('motor-sequence').textContent = motorSequence.join(' ');
-            document.getElementById('motor-timer').textContent = `Time Remaining: ${minigameTimer.toFixed(1)}s`;
-            motorPrompt.style.display = 'block';
-
-            // Start a listener for the 1, 2, 3, 4 keys
-            document.addEventListener('keydown', handleMinigameInput, true);
-        }
         
-        function handleMinigameInput(event) {
-            if (!isMinigameActive) return;
-            
-            const expectedKey = `Digit${motorSequence[sequenceIndex]}`;
-            
-            if (event.code === expectedKey) {
-                sequenceIndex++;
-                event.preventDefault(); // Stop movement keys from triggering
-                
-                // Highlight the successfully pressed part
-                const seqElement = document.getElementById('motor-sequence');
-                const parts = seqElement.textContent.trim().split(/\s+/);
-                
-                if (parts[sequenceIndex - 1]) {
-                    parts[sequenceIndex - 1] = `<span style="color:#00ff00;">${parts[sequenceIndex - 1]}</span>`;
-                    seqElement.innerHTML = parts.join(' ');
-                }
-
-                if (sequenceIndex >= motorSequence.length) {
-                    endMotorMinigame(true, "SUCCESS! You fixed the Heavy-Duty Motor. (Ghosts are slower for 15s!)");
-                }
-            } else if (event.code.startsWith('Digit') && event.code !== expectedKey) {
-                 endMotorMinigame(false, "FAILURE! Wrong key pressed. The motor overheated! (You are slower for 15s.)");
-            } else if (event.code === 'Escape') {
-                 // ESC key to forcibly exit (counts as failure)
-                 endMotorMinigame(false, "FAILURE! Minigame aborted. The motor stalled. (You are slower for 15s.)");
-            }
-        }
-        
-        function endMotorMinigame(success, message) {
-            isMinigameActive = false;
-            document.removeEventListener('keydown', handleMinigameInput, true);
-            document.getElementById('motor-prompt').style.display = 'none';
-
-            if (success) {
-                isMotorFixed = true;
-                motorObject.userData.isFixed = true;
-                motorObject.userData.sparkLight.intensity = 0; // Turn off spark light
-                // Apply Buff: Ghost speed reduced temporarily
-                ghosts.forEach(ghost => ghost.userData.buffSpeed = -150);
-                setTimeout(() => {
-                    ghosts.forEach(ghost => ghost.userData.buffSpeed = 0);
-                }, 15000); 
-            } else {
-                // Apply Debuff: Player speed reduced temporarily
-                effectiveSpeed = WALK_SPEED / 2;
-                setTimeout(() => {
-                    effectiveSpeed = WALK_SPEED;
-                }, 15000);
-            }
-            
-            // Show a temporary alert to explain the result
-            const oldOnclick = document.getElementById('message-box').querySelector('.action-button').onclick;
-            document.getElementById('message-box').querySelector('.action-button').onclick = () => {
-                 document.getElementById('message-box').style.display = 'none';
-                 controls.lock(); 
-                 document.getElementById('message-box').querySelector('.action-button').onclick = oldOnclick;
-            };
-
-            showAlert(message, success);
-        }
-        
-        function checkMotorInteraction(delta) {
-            if (isFreeCam || isMotorFixed || isMinigameActive) return;
-
-            const playerPos = camera.position;
-            const interactionRadius = CELL_SIZE / 2; 
-
-            if (playerPos.distanceTo(motorObject.position) < interactionRadius) {
-                startMotorMinigame();
-            }
-            
-            // Update minigame timer
-            if (isMinigameActive) {
-                minigameTimer -= delta;
-                document.getElementById('motor-timer').textContent = `Time Remaining: ${minigameTimer.toFixed(1)}s`;
-
-                if (minigameTimer <= 0) {
-                    endMotorMinigame(false, "FAILURE! Time ran out. The motor seized up! (You are slower for 15s.)");
-                }
-            }
-        }
-        // --- END ADDED: MOTOR INTERACTION LOGIC ---
-
-
         // --- CHEAT FUNCTIONS ---
         function setCrystalCount(count) {
             crystalsCollected = count;
@@ -1063,7 +858,7 @@
 
 
         function updateStatusBar() {
-            if (isFreeCam || isMinigameActive) return; 
+            if (isFreeCam) return; 
 
             let closestDist = Infinity;
             ghosts.forEach(ghost => {
@@ -1108,13 +903,6 @@
             ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; 
             ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
             
-            // Draw Motor (If not fixed)
-            if (motorObject && !motorObject.userData.isFixed) {
-                 ctx.fillStyle = '#ff0000'; 
-                 const motorGridPos = toGridPosition(motorObject.position.x, motorObject.position.z);
-                 ctx.fillRect(motorGridPos.c * cellMapSize, motorGridPos.r * cellMapSize, cellMapSize, cellMapSize);
-            }
-            
             // Draw Ghosts
             ghosts.forEach(ghost => {
                 const ghostGridPos = toGridPosition(ghost.position.x, ghost.position.z);
@@ -1137,15 +925,14 @@
 
         // --- Input Handlers - FIX APPLIED HERE ---
         function onKeyDown(event) {
-            // Block normal input if console or minigame is open
-            if (isConsoleOpen || isMinigameActive) {
-                if (event.code === 'Escape' && isConsoleOpen) {
+            if (isConsoleOpen) {
+                if (event.code === 'Escape') {
                     event.preventDefault(); 
                     consoleInput.value = '';
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
                     
-                    controls.lock(); 
+                    controls.lock(); // FIX: Re-lock controls when closing console with ESC
                 }
                 return; 
             }
@@ -1156,8 +943,8 @@
                 gameActive = false;
                 
                 consoleElement.style.display = 'block';
+                consoleInput.focus(); // Focus on the input when console opens
                 isConsoleOpen = true;
-                consoleInput.focus();
                 return;
             }
 
@@ -1166,14 +953,13 @@
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
-                // Q and E are used for flight/ascend/descend in freecam
                 case 'KeyQ': moveUp = true; break; 
                 case 'KeyE': moveDown = true; break; 
             }
         }
 
         function onKeyUp(event) {
-            if (isConsoleOpen || isMinigameActive) return; 
+            if (isConsoleOpen) return; 
             
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = false; break;
@@ -1198,14 +984,13 @@
 
             const delta = clock.getDelta();
 
-            // The main game loop runs if controls are locked OR if in freecam mode.
             if (controls.isLocked === true || isFreeCam) {
                 
                 updatePlayerGridPosition(); 
                 
                 let currentSpeed;
                 
-                if (!isFreeCam && !isMinigameActive) { 
+                if (!isFreeCam) { 
                     // --- GAMEPLAY LOGIC ---
                     let ghostInSight = false;
                     if (!ghostsGoFrenzy) {
@@ -1218,7 +1003,6 @@
                     
                     moveGhosts(delta); 
                     checkCrystalCollection();
-                    checkMotorInteraction(delta); // ADDED: Motor interaction check
 
                     // Sprint Logic
                     if (!ghostsGoFrenzy) {
@@ -1244,15 +1028,12 @@
                     
                     currentSpeed = effectiveSpeed;
                     updateStatusBar(); 
-                } else if (isFreeCam) {
+                } else {
                     // --- FREECAM LOGIC ---
                     currentSpeed = (MAX_FREECAM_SPEED / 100) * flySpeedMultiplier;
                     playerStatus.textContent = `Status: FREECAM ACTIVE (Speed: ${flySpeedMultiplier})`;
                     playerStatus.classList.remove('sprinting');
                     ghostProximity.textContent = `Threat: PAUSED | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
-                } else if (isMinigameActive) {
-                    // Minigame active - pause all movement
-                    currentSpeed = 0; 
                 }
 
 
@@ -1264,7 +1045,7 @@
                 if (moveLeft) velocity.x -= currentSpeed * delta;
                 if (moveRight) velocity.x += currentSpeed * delta;
                 
-                // Freecam vertical movement (Q/E)
+                // Freecam vertical movement
                 if (isFreeCam) {
                     if (moveUp) velocity.y += currentSpeed * delta;
                     if (moveDown) velocity.y -= currentSpeed * delta;
@@ -1273,18 +1054,69 @@
 
                 const oldPosition = camera.position.clone();
                 
-                controls.moveRight(velocity.x); 
-                controls.moveForward(-velocity.z);
-
-                // Collision Detection: Only run if NOT in freecam mode
-                if (!isFreeCam) { 
-                    const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                    const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-
-                    if (isColliding(currentGridX, currentGridZ, oldPosition)) {
-                        camera.position.copy(oldPosition);
+                // **FIX 1: Anti-Tunneling/Collision Constraint Logic**
+                let moveX = 0;
+                let moveZ = 0;
+                
+                // 1. Check X-axis movement
+                if (velocity.x !== 0) {
+                    const tempCamera = camera.clone();
+                    tempCamera.position.copy(camera.position);
+                    
+                    // Temporarily apply movement using controls (needed for direction)
+                    controls.moveRight(velocity.x);
+                    
+                    const newGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
+                    const newGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
+                    
+                    // Only allow the move if in freecam OR the new cell is not a wall.
+                    if (isFreeCam || (mazeGrid[newGridZ] && mazeGrid[newGridZ][newGridX] !== 1)) {
+                        moveX = camera.position.x - oldPosition.x;
                     }
                     
+                    // Reset position
+                    camera.position.copy(oldPosition);
+                }
+
+                // 2. Check Z-axis movement
+                if (velocity.z !== 0) {
+                    const tempCamera = camera.clone();
+                    tempCamera.position.copy(camera.position);
+
+                    // Temporarily apply movement using controls (needed for direction)
+                    controls.moveForward(-velocity.z);
+
+                    const newGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
+                    const newGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
+
+                    // Only allow the move if in freecam OR the new cell is not a wall.
+                    if (isFreeCam || (mazeGrid[newGridZ] && mazeGrid[newGridZ][newGridX] !== 1)) {
+                        moveZ = camera.position.z - oldPosition.z;
+                    }
+                    
+                    // Reset position
+                    camera.position.copy(oldPosition);
+                }
+                
+                // 3. Apply the constrained movement
+                camera.position.x += moveX;
+                camera.position.z += moveZ;
+                // **END FIX 1**
+                
+                
+                // Final Check and Win Condition: Only run if NOT in freecam mode
+                if (!isFreeCam) { 
+                    
+                    // The robust constraint above should prevent all wall clipping.
+                    // This is a minimal final check, though technically redundant now.
+                    const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
+                    const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
+                    
+                    if (isColliding(finalGridX, finalGridZ)) {
+                         // Should not happen, but serves as a failsafe
+                         camera.position.copy(oldPosition);
+                    }
+
                     checkWinCondition();
                 } 
                 
@@ -1297,14 +1129,7 @@
                     crystal.rotation.y += 2 * delta;
                     crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
                 });
-                
-                // Animate Motor if not fixed
-                if (motorObject && !motorObject.userData.isFixed) {
-                    motorObject.rotation.y += 0.5 * delta;
-                    motorObject.userData.sparkLight.intensity = 3 + Math.sin(clock.getElapsedTime() * 10) * 1; 
-                }
 
-                // Only draw the minimap if the collected crystal count triggers it OR the user has manually toggled it.
                 if (isMinimapVisible || crystalsCollected >= TOTAL_CRYSTALS) {
                     minimap.style.display = 'block';
                     updateMinimap();
@@ -1316,47 +1141,26 @@
             renderer.render(scene, camera);
         }
 
-        function isColliding(gridX, gridZ, oldPosition) {
+        // **FIX 2: Simplified isColliding function**
+        // The original complex position correction logic is removed and replaced by the robust 
+        // constraint system in animate(). This function is now just a simple cell check.
+        function isColliding(gridX, gridZ) {
             if (isFreeCam) return false; 
             
             if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
                 return true;
             }
 
-            if (mazeGrid[gridZ][gridX] === 1) {
-                
-                const tempX = oldPosition.x;
-                const tempZ = camera.position.z;
-                
-                let testGridX = Math.floor((tempX - offsetX) / CELL_SIZE);
-                let testGridZ = Math.floor((tempZ - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[testGridZ] && mazeGrid[testGridZ][testGridX] === 1) {
-                    camera.position.z = oldPosition.z; 
-                }
-                
-                const tempX_2 = camera.position.x;
-                const tempZ_2 = oldPosition.z;
-
-                let testGridX_2 = Math.floor((tempX_2 - offsetX) / CELL_SIZE);
-                let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                    camera.position.x = oldPosition.x; 
-                }
-
-                const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
-                
-                if (mazeGrid[finalGridZ] && mazeGrid[finalGridZ][finalGridX] === 1) {
-                    return true; 
-                }
+            if (mazeGrid[gridZ] && mazeGrid[gridZ][gridX] === 1) {
+                return true; 
             }
             return false;
         }
+        // **END FIX 2**
+
 
         function checkWinCondition() {
-            if (isFreeCam || isMinigameActive) return; 
+            if (isFreeCam) return; 
             if (!winPosition || !winPosition.visible) return;
             
             const distanceToExit = camera.position.distanceTo(winPosition.position);
