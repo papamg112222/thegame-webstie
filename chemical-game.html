@@ -22,7 +22,7 @@
             left: 50%;
             transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.9);
-            border: 2px solid #ff4444; /* Scary border color */
+            border: 2px solid #ff4444; 
             padding: 2rem;
             border-radius: 0.75rem;
             text-align: center;
@@ -117,6 +117,70 @@
             display: none; 
             z-index: 100;
         }
+        
+        /* --- Mobile Controls Styling --- */
+        #mobile-controls {
+            display: none; /* Hidden by default */
+            position: fixed;
+            bottom: 20px;
+            width: 100%;
+            height: 150px;
+            z-index: 1001;
+            padding: 0 10px;
+        }
+
+        #movement-pad {
+            position: absolute;
+            left: 10px;
+            bottom: 0;
+            width: 150px;
+            height: 150px;
+            display: grid;
+            grid-template-areas: 
+                ". up ."
+                "left center right"
+                ". down .";
+            gap: 5px;
+        }
+
+        #movement-pad button {
+            background: rgba(170, 0, 255, 0.7);
+            color: white;
+            border: 2px solid #ff4444;
+            border-radius: 10px;
+            font-size: 20px;
+            line-height: 1;
+            padding: 10px;
+            touch-action: manipulation;
+        }
+
+        #move-up    { grid-area: up; }
+        #move-left  { grid-area: left; }
+        #move-right { grid-area: right; }
+        #move-down  { grid-area: down; }
+        
+        #mobile-hide-button {
+            position: absolute;
+            right: 20px;
+            bottom: 0;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 68, 68, 0.8);
+            color: white;
+            border: 3px solid #00ffff;
+            border-radius: 50%;
+            font-size: 18px;
+            font-weight: bold;
+            box-shadow: 0 0 15px rgba(255, 68, 68, 0.9);
+            touch-action: manipulation;
+        }
+        
+        /* Show controls only on smaller screens (e.g., phones/tablets) */
+        @media (max-width: 768px) {
+            #mobile-controls {
+                display: block;
+            }
+        }
     </style>
 </head>
 <body>
@@ -125,8 +189,8 @@
         <p class="text-sm mb-4">Click to enter the darkness. Collect the 250 crystals before the 20 Ghosts find you!</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
-            **Walk**: **W** / **A** / **S** / **D**<br>
-            **Hide**: **E** when near a closet.
+            **Walk**: **W** / **A** / **S** / **D** (or on-screen pad)<br>
+            **Hide**: **E** (or on-screen button)
         </p>
         <button class="action-button">ENTER</button>
     </div>
@@ -143,6 +207,17 @@
     <div id="message-box">
         <p id="message-text" class="text-xl font-bold mb-4"></p>
         <button class="action-button" onclick="closeAlert()">RESTART</button>
+    </div>
+    
+    <div id="mobile-controls">
+        <div id="movement-pad">
+            <button id="move-up" onmousedown="setMove('forward', true)" onmouseup="setMove('forward', false)" ontouchstart="setMove('forward', true)" ontouchend="setMove('forward', false)">↑</button>
+            <button id="move-left" onmousedown="setMove('left', true)" onmouseup="setMove('left', false)" ontouchstart="setMove('left', true)" ontouchend="setMove('left', false)">←</button>
+            <button id="move-right" onmousedown="setMove('right', true)" onmouseup="setMove('right', false)" ontouchstart="setMove('right', true)" ontouchend="setMove('right', false)">→</button>
+            <button id="move-down" onmousedown="setMove('backward', true)" onmouseup="setMove('backward', false)" ontouchstart="setMove('backward', true)" ontouchend="setMove('backward', false)">↓</button>
+        </div>
+        
+        <button id="mobile-hide-button" ontouchstart="toggleHide()" onclick="toggleHide()">HIDE (E)</button>
     </div>
 
     <script type="module">
@@ -218,34 +293,39 @@
         const EXIT_COL = MAX_COL - 2;
         const EXIT_ROW = 1;
         
-        // NEW: Minimum Manhattan distance from player start (8 cells away)
         const MIN_SPAWN_DISTANCE = 8; 
 
 
         // Generate the complex, non-linear maze structure
         const mazeGrid = generateTrueMaze(MAX_ROW, MAX_COL);
 
-        // --- NEW: Generate Ghost starting positions with safety check ---
+        // --- Generate Ghost starting positions with safety check ---
         const GHOST_START_POSITIONS = [];
 
         while (GHOST_START_POSITIONS.length < TOTAL_GHOSTS) {
-            // Pick a random cell coordinate (excluding outer walls)
             const r = Math.floor(Math.random() * (MAX_ROW - 2)) + 1;
             const c = Math.floor(Math.random() * (MAX_COL - 2)) + 1;
             
-            // Check Manhattan distance from player start
             const isSafeDistance = Math.abs(r - START_ROW) + Math.abs(c - START_COL) >= MIN_SPAWN_DISTANCE;
 
-            // Check if cell is open (0) or exit (2) AND is safe distance
             if ((mazeGrid[r][c] === 0 || mazeGrid[r][c] === 2) && isSafeDistance) { 
-                // Ensure no duplicates
                 const isDuplicate = GHOST_START_POSITIONS.some(pos => pos.r === r && pos.c === c);
                 if (!isDuplicate) {
                     GHOST_START_POSITIONS.push({ r, c });
                 }
             }
         }
-        // --- END NEW GHOST POSITION GENERATION ---
+        // --- END GHOST POSITION GENERATION ---
+        
+        // --- Mobile Control Setter ---
+        window.setMove = function(direction, isPressed) {
+            switch(direction) {
+                case 'forward': moveForward = isPressed; break;
+                case 'backward': moveBackward = isPressed; break;
+                case 'left': moveLeft = isPressed; break;
+                case 'right': moveRight = isPressed; break;
+            }
+        }
         
         // --- Maze Generation (Recursive Backtracker + Aggressive Looping) ---
         function generateTrueMaze(rows, cols) {
@@ -529,17 +609,21 @@
         }
         
         /**
-         * Adds hiding closets to the maze.
+         * Adds hiding closets to the maze (now 100).
          */
         function addClosets() {
             const closetMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513, shininess: 50 });
             const closetGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.4, WALL_HEIGHT * 0.9, CELL_SIZE * 0.4);
-            const closetCount = 10; 
+            const closetCountTarget = 100; // Target 100 closets
             let count = 0;
 
-            for (let i = 1; i < MAX_ROW - 1 && count < closetCount; i++) { 
-                for (let j = 1; j < MAX_COL - 1 && count < closetCount; j++) {
-                    if (mazeGrid[i][j] === 0 && Math.random() < 0.01) { 
+            // Iterate through non-border cells
+            for (let i = 2; i < MAX_ROW - 2; i++) { 
+                for (let j = 2; j < MAX_COL - 2; j++) {
+                    // Check for open path cells (0) and a suitable probability (3%)
+                    if (mazeGrid[i][j] === 0 && Math.random() < 0.03) { 
+                        if (count >= closetCountTarget) return; 
+
                         const closet = new THREE.Mesh(closetGeometry, closetMaterial);
                         const worldPos = toWorldPosition(i, j);
 
@@ -733,7 +817,7 @@
         /**
          * Toggles the player's hiding state (in or out of a closet).
          */
-        function toggleHide() {
+        window.toggleHide = function() {
             if (isHiding) {
                 // UNHIDE
                 isHiding = false;
@@ -806,14 +890,14 @@
             
             // Check Closet Interaction
             if (isHiding) {
-                hidePrompt.textContent = "Press **E** to Exit";
+                hidePrompt.textContent = "Press **E** to Exit / Tap Hide Button";
                 hidePrompt.style.display = 'block';
                 return;
             }
             
             const nearbyCloset = findNearbyCloset();
             if (nearbyCloset && !isHiding) {
-                hidePrompt.textContent = "Press **E** to Hide";
+                hidePrompt.textContent = "Press **E** to Hide / Tap Hide Button";
                 hidePrompt.style.display = 'block';
             } else {
                 hidePrompt.style.display = 'none';
