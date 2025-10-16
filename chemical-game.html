@@ -134,13 +134,13 @@
 <body>
     <div id="info">
         <h1 class="text-3xl font-bold mb-4 text-[#ff4444]">THE DEEP LABYRINTH</h1>
-        <p class="text-sm mb-4">Click to enter the darkness. Collect the 150 crystals before the 6 Ghosts find you!</p>
+        <p class="text-sm mb-4">Click to enter the darkness. Collect the 150 crystals before the 6 Ghosts find you! The **Exit Door** is sealed.</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
-            **Walk**: **W** / **A** / **S** / **D** (Slower pace)<br>
-            **Sprint**: Automatically triggers when a **Ghost** is in sight.<br>
+            **Walk**: **W** / **A** / **S** / **D**<br>
+            **Sprint**: Automatic when a Ghost is sighted.<br>
             **Look**: **Mouse** Movement<br>
-            **Cheat Console**: Press **/** (forward slash)
+            **Cheat Console**: Press **/**
         </p>
         <button class="action-button">ENTER</button>
     </div>
@@ -153,7 +153,7 @@
     <div id="crosshair"></div>
 
     <div id="console">
-        <input type="text" id="console-input" placeholder="Type command (e.g., /set crystal 149) and press Enter" />
+        <input type="text" id="console-input" placeholder="Type command (e.g., /set crystal 149, /freecam) and press Enter" />
     </div>
 
     <div id="message-box">
@@ -207,7 +207,13 @@
         let gameActive = false;
         let winPosition = null;
         let wallObjects = [];
-        let exitGridPos = { r: 0, c: 0 }; // Store randomized exit position
+        let exitGridPos = { r: 0, c: 0 }; 
+        
+        // New Exit Door Variables
+        let exitDoor = null; // The solid door mesh
+        let exitPortal = null; // The open, glowing mesh
+        let exitLight = null; // The light source for the portal
+        let exitIsOpen = false;
 
         // --- GAME OBJECT ARRAYS ---
         let ghosts = []; 
@@ -236,6 +242,24 @@
             { r: 10, c: MAX_COL - 10 }
         ];
 
+        // --- Utility Texture Loader ---
+        const textureLoader = new THREE.TextureLoader();
+        const doorTexture = textureLoader.load('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAADmPMawAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAE8SURBVHhe7ZnBCsIwDIW9g+uV5xXnFXz+xO94S7Xk4gCg04Q3p9+f+Xp0dM3nJdYf8g/5B/yD/uL+D718l1i8mI+g/2N4Xg3hL+D4Xk3hD+D4Xk3hB0z/r3b5E2J/oE/oE37L/l7lMfrvX5f4b5f9gR7R+tM/3+0vC/8Ahu/R2A8X8hH0fgyP1xECH0fJv6v9gT6B/kH/YP+4v4PfZ/3zQc/c8378+X1W/lH/IP+Qf8g/7h+M/l/t8iNnQ/6A/oE/oE37L/l7lMfrvX5f4b5f9gR6R+kO8+u+P3+uK/w+G79HYDxehD3z7eA1h+B4N4S/w/O4x+B4fQ/j/rX/IP+Qf8g/7h/uPz3+L+yH/gH/QP+g/5B/33/Vf2X/gP+g/9B/2X/oE+gf7B/3H/Yf9x/1R+s3hV/sNofE3h//A2bH77+n5L8AAAAASUVORK5CYII=', () => {
+             // Texture is loaded, no special action needed here.
+        });
+        doorTexture.wrapS = THREE.RepeatWrapping;
+        doorTexture.wrapT = THREE.RepeatWrapping;
+        doorTexture.repeat.set(2, 1);
+        
+        const openPortalMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x00ff00, 
+            transparent: true, 
+            opacity: 0.8,
+            side: THREE.DoubleSide
+        });
+
+        // --- Maze Generation and Placement ---
+
         const mazeGrid = generateTrueMaze(MAX_ROW, MAX_COL);
 
         // Find a random, accessible exit on the outer boundary
@@ -244,13 +268,11 @@
             const cols = grid[0].length;
             let exitCandidates = [];
 
-            // Top and Bottom walls (row 1 and row rows-2)
+            // Collect all non-wall cells on the outer perimeter (r=1, r=rows-2, c=1, c=cols-2)
             for (let c = 1; c < cols - 1; c++) {
                 if (grid[1][c] === 0) exitCandidates.push({ r: 1, c: c });
                 if (grid[rows - 2][c] === 0) exitCandidates.push({ r: rows - 2, c: c });
             }
-
-            // Left and Right walls (col 1 and col cols-2)
             for (let r = 2; r < rows - 2; r++) {
                 if (grid[r][1] === 0) exitCandidates.push({ r: r, c: 1 });
                 if (grid[r][cols - 2] === 0) exitCandidates.push({ r: r, c: cols - 2 });
@@ -261,12 +283,11 @@
             exitCandidates = exitCandidates.filter(pos => `${pos.r},${pos.c}` !== startKey);
 
             if (exitCandidates.length === 0) {
-                 // Fallback to a fixed spot if no perimeter exits found (shouldn't happen with this generator)
                  return { r: 1, c: cols - 2 };
             }
 
             const chosen = exitCandidates[Math.floor(Math.random() * exitCandidates.length)];
-            grid[chosen.r][chosen.c] = 2; 
+            grid[chosen.r][chosen.c] = 2; // Mark as Exit on the grid
             return chosen;
         }
 
@@ -316,8 +337,6 @@
                 }
             }
             
-            // Note: Exit is marked later in findRandomExit before buildMaze
-
             const LOOP_PERCENTAGE = 0.20; 
             for (let r = 1; r < rows - 1; r++) {
                 for (let c = 1; c < cols - 1; c++) {
@@ -349,7 +368,6 @@
         function showAlert(message, isWin) {
             gameActive = false;
             
-            // Only unlock controls if the console is not open
             if (!isConsoleOpen) {
                 controls.unlock();
             }
@@ -375,7 +393,7 @@
             window.location.reload();
         }
 
-        // --- Pathfinding (Breadth-First Search) ---
+        // --- Pathfinding ---
         function findPath(startR, startC, endR, endC) {
             if (startR === endR && startC === endC) return [];
             
@@ -406,7 +424,6 @@
                     if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
                         const neighborKey = `${nr},${nc}`;
                         
-                        // Check for wall (1) or exit (2)
                         if (mazeGrid[nr][nc] !== 1 && !visited.has(neighborKey)) {
                             visited.add(neighborKey);
                             parent[neighborKey] = currentKey;
@@ -427,6 +444,49 @@
             }
             
             return fullPath; 
+        }
+
+        // --- Exit Door Logic ---
+        function setupExitDoor(x, z) {
+            // Closed Door (Wooden Box)
+            const doorMaterial = new THREE.MeshPhongMaterial({ map: doorTexture });
+            const doorGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, WALL_HEIGHT, 1); // Thin door
+            exitDoor = new THREE.Mesh(doorGeometry, doorMaterial);
+            exitDoor.position.set(x, WALL_HEIGHT / 2, z);
+            exitDoor.userData.isDoor = true;
+            wallObjects.push(exitDoor); // Treat door as a wall for collision
+            scene.add(exitDoor);
+            
+            // Open Portal (Starts hidden)
+            const portalGeometry = new THREE.PlaneGeometry(CELL_SIZE * 0.9, WALL_HEIGHT * 0.9);
+            exitPortal = new THREE.Mesh(portalGeometry, openPortalMaterial);
+            exitPortal.rotation.x = 0;
+            exitPortal.position.set(x, WALL_HEIGHT / 2, z); 
+            exitPortal.userData.isExit = true;
+            exitPortal.visible = false;
+            
+            // Glowing Light (Starts hidden)
+            exitLight = new THREE.PointLight(0x00ff00, 0, 25);
+            exitLight.position.set(x, WALL_HEIGHT / 2, z);
+            
+            scene.add(exitPortal);
+            scene.add(exitLight);
+
+            winPosition = exitPortal; // Set win position to the portal mesh
+        }
+
+        function openExitPortal() {
+            if (exitIsOpen) return;
+            
+            // 1. Remove the solid door
+            scene.remove(exitDoor);
+            wallObjects = wallObjects.filter(obj => obj.uuid !== exitDoor.uuid); // Remove from collision array
+            
+            // 2. Show the glowing portal
+            exitPortal.visible = true;
+            exitLight.intensity = 5; // Turn on the light
+            
+            exitIsOpen = true;
         }
 
         // --- Initialization ---
@@ -466,9 +526,8 @@
                 gameActive = true;
             });
             controls.addEventListener('unlock', () => {
-                 // Prevent info screen from showing if console or win/loss message is up
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    if (!isConsoleOpen) { 
+                    if (!isConsoleOpen && !isFreeCam) { // Don't show info screen if console or freecam is active
                         infoElement.style.display = 'block';
                     }
                 }
@@ -515,20 +574,20 @@
                         scene.add(wall);
                         wallObjects.push(wall);
                     } else if (cellType === 2) { 
-                        // Exit logic
-                        const exitMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
-                        const exitGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.8, WALL_HEIGHT / 4, CELL_SIZE * 0.8);
-                        const exitCube = new THREE.Mesh(exitGeometry, exitMaterial);
-                        exitCube.position.set(x, 0.1, z);
-                        exitCube.userData.isExit = true;
+                        // Place the door/portal at the exit cell
+                        const exitWorldPos = toWorldPosition(exitGridPos.r, exitGridPos.c);
                         
-                        const exitLight = new THREE.PointLight(0x00ff00, 2, 25);
-                        exitLight.position.set(x, 5, z);
-                        scene.add(exitLight);
-                        exitCube.userData.light = exitLight;
-
-                        scene.add(exitCube);
-                        winPosition = exitCube;
+                        // Determine door orientation based on exit position
+                        let doorRotation = 0; // default for N/S walls
+                        if (exitGridPos.c === 1 || exitGridPos.c === MAX_COL - 2) {
+                            doorRotation = Math.PI / 2; // for E/W walls
+                        }
+                        
+                        setupExitDoor(exitWorldPos.x, exitWorldPos.z);
+                        
+                        // Orient the door/portal correctly
+                        exitDoor.rotation.y = doorRotation;
+                        exitPortal.rotation.y = doorRotation;
                     }
                 }
             }
@@ -578,6 +637,7 @@
             let count = 0;
             for (let i = 1; i < MAX_ROW - 1; i++) { 
                 for (let j = 1; j < MAX_COL - 1; j++) {
+                    // Place crystals only in open spaces, not the exit
                     if (mazeGrid[i][j] === 0) { 
                         if (count >= TOTAL_CRYSTALS) return;
                         
@@ -636,7 +696,6 @@
             
             ghosts.forEach((ghostMesh, index) => {
                 const ghostWorldPos = ghostMesh.position;
-                // If in freecam, ghosts cannot see the player
                 const ghostIsSeeingPlayer = isFreeCam ? false : isGhostVisible(ghostMesh);
                 let ghostPath = ghostPaths[index]; 
                 
@@ -729,7 +788,8 @@
                     updateStatusBar(); 
 
                     if (crystalsCollected >= TOTAL_CRYSTALS) {
-                        minimap.style.display = 'block'; 
+                        minimap.style.display = 'block';
+                        openExitPortal(); // Opens the glowing portal
                     }
 
                     return;
@@ -778,7 +838,7 @@
             }
 
             // Draw Exit (Green dot)
-            ctx.fillStyle = '#00ff00';
+            ctx.fillStyle = exitIsOpen ? '#00ff00' : '#884444'; // Green when open, Brown/Red when closed
             ctx.fillRect(exitGridPos.c * cellMapSize, exitGridPos.r * cellMapSize, cellMapSize, cellMapSize);
             
             // Draw Ghosts
@@ -807,9 +867,15 @@
             crystalsCollected = count;
             
             if (count >= TOTAL_CRYSTALS) {
-                // Remove all remaining crystals if the goal is met/exceeded
                 crystals.forEach(crystal => scene.remove(crystal));
                 crystals = [];
+                openExitPortal();
+            } else {
+                // If crystals are reduced below 150, the door should close.
+                // This is complex to revert fully, so we simply ensure the portal state is correct.
+                if (exitIsOpen) {
+                    window.location.reload(); // Simple cheat reset for door state
+                }
             }
             
             updateStatusBar();
@@ -821,14 +887,14 @@
         function toggleFreeCam(forcedState = null) {
             const newState = forcedState !== null ? forcedState : !isFreeCam;
 
-            if (newState === isFreeCam) return; // No change needed
+            if (newState === isFreeCam) return; 
 
             isFreeCam = newState;
             
             if (isFreeCam) {
                 // Enter FreeCam Mode
                 controls.enabled = false;
-                controls.lock(); // Keep controls locked so player can still look around
+                controls.lock(); 
                 playerStatus.textContent = "Status: FreeCam Mode (FLYING)";
                 playerStatus.classList.add('sprinting');
             } else {
@@ -841,7 +907,7 @@
                 camera.position.y = PLAYER_HEIGHT; 
                 controls.lock();
             }
-            gameActive = true; // Ensure game loop continues
+            gameActive = true; 
             crosshair.style.opacity = 1;
         }
 
@@ -865,7 +931,7 @@
         }
 
 
-        // --- Input Handlers (Modified for Console) ---
+        // --- Input Handlers ---
 
         function onKeyDown(event) {
             // 1. Console commands handler
@@ -876,7 +942,6 @@
                     consoleElement.style.display = 'none';
                     isConsoleOpen = false;
                     
-                    // Only re-lock controls if we are not in freecam (freecam keeps it locked)
                     if (!isFreeCam) { 
                         controls.lock();
                     } else {
@@ -887,7 +952,7 @@
             }
             
             // 2. Open console on "/"
-            if (event.code === 'Slash' && !event.shiftKey) {
+            if (event.code === 'Slash' && !event.shiftKey && controls.isLocked) {
                 event.preventDefault(); 
                 controls.unlock();
                 gameActive = false;
@@ -926,7 +991,6 @@
         consoleInput.addEventListener('keydown', (event) => {
             if (event.code === 'Enter') {
                 processCommand(consoleInput.value);
-                // The main keydown handler handles the console closing after Enter
             }
         });
 
@@ -1023,9 +1087,13 @@
 
             checkWinCondition();
             
-            if (winPosition && winPosition.userData.light) {
-                winPosition.userData.light.intensity = 2 + Math.sin(clock.getElapsedTime() * 5) * 1;
+            // Portal Pulse Animation
+            if (exitIsOpen && exitLight) {
+                 exitLight.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
+                 exitPortal.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
             }
+            
+            // Crystal Animation
             crystals.forEach(crystal => {
                 crystal.rotation.y += 2 * delta;
                 crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
@@ -1036,15 +1104,15 @@
         }
 
         function isColliding(gridX, gridZ, oldPosition) {
-            // Basic boundary check
             if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
                 return true;
             }
 
-            // Check if current position is a solid wall
+            // A collision occurs if the current cell is a solid wall (1)
+            // The door acts as a solid wall (1) until the portal opens.
             if (mazeGrid[gridZ][gridX] === 1) {
                 
-                // Perform X-revert test (only allow movement if old Z is valid)
+                // Perform X-revert test
                 const tempX = oldPosition.x;
                 const tempZ = camera.position.z;
                 
@@ -1052,10 +1120,10 @@
                 let testGridZ = Math.floor((tempZ - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[testGridZ] && mazeGrid[testGridZ][testGridX] === 1) {
-                    camera.position.z = oldPosition.z; // Revert Z movement
+                    camera.position.z = oldPosition.z; 
                 }
                 
-                // Perform Z-revert test (only allow movement if old X is valid)
+                // Perform Z-revert test 
                 const tempX_2 = camera.position.x;
                 const tempZ_2 = oldPosition.z;
 
@@ -1063,7 +1131,7 @@
                 let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                    camera.position.x = oldPosition.x; // Revert X movement
+                    camera.position.x = oldPosition.x; 
                 }
 
                 // Final check after partial reverts
@@ -1071,17 +1139,17 @@
                 const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[finalGridZ] && mazeGrid[finalGridZ][finalGridX] === 1) {
-                    return true; // Still colliding after attempting fixes, revert full.
+                    return true; 
                 }
             }
             return false;
         }
 
         function checkWinCondition() {
-            if (!winPosition) return;
+            if (!winPosition || !exitIsOpen) return;
             
-            // Player must have collected all crystals AND be near the exit
-            if (crystalsCollected >= TOTAL_CRYSTALS) {
+            // Win condition is met only if the exit is open AND the player is close to the portal
+            if (exitIsOpen) {
                 const distanceToExit = camera.position.distanceTo(winPosition.position);
                 
                 if (distanceToExit < CELL_SIZE / 2) {
