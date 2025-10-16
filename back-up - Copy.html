@@ -4,10 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Maze Explorer: The Sprint</title>
-    <!-- Tailwind CSS for modern, responsive layout -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- Three.js PointerLockControls for first-person camera handling -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght400;700&display=swap" rel="stylesheet">
     <style>
@@ -17,6 +15,11 @@
             color: #E0E0E0;
             user-select: none;
             overflow: hidden;
+            /* Ensure the body and html take up full viewport */
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            width: 100vw;
         }
         #info {
             position: absolute;
@@ -24,7 +27,7 @@
             left: 50%;
             transform: translate(-50%, -50%);
             background: rgba(0, 0, 0, 0.9);
-            border: 2px solid #ff4444; /* Scary border color */
+            border: 2px solid #ff4444; 
             padding: 2rem;
             border-radius: 0.75rem;
             text-align: center;
@@ -96,34 +99,94 @@
             font-weight: bold;
             text-shadow: 0 0 8px #ff0000;
         }
+        #minimap {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            border: 2px solid #00ffff; 
+            background: rgba(0, 0, 0, 0.8);
+            display: none; 
+            z-index: 100;
+        }
+        
+        /* --- Console Styles --- */
+        #console {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 600px;
+            z-index: 5000;
+            display: none;
+        }
+        #console input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #00ffff;
+            color: #00ff00;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 16px;
+            outline: none;
+        }
+        /* New Style for Motor Minigame Prompt */
+        #motor-prompt {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(17, 17, 17, 0.95);
+            border: 3px solid #00ffcc;
+            padding: 1.5rem 3rem;
+            border-radius: 0.5rem;
+            text-align: center;
+            z-index: 3000;
+            box-shadow: 0 0 40px rgba(0, 255, 204, 0.8);
+            display: none;
+            color: #00ffcc;
+        }
+        #motor-sequence {
+            font-size: 3rem;
+            font-weight: bold;
+            margin: 1rem 0;
+            letter-spacing: 15px;
+            color: #ffcc00;
+            text-shadow: 0 0 10px #ffcc00;
+        }
     </style>
 </head>
 <body>
-    <!-- Canvas is added by Three.js -->
-
-    <!-- Info/Start Screen -->
     <div id="info">
         <h1 class="text-3xl font-bold mb-4 text-[#ff4444]">THE DEEP LABYRINTH</h1>
-        <p class="text-sm mb-4">Click to enter the darkness. Walk normally until you see **It**.</p>
+        <p class="text-sm mb-4">Click to enter the darkness. Your objective is to survive and escape.</p>
         <p class="text-xl font-bold mb-2">Controls</p>
         <p class="mb-4 text-left mx-auto max-w-xs">
-            **Walk**: **W** / **A** / **S** / **D** (Slower pace)<br>
-            **Sprint**: Automatically triggers when the **Ghost** is in sight, and lasts for 3 seconds after you hide!<br>
-            **Look**: **Mouse** Movement
+            **Walk**: **W** / **A** / **S** / **D**<br>
+            **Objective**: Collect **150 Crystals** to unlock the Exit.<br>
+            **Interact**: Walk into glowing items to collect or use them.
         </p>
         <button class="action-button">ENTER</button>
     </div>
-
-    <!-- Status Bar -->
-    <div id="status-bar">
-        <span id="player-status">Status: Walking...</span>
-        <span id="ghost-proximity">Threat: Distant</span>
+    
+    <div id="motor-prompt">
+        <p class="text-lg mb-2">FIX THE MOTOR: QUICK-TIME EVENT</p>
+        <p class="text-sm mb-2">Type the following sequence fast!</p>
+        <div id="motor-sequence"></div>
+        <p id="motor-timer" class="text-sm mt-2">Time Remaining: 3.0s</p>
     </div>
 
-    <!-- Crosshair -->
+
+    <div id="status-bar">
+        <span id="player-status">Status: Walking...</span>
+        <span id="ghost-proximity">Threat: Distant | Crystals: 0/150</span>
+    </div>
+
     <div id="crosshair"></div>
 
-    <!-- Custom Modal for Alerts -->
+    <div id="console">
+        <input type="text" id="console-input" placeholder="Type command (e.g., /showmm, /unshowmm, /freecam) and press Enter" />
+    </div>
+
     <div id="message-box">
         <p id="message-text" class="text-xl font-bold mb-4"></p>
         <button class="action-button" onclick="closeAlert()">RESTART</button>
@@ -137,22 +200,43 @@
         const crosshair = document.getElementById('crosshair');
         const playerStatus = document.getElementById('player-status');
         const ghostProximity = document.getElementById('ghost-proximity');
+        const minimap = document.createElement('canvas'); 
+        minimap.id = 'minimap';
+        document.body.appendChild(minimap);
+
+        // --- Console/Cheat Variables ---
+        let isConsoleOpen = false; 
+        const consoleElement = document.getElementById('console');
+        const consoleInput = document.getElementById('console-input');
+        
+        // --- Freecam Variables ---
+        let isFreeCam = false; 
+        let moveUp = false;    
+        let moveDown = false;  
+        
+        // Fly Speed Variables
+        const MAX_FREECAM_SPEED = 500; 
+        let flySpeedMultiplier = 10; 
+
+        // Minimap Toggle Variable
+        let isMinimapVisible = false; 
 
         const CELL_SIZE = 20;
         const WALL_HEIGHT = 10;
-        const PLAYER_HEIGHT = 6; 
+        const PLAYER_HEIGHT = 6;
         
-        // World Offset (Calculated in init, but declared globally for access)
         let offsetX, offsetZ;
         
         // Speed Definitions
-        const WALK_SPEED = 32; 
-        const GHOST_SPEED = 80; // Fast speed for the Ghost AI
-        const SPRINT_SPEED = GHOST_SPEED; // Player matches Ghost speed when seen
+        const WALK_SPEED = 32;
+        const GHOST_WANDER_SPEED = 15; 
+        const GHOST_SPEED = 150; 
+        const GHOST_FRENZY_SPEED = 300; 
+        const SPRINT_SPEED = GHOST_SPEED; 
         let effectiveSpeed = WALK_SPEED;
         
         // Sprint Delay Variables
-        const SPRINT_DELAY_DURATION = 3.0; // 3 seconds delay
+        const SPRINT_DELAY_DURATION = 3.0; 
         let sprintDelayTimer = 0;
 
         let moveForward = false;
@@ -161,36 +245,75 @@
         let moveRight = false;
         let gameActive = false;
         let winPosition = null;
-        let ghostMesh = null;
         let wallObjects = [];
 
-        // Ghost AI state
-        let ghostPath = []; // Array of [row, col] for the ghost to follow
-        let lastPathUpdateTime = 0;
+        // --- GAME OBJECT ARRAYS ---
+        let ghosts = []; 
+        let ghostPaths = []; 
+        let crystals = []; 
+        let crystalsCollected = 0;
+        const TOTAL_CRYSTALS = 150; 
         
-        let playerGridPos = { r: 0, c: 0 }; // Updated in animate loop
-        let ghostGridPos = { r: 35, c: 35 }; // Starting cell for the ghost
+        let ghostsGoFrenzy = false; 
+        
+        let playerGridPos = { r: 0, c: 0 }; 
+        let ghostUpdateTimer = 0;
+        const GHOST_UPDATE_INTERVAL = 0.5; 
+
+        // --- MOTOR MINIGAME VARIABLES (NEW) ---
+        let motorObject = null;
+        let isMotorFixed = false;
+        let isMinigameActive = false;
+        let motorSequence = [];
+        let sequenceIndex = 0;
+        let minigameTimer = 0;
+        const MINIGAME_DURATION = 3.0;
+        const MOTOR_FIX_R = 15; 
+        const MOTOR_FIX_C = 15;
+        // --- END MOTOR MINIGAME VARIABLES ---
 
         // Maze Grid Definitions
-        const MAX_COL = 71;
-        const MAX_ROW = 71;
-        const START_COL = 1; 
-        const START_ROW = MAX_ROW - 2; 
+        const MAX_COL = 51;
+        const MAX_ROW = 51;
+        const START_COL = 1;
+        const START_ROW = MAX_ROW - 2;
         const EXIT_COL = MAX_COL - 2;
         const EXIT_ROW = 1;
 
-        // Generate the complex, non-linear maze structure
+        // Ghost starting positions 
+        const GHOST_START_POSITIONS = [
+            { r: MAX_ROW - 2, c: MAX_COL - 2 },
+            { r: 1, c: 1 },
+            { r: Math.floor(MAX_ROW / 2), c: Math.floor(MAX_COL / 2) + 5 },
+            { r: Math.floor(MAX_ROW / 2) + 5, c: Math.floor(MAX_COL / 2) },
+            { r: 5, c: 5 },
+            { r: 10, c: MAX_COL - 10 }
+        ];
+
         const mazeGrid = generateTrueMaze(MAX_ROW, MAX_COL);
+
+        // Filter Ghost start positions after maze generation
+        GHOST_START_POSITIONS.forEach(pos => {
+            if (mazeGrid[pos.r][pos.c] === 1) {
+                for (let dr = -1; dr <= 1; dr++) {
+                    for (let dc = -1; dc <= 1; dc++) {
+                        const nr = pos.r + dr;
+                        const nc = pos.c + dc;
+                        if (nr > 0 && nr < MAX_ROW - 1 && nc > 0 && nc < MAX_COL - 1 && mazeGrid[nr][nc] !== 1) {
+                            pos.r = nr;
+                            pos.c = nc;
+                            return;
+                        }
+                    }
+                }
+            }
+        });
         
-        // --- Maze Generation (Recursive Backtracker + Aggressive Looping) ---
-        /**
-         * Generates a complex, non-linear maze structure using a carving algorithm.
-         */
+        // --- Maze Generation (Unchanged) ---
         function generateTrueMaze(rows, cols) {
             const grid = Array(rows).fill(0).map(() => Array(cols).fill(1));
             const stack = [];
 
-            // 2. Start carving from the START cell
             stack.push([START_ROW, START_COL]);
             grid[START_ROW][START_COL] = 0; 
 
@@ -214,10 +337,8 @@
                 }
             }
 
-            // 3. Set the Exit point
             grid[EXIT_ROW][EXIT_COL] = 2; 
 
-            // 4. Introduce LOOPS for complexity
             const LOOP_PERCENTAGE = 0.20; 
             for (let r = 1; r < rows - 1; r++) {
                 for (let c = 1; c < cols - 1; c++) {
@@ -229,36 +350,23 @@
             return grid;
         }
 
-        // --- Utility Functions for Grid/World Conversion ---
-
-        /**
-         * Converts world coordinates to maze grid coordinates.
-         */
+        // --- Utility Functions (Unchanged) ---
         function toGridPosition(worldX, worldZ) {
             const r = Math.floor((worldZ - offsetZ) / CELL_SIZE);
             const c = Math.floor((worldX - offsetX) / CELL_SIZE);
             return { r, c };
         }
 
-        /**
-         * Converts grid coordinates to world coordinates (center of the cell).
-         */
         function toWorldPosition(r, c) {
             const x = (c + 0.5) * CELL_SIZE + offsetX;
             const z = (r + 0.5) * CELL_SIZE + offsetZ;
             return new THREE.Vector3(x, PLAYER_HEIGHT, z);
         }
 
-        /**
-         * Updates the player's current grid position.
-         */
         function updatePlayerGridPosition() {
             playerGridPos = toGridPosition(camera.position.x, camera.position.z);
         }
         
-        /**
-         * Custom alert to avoid window.alert in the iframe.
-         */
         function showAlert(message, isWin) {
             gameActive = false;
             controls.unlock();
@@ -283,12 +391,7 @@
             window.location.reload();
         }
 
-        // --- Pathfinding (Breadth-First Search) ---
-
-        /**
-         * Uses Breadth-First Search (BFS) to find the shortest path from start to end.
-         * Returns an array of grid coordinates (excluding start, including end).
-         */
+        // --- Pathfinding (Unchanged) ---
         function findPath(startR, startC, endR, endC) {
             if (startR === endR && startC === endC) return [];
             
@@ -296,7 +399,7 @@
             const cols = mazeGrid[0].length;
             const queue = [`${startR},${startC}`];
             const visited = new Set();
-            const parent = {}; // Stores { 'r,c': 'parentR,parentC' }
+            const parent = {}; 
             
             visited.add(`${startR},${startC}`);
             let goalKey = null;
@@ -310,7 +413,6 @@
                     break;
                 }
 
-                // Neighbors (N, S, E, W)
                 const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
                 for (const [dr, dc] of directions) {
@@ -320,69 +422,57 @@
                     if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
                         const neighborKey = `${nr},${nc}`;
                         
-                        // If not a solid wall (1) and not visited
                         if (mazeGrid[nr][nc] !== 1 && !visited.has(neighborKey)) {
                             visited.add(neighborKey);
-                            parent[neighborKey] = currentKey; // The current cell is the parent of the neighbor
+                            parent[neighborKey] = currentKey;
                             queue.push(neighborKey);
                         }
                     }
                 }
             }
 
-            // Path reconstruction
             if (!goalKey) return [];
 
             const fullPath = [];
             let tempKey = goalKey;
             
-            // Loop backward from goal until reaching the start cell
             while (parent[tempKey]) {
                 fullPath.unshift(tempKey.split(',').map(Number));
                 tempKey = parent[tempKey];
             }
             
-            // fullPath now contains: [[nextR, nextC], ..., [endR, endC]]
             return fullPath; 
         }
 
-        // --- Initialization ---
+        // --- Initialization (Unchanged) ---
 
         function init() {
-            // 1. Scene setup
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x050508);
             scene.fog = new THREE.Fog(0x050508, CELL_SIZE * 5, CELL_SIZE * 30); 
 
-            // 2. Camera setup
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             raycaster = new THREE.Raycaster();
             
-            // Calculate and assign world offset for use in grid conversions
             offsetX = -(mazeGrid[0].length * CELL_SIZE) / 2;
             offsetZ = -(mazeGrid.length * CELL_SIZE) / 2;
 
-            // Start position
             const startX = (START_COL + 0.5) * CELL_SIZE + offsetX;
             const startZ = (START_ROW + 0.5) * CELL_SIZE + offsetZ;
             camera.position.set(startX, PLAYER_HEIGHT, startZ);
 
-            // 3. Renderer setup
             renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setSize(window.innerWidth, window.innerHeight); 
             renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
-            // 4. Lighting
             const ambientLight = new THREE.AmbientLight(0x404040, 0.8);
             scene.add(ambientLight);
 
-            // Flashlight effect
             const pointLight = new THREE.PointLight(0xffffff, 1, 50);
             camera.add(pointLight); 
             scene.add(camera);
 
-            // 5. Controls
             controls = new THREE.PointerLockControls(camera, document.body);
 
             controls.addEventListener('lock', () => {
@@ -391,8 +481,11 @@
                 gameActive = true;
             });
             controls.addEventListener('unlock', () => {
+                // Keep the info screen hidden if in freecam mode or console is open
                 if (!document.getElementById('message-box').style.display || document.getElementById('message-box').style.display === 'none') {
-                    infoElement.style.display = 'block';
+                    if (!isConsoleOpen && !isFreeCam && !isMinigameActive) { 
+                         infoElement.style.display = 'block';
+                    }
                 }
                 gameActive = false;
                 crosshair.style.opacity = 0;
@@ -402,19 +495,31 @@
                 controls.lock();
             });
 
-            // 6. Build the Maze and Ghost
             buildMaze(offsetX, offsetZ);
-            addGhost();
+            addGhosts();
+            addCrystals();
+            addMotor(); // ADDED: Motor object
+            
+            minimap.width = 150;
+            minimap.height = 150;
+            // Minimap is initially hidden via CSS display: none
 
-            // 7. Event listeners
             document.addEventListener('keydown', onKeyDown, false);
             document.addEventListener('keyup', onKeyUp, false);
             window.addEventListener('resize', onWindowResize, false);
+
+            consoleInput.addEventListener('keydown', (event) => {
+                if (event.code === 'Enter') {
+                    processCommand(consoleInput.value);
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    isConsoleOpen = false;
+                    
+                    controls.lock(); // FIX: Ensures controls re-lock immediately after command 
+                }
+            });
         }
 
-        /**
-         * Builds the 3D geometry for the maze.
-         */
         function buildMaze(offsetX, offsetZ) {
             const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x333333, shininess: 10 });
             const floorMaterial = new THREE.MeshPhongMaterial({ color: 0x1f1f2a });
@@ -438,180 +543,648 @@
                         wall.userData.isWall = true;
                         scene.add(wall);
                         wallObjects.push(wall);
-                    } else if (cellType === 2) { // Exit
+                    } else if (cellType === 2) { // Exit 
                         const exitMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.8 });
-                        const exitGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.8, WALL_HEIGHT / 4, CELL_SIZE * 0.8);
-                        const exitCube = new THREE.Mesh(exitGeometry, exitMaterial);
-                        exitCube.position.set(x, 0.1, z);
-                        exitCube.userData.isExit = true;
+                        const exitGeometry = new THREE.PlaneGeometry(CELL_SIZE * 0.9, WALL_HEIGHT * 0.9);
+                        const exitPortal = new THREE.Mesh(exitGeometry, exitMaterial);
+
+                        let doorRotation = 0; 
+                        if (EXIT_COL === 1 || EXIT_COL === MAX_COL - 2) {
+                            doorRotation = Math.PI / 2;
+                        }
+
+                        exitPortal.rotation.y = doorRotation;
+                        exitPortal.position.set(x, WALL_HEIGHT / 2, z);
+                        exitPortal.userData.isExit = true;
                         
-                        const exitLight = new THREE.PointLight(0x00ff00, 2, 25);
+                        exitPortal.visible = false;
+                        
+                        const exitLight = new THREE.PointLight(0x00ff00, 0, 25);
                         exitLight.position.set(x, 5, z);
                         scene.add(exitLight);
-                        exitCube.userData.light = exitLight;
+                        exitPortal.userData.light = exitLight;
 
-                        scene.add(exitCube);
-                        winPosition = exitCube;
+                        scene.add(exitPortal);
+                        winPosition = exitPortal;
+
+                        const doorMaterial = new THREE.MeshPhongMaterial({ color: 0x5c3317, shininess: 10 }); 
+                        const doorGeometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, WALL_HEIGHT, 1);
+                        const closedDoor = new THREE.Mesh(doorGeometry, doorMaterial);
+                        closedDoor.position.set(x, WALL_HEIGHT / 2, z);
+                        closedDoor.rotation.y = doorRotation;
+                        closedDoor.userData.isDoor = true;
+                        closedDoor.userData.isWall = true; 
+                        scene.add(closedDoor);
+                        wallObjects.push(closedDoor);
+                        
+                        winPosition.userData.closedDoor = closedDoor;
                     }
                 }
             }
         }
         
-        /**
-         * Adds the ghost entity to the scene.
-         */
-        function addGhost() {
+        // --- ADDED: MOTOR CREATION FUNCTION ---
+        function addMotor() {
+            const motorWorldPos = toWorldPosition(MOTOR_FIX_R, MOTOR_FIX_C);
+
+            // Detailed Motor Shape (Group for complexity)
+            const motorGroup = new THREE.Group();
+            
+            // Main Body (Iron-like)
+            const bodyGeometry = new THREE.BoxGeometry(3, 3, 5);
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x4a4a4a, shininess: 30 });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.position.set(0, 1.5, 0);
+            motorGroup.add(body);
+
+            // Casing (Copper/Brass detail)
+            const casingGeometry = new THREE.CylinderGeometry(1.5, 1.5, 4, 16);
+            const casingMaterial = new THREE.MeshPhongMaterial({ color: 0xb87333, shininess: 50 });
+            const casing = new THREE.Mesh(casingGeometry, casingMaterial);
+            casing.position.set(0, 1.5, 2.7);
+            casing.rotation.x = Math.PI / 2;
+            motorGroup.add(casing);
+
+            // Sparks/Glow (Indicates it needs fixing)
+            const sparkLight = new THREE.PointLight(0xff0000, 3, 5);
+            sparkLight.position.set(0, 3, 1.5);
+            motorGroup.add(sparkLight);
+
+            // Bolts (The minigame targets, simple spheres)
+            const boltMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
+            const boltPositions = [
+                { x: 1.5, y: 3, z: 1 }, { x: -1.5, y: 3, z: 1 },
+                { x: 1.5, y: 3, z: -1 }, { x: -1.5, y: 3, z: -1 }
+            ];
+            boltPositions.forEach((pos, index) => {
+                const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), boltMaterial);
+                bolt.position.set(pos.x, pos.y, pos.z);
+                bolt.userData.boltIndex = index + 1;
+                motorGroup.add(bolt);
+            });
+
+
+            motorGroup.position.copy(motorWorldPos);
+            motorGroup.userData.isMotor = true;
+            motorGroup.userData.isFixed = false;
+            motorGroup.userData.sparkLight = sparkLight;
+            
+            scene.add(motorGroup);
+            motorObject = motorGroup;
+        }
+        // --- END ADDED: MOTOR CREATION FUNCTION ---
+
+
+        function addGhosts() {
             const ghostMaterial = new THREE.MeshBasicMaterial({ 
-                color: 0xaa00ff, // Magenta/Purple/Menacing
+                color: 0xaa00ff,
                 transparent: true,
                 opacity: 0.5,
                 blending: THREE.AdditiveBlending 
             });
             const ghostGeometry = new THREE.SphereGeometry(2, 16, 16);
-            ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
-            ghostMesh.userData.isGhost = true;
             
-            // Start the ghost at the defined grid position (e.g., cell 35, 35)
-            const ghostWorldPos = toWorldPosition(ghostGridPos.r, ghostGridPos.c);
-            ghostMesh.position.copy(ghostWorldPos);
+            ghosts = [];
+            ghostPaths = [];
             
-            scene.add(ghostMesh);
-
-            // Add a point light to make it glow
-            const ghostLight = new THREE.PointLight(0xaa00aa, 4, 50);
-            ghostMesh.add(ghostLight);
+            GHOST_START_POSITIONS.forEach((startPos, index) => {
+                const ghostMesh = new THREE.Mesh(ghostGeometry, ghostMaterial);
+                ghostMesh.userData.isGhost = true;
+                ghostMesh.userData.chasing = false; 
+                
+                const ghostWorldPos = toWorldPosition(startPos.r, startPos.c);
+                ghostMesh.position.copy(ghostWorldPos);
+                
+                const ghostLight = new THREE.PointLight(0xaa00aa, 4, 50);
+                ghostMesh.add(ghostLight);
+                
+                scene.add(ghostMesh);
+                ghosts.push(ghostMesh);
+                ghostPaths.push([]); 
+            });
         }
 
-        /**
-         * Checks if the ghost is in direct line of sight (pure check).
-         */
-        function isGhostVisible() {
+        function addCrystals() {
+            const crystalMaterial = new THREE.MeshPhongMaterial({
+                color: 0x00ffff,
+                emissive: 0x00ffff,
+                emissiveIntensity: 0.5,
+                specular: 0xffffff,
+                shininess: 100,
+                transparent: true,
+                opacity: 0.9
+            });
+            const crystalGeometry = new THREE.DodecahedronGeometry(1); 
+            
+            let count = 0;
+            for (let i = 1; i < MAX_ROW - 1; i++) { 
+                for (let j = 1; j < MAX_COL - 1; j++) {
+                    if (mazeGrid[i][j] === 0) { 
+                        if (count >= TOTAL_CRYSTALS) return;
+                        
+                        if (Math.random() < 0.1) { 
+                            const crystal = new THREE.Mesh(crystalGeometry, crystalMaterial);
+                            const worldPos = toWorldPosition(i, j);
+                            crystal.position.set(worldPos.x + (Math.random() - 0.5) * 5, 
+                                                PLAYER_HEIGHT / 2, 
+                                                worldPos.z + (Math.random() - 0.5) * 5);
+                            crystal.userData.isCrystal = true;
+                            
+                            scene.add(crystal);
+                            crystals.push(crystal);
+                            count++;
+                        }
+                    }
+                }
+            }
+        }
+
+        function isGhostVisible(ghostMesh) {
             if (!ghostMesh) return false;
 
             const playerPosition = camera.position.clone();
             const ghostPosition = ghostMesh.position.clone();
 
-            // Check if distance is too far to bother with raycasting
             const dist = playerPosition.distanceTo(ghostPosition);
             if (dist > CELL_SIZE * 10) {
                  return false;
             }
 
-            // Direction vector from player to ghost
             const direction = new THREE.Vector3().subVectors(ghostPosition, playerPosition).normalize();
-
-            // Setup Raycaster
             raycaster.set(playerPosition, direction);
+            const objectsToIntersect = wallObjects.filter(obj => !obj.userData.isDoor); 
+            const intersects = raycaster.intersectObjects(objectsToIntersect);
 
-            // Check for intersections with walls
-            const intersects = raycaster.intersectObjects(wallObjects);
-
-            // If intersections exist, check the distance
             if (intersects.length > 0) {
                 const distanceToWall = intersects[0].distance;
-                
-                // If distance to ghost is less than distance to the closest wall, the ghost is visible.
                 return dist < distanceToWall - 0.5;
             }
             
-            return true; // No wall between
+            return true;
         }
 
-        /**
-         * Handles the Ghost's movement and AI.
-         */
-        function moveGhost(delta) {
-            if (!ghostMesh) return;
-
-            const currentTime = clock.getElapsedTime();
-            const ghostWorldPos = ghostMesh.position;
-            const ghostIsSeeingPlayer = isGhostVisible();
-
-            // --- Smart AI Update Logic: Only update path if player is visible ---
-            if (ghostIsSeeingPlayer) {
-                // If the ghost sees the player, recalculate the direct shortest path immediately.
-                ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
-                
-                // Find path from ghost's current cell to the player's current cell
-                ghostPath = findPath(
-                    ghostGridPos.r, ghostGridPos.c, 
-                    playerGridPos.r, playerGridPos.c
-                );
-                // Reset timer when path is updated (sighting)
-                lastPathUpdateTime = currentTime;
-            }
-            // The ghost continues to follow the last path if it loses sight, 
-            // simulating it heading towards the last known location.
-
-            // --- Movement Execution ---
-            if (ghostPath.length > 0) {
-                // The first cell in the path is the next target cell
-                const [nextR, nextC] = ghostPath[0];
-                const targetWorldPos = toWorldPosition(nextR, nextC);
-                
-                // Use vector interpolation for smooth movement
-                const moveDistance = GHOST_SPEED * delta;
-                
-                // Check if we will overshoot the target
-                if (ghostWorldPos.distanceTo(targetWorldPos) < moveDistance) {
-                    // Snap to target and remove this cell from the path
-                    ghostWorldPos.x = targetWorldPos.x;
-                    ghostWorldPos.z = targetWorldPos.z;
-                    ghostPath.shift(); 
-                } else {
-                    // Move towards the target position
-                    const direction = new THREE.Vector3().subVectors(targetWorldPos, ghostWorldPos).normalize();
-                    ghostWorldPos.addScaledVector(direction, moveDistance);
-                }
-                
-                // Make the ghost face the direction of movement
-                if (ghostPath.length > 0) {
-                    const lookAtTarget = toWorldPosition(ghostPath[0][0], ghostPath[0][1]);
-                    ghostMesh.lookAt(lookAtTarget.x, ghostWorldPos.y, lookAtTarget.z);
-                }
-            }
+        function moveGhosts(delta) {
+            if (isFreeCam || isMinigameActive) return; 
             
-            // Simple bobbing and rotation (always on)
-            ghostMesh.rotation.y += 1.0 * delta;
-            ghostMesh.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(currentTime * 3) * 0.5;
+            const currentTime = clock.getElapsedTime();
+            
+            const shouldUpdatePath = ghostUpdateTimer >= GHOST_UPDATE_INTERVAL;
+            
+            if (shouldUpdatePath) {
+                ghostUpdateTimer = 0;
+            } else {
+                ghostUpdateTimer += delta;
+            }
 
-            // --- Check for Game Over ---
-            checkCatchCondition(ghostWorldPos);
+            const GHOST_CHASE_SPEED = GHOST_SPEED; 
+            
+            ghosts.forEach((ghostMesh, index) => {
+                const ghostWorldPos = ghostMesh.position;
+                const ghostIsSeeingPlayer = isGhostVisible(ghostMesh); 
+                let ghostPath = ghostPaths[index]; 
+                let moveSpeed;
+                
+                // --- 1. FRENZY MODE CHECK ---
+                if (ghostsGoFrenzy) {
+                    moveSpeed = GHOST_FRENZY_SPEED;
+                    ghostMesh.userData.chasing = true; 
+                    
+                    if (shouldUpdatePath || ghostPath.length === 0) {
+                        const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
+                        ghostPath = findPath(
+                            ghostGridPos.r, ghostGridPos.c, 
+                            playerGridPos.r, playerGridPos.c
+                        );
+                        ghostPaths[index] = ghostPath; 
+                    }
+                } 
+                // --- 2. REGULAR AI MODE ---
+                else {
+                    if (ghostIsSeeingPlayer) {
+                        ghostMesh.userData.chasing = true; 
+                    } else if (ghostPath.length === 0) {
+                         ghostMesh.userData.chasing = false; 
+                    }
+
+                    if (ghostMesh.userData.chasing) {
+                        moveSpeed = GHOST_CHASE_SPEED;
+                        if (shouldUpdatePath) { 
+                            const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
+                            ghostPath = findPath(
+                                ghostGridPos.r, ghostGridPos.c, 
+                                playerGridPos.r, playerGridPos.c
+                            );
+                            ghostPaths[index] = ghostPath; 
+                        }
+                    } else {
+                        moveSpeed = GHOST_WANDER_SPEED;
+                        if (ghostPath.length === 0 && shouldUpdatePath) { 
+                            const ghostGridPos = toGridPosition(ghostWorldPos.x, ghostWorldPos.z);
+                            const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                            const validNeighbors = directions.map(([dr, dc]) => [ghostGridPos.r + dr, ghostGridPos.c + dc])
+                                .filter(([r, c]) => mazeGrid[r] && mazeGrid[r][c] === 0);
+
+                            if (validNeighbors.length > 0) {
+                                const [targetR, targetC] = validNeighbors[Math.floor(Math.random() * validNeighbors.length)];
+                                ghostPath.push([targetR, targetC]);
+                                ghostPaths[index] = ghostPath;
+                            }
+                        }
+                    }
+                }
+
+                // 3. Movement Execution
+                if (ghostPath.length > 0) {
+                    const [nextR, nextC] = ghostPath[0];
+                    const targetWorldPos = toWorldPosition(nextR, nextC);
+                    const moveDistance = moveSpeed * delta; 
+                    
+                    if (ghostWorldPos.distanceTo(targetWorldPos) < moveDistance) {
+                        ghostWorldPos.x = targetWorldPos.x;
+                        ghostWorldPos.z = targetWorldPos.z;
+                        ghostPath.shift(); 
+                    } else {
+                        const direction = new THREE.Vector3().subVectors(targetWorldPos, ghostWorldPos).normalize();
+                        ghostWorldPos.addScaledVector(direction, moveDistance);
+                    }
+                    
+                    if (ghostPath.length > 0) {
+                        const lookAtTarget = toWorldPosition(ghostPath[0][0], ghostPath[0][1]);
+                        ghostMesh.lookAt(lookAtTarget.x, ghostWorldPos.y, lookAtTarget.z);
+                    }
+                }
+                
+                ghostMesh.rotation.y += 1.0 * delta;
+                ghostMesh.position.y = PLAYER_HEIGHT + 0.5 + Math.sin(currentTime * 3 + index) * 0.5;
+
+                checkCatchCondition(ghostWorldPos);
+            });
         }
 
-        /**
-         * Checks if the Ghost has caught the player (Game Over condition).
-         */
-        function checkCatchCondition(ghostPosition) {
-            const catchDistance = 3; // Catch if distance is less than 3 units
+        function checkCatchCondition(ghostPosition) { 
+            if (isFreeCam || isMinigameActive) return; 
+            
+            const catchDistance = 3; 
             const dist = camera.position.distanceTo(ghostPosition);
 
             if (dist < catchDistance) {
-                showAlert("CAUGHT! The Ghost found you in the dark maze.", false);
+                showAlert("CAUGHT! A Ghost found you in the deep maze.", false);
             }
         }
 
+        function openExitPortal() {
+            const door = winPosition.userData.closedDoor;
+            scene.remove(door);
+            wallObjects = wallObjects.filter(obj => obj.uuid !== door.uuid);
 
-        // --- Input Handlers (Unchanged) ---
+            winPosition.visible = true; 
+            winPosition.userData.light.intensity = 5; 
+        }
 
+        function checkCrystalCollection() {
+            if (isFreeCam || isMinigameActive) return; 
+
+            const playerPos = camera.position;
+            const collectionRadius = 5; 
+
+            for (let i = crystals.length - 1; i >= 0; i--) {
+                const crystal = crystals[i];
+                if (playerPos.distanceTo(crystal.position) < collectionRadius) {
+                    scene.remove(crystal);
+                    crystals.splice(i, 1);
+                    crystalsCollected++;
+                    
+                    updateStatusBar(); 
+
+                    if (crystalsCollected >= TOTAL_CRYSTALS) {
+                        minimap.style.display = 'block'; // Always force show minimap on win condition
+                        isMinimapVisible = true; // Update state
+                        ghostsGoFrenzy = true; 
+                        playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
+                        playerStatus.classList.add('sprinting'); 
+                        openExitPortal();
+                    }
+
+                    return;
+                }
+            }
+        }
+
+        // --- ADDED: MOTOR INTERACTION LOGIC ---
+        function startMotorMinigame() {
+            if (isMotorFixed || isMinigameActive || !controls.isLocked) return;
+            
+            isMinigameActive = true;
+            controls.unlock();
+            gameActive = false;
+
+            motorSequence = [];
+            for (let i = 0; i < 4; i++) {
+                motorSequence.push(Math.floor(Math.random() * 4) + 1); // Sequence of 1, 2, 3, or 4
+            }
+            sequenceIndex = 0;
+            minigameTimer = MINIGAME_DURATION;
+
+            const motorPrompt = document.getElementById('motor-prompt');
+            document.getElementById('motor-sequence').textContent = motorSequence.join(' ');
+            document.getElementById('motor-timer').textContent = `Time Remaining: ${minigameTimer.toFixed(1)}s`;
+            motorPrompt.style.display = 'block';
+
+            // Start a listener for the 1, 2, 3, 4 keys
+            document.addEventListener('keydown', handleMinigameInput, true);
+        }
+        
+        function handleMinigameInput(event) {
+            if (!isMinigameActive) return;
+            
+            const expectedKey = `Digit${motorSequence[sequenceIndex]}`;
+            
+            if (event.code === expectedKey) {
+                sequenceIndex++;
+                event.preventDefault(); // Stop movement keys from triggering
+                
+                // Highlight the successfully pressed part
+                const seqElement = document.getElementById('motor-sequence');
+                const parts = seqElement.textContent.trim().split(/\s+/);
+                
+                if (parts[sequenceIndex - 1]) {
+                    parts[sequenceIndex - 1] = `<span style="color:#00ff00;">${parts[sequenceIndex - 1]}</span>`;
+                    seqElement.innerHTML = parts.join(' ');
+                }
+
+                if (sequenceIndex >= motorSequence.length) {
+                    endMotorMinigame(true, "SUCCESS! You fixed the Heavy-Duty Motor. (Ghosts are slower for 15s!)");
+                }
+            } else if (event.code.startsWith('Digit') && event.code !== expectedKey) {
+                 endMotorMinigame(false, "FAILURE! Wrong key pressed. The motor overheated! (You are slower for 15s.)");
+            } else if (event.code === 'Escape') {
+                 // ESC key to forcibly exit (counts as failure)
+                 endMotorMinigame(false, "FAILURE! Minigame aborted. The motor stalled. (You are slower for 15s.)");
+            }
+        }
+        
+        function endMotorMinigame(success, message) {
+            isMinigameActive = false;
+            document.removeEventListener('keydown', handleMinigameInput, true);
+            document.getElementById('motor-prompt').style.display = 'none';
+
+            if (success) {
+                isMotorFixed = true;
+                motorObject.userData.isFixed = true;
+                motorObject.userData.sparkLight.intensity = 0; // Turn off spark light
+                // Apply Buff: Ghost speed reduced temporarily
+                ghosts.forEach(ghost => ghost.userData.buffSpeed = -150);
+                setTimeout(() => {
+                    ghosts.forEach(ghost => ghost.userData.buffSpeed = 0);
+                }, 15000); 
+            } else {
+                // Apply Debuff: Player speed reduced temporarily
+                effectiveSpeed = WALK_SPEED / 2;
+                setTimeout(() => {
+                    effectiveSpeed = WALK_SPEED;
+                }, 15000);
+            }
+            
+            // Show a temporary alert to explain the result
+            const oldOnclick = document.getElementById('message-box').querySelector('.action-button').onclick;
+            document.getElementById('message-box').querySelector('.action-button').onclick = () => {
+                 document.getElementById('message-box').style.display = 'none';
+                 controls.lock(); 
+                 document.getElementById('message-box').querySelector('.action-button').onclick = oldOnclick;
+            };
+
+            showAlert(message, success);
+        }
+        
+        function checkMotorInteraction(delta) {
+            if (isFreeCam || isMotorFixed || isMinigameActive) return;
+
+            const playerPos = camera.position;
+            const interactionRadius = CELL_SIZE / 2; 
+
+            if (playerPos.distanceTo(motorObject.position) < interactionRadius) {
+                startMotorMinigame();
+            }
+            
+            // Update minigame timer
+            if (isMinigameActive) {
+                minigameTimer -= delta;
+                document.getElementById('motor-timer').textContent = `Time Remaining: ${minigameTimer.toFixed(1)}s`;
+
+                if (minigameTimer <= 0) {
+                    endMotorMinigame(false, "FAILURE! Time ran out. The motor seized up! (You are slower for 15s.)");
+                }
+            }
+        }
+        // --- END ADDED: MOTOR INTERACTION LOGIC ---
+
+
+        // --- CHEAT FUNCTIONS ---
+        function setCrystalCount(count) {
+            crystalsCollected = count;
+            
+            if (count >= TOTAL_CRYSTALS) {
+                crystals.forEach(crystal => scene.remove(crystal));
+                crystals = [];
+                ghostsGoFrenzy = true; 
+                playerStatus.textContent = "STATUS: ESCAPE! (FINAL SPRINT!)";
+                playerStatus.classList.add('sprinting'); 
+                openExitPortal();
+                minimap.style.display = 'block'; // Ensure minimap is visible
+                isMinimapVisible = true;
+            } else {
+                // To safely reset the game state if crystals are set lower than total, 
+                // we reload, which resets all game objects and state variables cleanly.
+                window.location.reload(); 
+            }
+            
+            updateStatusBar();
+        }
+
+        function toggleFreeCam(activate) { 
+            if (isFreeCam === activate) return; 
+
+            isFreeCam = activate;
+            
+            if (!isFreeCam) {
+                // Return to normal mode: snap player back to floor and reset vertical movement
+                if (camera.position.y < PLAYER_HEIGHT) {
+                    camera.position.y = PLAYER_HEIGHT;
+                }
+                moveUp = moveDown = false;
+            }
+            controls.lock(); // Re-lock immediately to ensure mouse look works
+        }
+        
+        function setFlySpeed(speedLevel) {
+            flySpeedMultiplier = Math.max(1, Math.min(100, speedLevel));
+            console.log(`[Cheat] Fly speed set to ${flySpeedMultiplier}.`);
+        }
+
+        function toggleMinimap(show) {
+            isMinimapVisible = show;
+            minimap.style.display = isMinimapVisible ? 'block' : 'none';
+        }
+
+        function processCommand(commandText) {
+            const parts = commandText.trim().toLowerCase().split(/\s+/);
+            const command = parts[0];
+
+            if (command === '/set' && parts[1] === 'crystal') {
+                const count = parseInt(parts[2]);
+                if (!isNaN(count) && count >= 0 && count <= TOTAL_CRYSTALS) {
+                    setCrystalCount(count);
+                    console.log(`[Cheat] Crystals set to ${count}.`);
+                } else {
+                    console.log(`[Cheat] Invalid crystal count. Must be between 0 and ${TOTAL_CRYSTALS}.`);
+                }
+            } else if (command === '/freecam') { 
+                toggleFreeCam(true);
+                console.log(`[Cheat] FreeCam Activated.`);
+            } else if (command === '/unfreecam') { 
+                toggleFreeCam(false);
+                console.log(`[Cheat] FreeCam Deactivated.`);
+            } else if (command === '/flyspeed') { 
+                const speedLevel = parseInt(parts[1]);
+                if (!isNaN(speedLevel)) {
+                    setFlySpeed(speedLevel);
+                } else {
+                    console.log(`[Cheat] Invalid speed level. Must be between 1 and 100.`);
+                }
+            } else if (command === '/showminimap' || command === '/showmm') { 
+                toggleMinimap(true);
+                console.log(`[Cheat] Minimap shown.`);
+            } else if (command === '/unshowminimap' || command === '/unshowmm') { 
+                toggleMinimap(false);
+                console.log(`[Cheat] Minimap hidden.`);
+            }
+        }
+        // --- END CHEAT FUNCTIONS ---
+
+
+        function updateStatusBar() {
+            if (isFreeCam || isMinigameActive) return; 
+
+            let closestDist = Infinity;
+            ghosts.forEach(ghost => {
+                const dist = camera.position.distanceTo(ghost.position);
+                closestDist = Math.min(closestDist, dist);
+            });
+
+            let threatText;
+            if (ghostsGoFrenzy) {
+                threatText = "THREAT: FRENZY! (THEY KNOW)";
+            } else if (closestDist > CELL_SIZE * 10) {
+                 threatText = "Threat: Distant";
+            } else if (closestDist > CELL_SIZE * 4) {
+                 threatText = "Threat: Nearby";
+            } else {
+                 threatText = "THREAT: IMMINENT!";
+            }
+            ghostProximity.textContent = `${threatText} | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
+        }
+
+        function updateMinimap() {
+            if (minimap.style.display === 'none') return;
+
+            const ctx = minimap.getContext('2d');
+            const mapSize = minimap.width;
+            const cellMapSize = mapSize / MAX_COL;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(0, 0, mapSize, mapSize);
+
+            // Draw Walls
+            ctx.fillStyle = '#111111'; 
+            for (let r = 0; r < MAX_ROW; r++) {
+                for (let c = 0; c < MAX_COL; c++) {
+                    if (mazeGrid[r][c] === 1) {
+                        ctx.fillRect(c * cellMapSize, r * cellMapSize, cellMapSize, cellMapSize);
+                    }
+                }
+            }
+
+            // Draw Exit (Green dot)
+            ctx.fillStyle = ghostsGoFrenzy ? '#00ff00' : '#5c3317'; 
+            ctx.fillRect(EXIT_COL * cellMapSize, EXIT_ROW * cellMapSize, cellMapSize, cellMapSize);
+            
+            // Draw Motor (If not fixed)
+            if (motorObject && !motorObject.userData.isFixed) {
+                 ctx.fillStyle = '#ff0000'; 
+                 const motorGridPos = toGridPosition(motorObject.position.x, motorObject.position.z);
+                 ctx.fillRect(motorGridPos.c * cellMapSize, motorGridPos.r * cellMapSize, cellMapSize, cellMapSize);
+            }
+            
+            // Draw Ghosts
+            ghosts.forEach(ghost => {
+                const ghostGridPos = toGridPosition(ghost.position.x, ghost.position.z);
+                ctx.fillStyle = ghost.userData.chasing ? '#ff0000' : '#aa00ff';
+                ctx.beginPath();
+                const ghostMapX = ghostGridPos.c * cellMapSize + cellMapSize / 2;
+                const ghostMapY = ghostGridPos.r * cellMapSize + cellMapSize / 2;
+                ctx.arc(ghostMapX, ghostMapY, cellMapSize * 0.3, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // Draw Player (Red dot)
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            const playerMapX = playerGridPos.c * cellMapSize + cellMapSize / 2;
+            const playerMapY = playerGridPos.r * cellMapSize + cellMapSize / 2;
+            ctx.arc(playerMapX, playerMapY, cellMapSize * 0.4, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        // --- Input Handlers - FIX APPLIED HERE ---
         function onKeyDown(event) {
+            // Block normal input if console or minigame is open
+            if (isConsoleOpen || isMinigameActive) {
+                if (event.code === 'Escape' && isConsoleOpen) {
+                    event.preventDefault(); 
+                    consoleInput.value = '';
+                    consoleElement.style.display = 'none';
+                    isConsoleOpen = false;
+                    
+                    controls.lock(); 
+                }
+                return; 
+            }
+            
+            if (event.code === 'Slash' && !event.shiftKey && controls.isLocked) {
+                event.preventDefault(); 
+                controls.unlock();
+                gameActive = false;
+                
+                consoleElement.style.display = 'block';
+                isConsoleOpen = true;
+                consoleInput.focus();
+                return;
+            }
+
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = true; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = true; break;
                 case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                // Q and E are used for flight/ascend/descend in freecam
+                case 'KeyQ': moveUp = true; break; 
+                case 'KeyE': moveDown = true; break; 
             }
         }
 
         function onKeyUp(event) {
+            if (isConsoleOpen || isMinigameActive) return; 
+            
             switch (event.code) {
                 case 'ArrowUp': case 'KeyW': moveForward = false; break;
                 case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
                 case 'ArrowDown': case 'KeyS': moveBackward = false; break;
                 case 'ArrowRight': case 'KeyD': moveRight = false; break;
+                case 'KeyQ': moveUp = false; break;
+                case 'KeyE': moveDown = false; break;
             }
         }
-
+        
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -625,97 +1198,133 @@
 
             const delta = clock.getDelta();
 
-            if (controls.isLocked === true && gameActive) {
+            // The main game loop runs if controls are locked OR if in freecam mode.
+            if (controls.isLocked === true || isFreeCam) {
                 
-                // 1. Update Player position
                 updatePlayerGridPosition(); 
                 
-                // Check Ghost vision (now a pure boolean)
-                const ghostInSight = isGhostVisible(); 
+                let currentSpeed;
                 
-                // 2. Ghost AI Movement
-                moveGhost(delta); 
+                if (!isFreeCam && !isMinigameActive) { 
+                    // --- GAMEPLAY LOGIC ---
+                    let ghostInSight = false;
+                    if (!ghostsGoFrenzy) {
+                        ghosts.forEach(ghost => {
+                            if(isGhostVisible(ghost)) {
+                                ghostInSight = true;
+                            }
+                        });
+                    }
+                    
+                    moveGhosts(delta); 
+                    checkCrystalCollection();
+                    checkMotorInteraction(delta); // ADDED: Motor interaction check
 
-                // --- Sprint Logic (With 3-second delay) ---
-                
-                if (ghostInSight) {
-                    // Ghost is in sight: Sprint immediately, reset delay timer
-                    effectiveSpeed = SPRINT_SPEED;
-                    sprintDelayTimer = SPRINT_DELAY_DURATION; 
-                    playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
-                    playerStatus.classList.add('sprinting');
-                } else if (sprintDelayTimer > 0) {
-                    // Ghost is out of sight, but delay is active: Keep sprinting
-                    sprintDelayTimer -= delta;
-                    // Clamp timer to prevent negative display numbers
-                    sprintDelayTimer = Math.max(0, sprintDelayTimer);
-                    effectiveSpeed = SPRINT_SPEED;
-                    playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
-                    playerStatus.classList.add('sprinting');
-                } else {
-                    // Delay expired or never triggered: Walk
-                    effectiveSpeed = WALK_SPEED;
-                    playerStatus.textContent = "Status: Walking...";
+                    // Sprint Logic
+                    if (!ghostsGoFrenzy) {
+                        if (ghostInSight) {
+                            effectiveSpeed = SPRINT_SPEED;
+                            sprintDelayTimer = SPRINT_DELAY_DURATION; 
+                            playerStatus.textContent = "Status: SPRINTING! (GO! GO! GO!)";
+                            playerStatus.classList.add('sprinting');
+                        } else if (sprintDelayTimer > 0) {
+                            sprintDelayTimer -= delta;
+                            sprintDelayTimer = Math.max(0, sprintDelayTimer);
+                            effectiveSpeed = SPRINT_SPEED;
+                            playerStatus.textContent = `Status: SPRINTING! (Delay: ${sprintDelayTimer.toFixed(1)}s)`;
+                            playerStatus.classList.add('sprinting');
+                        } else {
+                            effectiveSpeed = WALK_SPEED;
+                            playerStatus.textContent = "Status: Walking...";
+                            playerStatus.classList.remove('sprinting');
+                        }
+                    } else {
+                        effectiveSpeed = SPRINT_SPEED; 
+                    }
+                    
+                    currentSpeed = effectiveSpeed;
+                    updateStatusBar(); 
+                } else if (isFreeCam) {
+                    // --- FREECAM LOGIC ---
+                    currentSpeed = (MAX_FREECAM_SPEED / 100) * flySpeedMultiplier;
+                    playerStatus.textContent = `Status: FREECAM ACTIVE (Speed: ${flySpeedMultiplier})`;
                     playerStatus.classList.remove('sprinting');
-                }
-                
-                // --- Proximity Status Update ---
-                const dist = camera.position.distanceTo(ghostMesh.position);
-                if (dist > CELL_SIZE * 10) {
-                     ghostProximity.textContent = "Threat: Distant";
-                } else if (dist > CELL_SIZE * 4) {
-                     ghostProximity.textContent = "Threat: Nearby";
-                } else {
-                     ghostProximity.textContent = "THREAT: IMMINENT!";
+                    ghostProximity.textContent = `Threat: PAUSED | Crystals: ${crystalsCollected}/${TOTAL_CRYSTALS}`;
+                } else if (isMinigameActive) {
+                    // Minigame active - pause all movement
+                    currentSpeed = 0; 
                 }
 
-                // --- Movement Calculation ---
+
+                
+                // Movement Calculation (Applies to both modes)
                 const velocity = new THREE.Vector3();
-                if (moveForward) velocity.z -= effectiveSpeed * delta;
-                if (moveBackward) velocity.z += effectiveSpeed * delta;
-                if (moveLeft) velocity.x -= effectiveSpeed * delta;
-                if (moveRight) velocity.x += effectiveSpeed * delta;
+                if (moveForward) velocity.z -= currentSpeed * delta;
+                if (moveBackward) velocity.z += currentSpeed * delta;
+                if (moveLeft) velocity.x -= currentSpeed * delta;
+                if (moveRight) velocity.x += currentSpeed * delta;
+                
+                // Freecam vertical movement (Q/E)
+                if (isFreeCam) {
+                    if (moveUp) velocity.y += currentSpeed * delta;
+                    if (moveDown) velocity.y -= currentSpeed * delta;
+                    camera.position.y += velocity.y; 
+                }
 
                 const oldPosition = camera.position.clone();
                 
-                // Apply movement
                 controls.moveRight(velocity.x); 
                 controls.moveForward(-velocity.z);
 
-                // --- Collision Detection ---
-                const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
-                const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
+                // Collision Detection: Only run if NOT in freecam mode
+                if (!isFreeCam) { 
+                    const currentGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
+                    const currentGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
 
-                if (isColliding(currentGridX, currentGridZ, oldPosition)) {
-                    camera.position.copy(oldPosition);
+                    if (isColliding(currentGridX, currentGridZ, oldPosition)) {
+                        camera.position.copy(oldPosition);
+                    }
+                    
+                    checkWinCondition();
+                } 
+                
+                // Animate lights & crystals 
+                if (winPosition && winPosition.visible && winPosition.userData.light) {
+                    winPosition.userData.light.intensity = 4 + Math.sin(clock.getElapsedTime() * 5) * 1;
+                    winPosition.material.opacity = 0.6 + Math.sin(clock.getElapsedTime() * 5) * 0.2;
+                }
+                crystals.forEach(crystal => {
+                    crystal.rotation.y += 2 * delta;
+                    crystal.position.y = PLAYER_HEIGHT / 2 + 0.5 + Math.sin(clock.getElapsedTime() * 4) * 0.2;
+                });
+                
+                // Animate Motor if not fixed
+                if (motorObject && !motorObject.userData.isFixed) {
+                    motorObject.rotation.y += 0.5 * delta;
+                    motorObject.userData.sparkLight.intensity = 3 + Math.sin(clock.getElapsedTime() * 10) * 1; 
                 }
 
-                // --- Win Condition ---
-                checkWinCondition();
-                
-                // Animate exit light pulse
-                if (winPosition && winPosition.userData.light) {
-                    winPosition.userData.light.intensity = 2 + Math.sin(clock.getElapsedTime() * 5) * 1;
+                // Only draw the minimap if the collected crystal count triggers it OR the user has manually toggled it.
+                if (isMinimapVisible || crystalsCollected >= TOTAL_CRYSTALS) {
+                    minimap.style.display = 'block';
+                    updateMinimap();
+                } else {
+                    minimap.style.display = 'none';
                 }
             }
 
             renderer.render(scene, camera);
         }
 
-        /**
-         * Checks the player's position against the maze grid for walls.
-         */
         function isColliding(gridX, gridZ, oldPosition) {
-            // Check bounds 
+            if (isFreeCam) return false; 
+            
             if (gridZ < 0 || gridZ >= mazeGrid.length || gridX < 0 || gridX >= mazeGrid[0].length) {
                 return true;
             }
 
             if (mazeGrid[gridZ][gridX] === 1) {
                 
-                // Attempt to revert movement along one axis to unstick the player
-                
-                // Test X-revert:
                 const tempX = oldPosition.x;
                 const tempZ = camera.position.z;
                 
@@ -723,10 +1332,9 @@
                 let testGridZ = Math.floor((tempZ - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[testGridZ] && mazeGrid[testGridZ][testGridX] === 1) {
-                    camera.position.z = oldPosition.z;
+                    camera.position.z = oldPosition.z; 
                 }
                 
-                // Test Z-revert:
                 const tempX_2 = camera.position.x;
                 const tempZ_2 = oldPosition.z;
 
@@ -734,10 +1342,9 @@
                 let testGridZ_2 = Math.floor((tempZ_2 - offsetZ) / CELL_SIZE);
                 
                 if (mazeGrid[testGridZ_2] && mazeGrid[testGridZ_2][testGridX_2] === 1) {
-                    camera.position.x = oldPosition.x;
+                    camera.position.x = oldPosition.x; 
                 }
 
-                // Final check after partial reverts
                 const finalGridX = Math.floor((camera.position.x - offsetX) / CELL_SIZE);
                 const finalGridZ = Math.floor((camera.position.z - offsetZ) / CELL_SIZE);
                 
@@ -749,7 +1356,8 @@
         }
 
         function checkWinCondition() {
-            if (!winPosition) return;
+            if (isFreeCam || isMinigameActive) return; 
+            if (!winPosition || !winPosition.visible) return;
             
             const distanceToExit = camera.position.distanceTo(winPosition.position);
             
