@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>AI Hide-and-Seek Dynamic</title>
+  <title>AI Hide-and-Seek Persistent</title>
   <style>
     html, body {
       margin: 0; padding: 0;
@@ -12,24 +12,33 @@
     canvas { display: block; }
     #hud {
       position: absolute;
-      top: 10px; left: 50%;
-      transform: translateX(-50%);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
       color: #fff;
       text-align: center;
       z-index: 10;
       text-shadow: 1px 1px 2px black;
     }
-    #timer {
-      font-size: 48px;
-      font-weight: bold;
+    #timer { font-size: 48px; font-weight: bold; }
+    #attempts { font-size: 32px; margin-top: 5px; }
+    #cookies { font-size: 22px; margin-top: 3px; }
+    #controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 20px;
     }
-    #attempts {
-      font-size: 28px;
-      margin-top: 5px;
-    }
-    #cookies {
-      font-size: 22px;
-      margin-top: 3px;
+    button {
+      font-size: 20px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      background-color: #6a4c93;
+      color: #fff;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
     }
   </style>
 </head>
@@ -41,18 +50,21 @@
   <div id="cookies">Seeker Cookies: 0 | Hider Cookies: 0</div>
 </div>
 
+<div id="controls">
+  <button id="resetBtn">Reset</button>
+</div>
+
 <canvas id="gameCanvas"></canvas>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
-let attempts = 0;
-let seekerCookies = 0;
-let hiderCookies = 0;
-let timer = 30; // seconds
+let attempts = parseInt(localStorage.getItem('attempts')) || 0;
+let seekerCookies = parseInt(localStorage.getItem('seekerCookies')) || 0;
+let hiderCookies = parseInt(localStorage.getItem('hiderCookies')) || 0;
+let timer = 30;
 
-// Resize canvas
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
@@ -62,6 +74,8 @@ resizeCanvas();
 
 // Memory for AI learning
 const memory = { bestHiderSpot: null };
+const savedMemory = localStorage.getItem('hiderMemory');
+if(savedMemory) memory.bestHiderSpot = JSON.parse(savedMemory);
 
 // AI objects
 function createAI(x, y, size, color, speed) {
@@ -70,14 +84,13 @@ function createAI(x, y, size, color, speed) {
 const hider = createAI(50, 50, 40, 'green', 3);
 const seeker = createAI(canvas.width - 100, canvas.height - 100, 40, 'red', 2.5);
 
-// Dynamic obstacles with velocity
+// Dynamic obstacles
 const obstacles = [
   { x: 200, y: 150, width: 120, height: 60, color: '#6a4c93', type: 'rect', vx: 1, vy: 1.2 },
   { x: 500, y: 300, width: 80, height: 80, color: '#ff6347', type: 'circle', vx: -1.1, vy: 0.8 },
   { x: 800, y: 100, width: 100, height: 50, color: '#ffd700', type: 'triangle', vx: 0.7, vy: -1 }
 ];
 
-// Utility
 function distance(a, b) {
   return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2);
 }
@@ -86,7 +99,7 @@ function rectsOverlap(a, b) {
            a.y + a.size < b.y || a.y > b.y + b.height);
 }
 
-// Reset positions and timer
+// Reset round
 function resetRound() {
   hider.x = Math.random() * (canvas.width - hider.size);
   hider.y = Math.random() * (canvas.height - hider.size);
@@ -100,12 +113,10 @@ function moveHider() {
   let angle = Math.random() * 2 * Math.PI;
   hider.x += Math.cos(angle) * hider.speed;
   hider.y += Math.sin(angle) * hider.speed;
-
   obstacles.forEach(o => { if(rectsOverlap(hider, o)) {
     hider.x -= Math.cos(angle) * hider.speed;
     hider.y -= Math.sin(angle) * hider.speed;
   }});
-
   hider.x = Math.max(0, Math.min(canvas.width - hider.size, hider.x));
   hider.y = Math.max(0, Math.min(canvas.height - hider.size, hider.y));
 }
@@ -116,39 +127,31 @@ function moveSeeker() {
   let dy = target.y - seeker.y;
   seeker.x += dx*0.01 + (Math.random()-0.5)*1.5;
   seeker.y += dy*0.01 + (Math.random()-0.5)*1.5;
-
   obstacles.forEach(o => { if(rectsOverlap(seeker, o)) {
     seeker.x -= dx*0.01;
     seeker.y -= dy*0.01;
   }});
-
   seeker.x = Math.max(0, Math.min(canvas.width - seeker.size, seeker.x));
   seeker.y = Math.max(0, Math.min(canvas.height - seeker.size, seeker.y));
 }
 
-// Move dynamic obstacles
+// Move obstacles
 function moveObstacles() {
   obstacles.forEach(o => {
-    o.x += o.vx;
-    o.y += o.vy;
-
-    // Bounce off walls
+    o.x += o.vx; o.y += o.vy;
     if(o.x < 0 || o.x + o.width > canvas.width) o.vx *= -1;
     if(o.y < 0 || o.y + o.height > canvas.height) o.vy *= -1;
   });
 }
 
-// Draw obstacles with shapes and gradient effect
+// Draw obstacles
 function drawObstacles() {
   obstacles.forEach(o => {
     let grad = ctx.createRadialGradient(o.x + o.width/2, o.y + o.height/2, 5, o.x + o.width/2, o.y + o.height/2, o.width/2);
-    grad.addColorStop(0, '#ffffff');
-    grad.addColorStop(1, o.color);
+    grad.addColorStop(0, '#ffffff'); grad.addColorStop(1, o.color);
     ctx.fillStyle = grad;
-
-    if(o.type === 'rect') {
-      ctx.fillRect(o.x, o.y, o.width, o.height);
-    } else if(o.type === 'circle') {
+    if(o.type === 'rect') ctx.fillRect(o.x, o.y, o.width, o.height);
+    else if(o.type === 'circle') {
       ctx.beginPath();
       ctx.arc(o.x + o.width/2, o.y + o.height/2, o.width/2, 0, 2*Math.PI);
       ctx.fill();
@@ -163,7 +166,7 @@ function drawObstacles() {
   });
 }
 
-// Draw AI with shadow for depth
+// Draw AI
 function drawAI(ai) {
   ctx.shadowColor = 'rgba(0,0,0,0.3)';
   ctx.shadowBlur = 10;
@@ -172,40 +175,48 @@ function drawAI(ai) {
   ctx.shadowBlur = 0;
 }
 
-// Game Loop
+// Update HUD and localStorage
+function updateHUD() {
+  document.getElementById('timer').innerText = Math.ceil(timer);
+  document.getElementById('attempts').innerText = `Attempts: ${attempts}`;
+  document.getElementById('cookies').innerText = `Seeker Cookies: ${seekerCookies} | Hider Cookies: ${hiderCookies}`;
+  localStorage.setItem('attempts', attempts);
+  localStorage.setItem('seekerCookies', seekerCookies);
+  localStorage.setItem('hiderCookies', hiderCookies);
+  localStorage.setItem('hiderMemory', JSON.stringify(memory.bestHiderSpot));
+}
+
+// Game loop
 function gameLoop() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  moveObstacles(); moveHider(); moveSeeker();
+  drawObstacles(); drawAI(hider); drawAI(seeker);
 
-  moveObstacles();
-  moveHider();
-  moveSeeker();
-  drawObstacles();
-  drawAI(hider);
-  drawAI(seeker);
-
-  // Check collision
+  // Collision
   if(distance(hider, seeker) < (hider.size + seeker.size)/2) {
-    attempts++;
-    seekerCookies++;
-    memory.bestHiderSpot = { x: hider.x, y: hider.y };
+    attempts++; seekerCookies++;
+    memory.bestHiderSpot = {x: hider.x, y: hider.y};
     resetRound();
   }
 
   // Timer
   timer -= 1/60;
   if(timer <= 0) {
-    attempts++;
-    hiderCookies++;
+    attempts++; hiderCookies++;
     resetRound();
   }
 
-  // Update HUD
-  document.getElementById('timer').innerText = Math.ceil(timer);
-  document.getElementById('attempts').innerText = `Attempts: ${attempts}`;
-  document.getElementById('cookies').innerText = `Seeker Cookies: ${seekerCookies} | Hider Cookies: ${hiderCookies}`;
-
+  updateHUD();
   requestAnimationFrame(gameLoop);
 }
+
+// Reset button
+document.getElementById('resetBtn').addEventListener('click', () => {
+  localStorage.clear();
+  attempts = 0; seekerCookies = 0; hiderCookies = 0;
+  memory.bestHiderSpot = null;
+  resetRound();
+});
 
 resetRound();
 gameLoop();
