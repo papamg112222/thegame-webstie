@@ -4,64 +4,82 @@
 <meta charset="UTF-8">
 <title>Urban Survival Prototype</title>
 <style>
-  body { margin: 0; overflow: hidden; }
-  #info { position: absolute; top: 10px; left: 10px; color: white; font-family: Arial; }
+  /* Basic styling for the entire page */
+  body { margin: 0; overflow: hidden; background-color: black; }
+  /* Styling for the instruction/info panel */
+  #info { 
+    position: absolute; 
+    top: 10px; 
+    left: 10px; 
+    color: white; 
+    font-family: Arial, sans-serif;
+    background: rgba(0, 0, 0, 0.5); /* Semi-transparent background for readability */
+    padding: 10px;
+    border-radius: 5px;
+  }
 </style>
 </head>
 <body>
 <div id="info">Click to start. Use WASD to move. Find the red cube (item).</div>
 
-<!-- Three.js -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.156.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.156.0/examples/js/controls/PointerLockControls.js"></script>
 
 <script>
+// Core variables
 let scene, camera, renderer, controls, item;
+const playerHeight = 2; // The camera's initial height above the floor
+
+// Initialize the scene, camera, and renderer
 init();
+// Start the main game loop
 animate();
 
 function init() {
-    // Scene
+    // --- Scene Setup ---
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x87ceeb);
+    scene.background = new THREE.Color(0x87ceeb); // Light sky blue background
 
-    // Camera
+    // --- Camera Setup ---
     camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-    camera.position.y = 2;
+    camera.position.y = playerHeight;
+    // Note: The PointerLockControls automatically manages the camera's position/rotation.
 
-    // Renderer
+    // --- Renderer Setup ---
     renderer = new THREE.WebGLRenderer({antialias: true});
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // Light
+    // --- Lighting ---
     const light = new THREE.DirectionalLight(0xffffff, 1);
-    light.position.set(10,20,10);
+    light.position.set(10, 20, 10);
     scene.add(light);
-    scene.add(new THREE.AmbientLight(0x404040));
+    scene.add(new THREE.AmbientLight(0x404040)); // Soft, general light
 
-    // Floor
-    const floorGeo = new THREE.PlaneGeometry(100,100);
-    const floorMat = new THREE.MeshStandardMaterial({color:0x555555});
+    // --- Floor ---
+    const floorGeo = new THREE.PlaneGeometry(100, 100);
+    const floorMat = new THREE.MeshStandardMaterial({color: 0x555555});
     const floor = new THREE.Mesh(floorGeo, floorMat);
-    floor.rotation.x = -Math.PI/2;
+    floor.rotation.x = -Math.PI/2; // Rotate to lie flat on the XZ plane
     scene.add(floor);
 
-    // Controls
+    // --- Controls ---
     controls = new THREE.PointerLockControls(camera, document.body);
+    // Lock the cursor when the user clicks the screen to start movement
     document.body.addEventListener('click', () => controls.lock());
 
-    // Item
-    const itemGeo = new THREE.BoxGeometry(1,1,1);
-    const itemMat = new THREE.MeshStandardMaterial({color:0xff0000});
+    // --- Item (Red Cube) ---
+    const itemGeo = new THREE.BoxGeometry(1, 1, 1);
+    const itemMat = new THREE.MeshStandardMaterial({color: 0xff0000});
     item = new THREE.Mesh(itemGeo, itemMat);
-    item.position.set(5,0.5,-5);
+    item.position.set(5, 0.5, -5); // Positioned half-height (0.5) above the floor
     scene.add(item);
 
-    // Movement
+    // --- Event Listeners ---
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
 
+    // Handle window resizing
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth/window.innerHeight;
         camera.updateProjectionMatrix();
@@ -69,7 +87,7 @@ function init() {
     });
 }
 
-// Movement state
+// --- Movement State and Variables ---
 const move = {forward:false, backward:false, left:false, right:false};
 const velocity = new THREE.Vector3();
 const speed = 0.1;
@@ -88,21 +106,29 @@ function onKeyUp(e){
     if(e.code==='KeyD') move.right=false;
 }
 
+// --- Day/Night Cycle Logic ---
 let time = 0;
 function updateDayNight(){
     time += 0.01;
-    if(time>24) time=0;
-    const intensity = Math.max(Math.sin((time/24)*Math.PI),0.2);
+    if(time > 24) time = 0; // Reset time after a full cycle
+
+    // Calculate intensity using a sine function, clamped at 0.2 for night
+    const intensity = Math.max(Math.sin((time/24)*Math.PI), 0.2);
+    
+    // Apply intensity to the directional light
     scene.children.forEach(child => {
         if(child.type==='DirectionalLight') child.intensity = intensity;
     });
-    scene.background.setHSL(0.6, 0.6, 0.5*intensity + 0.2);
+    
+    // Update sky background color (Lightness scales with intensity)
+    scene.background.setHSL(0.6, 0.6, 0.5 * intensity + 0.2);
 }
 
+// --- Main Animation Loop ---
 function animate(){
     requestAnimationFrame(animate);
 
-    // Movement
+    // 1. Update Movement
     velocity.set(0,0,0);
     if(move.forward) velocity.z -= speed;
     if(move.backward) velocity.z += speed;
@@ -112,13 +138,25 @@ function animate(){
     controls.moveRight(velocity.x);
     controls.moveForward(velocity.z);
 
-    // Pickup
-    if(camera.position.distanceTo(item.position)<1){
-        item.visible=false;
+    // 2. Item Pickup Check (Horizontal Distance Only)
+    
+    // Clone camera and item positions, setting Y to 0 to check ground-plane distance
+    const playerXZ = camera.position.clone();
+    playerXZ.y = 0; 
+    
+    const itemXZ = item.position.clone();
+    itemXZ.y = 0; 
+
+    // Check if the horizontal distance is less than 1.5 units and the item is visible
+    if(playerXZ.distanceTo(itemXZ) < 1.5 && item.visible){
+        item.visible = false;
         document.getElementById('info').innerText = 'Item Collected! 🎉';
     }
 
+    // 3. Update Environment
     updateDayNight();
+    
+    // 4. Render the scene
     renderer.render(scene, camera);
 }
 </script>
