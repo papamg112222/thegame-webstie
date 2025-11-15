@@ -3,15 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Dreamscape Explorer</title>
+    <title>AI Dreamscape Explorer - Fixed</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #1a0033; } /* Deep Purple Background */
+        body { margin: 0; overflow: hidden; background-color: #1a0033; }
         canvas { display: block; }
         #blocker {
+            /* Start hidden, only show instructions if Pointer Lock is needed/failed */
             position: absolute;
             width: 100%;
             height: 100%;
             background-color: rgba(0,0,0,0.5);
+            display: none; /* KEY FIX: Start hidden */
+            z-index: 10;
         }
         #instructions {
             width: 100%;
@@ -38,10 +41,9 @@
     <div id="blocker">
         <div id="instructions">
             <p>
-                Click to Play<br/>
-                (Pointer Lock)<br/><br/>
-                **WASD** to Move<br/>
-                **Mouse** to Look
+                **Click to Engage Mouse Look**<br/>
+                (WASD movement is active)<br/><br/>
+                If the screen is locked, press **ESC** to free the mouse.
             </p>
         </div>
     </div>
@@ -65,116 +67,80 @@
         const GRID_SIZE = 15;
         const BLOCK_SIZE = 40;
         const blocks = [];
-        const world = new THREE.Object3D(); // Container for all blocks
+        const world = new THREE.Object3D();
         
-        // --- Pointer Lock API Setup ---
+        // --- DOM Elements ---
         const blocker = document.getElementById('blocker');
         const instructions = document.getElementById('instructions');
 
-        const havePointerLock = 'pointerLockElement' in document || 'mozPointerLockElement' in document || 'webkitPointerLockElement' in document;
-
-        if (havePointerLock) {
+        // --- Pointer Lock API Setup ---
+        const setupPointerLock = () => {
             const element = document.body;
+            const havePointerLock = 'pointerLockElement' in document || 'mozPointerLockElement' in document || 'webkitPointerLockElement' in document;
 
-            const pointerlockchange = (event) => {
-                if (document.pointerLockElement === element || document.mozPointerLockElement === element || document.webkitPointerLockElement === element) {
-                    controls.enabled = true;
-                    blocker.style.display = 'none';
-                } else {
-                    controls.enabled = false;
-                    blocker.style.display = 'flex';
-                    instructions.style.display = 'flex';
-                }
-            };
+            if (havePointerLock) {
+                const onPointerLockChange = () => {
+                    if (document.pointerLockElement === element || document.mozPointerLockElement === element || document.webkitPointerLockElement === element) {
+                        controls.enabled = true;
+                        blocker.style.display = 'none'; // Hide instructions when lock is successful
+                    } else {
+                        controls.enabled = false;
+                        blocker.style.display = 'flex'; // Show instructions when lock is lost (e.g., pressed ESC)
+                    }
+                };
 
-            const pointerlockerror = (event) => {
-                instructions.style.display = 'flex';
-            };
+                document.addEventListener('pointerlockchange', onPointerLockChange, false);
+                document.addEventListener('mozpointerlockchange', onPointerLockChange, false);
+                document.addEventListener('webkitpointerlockchange', onPointerLockChange, false);
 
-            document.addEventListener('pointerlockchange', pointerlockchange, false);
-            document.addEventListener('mozpointerlockchange', pointerlockchange, false);
-            document.addEventListener('webkitpointerlockchange', pointerlockchange, false);
-            document.addEventListener('pointerlockerror', pointerlockerror, false);
-            document.addEventListener('mozpointerlockerror', pointerlockerror, false);
-            document.addEventListener('webkitpointerlockerror', pointerlockerror, false);
-
-            instructions.addEventListener('click', () => {
-                // Request pointer lock
-                element.requestPointerLock = element.requestPointerLock || element.mozRequestPointerLock || element.webkitRequestPointerLock;
-                if (/Firefox/i.test(navigator.userAgent)) {
-                    const fullscreenchange = () => {
-                        if (document.fullscreenElement === element || document.mozFullscreenElement === element || document.mozFullScreenElement === element) {
-                            document.removeEventListener('fullscreenchange', fullscreenchange);
-                            document.removeEventListener('mozfullscreenchange', fullscreenchange);
-                            element.requestPointerLock();
-                        }
-                    };
-                    document.addEventListener('fullscreenchange', fullscreenchange, false);
-                    document.addEventListener('mozfullscreenchange', fullscreenchange, false);
-                    element.requestFullscreen = element.requestFullscreen || element.mozRequestFullscreen || element.webkitRequestFullscreen;
-                    element.requestFullscreen();
-                } else {
-                    element.requestPointerLock();
-                }
-            }, false);
-        } else {
-            instructions.innerHTML = 'Your browser doesn\'t seem to support Pointer Lock API';
-        }
+                // Attach click listener to the renderer canvas/document body for activation
+                document.addEventListener('click', () => {
+                    if (!controls.enabled) {
+                        element.requestPointerLock = element.requestPointerLock || element.mozRequestPointerLock || element.webkitRequestPointerLock;
+                        element.requestPointerLock();
+                    }
+                }, false);
+            } else {
+                instructions.innerHTML = 'Pointer Lock API not supported. Use WASD only.';
+            }
+        };
 
         // --- Initialisation Function ---
         function init() {
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
-            camera.position.y = 50; // Start slightly above the blocks
+            camera.position.y = 50;
 
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a0033); // Deep Purple
+            scene.background = new THREE.Color(0x1a0033);
 
-            // A small, dim ambient light
             scene.add(new THREE.AmbientLight(0xffffff, 0.2));
 
-            // Controls Setup (Three.js standard PointerLockControls)
+            // Controls Setup
             controls = new THREE.PointerLockControls(camera, document.body);
             scene.add(controls.getObject());
 
             // --- Event Listeners for WASD movement ---
             const onKeyDown = (event) => {
                 switch (event.code) {
-                    case 'KeyW':
-                        moveForward = true;
-                        break;
-                    case 'KeyA':
-                        moveLeft = true;
-                        break;
-                    case 'KeyS':
-                        moveBackward = true;
-                        break;
-                    case 'KeyD':
-                        moveRight = true;
-                        break;
+                    case 'KeyW': moveForward = true; break;
+                    case 'KeyA': moveLeft = true; break;
+                    case 'KeyS': moveBackward = true; break;
+                    case 'KeyD': moveRight = true; break;
                 }
             };
 
             const onKeyUp = (event) => {
                 switch (event.code) {
-                    case 'KeyW':
-                        moveForward = false;
-                        break;
-                    case 'KeyA':
-                        moveLeft = false;
-                        break;
-                    case 'KeyS':
-                        moveBackward = false;
-                        break;
-                    case 'KeyD':
-                        moveRight = false;
-                        break;
+                    case 'KeyW': moveForward = false; break;
+                    case 'KeyA': moveLeft = false; break;
+                    case 'KeyS': moveBackward = false; break;
+                    case 'KeyD': moveRight = false; break;
                 }
             };
 
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
 
-            // --- Create the Dreamscape Environment ---
             createDreamscape();
             scene.add(world);
 
@@ -184,28 +150,31 @@
             document.body.appendChild(renderer.domElement);
 
             window.addEventListener('resize', onWindowResize, false);
+            
+            // Set up pointer lock AFTER renderer is attached
+            setupPointerLock(); 
+            
+            // Start the game with movement active immediately
+            controls.enabled = true; 
         }
 
-        // --- Dreamscape Generation Function ---
+        // --- Dreamscape Generation Function (Unchanged) ---
         function createDreamscape() {
             const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
             
             for (let x = 0; x < GRID_SIZE; x++) {
                 blocks[x] = [];
                 for (let z = 0; z < GRID_SIZE; z++) {
-                    // Start with a generic material, color will be updated in animate
                     const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffffff) });
                     const cube = new THREE.Mesh(geometry, material);
 
-                    // Position the blocks
                     cube.position.x = (x - GRID_SIZE / 2) * (BLOCK_SIZE * 1.5);
                     cube.position.z = (z - GRID_SIZE / 2) * (BLOCK_SIZE * 1.5);
-                    cube.position.y = 0; // Base Y position
+                    cube.position.y = 0;
 
-                    // Store original position and a unique ID for distortion
                     cube.userData = { 
                         originalY: cube.position.y,
-                        index: x * GRID_SIZE + z // Unique index for noise/ripple
+                        index: x * GRID_SIZE + z
                     };
 
                     blocks[x][z] = cube;
@@ -214,14 +183,13 @@
             }
         }
 
-        // --- Window Resize Handler ---
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        // --- Animation Loop ---
+        // --- Animation Loop (Unchanged Dreamscape Logic) ---
         function animate() {
             requestAnimationFrame(animate);
 
@@ -229,9 +197,7 @@
             const delta = (time - prevTime) / 1000;
 
             // --- Dreamscape Effects Update ---
-            const hueShift = (Math.sin(time * 0.0005) + 1) / 2; // Slow, continuous shift
-            
-            // Get the camera's angle for the reality distortion effect
+            const hueShift = (Math.sin(time * 0.0005) + 1) / 2;
             const cameraRotationY = controls.getObject().rotation.y;
             const cameraPositionX = camera.position.x * 0.01;
             const cameraPositionZ = camera.position.z * 0.01;
@@ -241,26 +207,24 @@
                     const block = blocks[x][z];
                     const index = block.userData.index;
 
-                    // 1. Color Shift (Vibrant Rainbow)
-                    // Use HSL for smooth color cycling
+                    // 1. Color Shift
                     const color = new THREE.Color();
-                    color.setHSL((hueShift + index * 0.01) % 1, 1.0, 0.5); // 1.0 Saturation, 0.5 Lightness
+                    color.setHSL((hueShift + index * 0.01) % 1, 1.0, 0.5);
                     block.material.color.copy(color);
 
-                    // 2. Reality Distortion (Y position ripple)
-                    // The Y position changes based on camera movement, rotation, and time.
+                    // 2. Reality Distortion
                     const distortion = Math.sin(
                         time * 0.0015 + 
-                        cameraRotationY * 5 + // Camera Rotation
-                        (block.position.x + block.position.z) * 0.05 + // Position in space
-                        (cameraPositionX + cameraPositionZ) * 0.5 // Camera movement
-                    ) * 30; // Max distortion height (30 units)
+                        cameraRotationY * 5 + 
+                        (block.position.x + block.position.z) * 0.05 + 
+                        (cameraPositionX + cameraPositionZ) * 0.5
+                    ) * 30;
 
                     block.position.y = block.userData.originalY + distortion;
                 }
             }
 
-            // --- First-Person Movement Update (WASD) ---
+            // --- First-Person Movement Update ---
             velocity.x -= velocity.x * 10.0 * delta;
             velocity.z -= velocity.z * 10.0 * delta;
 
@@ -272,7 +236,6 @@
             controls.moveRight(velocity.x * delta);
             controls.moveForward(velocity.z * delta);
             
-            // Lock the camera Y position to prevent falling/jumping (floating in space)
             controls.getObject().position.y = 50; 
 
             prevTime = time;
