@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dreamcore Drift • Creepy Ambient Sounds</title>
+    <title>Dreamcore Drift • Backrooms + Man Map</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -38,7 +38,7 @@
     </div>
 
     <script>
-        // DREAMCORE DRIFT • CREEPY AMBIENT SOUNDS + FASTER SHIFTS + CONSOLE SKIP
+        // DREAMCORE DRIFT • BACKROOMS STYLE + SPECIAL MAN MAP
         let scene, camera, renderer, controls;
         let move = {forward:false, backward:false, left:false, right:false};
         let velocity = new THREE.Vector3();
@@ -48,11 +48,13 @@
         let isShifting = false;
         let fadeScreen = document.getElementById('fade');
         let currentWorld = [];
-        let nextShift = 15 + Math.random() * 30; // FASTER: 15-45s instead of 45-165s
+        let nextShift = 15 + Math.random() * 30;
+        let manPosition = new THREE.Vector3();
+        let isManMapActive = false;
         
         // AUDIO SYSTEM
         let audioContext;
-        let ambientSound, windSound, shiftSound;
+        let ambientSound, windSound, shiftSound, backroomsSound;
         let isMuted = false;
 
         init();
@@ -97,7 +99,7 @@
                     case 'KeyS': move.backward = true; break;
                     case 'KeyA': move.left = true; break;
                     case 'KeyD': move.right = true; break;
-                    case 'Slash': // "/" key
+                    case 'Slash':
                         e.preventDefault();
                         showConsole();
                         break;
@@ -122,23 +124,20 @@
         }
 
         function initAudio() {
-            // Wait for user interaction before audio
             document.addEventListener('click', () => {
                 if(audioContext) return;
                 try {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     createAmbientSounds();
-                } catch(e) {
-                    console.log('Audio not supported');
-                }
+                } catch(e) {}
             }, {once: true});
         }
 
         function createAmbientSounds() {
-            // CREEPY AMBIENT DRONE (low frequency hum)
+            // Main drone
             const droneOsc = audioContext.createOscillator();
             const droneGain = audioContext.createGain();
-            droneOsc.frequency.setValueAtTime(55, audioContext.currentTime); // Low E
+            droneOsc.frequency.setValueAtTime(55, audioContext.currentTime);
             droneOsc.type = 'sine';
             droneGain.gain.setValueAtTime(0.03, audioContext.currentTime);
             droneOsc.connect(droneGain);
@@ -146,7 +145,7 @@
             droneOsc.start();
             ambientSound = {osc: droneOsc, gain: droneGain};
 
-            // WIND WHISPERS (high freq noise)
+            // Wind
             const windNoise = audioContext.createBufferSource();
             const windBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 2, audioContext.sampleRate);
             const windData = windBuffer.getChannelData(0);
@@ -165,6 +164,17 @@
             windGain.connect(audioContext.destination);
             windNoise.start();
             windSound = {source: windNoise, gain: windGain, filter: windFilter};
+
+            // Backrooms hum (starts on backrooms maps)
+            const humOsc = audioContext.createOscillator();
+            const humGain = audioContext.createGain();
+            humOsc.frequency.setValueAtTime(120, audioContext.currentTime);
+            humOsc.type = 'sine';
+            humGain.gain.setValueAtTime(0, audioContext.currentTime);
+            humOsc.connect(humGain);
+            humGain.connect(audioContext.destination);
+            humOsc.start();
+            backroomsSound = {osc: humOsc, gain: humGain};
         }
 
         function playShiftSound() {
@@ -179,7 +189,6 @@
             gain.connect(audioContext.destination);
             osc.start();
             osc.stop(audioContext.currentTime + 1.5);
-            shiftSound = {osc, gain};
         }
 
         function showConsole() {
@@ -197,9 +206,14 @@
                     const cmd = input.value.trim().toLowerCase();
                     output.innerHTML += '> ' + input.value + '<br>';
                     
-                    if(cmd === 'skip map') {
-                        output.innerHTML += '[MAP SHIFT INITIATED]<br>';
-                        smoothShift(true); // manual skip
+                    if(cmd === 'skip map' || cmd === 'map man') {
+                        if(cmd === 'map man') {
+                            output.innerHTML += '[MAN MAP ACTIVATED]<br>';
+                            activateManMap();
+                        } else {
+                            output.innerHTML += '[RANDOM MAP SHIFT]<br>';
+                            smoothShift(true);
+                        }
                     } else if(cmd === 'mute') {
                         isMuted = !isMuted;
                         output.innerHTML += `[AUDIO ${isMuted ? 'MUTED' : 'UNMUTED'}]<br>`;
@@ -222,23 +236,26 @@
             }, 300);
         }
 
-        function generateDreamWorld() {
+        // === SPECIAL MAN MAP ===
+        function activateManMap() {
+            isManMapActive = true;
+            generateManMap();
+        }
+
+        function generateManMap() {
             currentWorld.forEach(obj => scene.remove(obj));
             currentWorld = [];
 
-            // SOLID GRASS FLOOR
+            // Plain grass field
             const grassGeo = new THREE.PlaneGeometry(500, 500);
             grassGeo.rotateX(-Math.PI/2);
-            const grassMat = new THREE.MeshStandardMaterial({
-                color: 0x7cb82f,
-                roughness: 0.9
-            });
+            const grassMat = new THREE.MeshStandardMaterial({color: 0x7cb82f});
             const grass = new THREE.Mesh(grassGeo, grassMat);
             grass.receiveShadow = true;
             scene.add(grass);
             currentWorld.push(grass);
 
-            // SPARSE GRASS BLADES
+            // Sparse grass blades
             const bladeGeo = new THREE.PlaneGeometry(0.2, 1.2);
             const bladeMat = new THREE.MeshLambertMaterial({color: 0x228B22, side: THREE.DoubleSide});
             for(let i = 0; i < 8000; i++) {
@@ -253,34 +270,180 @@
                 scene.add(blade);
             }
 
-            // HOUSES & TREES
-            const houseCount = 3 + Math.floor(Math.random() * 3);
-            for(let h = 0; h < houseCount; h++) {
-                const house = createDetailedHouse();
-                house.position.set(
-                    (Math.random()-0.5)*400,
-                    0,
-                    (Math.random()-0.5)*400
-                );
-                currentWorld.push(house);
-                scene.add(house);
-            }
+            // CLOUDY SKY (darker)
+            scene.fog.color.setHex(0xcccccc);
 
-            for(let t = 0; t < 15; t++) {
-                const tree = createTree();
-                tree.position.set(
-                    (Math.random()-0.5)*450,
-                    0,
-                    (Math.random()-0.5)*450
-                );
-                currentWorld.push(tree);
-                scene.add(tree);
-            }
+            // TREE beside bench
+            const tree = createTree();
+            tree.position.set(-15, 0, 0);
+            currentWorld.push(tree);
+            scene.add(tree);
+
+            // BENCH
+            const benchGroup = new THREE.Group();
+            const benchSeat = new THREE.Mesh(
+                new THREE.BoxGeometry(4, 0.3, 1.5),
+                new THREE.MeshStandardMaterial({color: 0x8B4513})
+            );
+            benchSeat.position.y = 1.2;
+            const benchBack = new THREE.Mesh(
+                new THREE.BoxGeometry(4, 1.5, 0.2),
+                new THREE.MeshStandardMaterial({color: 0x654321})
+            );
+            benchBack.position.set(0, 2.1, -0.65);
+            benchGroup.add(benchSeat, benchBack);
+            benchGroup.position.set(0, 0, 0);
+            currentWorld.push(benchGroup);
+            scene.add(benchGroup);
+
+            // MAN SITTING (creepy silhouette)
+            const manGroup = new THREE.Group();
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(1.2, 1.8, 0.8),
+                new THREE.MeshLambertMaterial({color: 0x333333})
+            );
+            body.position.y = 1.5;
+            const head = new THREE.Mesh(
+                new THREE.SphereGeometry(0.4),
+                new THREE.MeshLambertMaterial({color: 0x222222})
+            );
+            head.position.y = 2.7;
+            manGroup.add(body, head);
+            manGroup.position.set(0, 0, -0.5);
+            currentWorld.push(manGroup);
+            scene.add(manGroup);
+
+            manPosition.set(0, 0, 0);
+            dreamCount++;
+            document.getElementById('dream').textContent = dreamCount;
+        }
+
+        function generateDreamWorld() {
+            currentWorld.forEach(obj => scene.remove(obj));
+            currentWorld = [];
+            isManMapActive = false;
+
+            // RANDOM MAP TYPE (Backrooms style - NOTHING THE SAME)
+            const mapType = Math.floor(Math.random() * 4);
+            
+            if(mapType === 0) generateGrassHouses();      // Houses + grass
+            else if(mapType === 1) generateBackrooms();   // Classic backrooms
+            else if(mapType === 2) generatePoolrooms();   // Wet tiles
+            else generateOffice();                        // Office hell
 
             dreamCount++;
             document.getElementById('dream').textContent = dreamCount;
             stability = 100;
             document.getElementById('stability').textContent = '100';
+        }
+
+        function generateGrassHouses() {
+            // Grass + houses (your original)
+            const grassGeo = new THREE.PlaneGeometry(500, 500);
+            grassGeo.rotateX(-Math.PI/2);
+            const grass = new THREE.Mesh(grassGeo, new THREE.MeshStandardMaterial({color: 0x7cb82f}));
+            grass.receiveShadow = true;
+            scene.add(grass);
+            currentWorld.push(grass);
+
+            const bladeGeo = new THREE.PlaneGeometry(0.2, 1.2);
+            const bladeMat = new THREE.MeshLambertMaterial({color: 0x228B22, side: THREE.DoubleSide});
+            for(let i = 0; i < 8000; i++) {
+                const blade = new THREE.Mesh(bladeGeo, bladeMat);
+                blade.position.set((Math.random()-0.5)*480, 0.6, (Math.random()-0.5)*480);
+                blade.rotation.y = Math.random() * Math.PI;
+                currentWorld.push(blade);
+                scene.add(blade);
+            }
+
+            for(let h = 0; h < 3 + Math.floor(Math.random() * 3); h++) {
+                const house = createDetailedHouse();
+                house.position.set((Math.random()-0.5)*400, 0, (Math.random()-0.5)*400);
+                currentWorld.push(house);
+                scene.add(house);
+            }
+        }
+
+        function generateBackrooms() {
+            // CLASSIC BACKROOMS - moist carpet + yellow walls
+            scene.fog.color.setHex(0xf5f5dc);
+            renderer.setClearColor(0xf5f5dc);
+
+            const floorGeo = new THREE.PlaneGeometry(500, 500);
+            floorGeo.rotateX(-Math.PI/2);
+            const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({color: 0xd4c372}));
+            floor.receiveShadow = true;
+            scene.add(floor);
+            currentWorld.push(floor);
+
+            // Endless maze walls
+            for(let i = 0; i < 150; i++) {
+                const wall = new THREE.Mesh(
+                    new THREE.BoxGeometry(20, 5, 2),
+                    new THREE.MeshStandardMaterial({color: 0xf0e68c})
+                );
+                wall.position.set((Math.random()-0.5)*480, 2.5, (Math.random()-0.5)*480);
+                wall.rotation.y = Math.floor(Math.random() * 4) * Math.PI/2;
+                currentWorld.push(wall);
+                scene.add(wall);
+            }
+
+            // Flickering lights
+            for(let i = 0; i < 30; i++) {
+                const light = new THREE.PointLight(0xffff99, 0.5, 50);
+                light.position.set((Math.random()-0.5)*400, 4.5, (Math.random()-0.5)*400);
+                scene.add(light);
+            }
+        }
+
+        function generatePoolrooms() {
+            // POOLROOMS - wet blue tiles
+            scene.fog.color.setHex(0x87cefa);
+            renderer.setClearColor(0x87cefa);
+
+            const floorGeo = new THREE.PlaneGeometry(500, 500);
+            floorGeo.rotateX(-Math.PI/2);
+            const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({color: 0x4169e1}));
+            floor.receiveShadow = true;
+            scene.add(floor);
+            currentWorld.push(floor);
+
+            // Pool dividers
+            for(let i = 0; i < 80; i++) {
+                const divider = new THREE.Mesh(
+                    new THREE.BoxGeometry(30, 1, 2),
+                    new THREE.MeshStandardMaterial({color: 0x87cefa})
+                );
+                divider.position.set((Math.random()-0.5)*480, 0.5, (Math.random()-0.5)*480);
+                divider.rotation.y = Math.random() * Math.PI;
+                currentWorld.push(divider);
+                scene.add(divider);
+            }
+        }
+
+        function generateOffice() {
+            // OFFICE - carpet tiles + cubicles
+            scene.fog.color.setHex(0xd3d3d3);
+            renderer.setClearColor(0xd3d3d3);
+
+            const floorGeo = new THREE.PlaneGeometry(500, 500);
+            floorGeo.rotateX(-Math.PI/2);
+            const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({color: 0x8b8b83}));
+            floor.receiveShadow = true;
+            scene.add(floor);
+            currentWorld.push(floor);
+
+            // Office partitions
+            for(let i = 0; i < 100; i++) {
+                const partition = new THREE.Mesh(
+                    new THREE.BoxGeometry(2, 4, 20),
+                    new THREE.MeshStandardMaterial({color: 0x696969})
+                );
+                partition.position.set((Math.random()-0.5)*480, 2, (Math.random()-0.5)*480);
+                partition.rotation.y = Math.floor(Math.random() * 4) * Math.PI/2;
+                currentWorld.push(partition);
+                scene.add(partition);
+            }
         }
 
         function createDetailedHouse() {
@@ -299,13 +462,6 @@
             );
             roof.position.y = 8;
             group.add(roof);
-
-            const door = new THREE.Mesh(
-                new THREE.BoxGeometry(1.5, 2.5, 0.1),
-                new THREE.MeshStandardMaterial({color: 0x654321})
-            );
-            door.position.set(0, -1.5, 4.1);
-            group.add(door);
 
             return group;
         }
@@ -336,15 +492,27 @@
             document.getElementById('stability').textContent = Math.max(0, Math.floor(stability));
 
             playShiftSound();
-            fadeScreen.style.opacity = manual ? '1' : '1'; // Same fade for both
+            fadeScreen.style.opacity = '1';
             
             setTimeout(() => {
-                generateDreamWorld();
+                if(isManMapActive) {
+                    generateDreamWorld(); // Back to random if was man map
+                } else {
+                    generateDreamWorld();
+                }
                 fadeScreen.style.opacity = '0';
                 isShifting = false;
-                nextShift = manual ? 5 : (15 + Math.random() * 30); // Reset timer
-                hideConsole(); // Hide console after manual skip
-            }, manual ? 2500 : 1500); // Longer fade for manual skip
+                nextShift = manual ? 5 : (15 + Math.random() * 30);
+                hideConsole();
+            }, manual ? 2500 : 1500);
+        }
+
+        function checkManProximity() {
+            if(!isManMapActive) return;
+            const distance = camera.position.distanceTo(manPosition);
+            if(distance < 15) { // Walk close = auto shift
+                smoothShift();
+            }
         }
 
         function animate() {
@@ -367,34 +535,33 @@
             controls.moveRight(-velocity.x * delta);
             controls.moveForward(-velocity.z * delta);
 
-            // GENTLE GRASS SWAY
-            for(let i = 1; i < 8001; i++) {
-                const blade = currentWorld[i];
-                if(blade) {
-                    blade.rotation.z = Math.sin(clock.elapsedTime * 2 + blade.position.x * 0.1) * 0.25;
+            // MAN PROXIMITY CHECK
+            checkManProximity();
+
+            // Grass sway (only grass maps)
+            if(currentWorld.length > 8000) {
+                for(let i = 1; i < 8001; i++) {
+                    const blade = currentWorld[i];
+                    if(blade) {
+                        blade.rotation.z = Math.sin(clock.elapsedTime * 2 + blade.position.x * 0.1) * 0.25;
+                    }
                 }
             }
 
-            // FASTER NATURAL SHIFT
             nextShift -= delta;
             if(nextShift <= 0) {
                 smoothShift();
             }
 
-            // AUDIO ANIMATION (creepy modulation)
+            // Audio modulation
             if(ambientSound && !isMuted) {
-                ambientSound.gain.gain.setValueAtTime(
-                    0.025 + Math.sin(clock.elapsedTime * 0.3) * 0.01, 
-                    audioContext.currentTime
-                );
-                windSound.gain.gain.setValueAtTime(
-                    0.015 + Math.sin(clock.elapsedTime * 1.2) * 0.008, 
-                    audioContext.currentTime
-                );
-                windSound.filter.frequency.setValueAtTime(
-                    600 + Math.sin(clock.elapsedTime * 0.8) * 300,
-                    audioContext.currentTime
-                );
+                ambientSound.gain.gain.setValueAtTime(0.025 + Math.sin(clock.elapsedTime * 0.3) * 0.01, audioContext.currentTime);
+                windSound.gain.gain.setValueAtTime(0.015 + Math.sin(clock.elapsedTime * 1.2) * 0.008, audioContext.currentTime);
+                
+                // Backrooms hum active
+                if(!isManMapActive && Math.random() < 0.1) {
+                    backroomsSound.gain.gain.setValueAtTime(0.02 + Math.random() * 0.01, audioContext.currentTime);
+                }
             }
 
             renderer.render(scene, camera);
