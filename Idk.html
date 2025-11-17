@@ -1,191 +1,287 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Tee Noi Hotpot Runner 3D</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  body { margin:0; overflow:hidden; background:#000; font-family:sans-serif; }
-  #score { position:absolute; top:20px; left:20px; color:#FF4500; font-size:30px; z-index:100; text-shadow:0 0 10px #000; display:none; }
-  #gameover { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:50px; background:rgba(0,0,0,0.8); padding:30px; border-radius:20px; display:none; text-align:center; z-index:200; }
-  button { margin-top:20px; padding:15px 30px; font-size:20px; background:#FF4500; color:white; border:none; border-radius:10px; cursor:pointer; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dreamcore Shift</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        canvas { display: block; }
+        #ui { pointer-events: none; }
+        .fade-in { animation: fadeIn 2s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
 </head>
 <body>
-<div id="score">Score: 0</div>
-<div id="gameover">
-  <h1>STUFFED!</h1>
-  <p id="final">Score: 0</p>
-  <button onclick="location.reload()">Play Again</button>
-</div>
+    <div id="loading" class="fixed inset-0 bg-gradient-to-br from-pink-300 to-yellow-200 flex items-center justify-center z-50 fade-in">
+        <div class="text-center text-white text-2xl font-mono">
+            <div class="text-6xl mb-4">🏠</div>
+            <div>PERFECT PLACE</div>
+            <div class="text-sm mt-4 text-yellow-900">Click to enter</div>
+        </div>
+    </div>
+    
+    <div id="instructions" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-md px-6 py-3 rounded-full text-sm font-mono text-gray-800 shadow-2xl z-40 opacity-0 transition-all duration-500">
+        WASD to move • Mouse to look • Don't look away
+    </div>
 
-<!-- FIXED VERSION – uses working Three.js r128 (last version with old controls path) -->
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+    <div id="shiftCount" class="fixed top-8 left-8 bg-white/90 backdrop-blur-md px-4 py-2 rounded-lg text-lg font-mono text-gray-900 shadow-xl z-40 opacity-0 transition-all duration-500">
+        Shifts: <span id="count">0</span>/3
+    </div>
 
-<script>
-// === TEE NOI HOTPOT RUNNER 3D === (now 100% working)
-let camera, scene, renderer, controls;
-let move = { forward:false, backward:false, left:false, right:false };
-let velocity = new THREE.Vector3();
-let direction = new THREE.Vector3();
-let score = 0;
-let ingredients = [];
-let taxis = [];
-let gameOver = false;
+    <script>
+        // === DREAMCORE SHIFT ===
+        let scene, camera, renderer, controls;
+        let move = { forward: false, backward: false, left: false, right: false };
+        let velocity = new THREE.Vector3();
+        let shiftTimer = 0;
+        let isLookingAtHouse = true;
+        let shiftCount = 0;
+        let isTwisted = false;
+        let isShiftLocked = false;
+        let house, ground, skySphere;
+        let impossibleObjects = [];
+        let clock = new THREE.Clock();
 
-init();
-animate();
+        // House direction tracking
+        const housePos = new THREE.Vector3(0, 2, 0);
+        const houseDir = new THREE.Vector3();
+        const playerDir = new THREE.Vector3();
 
-function init() {
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000022);
-  scene.fog = new THREE.FogExp2(0x000022, 0.0015);
+        init();
+        animate();
 
-  camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-  camera.position.y = 2;
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(0, 1.6, 10);
 
-  renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setClearColor(0x87CEEB); // Perfect sky blue
+            document.body.appendChild(renderer.domElement);
 
-  const light = new THREE.HemisphereLight(0xffffff, 0x4444ff, 1);
-  scene.add(light);
+            // Perfect lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambient);
+            const directional = new THREE.DirectionalLight(0xffffff, 0.6);
+            directional.position.set(1, 1, 0.5);
+            scene.add(directional);
 
-  // Floor
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(200, 200),
-    new THREE.MeshBasicMaterial({color:0x111133})
-  );
-  floor.rotation.x = -Math.PI/2;
-  floor.position.y = -0.5;
-  scene.add(floor);
+            // Infinite ground
+            const groundGeo = new THREE.PlaneGeometry(2000, 2000);
+            const groundMat = new THREE.MeshLambertMaterial({ color: 0x90EE90 }); // Pastel green
+            ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            scene.add(ground);
 
-  // Neon signs
-  for(let i=0; i<30; i++){
-    const sign = new THREE.Mesh(
-      new THREE.BoxGeometry(4,2,0.2),
-      new THREE.MeshBasicMaterial({color: Math.random()>0.5?0xFF4500:0x00FFFF})
-    );
-    sign.position.set(Math.random()*180-90, 5, Math.random()*180-90);
-    scene.add(sign);
-  }
+            // Sky sphere
+            const skyGeo = new THREE.SphereGeometry(1000, 32, 32);
+            const skyMat = new THREE.MeshBasicMaterial({ 
+                color: 0x87CEEB,
+                side: THREE.BackSide 
+            });
+            skySphere = new THREE.Mesh(skyGeo, skyMat);
+            scene.add(skySphere);
 
-  // Pointer lock controls (now actually loads!)
-  controls = new THREE.PointerLockControls(camera, document.body);
-  
-  document.body.addEventListener('click', () => controls.lock());
-  controls.addEventListener('lock', () => document.getElementById('score').style.display = 'block');
-  controls.addEventListener('unlock', () => { if(!gameOver) document.getElementById('score').style.display = 'none'; });
+            // THE HOUSE
+            const houseGroup = new THREE.Group();
+            const baseGeo = new THREE.BoxGeometry(8, 6, 8);
+            const baseMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = 3;
+            houseGroup.add(base);
 
-  // Keyboard
-  document.addEventListener('keydown', e => {
-    switch(e.code){
-      case 'KeyW': move.forward = true; break;
-      case 'KeyS': move.backward = true; break;
-      case 'KeyA': move.left = true; break;
-      case 'KeyD': move.right = true; break;
-      case 'Space': if(velocity.y===0) velocity.y = 8; break;
-    }
-  });
-  document.addEventListener('keyup', e => {
-    switch(e.code){
-      case 'KeyW': move.forward = false; break;
-      case 'KeyS': move.backward = false; break;
-      case 'KeyA': move.left = false; break;
-      case 'KeyD': move.right = false; break;
-    }
-  });
+            const roofGeo = new THREE.ConeGeometry(6, 4, 4);
+            const roofMat = new THREE.MeshLambertMaterial({ color: 0xffd700 });
+            const roof = new THREE.Mesh(roofGeo, roofMat);
+            roof.position.y = 8;
+            roof.rotation.y = Math.PI / 4;
+            houseGroup.add(roof);
 
-  // Spawn ingredients
-  setInterval(() => {
-    if(gameOver) return;
-    const type = ['pork','squid','egg','cheese','veggie'][Math.floor(Math.random()*5)];
-    const ing = new THREE.Mesh(
-      new THREE.SphereGeometry(1,16,16),
-      new THREE.MeshBasicMaterial({color:0xffff00})
-    );
-    ing.position.set(Math.random()*160-80, 2, Math.random()*160-80);
-    ing.userData = {type, points:type==='cheese'?50:20};
-    scene.add(ing);
-    ingredients.push(ing);
-  }, 1200);
+            house = houseGroup;
+            house.position.copy(housePos);
+            scene.add(house);
 
-  // Spawn taxis
-  setInterval(() => {
-    if(gameOver) return;
-    const taxi = new THREE.Mesh(
-      new THREE.BoxGeometry(4,2,8),
-      new THREE.MeshBasicMaterial({color:0xffff00})
-    );
-    taxi.position.set(Math.random()*160-80, 1, -100);
-    scene.add(taxi);
-    taxis.push(taxi);
-  }, 3000);
+            // Controls
+            controls = new THREE.PointerLockControls(camera, document.body);
+            scene.add(controls.getObject());
 
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-}
+            document.addEventListener('click', () => {
+                controls.lock();
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('instructions').style.opacity = '1';
+                    document.getElementById('shiftCount').style.opacity = '1';
+                }, 1000);
+            });
 
-function animate() {
-  requestAnimationFrame(animate);
-  if(!controls.isLocked || gameOver) { renderer.render(scene, camera); return; }
+            // Keyboard
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
 
-  // Movement
-  velocity.x *= 0.9;
-  velocity.z *= 0.9;
-  direction.z = Number(move.forward) - Number(move.backward);
-  direction.x = Number(move.right) - Number(move.left);
-  direction.normalize();
-  if(move.forward || move.backward) velocity.z -= direction.z * 0.8;
-  if(move.left || move.right) velocity.x -= direction.x * 0.8;
-  controls.moveRight(-velocity.x);
-  controls.moveForward(-velocity.z);
+            // Resize
+            window.addEventListener('resize', onWindowResize);
+        }
 
-  // Gravity & jump
-  velocity.y -= 0.25;
-  camera.position.y += velocity.y * 0.05;
-  if(camera.position.y < 2){ camera.position.y = 2; velocity.y = 0; }
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'KeyW': move.forward = true; break;
+                case 'KeyS': move.backward = true; break;
+                case 'KeyA': move.left = true; break;
+                case 'KeyD': move.right = true; break;
+            }
+        }
 
-  // Collect ingredients
-  for(let i=ingredients.length-1; i>=0; i--){
-    const ing = ingredients[i];
-    ing.rotation.y += 0.02;
-    if(camera.position.distanceTo(ing.position) < 2){
-      score += ing.userData.points;
-      document.getElementById('score').innerText = `Score: ${score}`;
-      scene.remove(ing);
-      ingredients.splice(i,1);
-      if(score >= 999){
-        alert('CHEESE VOLCANO UNLOCKED!!! YOU WIN BKK TONIGHT!');
-        gameOver = true;
-      }
-    }
-  }
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'KeyW': move.forward = false; break;
+                case 'KeyS': move.backward = false; break;
+                case 'KeyA': move.left = false; break;
+                case 'KeyD': move.right = false; break;
+            }
+        }
 
-  // Taxis
-  taxis.forEach((taxi, i) => {
-    taxi.position.z += 1.5;
-    taxi.rotation.y = Math.PI;
-    if(camera.position.distanceTo(taxi.position) < 3){
-      gameOver = true;
-      document.getElementById('gameover').style.display = 'block';
-      document.getElementById('final').innerText = `Final Score: ${score}`;
-      controls.unlock();
-    }
-    if(taxi.position.z > 100){ scene.remove(taxi); taxis.splice(i,1); }
-  });
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
 
-  renderer.render(scene, camera);
-}
-</script>
+        function updateLookingState() {
+            playerDir.set(0, 0, -1).applyQuaternion(camera.quaternion);
+            houseDir.copy(housePos).sub(camera.position).normalize();
+            
+            const dot = playerDir.dot(houseDir);
+            const angle = Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
+            
+            // Looking at house if within 60 degrees and not too far
+            isLookingAtHouse = angle < 60 && camera.position.distanceTo(housePos) < 100;
+        }
 
-<h2 style="position:absolute; bottom:20px; left:20px; color:#FF4500; z-index:99;">
-  Click screen → WASD + Mouse → Collect food, dodge taxis!<br>
-  999 points = CHEESE VOLCANO
-</h2>
+        function performShift() {
+            isShiftLocked = true;
+            shiftCount++;
+            document.getElementById('count').textContent = shiftCount;
+
+            // Flash to black
+            renderer.setClearColor(0x000000);
+            setTimeout(() => {
+                if (!isTwisted) {
+                    renderer.setClearColor(0x98D8C8); // Shifted sky
+                }
+                isShiftLocked = false;
+            }, 500);
+
+            if (shiftCount >= 3) {
+                enterTwistedWorld();
+            } else {
+                // Subtle shift effects
+                skySphere.material.color.setHex(0x98D8C8);
+                ground.material.color.setHex(0x7CB69C);
+                
+                // Add impossible object
+                const obj = new THREE.Mesh(
+                    new THREE.BoxGeometry(1, 1, 1),
+                    new THREE.MeshLambertMaterial({ color: 0x888888 })
+                );
+                obj.position.set(
+                    (Math.random() - 0.5) * 100,
+                    2,
+                    (Math.random() - 0.5) * 100
+                );
+                scene.add(obj);
+                impossibleObjects.push(obj);
+            }
+        }
+
+        function enterTwistedWorld() {
+            isTwisted = true;
+            
+            // Drastic changes
+            skySphere.material.color.setHex(0xFF00FF);
+            ground.material.color.setHex(0x330033);
+            
+            // Distort house
+            house.scale.set(1.3, 0.7, 1.3);
+            house.rotation.z = 0.3;
+            house.position.y += 5;
+            
+            // Impossible geometry
+            const wallGeo = new THREE.BoxGeometry(100, 10, 2);
+            const wall = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ color: 0xFF0000 }));
+            wall.position.set(50, 5, 0);
+            wall.rotation.y = Math.PI / 4;
+            scene.add(wall);
+
+            // Hole in ground
+            const holeGeo = new THREE.PlaneGeometry(30, 30);
+            const holeMat = new THREE.MeshBasicMaterial({ 
+                color: 0x000000,
+                side: THREE.DoubleSide 
+            });
+            const hole = new THREE.Mesh(holeGeo, holeMat);
+            hole.rotation.x = -Math.PI / 2;
+            hole.position.set(-30, -0.1, -30);
+            scene.add(hole);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (!controls.isLocked) {
+                renderer.render(scene, camera);
+                return;
+            }
+
+            const delta = clock.getDelta();
+
+            // Movement
+            velocity.x *= 0.9;
+            velocity.z *= 0.9;
+            
+            const direction = new THREE.Vector3();
+            direction.z = Number(move.forward) - Number(move.backward);
+            direction.x = Number(move.right) - Number(move.left);
+            direction.normalize();
+
+            if (move.forward || move.backward) velocity.z -= direction.z * 50 * delta;
+            if (move.left || move.right) velocity.x -= direction.x * 50 * delta;
+
+            controls.moveRight(-velocity.x * delta);
+            controls.moveForward(-velocity.z * delta);
+
+            // Looking detection
+            updateLookingState();
+
+            if (!isShiftLocked) {
+                if (isLookingAtHouse) {
+                    shiftTimer = 0;
+                } else {
+                    shiftTimer += delta;
+                    if (shiftTimer >= 2.0) {
+                        performShift();
+                        shiftTimer = 0;
+                    }
+                }
+            }
+
+            // Animate objects
+            house.rotation.y += 0.005;
+            impossibleObjects.forEach(obj => {
+                obj.rotation.y += 0.01;
+                obj.position.y += Math.sin(clock.elapsedTime * 2) * 0.01;
+            });
+
+            renderer.render(scene, camera);
+        }
+    </script>
 </body>
 </html>
