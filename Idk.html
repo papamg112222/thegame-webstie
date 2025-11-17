@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dreamcore Drift • Optimized & Smooth</title>
+    <title>Dreamcore Drift • Creepy Ambient Sounds</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -17,16 +17,28 @@
             position:fixed; top:20px; left:20px; background:rgba(0,0,0,0.6); padding:10px 20px; 
             color:#87CEEB; font-size:18px; border:2px solid #87CEEB; z-index:100; opacity:0; transition:opacity 2s;
         }
-        #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity 1.5s; z-index:998; }
+        #fade { position:fixed; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity 3s; z-index:998; }
+        #console { 
+            position:fixed; bottom:20px; left:50%; transform:translateX(-50%); 
+            background:rgba(0,0,0,0.9); color:#00ff00; padding:15px; border:2px solid #00ff00;
+            font-family:'Courier New'; font-size:14px; border-radius:5px; opacity:0; transition:opacity 0.3s;
+            max-width:400px; display:none;
+        }
+        #input { background:none; border:1px solid #00ff00; color:#00ff00; padding:5px; width:200px; }
     </style>
 </head>
 <body>
     <div id="loading">REALITY LOADING...</div>
     <div id="status">Dream <span id="dream">0</span> • Stability: <span id="stability">100</span>%</div>
     <div id="fade"></div>
+    
+    <div id="console">
+        <div id="output"></div>
+        <input id="input" type="text" placeholder="type command..." maxlength="50">
+    </div>
 
     <script>
-        // OPTIMIZED DREAMCORE DRIFT — NO LAG, NO TWITCHING FLOOR
+        // DREAMCORE DRIFT • CREEPY AMBIENT SOUNDS + FASTER SHIFTS + CONSOLE SKIP
         let scene, camera, renderer, controls;
         let move = {forward:false, backward:false, left:false, right:false};
         let velocity = new THREE.Vector3();
@@ -36,9 +48,15 @@
         let isShifting = false;
         let fadeScreen = document.getElementById('fade');
         let currentWorld = [];
-        let nextShift = 45 + Math.random() * 90;
+        let nextShift = 15 + Math.random() * 30; // FASTER: 15-45s instead of 45-165s
+        
+        // AUDIO SYSTEM
+        let audioContext;
+        let ambientSound, windSound, shiftSound;
+        let isMuted = false;
 
         init();
+        initAudio();
         animate();
 
         function init() {
@@ -55,7 +73,6 @@
             renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             document.body.appendChild(renderer.domElement);
 
-            // Lights
             const ambient = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambient);
             const sun = new THREE.DirectionalLight(0xffffcc, 1);
@@ -80,6 +97,10 @@
                     case 'KeyS': move.backward = true; break;
                     case 'KeyA': move.left = true; break;
                     case 'KeyD': move.right = true; break;
+                    case 'Slash': // "/" key
+                        e.preventDefault();
+                        showConsole();
+                        break;
                 }
             });
             document.addEventListener('keyup', e => {
@@ -100,24 +121,124 @@
             generateDreamWorld();
         }
 
+        function initAudio() {
+            // Wait for user interaction before audio
+            document.addEventListener('click', () => {
+                if(audioContext) return;
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    createAmbientSounds();
+                } catch(e) {
+                    console.log('Audio not supported');
+                }
+            }, {once: true});
+        }
+
+        function createAmbientSounds() {
+            // CREEPY AMBIENT DRONE (low frequency hum)
+            const droneOsc = audioContext.createOscillator();
+            const droneGain = audioContext.createGain();
+            droneOsc.frequency.setValueAtTime(55, audioContext.currentTime); // Low E
+            droneOsc.type = 'sine';
+            droneGain.gain.setValueAtTime(0.03, audioContext.currentTime);
+            droneOsc.connect(droneGain);
+            droneGain.connect(audioContext.destination);
+            droneOsc.start();
+            ambientSound = {osc: droneOsc, gain: droneGain};
+
+            // WIND WHISPERS (high freq noise)
+            const windNoise = audioContext.createBufferSource();
+            const windBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 2, audioContext.sampleRate);
+            const windData = windBuffer.getChannelData(0);
+            for(let i = 0; i < windData.length; i++) {
+                windData[i] = (Math.random() * 2 - 1) * 0.1;
+            }
+            windNoise.buffer = windBuffer;
+            windNoise.loop = true;
+            const windFilter = audioContext.createBiquadFilter();
+            windFilter.type = 'highpass';
+            windFilter.frequency.setValueAtTime(800, audioContext.currentTime);
+            const windGain = audioContext.createGain();
+            windGain.gain.setValueAtTime(0.02, audioContext.currentTime);
+            windNoise.connect(windFilter);
+            windFilter.connect(windGain);
+            windGain.connect(audioContext.destination);
+            windNoise.start();
+            windSound = {source: windNoise, gain: windGain, filter: windFilter};
+        }
+
+        function playShiftSound() {
+            if(!audioContext) return;
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            osc.frequency.setValueAtTime(200, audioContext.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(40, audioContext.currentTime + 1.5);
+            gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 1.5);
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start();
+            osc.stop(audioContext.currentTime + 1.5);
+            shiftSound = {osc, gain};
+        }
+
+        function showConsole() {
+            const consoleEl = document.getElementById('console');
+            const input = document.getElementById('input');
+            const output = document.getElementById('output');
+            
+            consoleEl.style.display = 'block';
+            consoleEl.style.opacity = '1';
+            input.focus();
+            input.value = '';
+            
+            input.onkeydown = (e) => {
+                if(e.key === 'Enter') {
+                    const cmd = input.value.trim().toLowerCase();
+                    output.innerHTML += '> ' + input.value + '<br>';
+                    
+                    if(cmd === 'skip map') {
+                        output.innerHTML += '[MAP SHIFT INITIATED]<br>';
+                        smoothShift(true); // manual skip
+                    } else if(cmd === 'mute') {
+                        isMuted = !isMuted;
+                        output.innerHTML += `[AUDIO ${isMuted ? 'MUTED' : 'UNMUTED'}]<br>`;
+                    } else {
+                        output.innerHTML += '[UNKNOWN COMMAND]<br>';
+                    }
+                    
+                    input.value = '';
+                    output.scrollTop = output.scrollHeight;
+                } else if(e.key === 'Escape') {
+                    hideConsole();
+                }
+            };
+        }
+
+        function hideConsole() {
+            document.getElementById('console').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('console').style.display = 'none';
+            }, 300);
+        }
+
         function generateDreamWorld() {
             currentWorld.forEach(obj => scene.remove(obj));
             currentWorld = [];
 
-            // === SOLID GRASS FLOOR (NO TWITCHING) ===
+            // SOLID GRASS FLOOR
             const grassGeo = new THREE.PlaneGeometry(500, 500);
             grassGeo.rotateX(-Math.PI/2);
             const grassMat = new THREE.MeshStandardMaterial({
                 color: 0x7cb82f,
-                roughness: 0.9,
-                metalness: 0
+                roughness: 0.9
             });
             const grass = new THREE.Mesh(grassGeo, grassMat);
             grass.receiveShadow = true;
             scene.add(grass);
             currentWorld.push(grass);
 
-            // === SPARSE GRASS BLADES (only 8,000, no lag) ===
+            // SPARSE GRASS BLADES
             const bladeGeo = new THREE.PlaneGeometry(0.2, 1.2);
             const bladeMat = new THREE.MeshLambertMaterial({color: 0x228B22, side: THREE.DoubleSide});
             for(let i = 0; i < 8000; i++) {
@@ -132,7 +253,7 @@
                 scene.add(blade);
             }
 
-            // === HOUSES & TREES (fewer, detailed) ===
+            // HOUSES & TREES
             const houseCount = 3 + Math.floor(Math.random() * 3);
             for(let h = 0; h < houseCount; h++) {
                 const house = createDetailedHouse();
@@ -164,7 +285,6 @@
 
         function createDetailedHouse() {
             const group = new THREE.Group();
-
             const base = new THREE.Mesh(
                 new THREE.BoxGeometry(8 + Math.random()*3, 6, 8 + Math.random()*3),
                 new THREE.MeshStandardMaterial({color: 0xd9b38c})
@@ -209,19 +329,22 @@
             return group;
         }
 
-        function smoothShift() {
+        function smoothShift(manual = false) {
             if(isShifting) return;
             isShifting = true;
-            stability -= 20;
+            stability -= manual ? 40 : 20;
             document.getElementById('stability').textContent = Math.max(0, Math.floor(stability));
 
-            fadeScreen.style.opacity = '1';
+            playShiftSound();
+            fadeScreen.style.opacity = manual ? '1' : '1'; // Same fade for both
+            
             setTimeout(() => {
                 generateDreamWorld();
                 fadeScreen.style.opacity = '0';
                 isShifting = false;
-                nextShift = 45 + Math.random() * 120;
-            }, 1500);
+                nextShift = manual ? 5 : (15 + Math.random() * 30); // Reset timer
+                hideConsole(); // Hide console after manual skip
+            }, manual ? 2500 : 1500); // Longer fade for manual skip
         }
 
         function animate() {
@@ -244,17 +367,34 @@
             controls.moveRight(-velocity.x * delta);
             controls.moveForward(-velocity.z * delta);
 
-            // Gentle wind on sparse grass only
-            for(let i = 1; i < 8001; i++) { // skip floor
+            // GENTLE GRASS SWAY
+            for(let i = 1; i < 8001; i++) {
                 const blade = currentWorld[i];
                 if(blade) {
                     blade.rotation.z = Math.sin(clock.elapsedTime * 2 + blade.position.x * 0.1) * 0.25;
                 }
             }
 
+            // FASTER NATURAL SHIFT
             nextShift -= delta;
             if(nextShift <= 0) {
                 smoothShift();
+            }
+
+            // AUDIO ANIMATION (creepy modulation)
+            if(ambientSound && !isMuted) {
+                ambientSound.gain.gain.setValueAtTime(
+                    0.025 + Math.sin(clock.elapsedTime * 0.3) * 0.01, 
+                    audioContext.currentTime
+                );
+                windSound.gain.gain.setValueAtTime(
+                    0.015 + Math.sin(clock.elapsedTime * 1.2) * 0.008, 
+                    audioContext.currentTime
+                );
+                windSound.filter.frequency.setValueAtTime(
+                    600 + Math.sin(clock.elapsedTime * 0.8) * 300,
+                    audioContext.currentTime
+                );
             }
 
             renderer.render(scene, camera);
