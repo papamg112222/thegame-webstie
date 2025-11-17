@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dreamcore Shift</title>
+    <title>Dreamcore Infinite Drift</title>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -11,104 +11,80 @@
         body { margin: 0; overflow: hidden; background: #000; }
         canvas { display: block; }
         #ui { pointer-events: none; }
-        .fade-in { animation: fadeIn 2s ease-in; }
+        .glitch { animation: glitch 0.3s infinite; }
+        @keyframes glitch {
+            0%, 100% { transform: translate(0); }
+            20% { transform: translate(-2px, 2px); }
+            40% { transform: translate(-2px, -2px); }
+            60% { transform: translate(2px, 2px); }
+            80% { transform: translate(2px, -2px); }
+        }
+        .fade-in { animation: fadeIn 3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     </style>
 </head>
 <body>
-    <div id="loading" class="fixed inset-0 bg-gradient-to-br from-pink-300 to-yellow-200 flex items-center justify-center z-50 fade-in">
-        <div class="text-center text-white text-2xl font-mono">
+    <div id="loading" class="fixed inset-0 bg-gradient-to-br from-yellow-200 via-pink-200 to-purple-200 flex items-center justify-center z-50 fade-in">
+        <div class="text-center text-black text-2xl font-mono glitch">
             <div class="text-6xl mb-4">🏠</div>
-            <div>PERFECT PLACE</div>
-            <div class="text-sm mt-4 text-yellow-900">Click to enter</div>
+            <div>YOU ARE HERE</div>
+            <div class="text-sm mt-4 text-gray-700">WASD • Mouse • Explore Forever</div>
         </div>
     </div>
-    
-    <div id="instructions" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-white/80 backdrop-blur-md px-6 py-3 rounded-full text-sm font-mono text-gray-800 shadow-2xl z-40 opacity-0 transition-all duration-500">
-        WASD to move • Mouse to look • Don't look away
-    </div>
 
-    <div id="shiftCount" class="fixed top-8 left-8 bg-white/90 backdrop-blur-md px-4 py-2 rounded-lg text-lg font-mono text-gray-900 shadow-xl z-40 opacity-0 transition-all duration-500">
-        Shifts: <span id="count">0</span>/3
+    <div id="status" class="fixed top-8 left-8 bg-white/80 backdrop-blur-md px-4 py-2 rounded-lg text-lg font-mono text-gray-900 shadow-2xl z-40 opacity-0 transition-all duration-1000">
+        <span id="driftCount">Drift: 0</span>
     </div>
 
     <script>
-        // === DREAMCORE SHIFT ===
+        // === DREAMCORE INFINITE DRIFT ===
         let scene, camera, renderer, controls;
         let move = { forward: false, backward: false, left: false, right: false };
         let velocity = new THREE.Vector3();
-        let shiftTimer = 0;
-        let isLookingAtHouse = true;
-        let shiftCount = 0;
-        let isTwisted = false;
-        let isShiftLocked = false;
-        let house, ground, skySphere;
-        let impossibleObjects = [];
         let clock = new THREE.Clock();
+        let driftCount = 0;
+        let shiftTimer = 0;
+        let isShiftLocked = false;
+        let currentStage = 0;
+        let stageTimer = 0;
+        
+        // Dynamic world elements
+        let ground, skySphere, structures = [];
+        let shiftCooldown = 0;
 
-        // House direction tracking
-        const housePos = new THREE.Vector3(0, 2, 0);
-        const houseDir = new THREE.Vector3();
-        const playerDir = new THREE.Vector3();
+        // Procedural generation
+        const stages = [
+            { name: 'perfect', groundColor: 0x90EE90, skyColor: 0x87CEEB },
+            { name: 'yellowed', groundColor: 0xD4A017, skyColor: 0xF0E68C },
+            { name: 'pinkvoid', groundColor: 0xFFB6C1, skyColor: 0xFF69B4 },
+            { name: 'backrooms', groundColor: 0xF5F5DC, skyColor: 0xFFFFE0 },
+            { name: 'neonrot', groundColor: 0x8B0000, skyColor: 0x00FFFF },
+            { name: 'poolrooms', groundColor: 0x4682B4, skyColor: 0xE0FFFF },
+            { name: 'office', groundColor: 0x708090, skyColor: 0xD3D3D3 }
+        ];
 
         init();
         animate();
 
         function init() {
-            // Scene
             scene = new THREE.Scene();
-            
-            // Camera
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(0, 1.6, 10);
+            camera.position.set(0, 1.6, 5);
 
-            // Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setClearColor(0x87CEEB); // Perfect sky blue
+            renderer.setClearColor(0x87CEEB);
             document.body.appendChild(renderer.domElement);
 
-            // Perfect lighting
-            const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+            // Lighting
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
             scene.add(ambient);
-            const directional = new THREE.DirectionalLight(0xffffff, 0.6);
+            const directional = new THREE.DirectionalLight(0xffffff, 0.8);
             directional.position.set(1, 1, 0.5);
             scene.add(directional);
 
-            // Infinite ground
-            const groundGeo = new THREE.PlaneGeometry(2000, 2000);
-            const groundMat = new THREE.MeshLambertMaterial({ color: 0x90EE90 }); // Pastel green
-            ground = new THREE.Mesh(groundGeo, groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            scene.add(ground);
-
-            // Sky sphere
-            const skyGeo = new THREE.SphereGeometry(1000, 32, 32);
-            const skyMat = new THREE.MeshBasicMaterial({ 
-                color: 0x87CEEB,
-                side: THREE.BackSide 
-            });
-            skySphere = new THREE.Mesh(skyGeo, skyMat);
-            scene.add(skySphere);
-
-            // THE HOUSE
-            const houseGroup = new THREE.Group();
-            const baseGeo = new THREE.BoxGeometry(8, 6, 8);
-            const baseMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
-            const base = new THREE.Mesh(baseGeo, baseMat);
-            base.position.y = 3;
-            houseGroup.add(base);
-
-            const roofGeo = new THREE.ConeGeometry(6, 4, 4);
-            const roofMat = new THREE.MeshLambertMaterial({ color: 0xffd700 });
-            const roof = new THREE.Mesh(roofGeo, roofMat);
-            roof.position.y = 8;
-            roof.rotation.y = Math.PI / 4;
-            houseGroup.add(roof);
-
-            house = houseGroup;
-            house.position.copy(housePos);
-            scene.add(house);
+            // Initial world
+            generateStage();
 
             // Controls
             controls = new THREE.PointerLockControls(camera, document.body);
@@ -118,17 +94,192 @@
                 controls.lock();
                 setTimeout(() => {
                     document.getElementById('loading').style.display = 'none';
-                    document.getElementById('instructions').style.opacity = '1';
-                    document.getElementById('shiftCount').style.opacity = '1';
-                }, 1000);
+                    document.getElementById('status').style.opacity = '1';
+                }, 1500);
             });
 
-            // Keyboard
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
-
-            // Resize
             window.addEventListener('resize', onWindowResize);
+        }
+
+        function generateStage() {
+            // Clear old structures
+            structures.forEach(struct => scene.remove(struct));
+            structures = [];
+
+            // Ground
+            if (ground) scene.remove(ground);
+            const groundGeo = new THREE.PlaneGeometry(400, 400);
+            const groundMat = new THREE.MeshLambertMaterial({ 
+                color: stages[currentStage].groundColor 
+            });
+            ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            scene.add(ground);
+
+            // Sky
+            if (skySphere) scene.remove(skySphere);
+            const skyGeo = new THREE.SphereGeometry(1000, 32, 32);
+            const skyMat = new THREE.MeshBasicMaterial({ 
+                color: stages[currentStage].skyColor,
+                side: THREE.BackSide 
+            });
+            skySphere = new THREE.Mesh(skyGeo, skyMat);
+            scene.add(skySphere);
+
+            // Generate dreamcore structures (5-15 random objects)
+            const numStructures = 5 + Math.floor(Math.random() * 10);
+            for (let i = 0; i < numStructures; i++) {
+                const struct = generateRandomStructure();
+                structures.push(struct);
+                scene.add(struct);
+            }
+
+            // Always spawn a "house" variant in center
+            const house = generateHouseVariant();
+            house.position.set(
+                (Math.random() - 0.5) * 50,
+                0,
+                (Math.random() - 0.5) * 50
+            );
+            structures.push(house);
+            scene.add(house);
+
+            renderer.setClearColor(stages[currentStage].skyColor);
+        }
+
+        function generateRandomStructure() {
+            const type = Math.floor(Math.random() * 8);
+            let geo, mat, mesh;
+
+            switch(type) {
+                case 0: // Weird house
+                    mesh = generateHouseVariant();
+                    break;
+                case 1: // Floating cube
+                    geo = new THREE.BoxGeometry(3, 3, 3);
+                    mat = new THREE.MeshLambertMaterial({ 
+                        color: new THREE.Color().setHSL(Math.random(), 0.7, 0.6)
+                    });
+                    mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.y = 5 + Math.random() * 10;
+                    break;
+                case 2: // Long hallway wall
+                    geo = new THREE.BoxGeometry(50, 8, 2);
+                    mat = new THREE.MeshLambertMaterial({ color: 0xFFFFFF });
+                    mesh = new THREE.Mesh(geo, mat);
+                    mesh.position.y = 4;
+                    break;
+                case 3: // Carpet patch
+                    geo = new THREE.PlaneGeometry(20, 20);
+                    mat = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+                    mesh = new THREE.Mesh(geo, mat);
+                    mesh.rotation.x = -Math.PI / 2;
+                    mesh.position.y = 0.01;
+                    break;
+                case 4: // Pool tile section
+                    geo = new THREE.PlaneGeometry(15, 15);
+                    mat = new THREE.MeshLambertMaterial({ color: 0x4169E1 });
+                    mesh = new THREE.Mesh(geo, mat);
+                    mesh.rotation.x = -Math.PI / 2;
+                    mesh.position.y = 0.01;
+                    break;
+                case 5: // Office partition
+                    geo = new THREE.BoxGeometry(2, 6, 20);
+                    mat = new THREE.MeshLambertMaterial({ color: 0x696969 });
+                    mesh = new THREE.Mesh(geo, mat);
+                    break;
+                case 6: // Lamp post
+                    const lampGroup = new THREE.Group();
+                    const post = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.3, 0.3, 12),
+                        new THREE.MeshLambertMaterial({ color: 0x333333 })
+                    );
+                    const light = new THREE.Mesh(
+                        new THREE.SphereGeometry(1.5),
+                        new THREE.MeshLambertMaterial({ color: 0xFFFF00 })
+                    );
+                    light.position.y = 7;
+                    lampGroup.add(post, light);
+                    mesh = lampGroup;
+                    break;
+                case 7: // Weird stairs
+                    const stairsGroup = new THREE.Group();
+                    for (let i = 0; i < 5; i++) {
+                        const step = new THREE.Mesh(
+                            new THREE.BoxGeometry(4, 1, 8),
+                            new THREE.MeshLambertMaterial({ color: 0xA9A9A9 })
+                        );
+                        step.position.set(0, i * 1.1, 0);
+                        stairsGroup.add(step);
+                    }
+                    mesh = stairsGroup;
+                    break;
+            }
+
+            // Random position
+            mesh.position.set(
+                (Math.random() - 0.5) * 300,
+                0,
+                (Math.random() - 0.5) * 300
+            );
+
+            return mesh;
+        }
+
+        function generateHouseVariant() {
+            const houseGroup = new THREE.Group();
+            
+            // Distorted base
+            const baseGeo = new THREE.BoxGeometry(
+                6 + Math.random() * 4,
+                5 + Math.random() * 2,
+                6 + Math.random() * 4
+            );
+            const baseMat = new THREE.MeshLambertMaterial({ 
+                color: Math.random() > 0.5 ? 0xFFFFFF : 0xF0F8FF 
+            });
+            const base = new THREE.Mesh(baseGeo, baseMat);
+            base.position.y = 2.5;
+            houseGroup.add(base);
+
+            // Weird roof
+            if (Math.random() > 0.3) {
+                const roofGeo = new THREE.ConeGeometry(
+                    5 + Math.random() * 2,
+                    3 + Math.random() * 2,
+                    4 + Math.floor(Math.random() * 4)
+                );
+                const roofMat = new THREE.MeshLambertMaterial({ 
+                    color: new THREE.Color().setHSL(Math.random() * 0.1, 0.8, 0.6) 
+                });
+                const roof = new THREE.Mesh(roofGeo, roofMat);
+                roof.position.y = 7;
+                roof.rotation.y = Math.random() * Math.PI * 2;
+                houseGroup.add(roof);
+            }
+
+            // Random tilt
+            houseGroup.rotation.z = (Math.random() - 0.5) * 0.3;
+            
+            return houseGroup;
+        }
+
+        function performDriftShift() {
+            isShiftLocked = true;
+            driftCount++;
+            document.getElementById('driftCount').textContent = `Drift: ${driftCount}`;
+            
+            // Glitch flash
+            const originalClear = renderer.getClearColor();
+            renderer.setClearColor(0x000000);
+            
+            setTimeout(() => {
+                currentStage = (currentStage + 1) % stages.length;
+                generateStage();
+                isShiftLocked = false;
+            }, 800);
         }
 
         function onKeyDown(event) {
@@ -155,84 +306,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function updateLookingState() {
-            playerDir.set(0, 0, -1).applyQuaternion(camera.quaternion);
-            houseDir.copy(housePos).sub(camera.position).normalize();
-            
-            const dot = playerDir.dot(houseDir);
-            const angle = Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
-            
-            // Looking at house if within 60 degrees and not too far
-            isLookingAtHouse = angle < 60 && camera.position.distanceTo(housePos) < 100;
-        }
-
-        function performShift() {
-            isShiftLocked = true;
-            shiftCount++;
-            document.getElementById('count').textContent = shiftCount;
-
-            // Flash to black
-            renderer.setClearColor(0x000000);
-            setTimeout(() => {
-                if (!isTwisted) {
-                    renderer.setClearColor(0x98D8C8); // Shifted sky
-                }
-                isShiftLocked = false;
-            }, 500);
-
-            if (shiftCount >= 3) {
-                enterTwistedWorld();
-            } else {
-                // Subtle shift effects
-                skySphere.material.color.setHex(0x98D8C8);
-                ground.material.color.setHex(0x7CB69C);
-                
-                // Add impossible object
-                const obj = new THREE.Mesh(
-                    new THREE.BoxGeometry(1, 1, 1),
-                    new THREE.MeshLambertMaterial({ color: 0x888888 })
-                );
-                obj.position.set(
-                    (Math.random() - 0.5) * 100,
-                    2,
-                    (Math.random() - 0.5) * 100
-                );
-                scene.add(obj);
-                impossibleObjects.push(obj);
-            }
-        }
-
-        function enterTwistedWorld() {
-            isTwisted = true;
-            
-            // Drastic changes
-            skySphere.material.color.setHex(0xFF00FF);
-            ground.material.color.setHex(0x330033);
-            
-            // Distort house
-            house.scale.set(1.3, 0.7, 1.3);
-            house.rotation.z = 0.3;
-            house.position.y += 5;
-            
-            // Impossible geometry
-            const wallGeo = new THREE.BoxGeometry(100, 10, 2);
-            const wall = new THREE.Mesh(wallGeo, new THREE.MeshLambertMaterial({ color: 0xFF0000 }));
-            wall.position.set(50, 5, 0);
-            wall.rotation.y = Math.PI / 4;
-            scene.add(wall);
-
-            // Hole in ground
-            const holeGeo = new THREE.PlaneGeometry(30, 30);
-            const holeMat = new THREE.MeshBasicMaterial({ 
-                color: 0x000000,
-                side: THREE.DoubleSide 
-            });
-            const hole = new THREE.Mesh(holeGeo, holeMat);
-            hole.rotation.x = -Math.PI / 2;
-            hole.position.set(-30, -0.1, -30);
-            scene.add(hole);
-        }
-
         function animate() {
             requestAnimationFrame(animate);
             
@@ -244,41 +317,39 @@
             const delta = clock.getDelta();
 
             // Movement
-            velocity.x *= 0.9;
-            velocity.z *= 0.9;
+            velocity.x *= 0.8;
+            velocity.z *= 0.8;
             
             const direction = new THREE.Vector3();
             direction.z = Number(move.forward) - Number(move.backward);
             direction.x = Number(move.right) - Number(move.left);
             direction.normalize();
 
-            if (move.forward || move.backward) velocity.z -= direction.z * 50 * delta;
-            if (move.left || move.right) velocity.x -= direction.x * 50 * delta;
+            if (move.forward || move.backward) velocity.z -= direction.z * 40 * delta;
+            if (move.left || move.right) velocity.x -= direction.x * 40 * delta;
 
             controls.moveRight(-velocity.x * delta);
             controls.moveForward(-velocity.z * delta);
 
-            // Looking detection
-            updateLookingState();
-
-            if (!isShiftLocked) {
-                if (isLookingAtHouse) {
-                    shiftTimer = 0;
-                } else {
-                    shiftTimer += delta;
-                    if (shiftTimer >= 2.0) {
-                        performShift();
-                        shiftTimer = 0;
-                    }
-                }
+            // Random drift shifts (never the same place)
+            shiftCooldown -= delta;
+            if (shiftCooldown <= 0 && Math.random() < 0.003 && !isShiftLocked) { // ~every 5-20min + random
+                performDriftShift();
+                shiftCooldown = 30 + Math.random() * 120; // 30-150 seconds
             }
 
-            // Animate objects
-            house.rotation.y += 0.005;
-            impossibleObjects.forEach(obj => {
-                obj.rotation.y += 0.01;
-                obj.position.y += Math.sin(clock.elapsedTime * 2) * 0.01;
+            // Animate structures (subtle breathing/movement)
+            structures.forEach((struct, i) => {
+                struct.rotation.y += 0.002 * (i % 3 + 1);
+                struct.position.y += Math.sin(clock.elapsedTime * 0.5 + i) * 0.005;
             });
+
+            // Ground texture animation
+            ground.material.color.setHSL(
+                stages[currentStage].groundColor / 0xffffff % 1,
+                0.2 + Math.sin(clock.elapsedTime) * 0.1,
+                0.5 + Math.sin(clock.elapsedTime * 1.3) * 0.1
+            );
 
             renderer.render(scene, camera);
         }
