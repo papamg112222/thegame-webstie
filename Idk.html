@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Liminal Dreamscape Simulator v2.0</title>
+    <title>Liminal Dreamscape Simulator v2.1</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; }
         canvas { display: block; }
@@ -34,7 +34,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: white; /* Used for the quick flash */
+            background-color: white; 
             opacity: 0;
             pointer-events: none;
             transition: opacity 3s;
@@ -45,11 +45,11 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: transparent;
-            /* Using a CSS filter to create a red tint/vignette effect */
-            filter: grayscale(0%) sepia(100%) hue-rotate(330deg) saturate(300%) opacity(0);
+            /* Start transparent */
+            background-color: rgba(255, 0, 0, 0); 
             pointer-events: none;
-            transition: filter 1s ease-out, opacity 1s ease-out;
+            /* Transition opacity smoothly */
+            transition: background-color 0.5s ease-out; 
         }
         #console {
             position: absolute;
@@ -97,7 +97,7 @@
     <div id="bloodOverlay"></div>
     <div id="console">
         <div id="output">
-            --- DREAM CONSOLE v2.0 (100 Maps) ---<br>
+            --- DREAM CONSOLE v2.1 (100 Maps) ---<br>
             Available commands: `map man`, `skip map`<br>
         </div>
         &gt; <input type="text" id="input">
@@ -121,7 +121,7 @@
         let isManMapActive = false;
         let consoleOpen = false;
         let textureLoader = new THREE.TextureLoader();
-        let currentMapDanger = 1.0; // D value for sanity drain
+        let currentMapDanger = 1.0; 
 
         // --- Audio Variables ---
         let audioContext;
@@ -133,12 +133,13 @@
         let currentAmbientSound = null;
         const JUMPSCARE_SOUND = 'https://files.catbox.moe/k6t7u3.ogg';
         const DRIP_SOUND = 'https://files.catbox.moe/p8s2r4.ogg';
+        
+        let screamAudio = null;
+        let dripAudio = null;
 
 
         // --- MAP ARCHETYPES (Procedural Factory) ---
-        // { generator: function, sound: URL, danger: D (1.0 = normal, 3.0 = very dangerous) }
         const MAP_ARCHETYPES = [
-            // Safe/Lesser Danger (D=0.8 to 1.5)
             { name: "Infinite Hotel", generator: generateInfiniteHotel, sound: "https://files.catbox.moe/9p1r7t.ogg", danger: 0.8 },
             { name: "Quiet Street", generator: generateQuietStreet, sound: "https://files.catbox.moe/9p1r7t.ogg", danger: 1.0 },
             { name: "Empty Mall", generator: generateEmptyMall, sound: "https://files.catbox.moe/q1w5e2.ogg", danger: 1.0 },
@@ -146,31 +147,26 @@
             { name: "Poolrooms", generator: generatePoolrooms, sound: "https://files.catbox.moe/4g5v3r.ogg", danger: 1.2 },
             { name: "Backrooms Classic", generator: generateBackroomsClassic, sound: "https://files.catbox.moe/4g5v3r.ogg", danger: 1.3 },
             { name: "Retro Arcade", generator: generateRetroArcade, sound: "https://files.catbox.moe/q1w5e2.ogg", danger: 1.5 },
-            // Medium Danger (D=1.5 to 2.5)
             { name: "Trippy Liminal", generator: generateTrippyLiminal, sound: "https://files.catbox.moe/9p1r7t.ogg", danger: 1.8 },
             { name: "Neon Rooftops", generator: generateNeonRooftops, sound: "https://files.catbox.moe/9p1r7t.ogg", danger: 1.8 },
             { name: "Train Platform", generator: generateTrainPlatform, sound: "https://files.catbox.moe/q1w5e2.ogg", danger: 2.0 },
             { name: "Mirror Maze", generator: generateMirrorMaze, sound: "https://files.catbox.moe/m3b8v9.ogg", danger: 2.0 },
             { name: "VHS Static Desert", generator: generateStaticDesert, sound: "https://files.catbox.moe/4g5v3r.ogg", danger: 2.2 },
             { name: "Submerged Highway", generator: generateSubmergedHighway, sound: "https://files.catbox.moe/m3b8v9.ogg", danger: 2.3 },
-            // High/Critical Danger (D=2.5 to 4.0)
             { name: "Red Void", generator: generateRedVoid, sound: "https://files.catbox.moe/4g5v3r.ogg", danger: 2.8 },
             { name: "Backrooms Hell", generator: generateBackroomsHell, sound: "https://files.catbox.moe/4g5v3r.ogg", danger: 3.0 },
             { name: "Impossible Geometry", generator: generate4DImpossible, sound: "https://files.catbox.moe/m3b8v9.ogg", danger: 3.2 },
-            // The Most Dangerous (D=4.0) - Always forces a shift if sanity is below 60
             { name: "Endless Fall", generator: generateEndlessFall, sound: "https://files.catbox.moe/q1w5e2.ogg", danger: 4.0 }, 
         ];
 
         // --- MAP CATALOG (100 Entries Generated) ---
         const MAP_CATALOG = [];
         let i = 0;
-        // Generate 100 entries by repeating the archetypes and giving them unique names
         while (MAP_CATALOG.length < 100) {
             const archetype = MAP_ARCHETYPES[i % MAP_ARCHETYPES.length];
-            // Create a unique name suffix
             let suffix = MAP_CATALOG.length + 1;
             if (MAP_CATALOG.length >= 17) {
-                suffix = (MAP_CATALOG.length - 17) + (i % 5 > 2 ? 'b' : 'a'); // Simple non-sequential ID
+                suffix = (MAP_CATALOG.length - 17) + (i % 5 > 2 ? 'b' : 'a');
             }
             
             MAP_CATALOG.push({
@@ -178,15 +174,15 @@
                 name: `${archetype.name} ${suffix}`,
                 generator: archetype.generator,
                 sound: archetype.sound,
-                danger: archetype.danger + (Math.random() * 0.5 - 0.25) // Slight danger variation
+                danger: archetype.danger + (Math.random() * 0.5 - 0.25)
             });
             i++;
         }
-        // Shuffle the final list for good measure
         MAP_CATALOG.sort(() => Math.random() - 0.5);
 
         init();
-        initAudio();
+        // **FIX: Ensure audio objects are initialized immediately after setup**
+        initAudio(); 
         animate();
 
         // --- Initialization and Setup ---
@@ -218,6 +214,8 @@
                     controls.lock();
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('status').style.opacity = '1';
+                    
+                    // User interaction grants permission to play. Start music now.
                     playRandomMusic();
                 }
             });
@@ -253,10 +251,18 @@
 
         // --- Audio Functions ---
         function initAudio() {
-            document.addEventListener('click', () => {
-                if (audioContext) return;
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }, {once: true});
+            // FIX: Initialize the audio objects only once and preload them
+            if (screamAudio === null) {
+                screamAudio = new Audio(JUMPSCARE_SOUND);
+                screamAudio.volume = 1.0;
+                screamAudio.load(); // Preload for instant playback
+            }
+            if (dripAudio === null) {
+                dripAudio = new Audio(DRIP_SOUND);
+                dripAudio.volume = 0.8;
+                dripAudio.loop = true;
+                dripAudio.load(); // Preload for instant playback
+            }
         }
         function playRandomMusic() {
             if(currentMusic) currentMusic.pause();
@@ -288,7 +294,12 @@
             }
         }
         function playShiftSound() {
-            if (!audioContext) return;
+            // If AudioContext is not initialized (e.g., if init() didn't run properly) 
+            // we will skip the sound.
+            if (!audioContext) { 
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                if (!audioContext) return;
+            }
             const osc = audioContext.createOscillator();
             const gain = audioContext.createGain();
             osc.frequency.setValueAtTime(400, audioContext.currentTime);
@@ -300,18 +311,23 @@
             osc.stop(audioContext.currentTime + 1.2);
         }
         function playScream() {
+            // Stop background music and ambient sounds
             if (currentMusic) currentMusic.pause();
             if (currentAmbientSound) currentAmbientSound.pause();
-            const scream = new Audio(JUMPSCARE_SOUND);
-            scream.volume = 1.0;
-            scream.play().catch(()=>{});
-            const drip = new Audio(DRIP_SOUND);
-            drip.volume = 0.8;
-            drip.loop = true;
-            drip.play().catch(()=>{});
+            
+            // FIX: Use the pre-initialized Audio objects
+            if (screamAudio) {
+                screamAudio.currentTime = 0; 
+                screamAudio.play().catch(e => console.error("Scream failed to play:", e));
+            }
+
+            if (dripAudio) {
+                dripAudio.currentTime = 0; 
+                dripAudio.play().catch(e => console.error("Drip failed to play:", e));
+            }
         }
 
-        // --- Console/Command Functions (Unchanged) ---
+        // --- Console/Command Functions (Omitted for brevity, assumed functional) ---
         function showConsole() {
             const con = document.getElementById('console');
             const input = document.getElementById('input');
@@ -341,7 +357,7 @@
             controls.lock();
         }
 
-        // --- World Management Functions (Unchanged) ---
+        // --- World Management Functions (Omitted for brevity, assumed functional) ---
         function clearWorld() {
             currentWorld.forEach(obj => {
                 if (obj.isMesh) {
@@ -373,7 +389,7 @@
             if(defaultFloor) { scene.remove(defaultFloor); currentWorld.splice(currentWorld.indexOf(defaultFloor), 1); }
         }
 
-        // --- Map Generator Functions (Only one for each archetype needed) ---
+        // --- Map Generator Functions (Only relevant functions included for size) ---
         function generateTrippyLiminal() {
             removeDefaultFloor(); 
             const colors = [0xff99cc,0x99ccff,0xffff99,0x99ff99,0xffcc99];
@@ -397,7 +413,7 @@
             scene.add(knot); currentWorld.push(knot);
             const spin = () => {
                 if(currentWorld.includes(knot)) {
-                    knot.rotation.x += 0.004 * currentMapDanger; // Speed scales with danger
+                    knot.rotation.x += 0.004 * currentMapDanger; 
                     knot.rotation.y += 0.007 * currentMapDanger;
                     platform.rotation.z += 0.001 * currentMapDanger;
                     requestAnimationFrame(spin);
@@ -416,7 +432,7 @@
         function generateEndlessFall() {
             removeDefaultFloor();
             renderer.setClearColor(0x000011); scene.fog = new THREE.FogExp2(0x000011, 0.001);
-            const fallRate = 0.7 * currentMapDanger; // Fall rate scales with danger
+            const fallRate = 0.7 * currentMapDanger; 
             const fall = () => {
                 if(currentWorld.length < 10) {
                     camera.position.y -= fallRate;
@@ -586,11 +602,9 @@
             }
         }
         function generateManMap() {
-             // Logic for Map Man environment (used below)
              isManMapActive = true;
              scene.fog = new THREE.FogExp2(0xaaaaaa, 0.0008);
              renderer.setClearColor(0xcccccc);
- 
              const grassTexture = textureLoader.load('https://threejs.org/examples/textures/crate.gif');
              grassTexture.wrapS = grassTexture.wrapT = THREE.RepeatWrapping;
              grassTexture.repeat.set( 100, 100 );
@@ -602,7 +616,6 @@
              grass.receiveShadow = true;
              scene.add(grass);
              currentWorld.push(grass);
- 
              const bladeGeo = new THREE.PlaneGeometry(0.2, 1.2);
              const bladeMat = new THREE.MeshLambertMaterial({color: 0x228B22, side: THREE.DoubleSide});
              for (let i = 0; i < 20000; i++) {
@@ -612,14 +625,12 @@
                  scene.add(b);
                  currentWorld.push(b);
              }
-             
              const tree = new THREE.Group();
              tree.add(new THREE.Mesh(new THREE.CylinderGeometry(1,1.2,8), new THREE.MeshStandardMaterial({color:0x8B4513})));
              tree.add(new THREE.Mesh(new THREE.SphereGeometry(5,16,16), new THREE.MeshStandardMaterial({color:0x228B22})));
              tree.position.set(-12,4,0);
              tree.children[1].position.y = 6;
              scene.add(tree); currentWorld.push(tree);
- 
              const man = new THREE.Group();
              man.add(new THREE.Mesh(new THREE.BoxGeometry(0.6,2.2,0.4), new THREE.MeshBasicMaterial({color:0x000000})));
              man.add(new THREE.Mesh(new THREE.SphereGeometry(0.35), new THREE.MeshBasicMaterial({color:0x000000})));
@@ -628,7 +639,6 @@
              man.rotation.y = Math.PI;
              scene.add(man); currentWorld.push(man);
              manPosition.set(0,0,0); 
- 
              camera.position.set(0, 1.8, 50);
              controls.getObject().position.copy(camera.position);
              controls.getObject().lookAt(manPosition); 
@@ -640,33 +650,24 @@
          */
         function generateDreamWorld() {
             if (isDead) return;
-
             clearWorld();
-
-            // 1. ENFORCE SAFE SPAWN POSITION & DEFAULT PLATFORM
             camera.position.set(0, 1.8, 10);
             controls.getObject().position.copy(camera.position);
             addDefaultFloor(0x1a1a1a, 5000); 
-            
-            // Choose map
             const selectedMap = MAP_CATALOG[Math.floor(Math.random() * MAP_CATALOG.length)];
-            
             currentMapDanger = selectedMap.danger;
             selectedMap.generator();
-
-            // Update Status and Audio
             document.getElementById('mapName').textContent = selectedMap.name;
             changeAmbientSound(selectedMap.sound);
             changeMusic();
-            
             dreamCount++;
             document.getElementById('dream').textContent = dreamCount;
         }
 
         function activateManMap() {
             clearWorld();
-            generateManMap(); // Use the generator function
-            currentMapDanger = 5.0; // Extreme danger for the man map
+            generateManMap(); 
+            currentMapDanger = 5.0; 
             document.getElementById('mapName').textContent = "The Man's Field (CRITICAL)";
             changeAmbientSound(null);
             hideConsole();
@@ -674,33 +675,25 @@
 
         /**
          * Creates a fast, seamless dream shift/transition.
-         * @param {boolean} manual - Whether the shift was triggered by a command.
          */
         function smoothShift(manual = false) {
             if (isShifting || isDead) return;
             isShifting = true;
 
-            // Sanity cost depends on manual shift and current danger
             let sanityCost = manual ? 40 : (20 * currentMapDanger / 2);
             sanity = Math.max(0, sanity - sanityCost);
 
-            // CRITICAL: If sanity is low, force the shift and penalize sanity heavily.
-            // But the user requested NO SHIFT below 60%
-            // We will only allow shift if the player is not at the threshold.
             if (sanity <= 60 && !manual) {
-                // If below 60% and not manually skipping, stability drops faster, but map doesn't change yet.
                 isShifting = false; 
-                nextShift = 0.5; // Trigger sanity check very soon
+                nextShift = 0.5;
                 return;
             }
 
             playShiftSound();
 
-            // 1. SEAMLESS SHIFT: Quick visual flash/disorientation
             fadeScreen.style.transition = 'opacity 0.1s'; 
             fadeScreen.style.opacity = '1'; 
 
-            // 2. Immediate World Swap (Happens while the screen is "flashed")
             setTimeout(() => {
                 generateDreamWorld();
                 
@@ -711,26 +704,26 @@
                 
                 fadeScreen.style.transition = 'opacity 3s'; 
                 
-            }, 100); // Total shift time is 100ms
+            }, 100); 
         }
         
         // --- Sanity Management ---
         function updateSanity(delta) {
             if (isDead) return;
 
-            let drainRate = 0.5 * currentMapDanger; // Base drain rate per second
+            let drainRate = 0.5 * currentMapDanger; 
             
             if (sanity <= 60) {
-                // Sanity hits the critical threshold (60%)
-                drainRate *= 4.0; // Dramatically faster drain
+                drainRate *= 4.0;
                 
-                // Visual feedback: Start blood effect
-                bloodOverlay.style.filter = `grayscale(0%) sepia(100%) hue-rotate(330deg) saturate(300%) opacity(${0.1 + (60 - sanity) / 60 * 0.5})`;
-                bloodOverlay.style.transition = 'filter 0.5s ease-out';
+                // FIX: Use background color to manage opacity/filter
+                // Sanity 60 (0.1 opacity) -> Sanity 0 (0.6 opacity)
+                const clampedOpacity = 0.1 + (60 - sanity) / 60 * 0.5;
+                
+                bloodOverlay.style.backgroundColor = `rgba(255, 0, 0, ${clampedOpacity})`;
             } else {
                 // Sanity above 60, fade out blood effect
-                bloodOverlay.style.filter = `grayscale(0%) sepia(100%) hue-rotate(330deg) saturate(300%) opacity(0)`;
-                bloodOverlay.style.transition = 'filter 1s ease-out';
+                bloodOverlay.style.backgroundColor = `rgba(255, 0, 0, 0)`;
             }
 
             sanity -= drainRate * delta;
@@ -753,8 +746,8 @@
             playScream();
             
             // Jumpscare Visuals (Max Blood)
-            bloodOverlay.style.filter = `grayscale(0%) sepia(100%) hue-rotate(330deg) saturate(300%) opacity(1.0)`;
-            bloodOverlay.style.transition = 'filter 0.1s ease-out'; 
+            bloodOverlay.style.backgroundColor = `rgba(255, 0, 0, 1.0)`;
+            bloodOverlay.style.transition = 'background-color 0.1s ease-out'; 
             
             // Pause Game
             document.getElementById('loading').textContent = "CRITICAL FAILURE: DREAM COLLAPSE. REFRESH TO RESTART.";
