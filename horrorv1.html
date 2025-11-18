@@ -1,1 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Specimen #966 - DO NOT OPEN</title>
+<style>
+  body, html { margin:0; padding:0; overflow:hidden; background:#000; cursor:none; }
+  canvas { display:block; }
+  #overlay { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; opacity:0; transition:opacity 1s; background:rgba(0,0,0,0.9); }
+  #text { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); color:#300; font-family: 'Courier New'; font-size:24px; text-align:center; text-shadow:0 0 10px #f00; opacity:0; transition:all 2s; }
+  #warning { position:fixed; bottom:20px; left:0; width:100%; color:#500; text-align:center; font-family:Arial; font-size:14px; opacity:0.6; }
+</style>
+</head>
+<body>
 
+<canvas id="c"></canvas>
+<div id="overlay"></div>
+<div id="text">IT SEES YOU</div>
+<div id="warning">WARNING: Prolonged observation may cause irreversible psychological damage.</div>
+
+<script>
+// =============== THREE.JS + HORROR EFFECT =================
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.168.0/build/three.module.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.168.0/examples/jsm/controls/OrbitControls.js';
+
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:false});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(1); // low-res for extra creepiness
+renderer.setClearColor(0x000000);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x000000, 0.0008);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 100);
+camera.position.set(0, 1, 5);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.02;
+controls.rotateSpeed = 0.5;
+controls.minDistance = 2;
+controls.maxDistance = 10;
+
+// ============ LIGHTING (very dim + red emergency light) ============
+const ambient = new THREE.AmbientLight(0x200000, 0.3);
+scene.add(ambient);
+const redLight = new THREE.PointLight(0x660000, 2, 10);
+redLight.position.set(0, 2, 3);
+scene.add(redLight);
+
+// ============ CREATE THE MONSTER (rough, distorted humanoid) ============
+const geometry = new THREE.DodecahedronGeometry(1.4, 1);
+const material = new THREE.MeshStandardMaterial({
+  color: 0x110011,
+  roughness: 0.9,
+  metalness: 0.1,
+  emissive: 0x330000,
+  emissiveIntensity: 0.3
+});
+
+const monster = new THREE.Mesh(geometry, material);
+scene.add(monster);
+
+// Add random distortion vertices (makes it look wrong)
+const positions = geometry.attributes.position;
+for(let i = 0; i < positions.count; i++){
+  const vx = positions.getX(i) + (Math.random()-0.5)*0.8;
+  const vy = positions.getY(i) + (Math.random()-0.5)*0.8;
+  const vz = positions.getZ(i) + (Math.random()-0.5)*0.8;
+  positions.setXYZ(i, vx, vy, vz);
+}
+positions.needsUpdate = true;
+geometry.computeVertexNormals();
+
+// Eyes that slowly glow brighter the longer you stare
+const eyeGeo = new THREE.SphereGeometry(0.15, 16, 16);
+const eyeMat = new THREE.MeshBasicMaterial({color: 0xff0000});
+const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+leftEye.position.set(-0.4, 0.6, 1.1);
+const rightEye = new THREE.Mesh(eyeGeo, eyeMat);
+rightEye.position.set(0.4, 0.6, 1.1);
+monster.add(leftEye);
+monster.add(rightEye);
+
+// ============ AUDIO - creepy ambience + jumpscare ============
+let audioContext = new (window.AudioContext || window.webkitAudioContext)();
+let screamReady = false;
+
+function playScreamingGoatFromHell() {
+  if (screamReady) return;
+  screamReady = true;
+  
+  const osc = audioContext.createOscillator();
+  const gain = audioContext.createGain();
+  osc.connect(gain);
+  gain.connect(audioContext.destination);
+  
+  osc.frequency.setValueAtTime(80, audioContext.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(30, audioContext.currentTime + 3);
+  gain.gain.setValueAtTime(0, audioContext.currentTime);
+  gain.gain.linearRampToValue(1.5, audioContext.currentTime + 0.1);
+  gain.gain.exponentialRampToValue(0.01, audioContext.currentTime + 4);
+  
+  osc.start(audioContext.currentTime);
+  osc.stop(audioContext.currentTime + 5);
+  
+  // Flash + shake
+  document.getElementById('overlay').style.background = "#800";
+  document.body.style.animation = "shake 0.5s infinite";
+  setTimeout(() => {
+    document.getElementById('overlay').style.background = "rgba(0,0,0,0.98)";
+    document.getElementById('text').innerText = "TOO LATE";
+    document.getElementById('text').style.opacity = 1;
+    document.getElementById('text').style.color = "#f00";
+    document.getElementById('text').style.fontSize = "120px";
+  }, 800);
+}
+
+// ============ HORROR LOGIC ============
+let timeStaring = 0;
+let triggered = false;
+
+function animate() {
+  requestAnimationFrame(animate);
+  
+  // Slow breathing rotation
+  monster.rotation.y += 0.001;
+  monster.rotation.x = Math.sin(Date.now()*0.0005)*0.1;
+  
+  // Eyes get brighter the longer you look directly at it
+  const lookingAtIt = controls.target.distanceTo(monster.position) < 2.5;
+  if (lookingAtIt) {
+    timeStaring += 0.016;
+    const intensity = Math.min(timeStaring / 10, 3);
+    leftEye.material.emissiveIntensity = intensity;
+    rightEye.material.emissiveIntensity = intensity;
+    redLight.intensity = 1 + intensity*2;
+    
+    // After 12 seconds of staring → JUMPSCARE
+    if (timeStaring > 12 && !triggered) {
+      triggered = true;
+      
+      // Sudden lunge forward
+      monster.scale.set(4,4,4);
+      camera.position.z = 0.5;
+      
+      playScreamingGoatFromHell();
+      
+      // Distort everything
+      renderer.setPixelRatio(0.2);
+      document.body.style.filter = "invert(1) hue-rotate(180deg)";
+    }
+  } else {
+    timeStaring = Math.max(timeStaring - 0.03, 0);
+  }
+  
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+window.addEventListener('resize', () => {
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+// Unlock audio on first click (required by browsers)
+document.body.addEventListener('click', () => {
+  if (audioContext.state === 'suspended') audioContext.resume();
+}, {once:true});
+
+</script>
+
+<style>
+@keyframes shake {
+  0% { transform: translate(1px, 1px) rotate(0deg); }
+  10% { transform: translate(-1px, -2px) rotate(-1deg); }
+  20% { transform: translate(-3px, 0px) rotate(1deg); }
+  30% { transform: translate(3px, 2px) rotate(0deg); }
+  40% { transform: translate(1px, -1px) rotate(1deg); }
+  50% { transform: translate(-1px, 2px) rotate(-1deg); }
+  60% { transform: translate(-3px, 1px) rotate(0deg); }
+  70% { transform: translate(3px, 1px) rotate(-1deg); }
+  80% { transform: translate(-1px, -1px) rotate(1deg); }
+  90% { transform: translate(1px, 2px) rotate(0deg); }
+  100% { transform: translate(1px, -2px) rotate(-1deg); }
+}
+</style>
+
+</body>
+</html>
