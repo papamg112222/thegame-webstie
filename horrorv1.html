@@ -448,7 +448,6 @@
             height: 100%;
             background-color: rgba(46, 46, 56, 0.85); /* royal-bg with transparency */
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
@@ -1720,6 +1719,7 @@
                 const target = this.board[f2][r2];
 
                 // --- HACKED PIECE CAPTURE CHECK ---
+                // The hacking piece (f1, r1) is allowed to capture a friendly piece (target.color == piece.color)
                 const is_hacked_capture = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
 
                 // --- FRIENDLY FIRE CHECK (MURASAKI) ---
@@ -1822,6 +1822,9 @@
 
                 this.en_passant_target = null;
                 this.phase_move_pending = false;
+                
+                // HACK: The hack status is cleared only after the turn switch, 
+                // allowing the hacked piece to make ONE move. This is handled below.
 
                 // 1. Roomba movement (always check if the King is still safe)
                 if (this.roomba_moves_remaining > 0) {
@@ -1850,10 +1853,10 @@
                     this.message += ` (${keys_to_remove.length} pieces thawed out!)`;
                 }
 
-                // 3. Switch turn and check for mate/stalemate
+                // 3. Clear one-turn states and switch turn
+                this.hacked_piece = null; // Clears hack status when turn changes
                 this.current_turn = this.current_turn === 'W' ? 'B' : 'W';
                 this.is_power_mode = null;
-                this.hacked_piece = null; // HACK only lasts for one turn
 
                 this.is_check = this._is_king_in_check(this.current_turn);
                 const has_moves = this.has_legal_moves(this.current_turn);
@@ -1942,6 +1945,10 @@
                 const target = this.board[f2][r2];
                 const df = f2 - f1;
                 const dr = r2 - r1;
+                
+                // Check if this move is a Hacked Capture
+                const is_hacked_capture_move = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
+
 
                 // --- MURASAKI ACTIVATION LOGIC (Immediate Execution) ---
                 const is_murasaki_move = (
@@ -1999,7 +2006,6 @@
                 // --- 3. Standard Move Logic (Standard move path) ---
                 } else {
                     const is_roomba_capture = this.roomba_pos && this.roomba_pos.f === f2 && this.roomba_pos.r === r2;
-                    const is_hacked_capture = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
 
                     if (is_roomba_capture) {
                         this.roomba_pos = null;
@@ -2007,13 +2013,15 @@
                         this.message = "Roomba destroyed by piece move!";
                     } else if (target) {
                         this.message = `Captured ${target.color}${target.type}!`;
-                        if (is_hacked_capture) {
+                        if (is_hacked_capture_move) {
+                            // If it was a hacked move, the target was friendly (already checked by _validate_move)
                             this.message = `Hacked piece ${piece.color}${piece.type} successfully captured friendly ${target.type}!`;
                         }
                     } else {
                         this.message = "Move successful.";
                     }
 
+                    // Perform the physical move
                     this.board[f2][r2] = piece;
                     this.board[f1][r1] = null;
                     piece.moved = true;
@@ -2210,6 +2218,7 @@
             
             // NEW: Function to simulate the opponent's device receiving and handling the invite
             showInviteReceivedPopup(opponentName) {
+                this._hide_all_screens(); 
                 this.elements.invitationPopupContainer.classList.remove('hidden');
                 this.elements.invitationPopupContainer.innerHTML = `
                     <div class="invitation-modal">
