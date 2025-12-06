@@ -636,28 +636,21 @@
             
             <div class="coming-soon">
                 <button id="start-online-btn" onclick="showOnlineLobby()">PLAY WITH FRIEND (ONLINE)</button>
-                <span class="soon-tag"></span>
+                <span class="soon-tag">[NETWORKING REQUIRED]</span>
             </div>
         </div>
 
         <div id="online-lobby" class="menu-screen hidden">
             <h2>ONLINE LOBBY: Find a Challenger</h2>
             <div id="player-list">
-                <div class="player-card" onclick="app.sendMatchRequest('Cody_The_Haxor')">
-                    Cody_The_Haxor (1850 ELO) <span class="status">Ready</span>
-                </div>
-                <div class="player-card" onclick="app.sendMatchRequest('Anime_King_24')">
-                    Anime_King_24 (1200 ELO) <span class="status">Ready</span>
-                </div>
-                <div class="player-card" onclick="alert('Player is currently busy.')">
-                    Network_Ghost (2500 ELO) <span class="status" style="color: var(--accent-red);">In Match</span>
-                </div>
+                <div id="dynamic-player-list">
+                    </div>
                 
-                <p style="color: var(--accent-green); margin-top: 20px;">
-                    *Simulation: Click a 'Ready' player to send a challenge.*
-                    <br><br>
-                    <button onclick="app.show_main_menu()" style="background-color: var(--accent-red); padding: 5px 10px; font-size: 14px; width: auto;">Back to Main Menu</button>
+                <p id="lobby-status-message" style="color: var(--light-square); margin-top: 20px; min-height: 50px;">
+                    Searching for opponents online...
                 </p>
+                
+                <button onclick="app.show_main_menu()" style="background-color: var(--accent-red); padding: 10px 20px; font-size: 16px; width: 100%; max-width: 400px;">Back to Main Menu</button>
             </div>
         </div>
         
@@ -919,32 +912,6 @@
                     for (let r1 = 0; r1 < 8; r1++) {
                         const piece = this.board[f1][r1];
                         if (piece && piece.color === color) {
-                            
-                            // Check for Rook command-line ultimate: If the piece is a Rook and it has uses left, 
-                            // we can initiate a special ability. The AI will prioritize this if it's high value.
-                            const has_rook_ability = (piece.type === 'R' && this.r_power_uses[color] > 0);
-                            
-                            // Check for other ultimate abilities that result in a move/selection
-                            const can_use_ultimate = !this._is_square_frozen(f1, r1);
-                            
-                            if (can_use_ultimate) {
-                                // Add a pseudo-move to represent the ultimate ability activation
-                                const power_info = this._get_piece_power(piece.type);
-                                if (power_info.mode !== 'GENERAL' && power_info.mode !== 'R_COMMAND_SELECT') {
-                                    all_moves.push({
-                                        'f1': f1,
-                                        'r1': r1,
-                                        'f2': f1,
-                                        'r2': r1,
-                                        'piece': piece.type,
-                                        'is_ultimate': true,
-                                        'ultimate_mode': power_info.mode,
-                                        'value': this._evaluate_ultimate(f1, r1, piece.type) // Evaluate ultimate value
-                                    });
-                                }
-                            }
-                            
-                            // Standard moves and move-based ultimate sequences
                             const targets = this.get_legal_moves(f1, r1);
                             for (const target of targets) {
                                 const f2 = target.f;
@@ -955,8 +922,7 @@
                                     'f2': f2,
                                     'r2': r2,
                                     'piece': piece.type,
-                                    'is_capture': target.is_capture,
-                                    'is_ultimate_move': target.is_power_target || target.is_murasaki_move
+                                    'is_capture': target.is_capture
                                 };
 
                                 // Use the simplified _validate_move (which checks for check safety)
@@ -965,31 +931,6 @@
                                     all_moves.push(move);
                                 }
                             }
-
-                            // Special handling for Rook's Command-Line ultimate selection
-                            if (has_rook_ability) {
-                                // Add pseudo-moves for Hack and Phase command, pointing to the rook's square
-                                all_moves.push({
-                                    'f1': f1,
-                                    'r1': r1,
-                                    'f2': f1,
-                                    'r2': r1,
-                                    'piece': 'R',
-                                    'is_ultimate': true,
-                                    'ultimate_mode': 'R_HACK_PENDING',
-                                    'value': 700 + Math.random() * 50 // High value to encourage use
-                                });
-                                all_moves.push({
-                                    'f1': f1,
-                                    'r1': r1,
-                                    'f2': f1,
-                                    'r2': r1,
-                                    'piece': 'R',
-                                    'is_ultimate': true,
-                                    'ultimate_mode': 'R_PHASE_PENDING',
-                                    'value': 650 + Math.random() * 50
-                                });
-                            }
                         }
                     }
                 }
@@ -997,24 +938,6 @@
                 this.current_turn = original_turn; // Restore turn
                 return all_moves;
             }
-            
-            _evaluate_ultimate(f, r, piece_type) {
-                /** Evaluates the static value of activating a piece's ultimate (before target selection). */
-                switch(piece_type) {
-                    case 'P': return 100; // Temporal Blockade (General)
-                    case 'N': {
-                        // Archbishop Fusion: Value is the value of the resulting Archbishop minus the sacrifice.
-                        // Since this evaluation is complex, we just give a high base value.
-                        return 800 + Math.random() * 50; 
-                    }
-                    case 'B': return 600; // Bishop Freeze: Value is high but situational.
-                    case 'Q': return 900; // Temporal Blockade (Queen is high value piece)
-                    case 'K': return 1000; // Murasaki: Guaranteed piece removal, very high value.
-                    // R is handled via its two command sub-modes in get_all_legal_moves_for_color
-                    default: return 50 + Math.random() * 10; // Default low value for non-specific pieces
-                }
-            }
-
 
             _evaluate_move(f1, r1, f2, r2, moving_piece) {
                 /** Estimates the value of a move for the current turn (higher is better). */
@@ -1042,15 +965,6 @@
 
                 if (this._is_king_in_check(opponent_color)) {
                     value += 500; // Simple check bonus
-                    
-                    // Check for checkmate (very high value)
-                    const original_turn = this.current_turn;
-                    this.current_turn = opponent_color;
-                    if (!this.has_legal_moves(opponent_color)) {
-                        value += 100000; // Checkmate is decisive
-                    }
-                    this.current_turn = original_turn;
-
                 }
 
                 // Revert move
@@ -1065,7 +979,6 @@
 
             get_bot_move(elo) {
                 /** Chooses a move based on the simulated ELO. */
-                // This is called by the AI handler (for both 'bot' and 'online' opponent turns)
 
                 this.available_ai_moves = this.get_all_legal_moves_for_color(this.current_turn);
 
@@ -1077,10 +990,9 @@
 
                 const best_move = this.available_ai_moves[0];
 
-                // --- AI Selection Logic (Updated to handle ultimate moves) ---
-                
-                // Low ELO: mostly random, sometimes best
+                // Simple ELO based selection logic
                 if (elo <= 1000) {
+                    // Low ELO: mostly random, sometimes best
                     if (Math.random() < (elo / 2000)) {
                         return best_move;
                     } else {
@@ -1108,91 +1020,6 @@
                     }
                 }
             }
-            
-            // --- AI Ultimate Execution (Called by App to chain ultimate steps) ---
-            execute_ai_ultimate_move(move) {
-                // This is a special function for the AI to execute an ultimate ability, 
-                // simulating the multiple clicks/steps a human player would take.
-                const { f1, r1, f2, r2, ultimate_mode } = move;
-                const piece = this.board[f1][r1];
-                const start_coord = this._indices_to_coords(f1, r1);
-                const end_coord = this._indices_to_coords(f2, r2);
-                
-                // 1. Activate the Ultimate (First click equivalent)
-                if (this.is_power_mode === null) {
-                    this.activate_ultimate(f1, r1);
-                    this.is_power_mode = ultimate_mode; // Ensure correct mode is set if it was 'GENERAL'
-                }
-                
-                // 2. Execute the next step based on mode
-                if (this.is_power_mode === 'BLOCKADE') {
-                    // Blockade: Only one step required
-                    this.place_blockade(end_coord);
-                    return true;
-                }
-                
-                if (ultimate_mode === 'R_HACK_PENDING') {
-                    // Hack/Phase: The initial move is a pseudo-move. The second move is selecting the target piece/square.
-                    // The AI needs to pick a target and commit the move.
-                    
-                    // --- AI Strategy for Hack/Phase ---
-                    // Since the AI already decided it's a good move, we need to find the best target.
-                    let best_target_move = null;
-                    const possible_targets = this.get_legal_moves(f1, r1).filter(t => t.is_power_target);
-                    
-                    if (ultimate_mode === 'R_HACK_PENDING') {
-                        // Hack: Prefer opponent Queen/Rook/Bishop/Knight (high value).
-                        best_target_move = possible_targets.sort((a, b) => {
-                            const pA = this.board[a.f][a.r];
-                            const pB = this.board[b.f][b.r];
-                            if (!pA) return 1; if (!pB) return -1;
-                            const opponent_key = this.current_turn === 'W' ? 'B' : 'W';
-                            
-                            // High value if the hacked piece is opponent and high value
-                            if (pA.color !== this.current_turn) return PIECE_VALUES[pB.type] - PIECE_VALUES[pA.type]; 
-                            // Low value if friendly piece (Pawn sacrifice hack is not implemented, hack only affects ability to capture friendly)
-                            return 0;
-                        })[0];
-                        
-                        if (best_target_move) {
-                            app._handle_rook_command_click(best_target_move.f, best_target_move.r);
-                            return true;
-                        }
-                    } else if (ultimate_mode === 'R_PHASE_PENDING') {
-                         // Phase: Move to a safe, central square, or a forward attacking square.
-                         best_target_move = possible_targets[Math.floor(Math.random() * possible_targets.length)];
-                         
-                         if (best_target_move) {
-                            app._handle_rook_command_click(best_target_move.f, best_target_move.r);
-                            return true;
-                        }
-                    }
-                    
-                    // If no target found, cancel the ultimate
-                    this.message = `AI's ${ULTIMATE_POWERS[piece.type].name} failed to find a target and was cancelled.`;
-                    this.is_power_mode = null;
-                    return false;
-                }
-                
-                if (ultimate_mode === 'KNIGHT_FUSION') {
-                    // Fusion: The "move" is finding the *other* friendly piece to fuse with (the Bishop).
-                    if (piece.type === 'N') {
-                        // The AI move already identified the optimal Bishop target (f2, r2)
-                        this.perform_fusion(f2, r2);
-                        return true;
-                    }
-                    return false;
-                }
-                
-                if (ultimate_mode === 'BISHOP_FREEZE' || ultimate_mode === 'ROOK_ROOMBA' || ultimate_mode === 'MURASAKI') {
-                    // These are move-and-execute powers, so the execute_move function handles them.
-                    this.execute_move(start_coord + end_coord);
-                    return true;
-                }
-
-                return false;
-            }
-
 
             // --- Power Activation Logic ---
 
@@ -1201,12 +1028,6 @@
                 const piece = this.board[f][r];
                 if (!piece || piece.color !== this.current_turn) {
                     this.message = "Cannot activate ultimate: no friendly piece selected.";
-                    return false;
-                }
-                
-                // If the piece is frozen, it cannot activate its ultimate
-                if (this._is_square_frozen(f, r)) {
-                    this.message = "Piece is FROZEN and cannot activate its Ultimate!";
                     return false;
                 }
 
@@ -1236,7 +1057,7 @@
                         this.is_power_mode = null;
                         return false;
                     }
-                    this.message = "Bishop activated Cat's Cradle! Select the target square for the move (must be on a diagonal).";
+                    this.message = "Bishop activated Cat's Cradle! Select the diagonal target square to freeze along that line.";
                     return true;
 
                 } else if (this.is_power_mode === 'R_COMMAND_SELECT') {
@@ -1285,7 +1106,6 @@
                         r
                     });
                     this.message = `Temporal Blockade successfully placed at ${coord}.`;
-                    this.is_power_mode = null; // Power executed, reset mode
                     this._next_turn();
                     return true;
                 } catch (e) {
@@ -1338,8 +1158,8 @@
                 }
 
                 // 1. Freeze pieces on the line (excluding the bishop itself and the king)
-                const df = f2 > f1 ? 1 : (f2 < f1 ? -1 : 0);
-                const dr = r2 > r1 ? 1 : (r2 < r1 ? -1 : 0);
+                const df = f2 > f1 ? 1 : -1;
+                const dr = r2 > r1 ? 1 : -1;
 
                 let f = f1;
                 let r = r1;
@@ -1352,14 +1172,11 @@
 
                     const target = this.board[f][r];
                     if (target && target.type !== 'K') {
-                        // Only freeze pieces of the *opponent* (opponent's next turn)
-                        if (target.color !== piece.color) { 
-                            this.frozen_pieces[`${f},${r}`] = 2; // Freeze for the opponent's next turn (2 half-turns)
-                            frozen_count++;
-                        }
+                        this.frozen_pieces[`${f},${r}`] = 2; // Freeze for the opponent's next turn (2 half-turns)
+                        frozen_count++;
                     }
                 }
-                
+
                 // 2. Perform the Bishop move (and capture if applicable)
                 const target_piece = this.board[f2][r2];
                 this.board[f2][r2] = piece;
@@ -1367,7 +1184,7 @@
                 piece.moved = true;
 
                 const capture_msg = target_piece ? ` (Captured ${target_piece.color}${target_piece.type})` : "";
-                this.message = `Bishop activated Cat's Cradle. ${frozen_count} opponent piece(s) frozen for 1 turn! Bishop moved to ${this._indices_to_coords(f2, r2)}.` + capture_msg;
+                this.message = `Bishop activated Cat's Cradle. ${frozen_count} piece(s) frozen for 1 turn! Bishop moved to ${this._indices_to_coords(f2, r2)}.` + capture_msg;
 
                 this.is_power_mode = null;
                 this._next_turn();
@@ -1423,8 +1240,6 @@
                     return;
                 }
 
-                this.message += ` (Roomba is moving...)`; // Prepend message
-
                 const k_pos = this.roomba_target;
                 if (!k_pos) {
                     this.roomba_pos = null;
@@ -1454,15 +1269,11 @@
 
                 // Check bounds
                 if (!(new_rf >= 0 && new_rf <= 7 && new_rr >= 0 && new_rr <= 7)) {
-                    this.board[rf][rr] = null; // Remove roomba from current position
                     this.roomba_pos = null;
                     this.roomba_moves_remaining = 0;
                     this.message += " (Roomba drove off the board and self-destructed.)";
                     return;
                 }
-
-                // Remove Roomba from old square first
-                this.board[rf][rr] = null;
 
 
                 // If Roomba reaches King or is blocked/captured
@@ -1497,10 +1308,6 @@
                         r: new_rr
                     };
                     this.roomba_moves_remaining -= 1;
-                    
-                    // Add Roomba to the new square (as a visible indicator for the UI)
-                    // The Roomba symbol is drawn directly by the UI, so no board piece is needed here.
-                    
                     this.message += ` (Roomba moved to ${this._indices_to_coords(new_rf, new_rr)}. Moves left: ${this.roomba_moves_remaining})`;
 
                     if (this.roomba_moves_remaining === 0) {
@@ -1629,17 +1436,27 @@
                         }
 
                         // Special check for Phasing Rook (If active, this piece can move to any empty square)
-                        // NOTE: This check is not needed here as Phase is handled by the R_PHASE_PENDING mode.
-                        
+                        if (this.phase_move_pending && f1 === this.selected_square_coords.f && r1 === this.selected_square_coords.r) {
+                            if (this.board[f2][r2] === null && !this._is_square_blocked(f2, r2)) {
+                                // Phase move doesn't need to check for check, as the piece is removed, then placed in execute_move
+                                // The execute_move for PHASE MOVE handles the final checks.
+                                legal_moves.push({
+                                    f: f2,
+                                    r: r2,
+                                    is_capture: false,
+                                    is_power_target: true
+                                });
+                            }
+                            continue;
+                        }
+
                         if (this._validate_move(f1, r1, f2, r2)) {
                             const target = this.board[f2][r2];
 
                             const is_castling = (piece.type === 'K' && Math.abs(f2 - f1) === 2 && r1 === r2);
                             const is_en_passant_capture = (piece.type === 'P' && this.en_passant_target && f2 === this.en_passant_target.f && r2 === this.en_passant_target.r);
 
-                            const is_capture = (target && target.color !== piece.color) || (this.roomba_pos && this.roomba_pos.f === f2 && this.roomba_pos.r === r2) || is_en_passant_capture;
-                            const is_friendly_fire_capture = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
-
+                            const is_capture = target !== null || (this.roomba_pos && this.roomba_pos.f === f2 && this.roomba_pos.r === r2) || is_en_passant_capture;
 
                             // Murasaki logic check
                             const is_murasaki_friendly_pawn = (
@@ -1648,57 +1465,21 @@
                                 target && target.color === piece.color &&
                                 target.type === 'P'
                             );
-                            
-                            // Check for Hacked Friendly Capture: Must be a legal move AND a friendly target.
-                            if (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1) {
-                                if (target && target.color === piece.color && !is_murasaki_friendly_pawn) {
-                                    // Hacked piece capturing a friendly piece
-                                     legal_moves.push({
-                                        f: f2,
-                                        r: r2,
-                                        is_capture: true,
-                                        is_power_target: false // Not an ultimate target square, just a capture
-                                    });
-                                    continue; 
-                                }
-                            }
-                            
-                            
+
                             if (this.is_power_mode === 'MURASAKI' && !is_murasaki_friendly_pawn) {
                                 continue; // Block all other moves in Murasaki mode
                             }
-                            
-                            // This also includes the Mursaki capture move, which is technically a capture
-                            const is_ultimate_move = this.is_power_mode === 'BISHOP_FREEZE' || this.is_power_mode === 'ROOK_ROOMBA' || this.is_power_mode === 'MURASAKI';
 
                             legal_moves.push({
                                 f: f2,
                                 r: r2,
-                                is_capture: is_capture || is_castling || is_murasaki_friendly_pawn || is_friendly_fire_capture,
-                                is_power_target: is_ultimate_move
+                                is_capture: is_capture || is_castling || is_murasaki_friendly_pawn
                             });
                         }
                     }
                 }
 
-                // 2. Special Power Mode Targets (Not moves, but target selections)
-                
-                // Blockade Mode - Target is any empty square
-                if (this.is_power_mode === 'BLOCKADE') {
-                     for (let f2 = 0; f2 < 8; f2++) {
-                        for (let r2 = 0; r2 < 8; r2++) {
-                            if (this.board[f2][r2] === null && !this._is_square_blocked(f2, r2)) {
-                                legal_moves.push({
-                                    f: f2,
-                                    r: r2,
-                                    is_capture: false,
-                                    is_power_target: true
-                                });
-                            }
-                        }
-                    }
-                }
-
+                // 2. Special Power Mode Targets
                 if (this.is_power_mode === 'ROOK_ROOMBA' && f1 === this.selected_square_coords.f && r1 === this.selected_square_coords.r) {
                     // Rook Retreat (adjacent empty squares)
                     for (let df = -1; df <= 1; df++) {
@@ -1737,7 +1518,7 @@
                                     legal_moves.push({
                                         f: f2,
                                         r: r2,
-                                        is_capture: true, // It's a "capture" of the friendly piece to fuse
+                                        is_capture: true,
                                         is_power_target: true
                                     });
                                 }
@@ -1746,7 +1527,7 @@
                     }
                 }
 
-                // 3. Targets for R_COMMAND actions (Target piece/square selection)
+                // 3. Targets for R_COMMAND actions
                 if (['R_HACK_PENDING', 'R_PHASE_PENDING'].includes(this.is_power_mode) && piece.type === 'R' && f1 === this.selected_square_coords.f && r1 === this.selected_square_coords.r) {
 
                     if (this.is_power_mode === 'R_HACK_PENDING') {
@@ -1758,7 +1539,7 @@
                                     legal_moves.push({
                                         f: f2,
                                         r: r2,
-                                        is_capture: true, // Visually appears as a capture target
+                                        is_capture: true,
                                         is_power_target: true
                                     });
                                 }
@@ -1905,12 +1686,6 @@
                 // --- END FRIENDLY FIRE CHECK ---
 
                 if (check_blockade && this._is_square_blocked(f2, r2)) return false;
-                
-                // Roomba collision check (cannot move onto the roomba square unless capturing)
-                if (this.roomba_pos && this.roomba_pos.f === f2 && this.roomba_pos.r === r2 && (target && target.color === piece.color && !is_hacked_capture)) {
-                    // Friendly piece cannot move onto the roomba
-                    return false;
-                }
 
                 const p_type = piece.type;
 
@@ -1931,7 +1706,7 @@
                     }
 
                     // Standard capture (or Hacked capture of friendly piece)
-                    if (abs_df === 1 && dr === direction && (target !== null || is_hacked_capture || (this.roomba_pos && this.roomba_pos.f === f2 && this.roomba_pos.r === r2))) return true;
+                    if (abs_df === 1 && dr === direction && (target !== null || is_hacked_capture)) return true;
 
                     // En Passant capture
                     if (abs_df === 1 && dr === direction && this.en_passant_target && f2 === this.en_passant_target.f && r2 === this.en_passant_target.r) return true;
@@ -2091,7 +1866,6 @@
                 }
 
                 // Power move execution: PHASE MOVE (Rook moves anywhere)
-                // This is specifically for when the human player selects the new spot after R_PHASE_PENDING is set by the app._initiate_phase()
                 if (this.phase_move_pending && f1 === this.selected_square_coords.f && r1 === this.selected_square_coords.r) {
                     if (this.board[f2][r2] !== null || this._is_square_blocked(f2, r2)) {
                         this.message = "Phase move must land on an empty, non-blocked square.";
@@ -2107,7 +1881,6 @@
                     this.message = `Rook phased to ${this._indices_to_coords(f2, r2)}!`;
                     this.phase_move_pending = false;
                     this.is_power_mode = null;
-                    this.r_power_uses[this.current_turn] -= 1; // Deduct use on Phase move
                     this._next_turn();
                     return;
                 }
@@ -2232,7 +2005,7 @@
                 this.bot_elo = 1500;
                 this.user_color = 'W';
                 this.game_type = 'local'; // Can be 'local', 'bot', or 'online'
-                this.opponent_name = null; // New for online mode
+                this.opponent_name = 'Opponent'; // Default for online simulation
                 this.is_small_screen = window.innerWidth < 800; // Match CSS breakpoint
 
                 this.elements = {};
@@ -2262,16 +2035,15 @@
                 this.elements.boardContainer = document.getElementById('board-container');
                 this.elements.overlay = document.getElementById('game-overlay');
                 this.elements.overlayMessage = document.getElementById('overlay-message');
+                // NEW Lobby elements
+                this.elements.dynamicPlayerList = document.getElementById('dynamic-player-list');
+                this.elements.lobbyStatusMessage = document.getElementById('lobby-status-message');
             }
 
             _setup_event_listeners() {
                 window.addEventListener('resize', () => this._on_resize());
                 this.elements.eloSlider.addEventListener('input', (e) => this.bot_elo = parseInt(e.target.value));
                 this.elements.overlay.addEventListener('click', () => this.return_to_menu_after_game());
-                
-                // Add click listener for command buttons (must be bound to the app instance)
-                this.elements.hackBtn.onclick = () => this._initiate_hack();
-                this.elements.phaseBtn.onclick = () => this._initiate_phase();
             }
 
             _on_resize() {
@@ -2313,14 +2085,62 @@
             // NEW: Show online lobby
             showOnlineLobby() {
                 this._hide_all_screens();
+                this._renderOnlinePlayers(); // Generate player list
                 this.elements.onlineLobby.classList.remove('hidden');
-                // In a real application, this would fetch the list of active players
             }
             
+            // NEW: Simulation of player list
+            _renderOnlinePlayers() {
+                const players = [
+                    { name: 'Cody_The_Haxor', elo: 1850, status: 'Ready' },
+                    { name: 'Anime_King_24', elo: 1200, status: 'Ready' },
+                    { name: 'Network_Ghost', elo: 2500, status: 'In Match', busy: true },
+                    // If no one is "found" dynamically, we can use a message:
+                    // { name: 'No person found', elo: '???', status: 'Offline', busy: true }
+                ];
+
+                this.elements.dynamicPlayerList.innerHTML = '';
+                
+                // Determine if any "Ready" players exist for the status message
+                const readyPlayers = players.filter(p => !p.busy);
+
+                if (readyPlayers.length === 0) {
+                    this.elements.lobbyStatusMessage.textContent = "No players found online right now. Try again later.";
+                    this.elements.dynamicPlayerList.innerHTML = `
+                        <div class="player-card" style="cursor: default; background-color: var(--royal-bg); border: 1px dashed #777;">
+                            No players currently ready.
+                        </div>
+                    `;
+                    return;
+                }
+
+                readyPlayers.forEach(player => {
+                    const card = document.createElement('div');
+                    card.className = 'player-card';
+                    
+                    if (player.busy) {
+                        card.onclick = () => alert('Player is currently busy.');
+                        card.style.cursor = 'default';
+                        card.querySelector('.status').style.color = 'var(--accent-red)';
+                    } else {
+                        // The core logic the user requested: tapping sends a request
+                        card.onclick = () => this.sendMatchRequest(player.name);
+                    }
+
+                    card.innerHTML = `
+                        ${player.name} (${player.elo} ELO) 
+                        <span class="status" style="color: ${player.busy ? 'var(--accent-red)' : 'var(--accent-green)'};">${player.status}</span>
+                    `;
+                    this.elements.dynamicPlayerList.appendChild(card);
+                });
+
+                this.elements.lobbyStatusMessage.textContent = `Found ${readyPlayers.length} challenger(s) ready to play. Click a name to send a challenge.`;
+            }
+
             // NEW: Send match request simulation
             sendMatchRequest(playerName) {
-                if (confirm(`Would you like to send a challenge request to ${playerName}? (Ultimate Abilities Enabled)`)) {
-                    // SIMULATION: Assume they accept and start the game immediately
+                if (confirm(`Would you like to send a challenge request to ${playerName} for an Ultimate Match? (Abilities Enabled)`)) {
+                    // SIMULATION: If accepted, start the game.
                     this.start_game('online', playerName);
                 }
             }
@@ -2329,25 +2149,18 @@
             start_game(game_type, opponentName = null) {
                 this.game = new UltimateChessGame();
                 this.game_type = game_type;
-                this.clear_selection(); // Clear any stale selection data
+                this.opponent_name = opponentName || 'Opponent'; // Set opponent name for status updates
 
-                if (game_type === 'bot' || game_type === 'online') {
-                    // Randomly assign player color for both bot and online simulation
+                if (game_type === 'bot') {
                     this.user_color = Math.random() < 0.5 ? 'W' : 'B';
-                } else {
-                    this.user_color = 'W'; // Local player is always White first
-                }
-                
-                if (game_type === 'online') {
-                    this.opponent_name = opponentName;
-                    this.game.message = `Online Match vs **${opponentName}** started! You are **${this.user_color === 'W' ? 'White' : 'Black'}**.`;
-                } else if (game_type === 'bot') {
-                     this.game.message = `Bot Match (ELO: ${this.bot_elo}) started! You are **${this.user_color === 'W' ? 'White' : 'Black'}**.`;
+                } else if (game_type === 'online') {
+                    // In a real game, the server decides the color. We'll pick one randomly for the simulation.
+                    this.user_color = Math.random() < 0.5 ? 'W' : 'B';
+                    this.game.message = `Online Match vs ${this.opponent_name} started! You are ${this.user_color === 'W' ? 'White' : 'Black'}. Abilities are enabled for both sides.`;
                 }
                 else {
-                    this.game.message = "Local 2-Player game started! White moves first."
+                    this.user_color = 'W';
                 }
-
 
                 this._hide_all_screens();
                 this.elements.gameUI.classList.remove('hidden');
@@ -2424,7 +2237,7 @@
                 this.draw_board();
                 this.update_status();
 
-                const is_ai_turn = (this.game_type === 'bot' || this.game_type === 'online') && this.game.current_turn !== this.user_color;
+                const is_ai_turn = this.game_type === 'bot' && this.game.current_turn !== this.user_color;
                 if (is_ai_turn && !this.game.game_over) {
                     this.handle_ai_turn();
                 }
@@ -2439,8 +2252,7 @@
                         f,
                         r
                     } = this.selected_square;
-                    // Get only the ultimate power targets (non-King pieces)
-                    this.valid_targets = this.game.get_legal_moves(f, r).filter(t => t.is_power_target && this.game.board[t.f][t.r]?.type !== 'K'); 
+                    this.valid_targets = this.game.get_legal_moves(f, r);
                     this.draw_board();
                     this.update_status();
                 }
@@ -2454,8 +2266,7 @@
                         f,
                         r
                     } = this.selected_square;
-                    // Get only the empty power targets
-                    this.valid_targets = this.game.get_legal_moves(f, r).filter(t => t.is_power_target && this.game.board[t.f][t.r] === null);
+                    this.valid_targets = this.game.get_legal_moves(f, r);
                     this.draw_board();
                     this.update_status();
                 }
@@ -2481,7 +2292,7 @@
 
                 // 1. Deduct use (only happens on successful target click)
                 this.game.r_power_uses[current_turn] -= 1;
-                
+
                 // 2. Execute command based on mode
                 if (mode === 'R_HACK_PENDING') {
                     const target_piece = this.game.board[f][r];
@@ -2489,13 +2300,16 @@
                         f,
                         r
                     };
-                    this.game.message = `HACK successful! ${target_piece.color}${target_piece.type} at ${this.game._indices_to_coords(f, r)} is HACKED! Next opponent move can capture a friendly piece.`;
+                    this.game.message = `HACK successful! ${target_piece.color}${target_piece.type} at ${this.game._indices_to_coords(f, r)} can now capture friendly pieces.`;
 
                 } else if (mode === 'R_PHASE_PENDING') {
                     // Phase is placing the rook on an empty square
-                    const rook_piece_data = this.game.board[f1][r1]; // Get data before overwriting
+                    const rook_piece_data = {
+                        'type': 'R',
+                        'color': current_turn,
+                        'moved': true
+                    };
                     this.game.board[f][r] = rook_piece_data;
-                    this.game.board[f][r].moved = true;
                     this.game.message = `PHASE successful! Rook teleported to ${this.game._indices_to_coords(f, r)}.`;
                 }
 
@@ -2508,7 +2322,7 @@
                 this.game._next_turn();
                 this.clear_selection();
 
-                if ((this.game_type === 'bot' || this.game_type === 'online') && !this.game.game_over && this.game.current_turn !== this.user_color) {
+                if (this.game_type === 'bot' && !this.game.game_over && this.game.current_turn !== this.user_color) {
                     this.handle_ai_turn();
                 }
             }
@@ -2590,9 +2404,8 @@
                     let message;
                     let fg_color;
                     if (this.game.game_over === 'CHECKMATE') {
-                        const winner_color = this.game.current_turn === 'B' ? 'White' : 'Black';
-                        const winner = winner_color === (this.user_color === 'W' ? 'White' : 'Black') ? 'YOU' : 'OPPONENT';
-                        message = `CHECKMATE! \n ${winner_color} (${winner}) WINS!`;
+                        const winner = this.game.current_turn === 'B' ? 'White' : 'Black';
+                        message = `CHECKMATE! \n ${winner} WINS!`;
                         fg_color = 'var(--accent-red)';
                     } else { // STALEMATE
                         message = "STALEMATE \n Draw!";
@@ -2638,6 +2451,14 @@
             update_ability_panel(piece = null) {
                 const info = this.game.current_ultimate_power_info;
 
+                // Update status for online/local/bot
+                let playerStatus = "";
+                if (this.game_type === 'online') {
+                    playerStatus = ` (Online vs ${this.opponent_name || 'Opponent'})`;
+                } else if (this.game_type === 'bot') {
+                    playerStatus = this.game.current_turn === this.user_color ? " (Your Move)" : " (AI Thinking)";
+                }
+                
                 // Update Rook uses display
                 const r_uses_text = `Rook Uses: W: ${this.game.r_power_uses['W']}/2 | B: ${this.game.r_power_uses['B']}/2`;
                 this.elements.rUsesLabel.textContent = r_uses_text;
@@ -2648,18 +2469,14 @@
                         r: hr
                     } = this.game.hacked_piece;
                     const h_piece = this.game.board[hf][hr];
-                    if (h_piece) {
-                         const h_coord = this.game._indices_to_coords(hf, hr);
-                         this.elements.rUsesLabel.textContent += ` | HACKED: ${h_piece.color}${h_piece.type} at ${h_coord}`;
-                    }
+                    const h_coord = this.game._indices_to_coords(hf, hr);
+                    this.elements.rUsesLabel.textContent += ` | HACKED: ${h_piece.color}${h_piece.type} at ${h_coord}`;
                 }
 
                 // Default button states
                 this.elements.hackBtn.disabled = true;
                 this.elements.phaseBtn.disabled = true;
-                
-                // Get human-readable opponent name for messaging
-                const opponentLabel = this.game_type === 'online' ? this.opponent_name : 'AI';
+
                 const is_user_turn = this.game.current_turn === this.user_color || this.game_type === 'local';
 
                 if (this.game.is_power_mode) {
@@ -2669,12 +2486,10 @@
                     this.elements.abilityDesc.style.color = 'var(--light-square)';
 
                     if (this.game.is_power_mode === 'R_COMMAND_SELECT') {
-                        this.elements.abilityPrompt.textContent = is_user_turn ? "Status: Select /HACK or /PHASE." : `${opponentLabel} is deciding a Rook command...`;
+                        this.elements.abilityPrompt.textContent = "Status: Select /HACK or /PHASE.";
                         this.elements.abilityPrompt.style.color = '#FFD700';
-                        if(is_user_turn) {
-                            this.elements.hackBtn.disabled = this.game.r_power_uses[this.game.current_turn] <= 0;
-                            this.elements.phaseBtn.disabled = this.game.r_power_uses[this.game.current_turn] <= 0;
-                        }
+                        this.elements.hackBtn.disabled = !is_user_turn;
+                        this.elements.phaseBtn.disabled = !is_user_turn;
                     } else if (['R_HACK_PENDING', 'R_PHASE_PENDING'].includes(this.game.is_power_mode)) {
                         this.elements.abilityPrompt.textContent = this.game.message;
                         this.elements.abilityPrompt.style.color = 'var(--accent-green)';
@@ -2725,12 +2540,13 @@
 
                 const turn_text = this.game.current_turn === 'W' ? "WHITE" : "BLACK";
                 let mode_label = "";
-                const is_user_turn = this.game.current_turn === this.user_color || this.game_type === 'local';
+                const is_user_turn = this.game.current_turn === this.user_color;
 
-                if (this.game_type === 'bot' || this.game_type === 'online') {
-                    const opponentLabel = this.game_type === 'online' ? this.opponent_name : 'AI';
-                    const player_role = is_user_turn ? "YOU" : opponentLabel;
-                    mode_label = ` (${player_role}'s turn)`;
+                if (this.game_type === 'bot') {
+                    const player_role = is_user_turn ? "YOU" : "AI";
+                    mode_label = ` (${player_role} turn)`;
+                } else if (this.game_type === 'online') {
+                    mode_label = is_user_turn ? ` (Your Move vs ${this.opponent_name})` : ` (${this.opponent_name}'s Move - Waiting...)`;
                 }
 
                 this.elements.statusLabel.textContent = `Current Turn: ${turn_text}${mode_label}`;
@@ -2747,7 +2563,10 @@
                 const is_piece_selected = this.selected_square !== null;
                 const can_activate = is_piece_selected && this.game.is_power_mode === null;
 
-                if (is_user_turn) {
+                // Disable UI if it's the opponent's turn in online mode or if it's the AI's turn
+                const ui_disabled = (this.game_type === 'online' && !is_user_turn) || (this.game_type === 'bot' && !is_user_turn);
+
+                if (!ui_disabled) {
                     if (this.game.is_power_mode) {
                         this.elements.ultimateButton.disabled = false;
                     } else {
@@ -2764,11 +2583,11 @@
 
             handle_click(f, r) {
                 if (this.game.game_over) return;
-                
-                // NEW: Block input if it's the simulated opponent's turn in 'bot' or 'online' mode
+
+                // Disable interaction if it's the bot's turn or the simulated online opponent's turn
                 const is_user_turn = this.game.current_turn === this.user_color || this.game_type === 'local';
                 if (!is_user_turn) {
-                    this.game.message = `Please wait for the ${this.game_type === 'online' ? this.opponent_name : 'AI'} to move.`;
+                    this.game.message = `Waiting for ${this.game_type === 'bot' ? 'AI' : this.opponent_name}'s move.`;
                     this.update_status();
                     return;
                 }
@@ -2815,7 +2634,7 @@
                             const start_coord = this.game._indices_to_coords(f1, r1);
                             const end_coord = this.game._indices_to_coords(f, r);
                             this.game.execute_move(start_coord + end_coord);
-                            this.clear_selection(); 
+                            this.clear_selection(); // Clear selection after successful power move
                         } else {
                             this.game.message = "Invalid target for power move. Try again or cancel.";
                         }
@@ -2872,9 +2691,10 @@
                         // Check if the execution resulted in a turn switch (normal move or ultimate completion)
                         if (this.game.is_power_mode === null) {
                             this.clear_selection();
-                            if ((this.game_type === 'bot' || this.game_type === 'online') && !this.game.game_over && this.game.current_turn !== this.user_color) {
+                            if (this.game_type === 'bot' && !this.game.game_over && this.game.current_turn !== this.user_color) {
                                 this.handle_ai_turn();
                             }
+                            // In a real online game, this would transmit the move to the server.
                         }
 
                     } else {
@@ -2887,11 +2707,10 @@
             }
 
             activate_ultimate_gui() {
-                // Block input if it's the simulated opponent's turn in 'bot' or 'online' mode
+                // If it's the opponent's turn (online or bot), the button is disabled, so this shouldn't run.
                 const is_user_turn = this.game.current_turn === this.user_color || this.game_type === 'local';
-                if (!is_user_turn) {
-                    return;
-                }
+                if (!is_user_turn) return;
+
 
                 if (this.game.is_power_mode) {
                     // Cancel current power mode sequence
@@ -2922,9 +2741,9 @@
                         // Re-calculate targets for the new power mode (e.g., Bishop freeze targets, Fusion targets)
                         this.valid_targets = this.game.get_legal_moves(f, r);
                     } else {
-                        // Power completed in one step (e.g., Blockade)
+                        // Power completed in one step (currently none, but future proofing)
                         this.clear_selection();
-                        if ((this.game_type === 'bot' || this.game_type === 'online') && !this.game.game_over && this.game.current_turn !== this.user_color) {
+                        if (this.game_type === 'bot' && !this.game.game_over && this.game.current_turn !== this.user_color) {
                             this.handle_ai_turn();
                         }
                     }
@@ -2934,61 +2753,56 @@
                 this.update_status();
             }
 
-            // --- AI Handler (Used for both 'bot' and simulated 'online' opponent) ---
+            // --- AI Handler (Only runs in 'bot' mode) ---
 
             _execute_ai_move() {
-                if ((this.game_type !== 'bot' && this.game_type !== 'online') || this.game.current_turn === this.user_color || this.game.game_over) {
+                if (this.game_type !== 'bot' || this.game.current_turn === this.user_color || this.game.game_over) {
                     return;
                 }
 
-                const elo_level = this.bot_elo; // Use the set ELO for difficulty
-                let ai_move = this.game.get_bot_move(elo_level);
+                const elo_level = this.bot_elo;
+                const ai_move = this.game.get_bot_move(elo_level);
 
                 if (ai_move) {
-                    const { f1, r1, f2, r2, is_ultimate, ultimate_mode } = ai_move;
+                    const {
+                        f1,
+                        r1,
+                        f2,
+                        r2,
+                        is_capture
+                    } = ai_move;
 
-                    if (is_ultimate) {
-                        // AI wants to use an Ultimate (multi-step process required for some)
-                        if (this.game.execute_ai_ultimate_move(ai_move)) {
-                             // If successful, the engine has already handled _next_turn().
-                            this.clear_selection();
-                        }
-                        
-                    } else {
-                        // Standard Move
-                        const start_coord = this.game._indices_to_coords(f1, r1);
-                        const end_coord = this.game._indices_to_coords(f2, r2);
-                        const move_str = start_coord + end_coord;
+                    const start_coord = this.game._indices_to_coords(f1, r1);
+                    const end_coord = this.game._indices_to_coords(f2, r2);
+                    const move_str = start_coord + end_coord;
 
-                        // Highlight the AI's selection and target before committing
-                        this.selected_square = { f: f1, r: r1 };
-                        this.valid_targets = this.game.get_legal_moves(f1, r1).filter(t => t.f === f2 && t.r === r2);
-                        this.draw_board();
-                        this.update_status();
-                        
-                        // Use setTimeout to simulate a small delay before committing the move
-                        setTimeout(() => this._commit_ai_move(move_str), 500);
-                        return; // Exit here and wait for commit
-                    }
-                }
+                    this.selected_square = {
+                        f: f1,
+                        r: r1
+                    };
+                    this.valid_targets = [{
+                        f: f2,
+                        r: r2,
+                        is_capture: is_capture
+                    }];
+                    this.draw_board();
+                    this.update_status();
 
-                // If no move or ultimate executed immediately
-                this.draw_board();
-                this.update_status();
-                
-                if (!this.game.game_over && this.game.current_turn !== this.user_color) {
-                    // This happens if roomba moves/freezing triggered a non-move turn switch.
-                    // Recurse to see if the AI needs to make another move immediately (e.g., in a chained action)
-                    setTimeout(() => this.handle_ai_turn(), 100);
+                    // Use setTimeout to simulate a small delay before committing the move
+                    setTimeout(() => this._commit_ai_move(move_str), 500);
+
+                } else {
+                    // Should be checkmate or stalemate, handled in get_all_legal_moves_for_color
+                    this.draw_board();
+                    this.update_status();
                 }
             }
 
             _commit_ai_move(move_str) {
-                if ((this.game_type !== 'bot' && this.game_type !== 'online') || this.game.game_over) {
+                if (this.game_type !== 'bot' || this.game.game_over) {
                     return;
                 }
 
-                // The execute_move call handles the turn switch
                 this.game.execute_move(move_str);
 
                 this.clear_selection();
