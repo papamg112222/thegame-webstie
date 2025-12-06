@@ -162,6 +162,64 @@
             background-color: #389569;
         }
 
+        /* --- Online Lobby Styling --- */
+        #online-lobby {
+            padding: 20px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 600px;
+            height: 100%;
+        }
+
+        #online-lobby h2 {
+            font-size: 24px;
+            color: var(--silver-piece);
+            margin-bottom: 30px;
+        }
+        
+        #player-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: var(--royal-bg);
+            border-radius: 4px;
+            flex-grow: 1;
+        }
+
+        .player-card {
+            background-color: #474751;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: left;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            border: 2px solid transparent;
+        }
+
+        .player-card:hover {
+            background-color: #5d6168;
+            border-color: var(--accent-green);
+        }
+        
+        .player-card:active {
+            transform: scale(0.98);
+        }
+        
+        .player-card span {
+            font-weight: bold;
+            color: var(--light-square);
+        }
+        
+        .player-card .status {
+            float: right;
+            font-weight: normal;
+            color: var(--accent-green);
+        }
+
         .coming-soon {
             display: flex;
             align-items: center;
@@ -172,9 +230,16 @@
         .coming-soon button {
             flex-grow: 1;
             background-color: var(--panel-bg);
+            color: var(--silver-piece);
+            cursor: pointer;
+            border: 4px solid var(--accent-green); /* Make button active */
+        }
+        
+        .coming-soon button:disabled {
             color: #888888;
             cursor: default;
             border: 1px solid #555;
+            background-color: var(--panel-bg);
         }
 
         .soon-tag {
@@ -182,6 +247,7 @@
             font-weight: bold;
             margin-left: 10px;
             font-size: 12px;
+            display: none; /* Hide the tag since the button is now active */
         }
 
         /* --- Game UI Layout --- */
@@ -569,11 +635,32 @@
             </div>
             
             <div class="coming-soon">
-                <button disabled>PLAY WITH FRIEND (ONLINE)</button>
-                <span class="soon-tag">[COMING SOON]</span>
+                <button id="start-online-btn" onclick="showOnlineLobby()">PLAY WITH FRIEND (ONLINE)</button>
+                <span class="soon-tag">[NETWORKING REQUIRED]</span>
             </div>
         </div>
 
+        <div id="online-lobby" class="menu-screen hidden">
+            <h2>ONLINE LOBBY: Find a Challenger</h2>
+            <div id="player-list">
+                <div class="player-card" onclick="app.sendMatchRequest('Cody_The_Haxor')">
+                    Cody_The_Haxor (1850 ELO) <span class="status">Ready</span>
+                </div>
+                <div class="player-card" onclick="app.sendMatchRequest('Anime_King_24')">
+                    Anime_King_24 (1200 ELO) <span class="status">Ready</span>
+                </div>
+                <div class="player-card" onclick="alert('Player is currently busy.')">
+                    Network_Ghost (2500 ELO) <span class="status" style="color: var(--accent-red);">In Match</span>
+                </div>
+                
+                <p style="color: var(--accent-green); margin-top: 20px;">
+                    *Simulation: Click a 'Ready' player to send a challenge.*
+                    <br><br>
+                    <button onclick="app.show_main_menu()" style="background-color: var(--accent-red); padding: 5px 10px; font-size: 14px; width: auto;">Back to Main Menu</button>
+                </p>
+            </div>
+        </div>
+        
         <div id="game-ui" class="hidden">
             <div id="board-ui-frame">
                 <div id="board-container">
@@ -1924,7 +2011,7 @@
                 this.valid_targets = []; // Array of {f, r, is_capture, is_power_target}
                 this.bot_elo = 1500;
                 this.user_color = 'W';
-                this.game_type = 'local';
+                this.game_type = 'local'; // Can be 'local', 'bot', or 'online'
                 this.is_small_screen = window.innerWidth < 800; // Match CSS breakpoint
 
                 this.elements = {};
@@ -1936,6 +2023,7 @@
             _setup_elements() {
                 this.elements.gameContainer = document.getElementById('game-container');
                 this.elements.mainMenu = document.getElementById('main-menu');
+                this.elements.onlineLobby = document.getElementById('online-lobby'); // NEW
                 this.elements.gameUI = document.getElementById('game-ui');
                 this.elements.boardFrame = document.getElementById('board-frame');
                 this.elements.panelFrame = document.getElementById('panel-frame');
@@ -1984,24 +2072,51 @@
                     root.style.setProperty('--dot-font-size', '36px');
                 }
             }
-
-            show_main_menu() {
+            
+            _hide_all_screens() {
+                this.elements.mainMenu.classList.add('hidden');
+                this.elements.onlineLobby.classList.add('hidden');
                 this.elements.gameUI.classList.add('hidden');
-                this.elements.mainMenu.classList.remove('hidden');
                 this.elements.overlay.classList.add('hidden');
             }
 
-            start_game(game_type) {
+            show_main_menu() {
+                this._hide_all_screens();
+                this.elements.mainMenu.classList.remove('hidden');
+            }
+            
+            // NEW: Show online lobby
+            showOnlineLobby() {
+                this._hide_all_screens();
+                this.elements.onlineLobby.classList.remove('hidden');
+            }
+            
+            // NEW: Send match request simulation
+            sendMatchRequest(playerName) {
+                if (confirm(`Would you like to send a challenge request to ${playerName} for an Ultimate Match? (Abilities Enabled)`)) {
+                    // SIMULATION: If accepted, start the game.
+                    this.start_game('online', playerName);
+                }
+            }
+
+
+            start_game(game_type, opponentName = null) {
                 this.game = new UltimateChessGame();
                 this.game_type = game_type;
 
                 if (game_type === 'bot') {
                     this.user_color = Math.random() < 0.5 ? 'W' : 'B';
-                } else {
+                } else if (game_type === 'online') {
+                    // In a real game, the server decides the color. We'll pick one randomly for the simulation.
+                    this.user_color = Math.random() < 0.5 ? 'W' : 'B';
+                    this.opponent_name = opponentName;
+                    this.game.message = `Online Match vs ${opponentName} started! You are ${this.user_color === 'W' ? 'White' : 'Black'}.`;
+                }
+                else {
                     this.user_color = 'W';
                 }
 
-                this.elements.mainMenu.classList.add('hidden');
+                this._hide_all_screens();
                 this.elements.gameUI.classList.remove('hidden');
 
                 this._setup_game_board_ui();
@@ -2030,6 +2145,7 @@
 
                         const square_div = document.createElement('div');
                         square_div.id = `square-${f}-${r}`;
+                        
                         // FIX: Remove inline background color set here, rely entirely on CSS classes
                         square_div.className = `square ${color_class}`; 
                         square_div.setAttribute('data-f', f);
@@ -2177,7 +2293,7 @@
                         
                         // Start with the base color class (light-square or dark-square)
                         const is_dark = (f + r) % 2 === 1;
-                        let classes = ['square', is_dark ? 'dark-square' : 'light-square']; 
+                        let classes = ['square']; 
 
                         // --- 1. Determine Content (Piece, Blockade, Roomba) ---
                         if (piece) {
@@ -2224,9 +2340,9 @@
                         }
 
                         // --- 4. Render to DOM ---
-                        // Filter out duplicates and unnecessary base classes before applying
+                        // Filter out duplicates and ensure base color is the last class added for proper cascading
                         const unique_classes = [...new Set(classes.filter(c => c !== 'light-square' && c !== 'dark-square'))];
-                        unique_classes.push(is_dark ? 'dark-square' : 'light-square'); // Ensure base color is always reapplied
+                        unique_classes.push(is_dark ? 'dark-square' : 'light-square');
                         
                         square_div.className = unique_classes.join(' ');
                         square_div.style.backgroundColor = ''; 
@@ -2289,6 +2405,14 @@
             update_ability_panel(piece = null) {
                 const info = this.game.current_ultimate_power_info;
 
+                // Update status for online/local/bot
+                let playerStatus = "";
+                if (this.game_type === 'online') {
+                    playerStatus = ` (Online vs ${this.opponent_name || 'Opponent'})`;
+                } else if (this.game_type === 'bot') {
+                    playerStatus = this.game.current_turn === this.user_color ? " (Your Move)" : " (AI Thinking)";
+                }
+                
                 // Update Rook uses display
                 const r_uses_text = `Rook Uses: W: ${this.game.r_power_uses['W']}/2 | B: ${this.game.r_power_uses['B']}/2`;
                 this.elements.rUsesLabel.textContent = r_uses_text;
@@ -2368,11 +2492,13 @@
 
                 const turn_text = this.game.current_turn === 'W' ? "WHITE" : "BLACK";
                 let mode_label = "";
-                const is_user_turn = this.game_type === 'local' || this.game.current_turn === this.user_color;
+                const is_user_turn = this.game.current_turn === this.user_color;
 
                 if (this.game_type === 'bot') {
-                    const player_role = this.game.current_turn === this.user_color ? "YOU" : "AI";
+                    const player_role = is_user_turn ? "YOU" : "AI";
                     mode_label = ` (${player_role} turn)`;
+                } else if (this.game_type === 'online') {
+                    mode_label = is_user_turn ? ` (Your Move vs ${this.opponent_name})` : ` (${this.opponent_name}'s Move)`;
                 }
 
                 this.elements.statusLabel.textContent = `Current Turn: ${turn_text}${mode_label}`;
@@ -2412,6 +2538,9 @@
                     this.update_status();
                     return;
                 }
+                
+                // NEW: In online mode, we would check if it's the current user's move, but since this is client-only
+                // simulation, we allow the move to proceed if it's the correct color.
 
                 const f1 = this.selected_square ? this.selected_square.f : null;
                 const r1 = this.selected_square ? this.selected_square.r : null;
@@ -2515,6 +2644,7 @@
                             if (this.game_type === 'bot' && !this.game.game_over && this.game.current_turn !== this.user_color) {
                                 this.handle_ai_turn();
                             }
+                            // NEW: In a real online game, this would transmit the move to the server.
                         }
 
                     } else {
@@ -2654,6 +2784,10 @@
 
         function startBotGame() {
             app.start_game('bot');
+        }
+        
+        function showOnlineLobby() {
+            app.showOnlineLobby();
         }
 
         function updateEloLabel(value) {
