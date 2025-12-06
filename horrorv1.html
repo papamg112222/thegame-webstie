@@ -249,6 +249,51 @@
             font-size: 12px;
             display: none; /* Hide the tag since the button is now active */
         }
+        
+        /* --- Popup/Modal Styles (NEW) --- */
+        #invitation-popup-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .invitation-modal {
+            background-color: var(--panel-bg);
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 400px;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+        
+        .invitation-modal h3 {
+            color: #FFD700;
+            font-size: 20px;
+            margin-top: 0;
+        }
+        
+        .modal-buttons button {
+            padding: 10px 20px;
+            margin: 10px 10px 0;
+            font-size: 16px;
+            width: 120px;
+        }
+        
+        .accept-btn {
+            background-color: var(--accent-green);
+        }
+        
+        .deny-btn {
+            background-color: var(--accent-red);
+        }
+
 
         /* --- Game UI Layout --- */
         #game-ui {
@@ -690,6 +735,9 @@
                 <button id="ultimate-button" onclick="app.activate_ultimate_gui()">ACTIVATE ULTIMATE</button>
             </div>
         </div>
+        
+        <div id="invitation-popup-container" class="hidden">
+            </div>
     </div>
 
     <script>
@@ -2017,7 +2065,7 @@
             _setup_elements() {
                 this.elements.gameContainer = document.getElementById('game-container');
                 this.elements.mainMenu = document.getElementById('main-menu');
-                this.elements.onlineLobby = document.getElementById('online-lobby'); // NEW
+                this.elements.onlineLobby = document.getElementById('online-lobby'); 
                 this.elements.gameUI = document.getElementById('game-ui');
                 this.elements.boardFrame = document.getElementById('board-frame');
                 this.elements.panelFrame = document.getElementById('panel-frame');
@@ -2038,6 +2086,7 @@
                 // NEW Lobby elements
                 this.elements.dynamicPlayerList = document.getElementById('dynamic-player-list');
                 this.elements.lobbyStatusMessage = document.getElementById('lobby-status-message');
+                this.elements.invitationPopupContainer = document.getElementById('invitation-popup-container');
             }
 
             _setup_event_listeners() {
@@ -2075,6 +2124,7 @@
                 this.elements.onlineLobby.classList.add('hidden');
                 this.elements.gameUI.classList.add('hidden');
                 this.elements.overlay.classList.add('hidden');
+                this.elements.invitationPopupContainer.classList.add('hidden');
             }
 
             show_main_menu() {
@@ -2082,39 +2132,36 @@
                 this.elements.mainMenu.classList.remove('hidden');
             }
             
-            // NEW: Show online lobby
             showOnlineLobby() {
                 this._hide_all_screens();
                 this._renderOnlinePlayers(); // Generate player list
                 this.elements.onlineLobby.classList.remove('hidden');
             }
             
-            // NEW: Simulation of player list
             _renderOnlinePlayers() {
+                // IMPORTANT: This is a simulation. These players are NOT real users.
                 const players = [
                     { name: 'Cody_The_Haxor', elo: 1850, status: 'Ready' },
                     { name: 'Anime_King_24', elo: 1200, status: 'Ready' },
                     { name: 'Network_Ghost', elo: 2500, status: 'In Match', busy: true },
-                    // If no one is "found" dynamically, we can use a message:
-                    // { name: 'No person found', elo: '???', status: 'Offline', busy: true }
                 ];
 
                 this.elements.dynamicPlayerList.innerHTML = '';
                 
-                // Determine if any "Ready" players exist for the status message
                 const readyPlayers = players.filter(p => !p.busy);
+                const allPlayers = players;
 
-                if (readyPlayers.length === 0) {
+                if (allPlayers.length === 0) {
                     this.elements.lobbyStatusMessage.textContent = "No players found online right now. Try again later.";
                     this.elements.dynamicPlayerList.innerHTML = `
                         <div class="player-card" style="cursor: default; background-color: var(--royal-bg); border: 1px dashed #777;">
-                            No players currently ready.
+                            No players currently available.
                         </div>
                     `;
                     return;
                 }
 
-                readyPlayers.forEach(player => {
+                allPlayers.forEach(player => {
                     const card = document.createElement('div');
                     card.className = 'player-card';
                     
@@ -2123,8 +2170,8 @@
                         card.style.cursor = 'default';
                         card.querySelector('.status').style.color = 'var(--accent-red)';
                     } else {
-                        // The core logic the user requested: tapping sends a request
-                        card.onclick = () => this.sendMatchRequest(player.name);
+                        // Action: Show invite SENT popup
+                        card.onclick = () => this.showInviteSentPopup(player.name);
                     }
 
                     card.innerHTML = `
@@ -2136,12 +2183,60 @@
 
                 this.elements.lobbyStatusMessage.textContent = `Found ${readyPlayers.length} challenger(s) ready to play. Click a name to send a challenge.`;
             }
+            
+            // NEW: Function to display the invitation sent popup
+            showInviteSentPopup(opponentName) {
+                this._hide_all_screens(); 
+                
+                this.elements.invitationPopupContainer.classList.remove('hidden');
+                this.elements.invitationPopupContainer.innerHTML = `
+                    <div class="invitation-modal">
+                        <h3>INVITE SENT</h3>
+                        <p style="color: var(--light-square);">
+                            A challenge has been sent to **${opponentName}**.<br>
+                            Waiting for them to accept the Ultimate Match.
+                        </p>
+                        <div class="modal-buttons">
+                            <button class="deny-btn" onclick="app._handleInviteResponse('${opponentName}', 'denied')">Cancel Request (X)</button>
+                        </div>
+                    </div>
+                `;
+                
+                // Simulate receiving the response after a short delay
+                setTimeout(() => {
+                    this.showInviteReceivedPopup(opponentName);
+                }, 1500); // 1.5 second simulated latency
+            }
+            
+            // NEW: Function to simulate the opponent's device receiving and handling the invite
+            showInviteReceivedPopup(opponentName) {
+                this.elements.invitationPopupContainer.classList.remove('hidden');
+                this.elements.invitationPopupContainer.innerHTML = `
+                    <div class="invitation-modal">
+                        <h3>🔔 INVITATION RECEIVED!</h3>
+                        <p style="color: var(--light-square);">
+                            **${opponentName}** has challenged you to an Ultimate Chess match!
+                            <br>
+                            *Abilities: ENABLED*
+                        </p>
+                        <div class="modal-buttons">
+                            <button class="accept-btn" onclick="app._handleInviteResponse('${opponentName}', 'accepted')">Accept (✔)</button>
+                            <button class="deny-btn" onclick="app._handleInviteResponse('${opponentName}', 'denied')">Deny (X)</button>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // NEW: Function to handle the final handshake logic
+            _handleInviteResponse(opponentName, response) {
+                this.elements.invitationPopupContainer.classList.add('hidden');
 
-            // NEW: Send match request simulation
-            sendMatchRequest(playerName) {
-                if (confirm(`Would you like to send a challenge request to ${playerName} for an Ultimate Match? (Abilities Enabled)`)) {
-                    // SIMULATION: If accepted, start the game.
-                    this.start_game('online', playerName);
+                if (response === 'accepted') {
+                    // Start the game, assigning the opponent's name
+                    this.start_game('online', opponentName);
+                } else {
+                    alert(`Challenge to ${opponentName} denied/cancelled. Returning to lobby.`);
+                    this.showOnlineLobby();
                 }
             }
 
