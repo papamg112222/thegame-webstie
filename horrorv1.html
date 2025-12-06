@@ -1,1827 +1,1087 @@
-import tkinter as tk
-from tkinter import messagebox
-import sys
-import random
-import math
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate Chess (Single-File Web Edition)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap" rel="stylesheet">
+    
+    <style>
+        /* --- Global & Theme Variables --- */
+        :root {
+            --dark-bg: #2E2E38;
+            --panel-bg: #383B40;
+            --light-square: #F0D9B5;
+            --dark-square: #B58863;
+            --gold-piece: #000000;
+            --silver-piece: #FFFFFF;
+            --accent-red: #F04747;
+            --accent-green: #43b581;
+            --highlight-color: #A8C356;
+            --attack-color: #FF5733;
+            --frozen-color: #00BFFF;
+            --power-target-color: #FFA500;
+            --dot-color: #383B40;
 
-# --- Global Constants (Game Engine Data) ---
-UNICODE_PIECES = {
-    'WK': '♔', 'WQ': '♕', 'WR': '♖', 'WB': '♗', 'WN': '♘', 'WP': '♙',
-    'BK': '♚', 'BQ': '♛', 'BR': '♜', 'BB': '♝', 'BN': '♞', 'BP': '♟',
-    'BL': '🚧', # Blockade/Traffic Jam symbol
-    'FR': '❄️', # Frozen Symbol
-    'RM': '🤖', # Roomba Symbol
-    # Archbishop (A): Fused Knight + Bishop symbol.
-    'WA': '♘♗', 'BA': '♞♝'
-}
+            /* Responsive Font Sizes */
+            --font-size-piece-desktop: 52px;
+            --font-size-dot-desktop: 36px;
+            --font-size-piece-mobile: 40px;
+            --font-size-dot-mobile: 28px;
+            --font-size-panel: 14px;
+        }
 
-# Mapping of file (column) letters to indices
-FILE_MAP = {file: i for i, file in enumerate('abcdefgh')}
-RANK_MAP = {str(rank + 1): rank for rank in range(8)} # Ranks 1-8 map to indices 0-7
+        /* --- Base Styles --- */
+        * {
+            box-sizing: border-box;
+            font-family: 'Roboto Mono', monospace;
+            transition: background-color 0.1s;
+        }
 
-# Standard Piece Values for AI evaluation
-PIECE_VALUES = {'P': 100, 'N': 300, 'B': 300, 'R': 500, 'Q': 900, 'K': 10000, 'A': 650, 'RM': 1000}
+        body {
+            background-color: var(--dark-bg);
+            color: var(--silver-piece);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 10px;
+        }
+
+        .screen {
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* --- Menu Styles --- */
+        #main-menu {
+            text-align: center;
+        }
+
+        #main-menu h1 {
+            font-size: 3em;
+            margin-bottom: 40px;
+        }
+
+        .menu-btn {
+            padding: 15px 30px;
+            font-size: 1.2em;
+            border: 4px solid var(--panel-bg);
+            cursor: pointer;
+            margin: 10px 0;
+            width: 100%;
+            max-width: 400px;
+            display: block;
+            margin-left: auto;
+            margin-right: auto;
+            font-weight: bold;
+        }
+
+        .dark-bg-btn {
+            background-color: var(--panel-bg);
+            color: var(--silver-piece);
+        }
+        .green-bg-btn {
+            background-color: var(--accent-green);
+            color: var(--silver-piece);
+        }
+        .menu-btn:hover:not(:disabled) {
+            opacity: 0.8;
+        }
+        .menu-btn:disabled {
+            cursor: not-allowed;
+            background-color: #474751;
+            color: #888888;
+        }
+
+        .bot-settings {
+            margin: 30px auto;
+            padding: 20px;
+            border: 1px solid var(--panel-bg);
+            max-width: 400px;
+            text-align: left;
+        }
+        .bot-settings h2 {
+            font-size: 1.1em;
+            margin-top: 0;
+            text-align: center;
+        }
+        .elo-controls label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        #elo-slider {
+            width: 100%;
+        }
+
+        /* --- Game Board Layout (Desktop) --- */
+        #board-ui-frame {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        #board-container {
+            flex-grow: 1;
+            max-width: 600px;
+            width: 100%;
+            /* Use grid for board + labels */
+            display: grid;
+            grid-template-columns: auto 1fr; /* Rank labels + board/file block */
+            grid-template-rows: 1fr auto; /* Board/rank block + file labels */
+            aspect-ratio: 1 / 1;
+        }
+
+        #board {
+            grid-column: 2;
+            grid-row: 1;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            border: 2px solid var(--dark-square);
+            width: 100%;
+            height: 100%;
+            overflow: hidden; /* Contains the squares */
+        }
+
+        #rank-labels {
+            grid-column: 1;
+            grid-row: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            height: 100%;
+            padding-right: 5px;
+        }
+
+        #file-labels {
+            grid-column: 2;
+            grid-row: 2;
+            display: flex;
+            justify-content: space-around;
+            padding-top: 5px;
+        }
+
+        .label-item {
+            font-size: 10px;
+            font-weight: bold;
+            color: var(--silver-piece);
+            text-align: center;
+        }
+
+        /* --- Board Squares --- */
+        .square {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: var(--font-size-piece-desktop);
+            cursor: pointer;
+            user-select: none;
+            line-height: 1;
+            min-width: 12.5%; /* Ensures grid behavior is correct */
+        }
+
+        .light { background-color: var(--light-square); }
+        .dark { background-color: var(--dark-square); }
+
+        /* --- Piece Coloring & Highlighting --- */
+        .white-piece { color: var(--gold-piece); }
+        .black-piece { color: var(--silver-piece); }
+
+        .highlight-selected { background-color: var(--highlight-color) !important; }
+        .highlight-capture { background-color: var(--attack-color) !important; }
+        .highlight-power { background-color: var(--power-target-color) !important; }
+        .highlight-frozen { background-color: var(--frozen-color) !important; }
+        .highlight-dot { 
+            font-size: var(--font-size-dot-desktop); 
+            color: var(--dot-color);
+        }
+        .hacked-piece { color: #FFD700 !important; }
+        .archbishop-piece { font-size: calc(var(--font-size-piece-desktop) - 12px); }
+
+        /* --- Panel Styles --- */
+        #panel-frame {
+            width: 300px;
+            background-color: var(--panel-bg);
+            padding: 15px;
+            border: 2px ridge;
+            flex-shrink: 0;
+            max-height: 600px; /* Match typical board height */
+        }
+
+        #panel-frame h1 {
+            font-size: 1.5em;
+            margin: 10px 0;
+        }
+
+        .status {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        #r-uses-label {
+            font-size: var(--font-size-panel);
+            color: #FFD700;
+            margin-bottom: 10px;
+        }
+
+        .message {
+            font-size: var(--font-size-panel);
+            color: var(--light-square);
+            min-height: 30px;
+        }
+
+        #ability-info-frame {
+            background-color: #474751;
+            padding: 10px;
+            margin: 15px 0;
+            border: 1px groove;
+        }
+
+        .section-title {
+            font-weight: bold;
+            color: var(--silver-piece);
+            font-size: var(--font-size-panel);
+            margin: 5px 0;
+        }
+
+        .ability-title {
+            font-weight: bold;
+            font-size: var(--font-size-panel);
+            color: var(--accent-green);
+            margin: 5px 0;
+        }
+
+        .ability-desc, .ability-prompt {
+            font-size: calc(var(--font-size-panel) - 2px);
+            color: var(--light-square);
+            margin: 5px 0;
+        }
+
+        .cmd-frame button {
+            width: 100%;
+            padding: 8px;
+            margin: 2px 0;
+            background-color: #474751;
+            color: var(--silver-piece);
+            border: none;
+            cursor: pointer;
+            font-size: var(--font-size-panel);
+        }
+
+        .cmd-frame button:hover:not(:disabled) {
+            background-color: #55555e;
+        }
+
+        #ultimate-button {
+            width: 100%;
+            padding: 15px;
+            background-color: var(--accent-red);
+            color: var(--silver-piece);
+            font-size: 1.4em;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        #ultimate-button:disabled {
+            background-color: #550000;
+            cursor: not-allowed;
+        }
+
+        /* --- Game Over Overlay --- */
+        .game-over-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        #overlay-text {
+            text-align: center;
+            font-size: 30px;
+            font-weight: bold;
+            color: var(--accent-red);
+            padding: 20px;
+            border-radius: 10px;
+            cursor: pointer;
+        }
 
 
-# --- Custom Powers (Updated with new Rook Ultimate) ---
-ULTIMATE_POWERS = {
-    'GENERAL': {
-        'name': "Temporal Blockade",
-        'mode': 'BLOCKADE',
-        'desc': "Places an indestructible blockade (🚧). Each side can have up to TWO blockades active at once.",
-        'prompt': "Select an empty square for the blockade."
-    },
-    'N': {
-        'name': "Archbishop's Fusion",
-        'mode': 'KNIGHT_FUSION',
-        'desc': "Fuses a friendly Knight and Bishop that are on adjacent or two-square diagonal squares (e.g., a1/b2, a1/c2) into a powerful **Archbishop (A)**. The Archbishop moves as a Knight OR a Bishop.",
-        'prompt': "Select the friendly Bishop to fuse with."
-    },
-    'B': {
-        'name': "Cat's Cradle Catastrophe",
-        'mode': 'BISHOP_FREEZE',
-        'desc': "Bishop releases a Web of Distraction along its attack diagonal. All pieces on that diagonal are **frozen** for the opponent's next turn. Requires Bishop to be attacked.",
-        'prompt': "Select the target Bishop for the Cat's Cradle attack (if it is attacked)."
-    },
-    'R': { # NEW COMMAND-LINE ULTIMATE
-        'name': "Hax.exe Command Shell",
-        'mode': 'R_COMMAND_SELECT', # Initial mode for button selection
-        'desc': "Opens the Hax.exe command shell. Allows one of two commands: /hack or /phase. Usable twice per team.",
-        'prompt': "Select /HACK (Friendly Fire) or /PHASE (Teleport) below."
-    },
-    'K': { # KING ULTIMATE
-        'name': "Domain Expansion: Murasaki",
-        'mode': 'MURASAKI',
-        'desc': "Activates on a **self-sacrifice**: King captures a friendly Pawn. The resulting 'Murasaki' beam instantly removes a **random** enemy piece (not the King).",
-        'prompt': "Select a friendly Pawn for the King to capture to initiate Murasaki."
-    }
-}
+        /* --- Mobile / Small Screen Overrides (Phone Support) --- */
+        @media (max-width: 800px) {
+            body {
+                padding: 5px;
+                align-items: flex-start;
+            }
 
-# --- Aesthetic Constants (Chess.com Classic Theme) ---
-ROYAL_BG = "#2E2E38"
-PANEL_BG = "#383B40"
-LIGHT_SQUARE = "#F0D9B5"
-DARK_SQUARE = "#B58863"
-GOLD_PIECE = "#000000"
-SILVER_PIECE = "#FFFFFF"
-ACCENT_RED = "#F04747"
-ACCENT_GREEN = "#43b581"
-HIGHLIGHT_COLOR = "#A8C356"
-ATTACK_COLOR = "#FF5733"
-FROZEN_COLOR = "#00BFFF"
+            #board-ui-frame {
+                flex-direction: column; /* Stack board and panel vertically */
+                align-items: center;
+                width: 100%;
+                max-width: 95vw;
+                gap: 10px;
+            }
+
+            #board-container {
+                width: 100%;
+                max-width: 95vw;
+                grid-template-columns: auto 1fr; 
+                grid-template-rows: 1fr auto; 
+            }
+            
+            #board-container, #panel-frame {
+                /* Mobile layout ensures they fill the width */
+                width: 95vw;
+                max-width: 95vw;
+                margin: 0;
+            }
+            
+            #panel-frame {
+                max-height: initial; 
+                padding: 10px;
+            }
+
+            /* Smaller fonts for pieces on mobile */
+            .square {
+                font-size: var(--font-size-piece-mobile);
+            }
+            .highlight-dot {
+                font-size: var(--font-size-dot-mobile);
+            }
+            
+            /* Smaller label fonts on mobile */
+            .label-item {
+                font-size: 8px;
+            }
+            
+            #overlay-text {
+                font-size: 20px;
+            }
+
+            #ultimate-button {
+                font-size: 1.1em;
+                padding: 10px;
+            }
+            
+            .archbishop-piece { font-size: calc(var(--font-size-piece-mobile) - 8px); }
+        }
+    </style>
+</head>
+<body>
+    <div id="main-menu" class="screen">
+        <h1 style="color: var(--accent-green);">ULTIMATE CHESS</h1>
+        <button onclick="startGame('local')" class="menu-btn dark-bg-btn">2 PLAYER (LOCAL)</button>
+        <div class="bot-settings">
+            <h2>Play with Bot (ELOfied)</h2>
+            <div class="elo-controls">
+                <label for="elo">ELO: <span id="elo-value">1500</span></label>
+                <input type="range" id="elo-slider" min="1" max="3000" value="1500" oninput="updateEloLabel(this.value)">
+            </div>
+            <button onclick="startGame('bot')" class="menu-btn green-bg-btn">START BOT GAME</button>
+        </div>
+        <button class="menu-btn dark-bg-btn disabled" disabled>PLAY WITH FRIEND (ONLINE) [COMING SOON]</button>
+    </div>
+
+    <div id="game-container" class="screen hidden">
+        <div id="board-ui-frame">
+            
+            <div id="board-container">
+                <div id="rank-labels" class="labels"></div>
+                
+                <div id="board">
+                    </div>
+                
+                <div id="file-labels" class="labels"></div>
+            </div>
+            
+            <div id="panel-frame">
+                <h1>ULTIMATE CHESS</h1>
+                <p id="status-label" class="status"></p>
+                
+                <div id="r-uses-label">Rook Uses: W: 2/2 | B: 2/2</div>
+                
+                <p id="message-label" class="message"></p>
+
+                <div id="ability-info-frame">
+                    <p class="section-title">--- ULTIMATE POWER ---</p>
+                    <p id="ability-title" class="ability-title">Select a Piece</p>
+                    <p id="ability-desc" class="ability-desc">General Ultimate: Places an indestructible blockade (🚧). Each side can have up to TWO blockades active at once.</p>
+                    <p id="ability-prompt" class="ability-prompt">Action: Make a standard move.</p>
+                </div>
+
+                <div id="cmd-frame" class="cmd-frame">
+                    <button id="hack-btn" disabled onclick="handleCommand('R_HACK_PENDING')">/HACK (Friendly Fire)</button>
+                    <button id="phase-btn" disabled onclick="handleCommand('R_PHASE_PENDING')">/PHASE (Teleport Rook)</button>
+                </div>
+
+                <button id="ultimate-button" disabled onclick="activateUltimateWeb()">ACTIVATE ULTIMATE</button>
+            </div>
+        </div>
+        
+        <div id="game-over-overlay" class="game-over-overlay hidden" onclick="returnToMenu()">
+            <div id="overlay-text"></div>
+        </div>
+    </div>
+    
+    <script>
+        // ==============================================================================
+        // 1. CONSTANTS (Equivalent to Python Globals)
+        // ==============================================================================
+        const UNICODE_PIECES = {
+            'WK': '♔', 'WQ': '♕', 'WR': '♖', 'WB': '♗', 'WN': '♘', 'WP': '♙',
+            'BK': '♚', 'BQ': '♛', 'BR': '♜', 'BB': '♝', 'BN': '♞', 'BP': '♟',
+            'BL': '🚧', 
+            'FR': '❄️', 
+            'RM': '🤖', 
+            'WA': '♘♗', 'BA': '♞♝'
+        };
+        const FILE_MAP = { 'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'f': 5, 'g': 6, 'h': 7 };
+        const RANK_MAP = { '1': 0, '2': 1, '3': 2, '4': 3, '5': 4, '6': 5, '7': 6, '8': 7 };
+        const PIECE_VALUES = { 'P': 100, 'N': 300, 'B': 300, 'R': 500, 'Q': 900, 'K': 10000, 'A': 650, 'RM': 1000 };
+        const ULTIMATE_POWERS = {
+            'GENERAL': { 'name': "Temporal Blockade", 'mode': 'BLOCKADE', 'desc': "Places an indestructible blockade (🚧). Each side can have up to TWO blockades active at once.", 'prompt': "Select an empty square for the blockade." },
+            'N': { 'name': "Archbishop's Fusion", 'mode': 'KNIGHT_FUSION', 'desc': "Fuses a friendly Knight and Bishop that are on adjacent or two-square diagonal squares (e.g., a1/b2, a1/c2) into a powerful **Archbishop (A)**. The Archbishop moves as a Knight OR a Bishop.", 'prompt': "Select the friendly Bishop to fuse with." },
+            'B': { 'name': "Cat's Cradle Catastrophe", 'mode': 'BISHOP_FREEZE', 'desc': "Bishop releases a Web of Distraction along its attack diagonal. All pieces on that diagonal are **frozen** for the opponent's next turn. Requires Bishop to be attacked.", 'prompt': "Select the target Bishop for the Cat's Cradle attack (if it is attacked)." },
+            'R': { 'name': "Hax.exe Command Shell", 'mode': 'R_COMMAND_SELECT', 'desc': "Opens the Hax.exe command shell. Allows one of two commands: /hack or /phase. Usable twice per team.", 'prompt': "Select /HACK (Friendly Fire) or /PHASE (Teleport) below." },
+            'K': { 'name': "Domain Expansion: Murasaki", 'mode': 'MURASAKI', 'desc': "Activates on a **self-sacrifice**: King captures a friendly Pawn. The resulting 'Murasaki' beam instantly removes a **random** enemy piece (not the King).", 'prompt': "Select a friendly Pawn for the King to capture to initiate Murasaki." }
+        };
+        const DOT_SYMBOL = '●';
+
+        // ==============================================================================
+        // 2. CORE GAME LOGIC CLASS (UltimateChessGameWeb)
+        //    *** THIS ENTIRE SECTION MUST BE REWRITTEN IN JAVASCRIPT ***
+        // ==============================================================================
+        class UltimateChessGameWeb {
+            // THE CONSTRUCTOR AND ALL METHODS BELOW ARE PYTHON LOGIC COPIED AS COMMENTS.
+            // THEY ARE CURRENTLY NON-FUNCTIONAL AND MUST BE REWRITTEN IN JAVASCRIPT.
+            
+            constructor() {
+                // def __init__(self):
+                this.board = this._initialize_board();
+                this.current_turn = 'W';
+                this.active_blockades = { 'W': [], 'B': [] };
+                this.message = "Game started! White moves first. ULTIMATE is available per piece.";
+                this.is_check = false;
+                this.is_power_mode = null;
+                this.selected_square_coords = null;
+                this.current_ultimate_power_info = ULTIMATE_POWERS['GENERAL'];
+                this.en_passant_target = null;
+                this.game_over = null;
+                this.frozen_pieces = {}; // { "f,r": turns_remaining }
+                this.roomba_pos = null;
+                this.roomba_target = null;
+                this.roomba_moves_remaining = 0;
+                this.r_power_uses = { 'W': 2, 'B': 2 };
+                this.hacked_piece = null; // [f, r] of the hacked piece
+                
+                // Placeholder for internal state (AI uses this)
+                this.available_ai_moves = []; 
+            }
+
+            _initialize_board() {
+                // PYTHON LOGIC: def _initialize_board(self): ...
+                const board = Array(8).fill(null).map(() => Array(8).fill(null));
+
+                const backRank = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R'];
+                for (let f = 0; f < 8; f++) {
+                    board[f][0] = { type: backRank[f], color: 'W', moved: false };
+                    board[f][1] = { type: 'P', color: 'W', moved: false };
+                    board[f][7] = { type: backRank[f], color: 'B', moved: false };
+                    board[f][6] = { type: 'P', color: 'B', moved: false };
+                }
+                return board;
+            }
+
+            _coords_to_indices(coord) {
+                // PYTHON LOGIC: def _coords_to_indices(self, coord): ...
+                if (coord.length !== 2 || !(coord[0] in FILE_MAP) || !(coord[1] in RANK_MAP)) {
+                    throw new Error(`Invalid coordinate: ${coord}`);
+                }
+                const f = FILE_MAP[coord[0]];
+                const r = RANK_MAP[coord[1]];
+                return [f, r];
+            }
+
+            _indices_to_coords(f, r) {
+                // PYTHON LOGIC: def _indices_to_coords(self, f, r): ...
+                const fileChar = Object.keys(FILE_MAP).find(key => FILE_MAP[key] === f);
+                const rankChar = Object.keys(RANK_MAP).find(key => RANK_MAP[key] === r);
+                return fileChar + rankChar;
+            }
+            
+            _get_piece_power(piece_type) {
+                // PYTHON LOGIC: def _get_piece_power(self, piece_type): ...
+                return ULTIMATE_POWERS[piece_type] || ULTIMATE_POWERS['GENERAL'];
+            }
+            
+            // --- GAME RULES AND AI (JS IMPLEMENTATION REQUIRED FOR ALL BELOW) ---
+            
+            _is_square_blocked(f, r) { 
+                // PYTHON LOGIC: def _is_square_blocked(self, f, r): ...
+                // Needs to check active_blockades for both 'W' and 'B'.
+                const pos = `${f},${r}`;
+                return this.active_blockades['W'].includes(pos) || this.active_blockades['B'].includes(pos);
+            }
+
+            _is_square_frozen(f, r) { 
+                // PYTHON LOGIC: def _is_square_frozen(self, f, r): ...
+                const pos = `${f},${r}`;
+                return this.frozen_pieces[pos] && this.frozen_pieces[pos] > 0;
+            }
+
+            _is_king_in_check(color) { 
+                // PYTHON LOGIC: def _is_king_in_check(self, color): ...
+                // Requires _get_king_pos and _is_square_attacked
+                return false; 
+            }
+            
+            get_bot_move(elo) {
+                // PYTHON LOGIC: def get_bot_move(self, elo): ...
+                // This function implements the basic minimax/ELO AI logic.
+                // JS IMPLEMENTATION REQUIRED
+                return null; 
+            }
+
+            get_all_legal_moves_for_color(color) { 
+                // PYTHON LOGIC: def get_all_legal_moves_for_color(self, color): ...
+                // JS IMPLEMENTATION REQUIRED
+                return []; 
+            }
+            
+            get_legal_moves(f1, r1) { 
+                // PYTHON LOGIC: def get_legal_moves(self, f1, r1): ...
+                // This is the largest and most complex function, combining standard chess moves
+                // (pawn push/capture, rook/bishop/queen line checks, knight jumps) with
+                // all power mode targets (Fusion, Rook retreat, Rook Hack/Phase, Murasaki).
+                // JS IMPLEMENTATION REQUIRED
+                return []; 
+            }
+            
+            _validate_move(f1, r1, f2, r2) {
+                // PYTHON LOGIC: def _validate_move(self, f1, r1, f2, r2): ...
+                // Checks standard rules (piece move pattern, path clear) AND checks if the move
+                // leaves the King in check (requires move simulation).
+                // JS IMPLEMENTATION REQUIRED
+                return true; 
+            }
+            
+            activate_ultimate(f, r) { 
+                // PYTHON LOGIC: def activate_ultimate(self, f, r): ...
+                // Initializes self.is_power_mode and sets up messages/checks prerequisites (e.g., Bishop attack check).
+                // JS IMPLEMENTATION REQUIRED
+                const piece = this.board[f][r];
+                if (piece) {
+                    this.selected_square_coords = [f, r];
+                    this.is_power_mode = this._get_piece_power(piece.type).mode;
+                    this.message = `Ultimate mode activated for ${piece.type}.`;
+                    return true;
+                }
+                return false; 
+            }
+
+            place_blockade(coord) { 
+                // PYTHON LOGIC: def place_blockade(self, coord): ...
+                // Executes GENERAL power logic.
+                // JS IMPLEMENTATION REQUIRED
+                this._next_turn();
+                return true;
+            }
+            
+            perform_fusion(bf, br) { 
+                // PYTHON LOGIC: def perform_fusion(self, bf, br): ...
+                // Executes KNIGHT_FUSION logic.
+                // JS IMPLEMENTATION REQUIRED
+                this._next_turn();
+                return true;
+            }
+
+            // def _execute_k_ultimate_logic(self): ...
+            _execute_k_ultimate_logic() { 
+                // PYTHON LOGIC: Removes random enemy piece.
+                // JS IMPLEMENTATION REQUIRED
+                this._next_turn();
+                return true;
+            }
+            
+            // def _handle_hack_command(self, f, r): 
+            _handle_hack_command(f, r) {
+                // PYTHON LOGIC: Sets self.hacked_piece = [f, r], costs R power use, switches turn.
+                // JS IMPLEMENTATION REQUIRED
+                this.hacked_piece = [f, r];
+                this._next_turn();
+            }
+
+            // def _handle_phase_command(self, f, r): 
+            _handle_phase_command(f, r) {
+                // PYTHON LOGIC: Moves the selected Rook to [f, r], costs R power use, switches turn.
+                // JS IMPLEMENTATION REQUIRED
+                const [f1, r1] = this.selected_square_coords;
+                this.board[f][r] = this.board[f1][r1];
+                this.board[f1][r1] = null;
+                this._next_turn();
+            }
+
+            _move_roomba() { 
+                // PYTHON LOGIC: def _move_roomba(self): ...
+                // Calculates shortest path, moves Roomba, checks collision/King capture, decrements moves.
+                // JS IMPLEMENTATION REQUIRED
+            }
+            
+            _next_turn() { 
+                // PYTHON LOGIC: def _next_turn(self): ...
+                // Decrements frozen_pieces, calls _move_roomba(), switches current_turn, checks for mate/stalemate.
+                // JS IMPLEMENTATION REQUIRED
+                
+                // Placeholder for core functionality
+                this.current_turn = (this.current_turn === 'W' ? 'B' : 'W'); 
+                this.is_power_mode = null;
+                this.selected_square_coords = null;
+                this.message = `${this.current_turn === 'W' ? 'White' : 'Black'}'s move.`;
+            }
+            
+            execute_move(move_str) { 
+                // PYTHON LOGIC: def execute_move(self, move_str): ...
+                // The main handler for all non-power move execution (standard move, castling, promotion, Murasaki).
+                // JS IMPLEMENTATION REQUIRED
+                
+                // Placeholder for successful move
+                const [f1, r1] = this._coords_to_indices(move_str.slice(0, 2));
+                const [f2, r2] = this._coords_to_indices(move_str.slice(2, 4));
+                
+                // Basic move simulation
+                this.board[f2][r2] = this.board[f1][r1];
+                this.board[f1][r1] = null;
+                
+                this._next_turn();
+            }
+        }
+        
+        // ==============================================================================
+        // 3. GUI AND EVENT HANDLERS
+        // ==============================================================================
+        
+        let game = null;
+        let selectedSquare = null;
+        let validTargets = [];
+        let userColor = 'W';
+
+        const dom = {
+            menu: document.getElementById('main-menu'),
+            gameContainer: document.getElementById('game-container'),
+            board: document.getElementById('board'),
+            status: document.getElementById('status-label'),
+            message: document.getElementById('message-label'),
+            ultimateBtn: document.getElementById('ultimate-button'),
+            eloValue: document.getElementById('elo-value'),
+            hackBtn: document.getElementById('hack-btn'),
+            phaseBtn: document.getElementById('phase-btn'),
+            abilityTitle: document.getElementById('ability-title'),
+            abilityDesc: document.getElementById('ability-desc'),
+            abilityPrompt: document.getElementById('ability-prompt'),
+            rUsesLabel: document.getElementById('r-uses-label'),
+            overlay: document.getElementById('game-over-overlay'),
+            overlayText: document.getElementById('overlay-text'),
+            rankLabels: document.getElementById('rank-labels'),
+            fileLabels: document.getElementById('file-labels')
+        };
+        
+        // --- Initialization and Screen Management ---
+
+        function setupBoardElements(color) {
+            const boardEl = dom.board;
+            const rankLabelsEl = dom.rankLabels;
+            const fileLabelsEl = dom.fileLabels;
+
+            boardEl.innerHTML = '';
+            rankLabelsEl.innerHTML = '';
+            fileLabelsEl.innerHTML = '';
+
+            const fileChars = 'abcdefgh';
+            const rankChars = '87654321';
+            
+            const displayRanks = color === 'W' ? rankChars : '12345678';
+            const displayFiles = color === 'W' ? fileChars : 'hgfedcba';
+            
+            // 1. Create Squares
+            for (let r = 0; r < 8; r++) {
+                for (let f = 0; f < 8; f++) {
+                    const coord = fileChars[f] + rankChars[r];
+                    const isDark = (f + r) % 2 !== 0; 
+                    const squareEl = document.createElement('div');
+                    
+                    squareEl.className = `square ${isDark ? 'dark' : 'light'}`;
+                    squareEl.dataset.coord = coord;
+                    squareEl.dataset.f = f;
+                    squareEl.dataset.r = 7 - r; // Map visual row (0-7) to logic rank (7-0)
+                    squareEl.addEventListener('click', () => handleSquareClick(f, 7 - r, coord));
+                    boardEl.appendChild(squareEl);
+                }
+            }
+
+            // 2. Create Rank Labels
+            for (let i = 0; i < 8; i++) {
+                const label = document.createElement('div');
+                label.className = 'label-item';
+                label.textContent = displayRanks[i];
+                rankLabelsEl.appendChild(label);
+            }
+            
+            // 3. Create File Labels
+            for (let i = 0; i < 8; i++) {
+                const label = document.createElement('div');
+                label.className = 'label-item';
+                label.textContent = displayFiles[i];
+                fileLabelsEl.appendChild(label);
+            }
+        }
+        
+        function startGame(type) {
+            game = new UltimateChessGameWeb();
+            game.game_type = type;
+            userColor = type === 'local' ? 'W' : (Math.random() < 0.5 ? 'W' : 'B');
+            
+            dom.menu.classList.add('hidden');
+            dom.gameContainer.classList.remove('hidden');
+
+            setupBoardElements(userColor); // Re-initialize based on player color
+            drawBoard();
+            updateStatus();
+            
+            // Start AI turn if necessary
+            if (type === 'bot' && game.current_turn !== userColor) {
+                // handleAITurn(); // Needs JS implementation
+            }
+        }
+        
+        function returnToMenu() {
+            dom.gameContainer.classList.add('hidden');
+            dom.overlay.classList.add('hidden');
+            dom.menu.classList.remove('hidden');
+            selectedSquare = null;
+            validTargets = [];
+        }
+
+        function updateEloLabel(value) {
+            dom.eloValue.textContent = value;
+        }
+
+        // --- Drawing and Status Updates ---
+
+        function drawBoard() {
+            const isSmallScreen = window.innerWidth < 800;
+            const pieceSize = isSmallScreen ? 'var(--font-size-piece-mobile)' : 'var(--font-size-piece-desktop)';
+            const dotSize = isSmallScreen ? 'var(--font-size-dot-mobile)' : 'var(--font-size-dot-desktop)';
+            
+            document.querySelectorAll('.square').forEach(squareEl => {
+                const f = parseInt(squareEl.dataset.f);
+                const r = parseInt(squareEl.dataset.r);
+                const piece = game.board[f][r];
+                
+                // Reset classes and content
+                squareEl.textContent = '';
+                squareEl.className = squareEl.className.replace(/ (selected|highlight-.*|dot|hacked-piece|archbishop-piece)/g, '');
+
+                const isDark = (f + r) % 2 !== 0;
+                squareEl.classList.add(isDark ? 'dark' : 'light');
+                
+                let symbol = '';
+                let fgClass = '';
+                let currentPieceType = null;
+                
+                // 1. Piece or Roomba or Blockade
+                if (piece) {
+                    const pieceKey = piece.color + piece.type;
+                    symbol = UNICODE_PIECES[pieceKey];
+                    fgClass = piece.color === 'W' ? 'white-piece' : 'black-piece';
+                    currentPieceType = piece.type;
+                } else if (game.roomba_pos && game.roomba_pos[0] === f && game.roomba_pos[1] === r) {
+                    symbol = UNICODE_PIECES['RM'];
+                    fgClass = 'hacked-piece'; // Use gold for visibility
+                } else if (game._is_square_blocked(f, r)) {
+                    symbol = UNICODE_PIECES['BL'];
+                    fgClass = 'highlight-capture'; // Use red for blockade
+                }
+
+                // 2. Frozen Overlay
+                if (game._is_square_frozen(f, r)) {
+                    squareEl.classList.add('highlight-frozen');
+                    symbol += (symbol.trim() ? ' ' : '') + UNICODE_PIECES['FR'];
+                }
+
+                // 3. Highlighting (Selection/Targets)
+                const targetInfo = validTargets.find(t => t.coords[0] === f && t.coords[1] === r);
+
+                if (selectedSquare && selectedSquare[0] === f && selectedSquare[1] === r) {
+                    squareEl.classList.add('highlight-selected');
+                } else if (targetInfo) {
+                    if (piece || (game.roomba_pos && game.roomba_pos[0] === f && game.roomba_pos[1] === r) || targetInfo.is_capture) {
+                        squareEl.classList.add('highlight-capture');
+                    } else if (targetInfo.is_power_target) {
+                        squareEl.classList.add('highlight-power');
+                    } else {
+                        // Empty square move target (dot)
+                        symbol = DOT_SYMBOL;
+                        squareEl.classList.add('highlight-dot');
+                    }
+                }
+                
+                // 4. Hacked Status (applied to the piece itself)
+                if (game.hacked_piece && game.hacked_piece[0] === f && game.hacked_piece[1] === r) {
+                    fgClass = 'hacked-piece';
+                }
+
+                // 5. Apply content and final styling
+                squareEl.textContent = symbol;
+                if (symbol && symbol !== DOT_SYMBOL) {
+                    squareEl.classList.add(fgClass);
+                    if (currentPieceType === 'A') {
+                        squareEl.classList.add('archbishop-piece');
+                    }
+                }
+                squareEl.style.fontSize = squareEl.classList.contains('highlight-dot') ? dotSize : pieceSize;
+            });
+            
+            updateStatus();
+            if (game.game_over) showGameOver();
+        }
+
+        function updateStatus() {
+            const turnText = game.current_turn === 'W' ? "WHITE" : "BLACK";
+            const isUserTurn = game.game_type === 'local' || game.current_turn === userColor;
+            const playerRole = game.game_type === 'bot' ? (isUserTurn ? " (YOU turn)" : " (AI turn)") : "";
+            
+            dom.status.textContent = `Current Turn: ${turnText}${playerRole}`;
+            dom.status.style.color = game.current_turn === 'W' ? 'var(--gold-piece)' : 'var(--silver-piece)';
+            
+            dom.message.textContent = game.message;
+            dom.message.style.color = game.is_check || game.game_over ? 'var(--accent-red)' : 'var(--light-square)';
+            
+            // Rook Uses and Hacked piece
+            let rUsesText = `Rook Uses: W: ${game.r_power_uses['W']}/2 | B: ${game.r_power_uses['B']}/2`;
+            if (game.hacked_piece) {
+                const [f, r] = game.hacked_piece;
+                const hPiece = game.board[f][r];
+                rUsesText += ` | HACKED: ${hPiece.color}${hPiece.type} at ${game._indices_to_coords(f, r)}`;
+            }
+            dom.rUsesLabel.textContent = rUsesText;
 
 
-# --- 1. GAME LOGIC (UltimateChessGame Class) ---
+            // Ultimate Button & Panel
+            const isPieceSelected = selectedSquare !== null;
+            const piece = isPieceSelected ? game.board[selectedSquare[0]][selectedSquare[1]] : null;
+            
+            if (game.is_power_mode) {
+                dom.ultimateBtn.textContent = "CANCEL POWER";
+                dom.ultimateBtn.disabled = false;
+            } else {
+                dom.ultimateBtn.textContent = "ACTIVATE ULTIMATE";
+                dom.ultimateBtn.disabled = !isPieceSelected || !isUserTurn;
+            }
 
-class UltimateChessGame:
-    def __init__(self):
-        self.board = self._initialize_board()
-        self.current_turn = 'W'
+            updateAbilityPanel(piece);
+        }
 
-        self.active_blockades = {'W': [], 'B': []}
-        self.message = "Game started! White moves first. ULTIMATE is available per piece."
-        self.is_check = False
-        self.is_power_mode = None
-        self.selected_square_coords = None
-        self.current_ultimate_power_info = ULTIMATE_POWERS['GENERAL']
-        self.removed_bishop = {'piece': None, 'turns_remaining': 0}
+        function updateAbilityPanel(piece) {
+            const info = piece ? game._get_piece_power(piece.type) : ULTIMATE_POWERS['GENERAL'];
+            
+            if (game.is_power_mode) {
+                dom.abilityTitle.textContent = `POWER MODE: ${info.name}`;
+                dom.abilityTitle.style.color = 'var(--accent-red)';
+                dom.hackBtn.disabled = game.is_power_mode !== 'R_COMMAND_SELECT';
+                dom.phaseBtn.disabled = game.is_power_mode !== 'R_COMMAND_SELECT';
+            } else if (piece) {
+                dom.abilityTitle.textContent = `${piece.type} ULTIMATE: ${info.name}`;
+                dom.abilityTitle.style.color = 'var(--accent-green)';
+                dom.hackBtn.disabled = true;
+                dom.phaseBtn.disabled = true;
+            } else {
+                dom.abilityTitle.textContent = "Select a Piece";
+                dom.abilityTitle.style.color = 'var(--silver-piece)';
+                dom.hackBtn.disabled = true;
+                dom.phaseBtn.disabled = true;
+            }
+            
+            dom.abilityDesc.textContent = info.desc;
+            dom.abilityPrompt.textContent = game.is_power_mode ? game.message : (info.prompt || "Action: Make a standard move.");
+        }
+        
+        function showGameOver() {
+            dom.overlay.classList.remove('hidden');
+            let message = '';
+            let color = 'var(--accent-red)';
+            
+            if (game.game_over === 'CHECKMATE') {
+                const winner = game.current_turn === 'B' ? 'White' : 'Black';
+                message = `CHECKMATE!\n${winner} WINS!\n\n(Click to return to Menu)`;
+            } else {
+                message = "STALEMATE\nDraw!\n\n(Click to return to Menu)";
+                color = 'var(--light-square)';
+            }
+            
+            dom.overlayText.textContent = message;
+            dom.overlayText.style.color = color;
+        }
 
-        # --- Standard Chess State ---
-        self.en_passant_target = None
-        self.game_over = None
 
-        # --- ABILITY STATE (NEW/MODIFIED) ---
-        self.frozen_pieces = {}
-        self.roomba_pos = None
-        self.roomba_target = None
-        self.roomba_moves_remaining = 0
+        // --- Click Handlers ---
 
-        # New Rook Ultimate Tracking
-        self.r_power_uses = {'W': 2, 'B': 2}
-        self.hacked_piece = None # Stores (f, r) of the hacked piece
-        self.phase_move_pending = False
-        self.swap_targets = [] # Keeping this just in case, though swap is removed
+        function clearSelection() {
+            selectedSquare = null;
+            game.selected_square_coords = null;
+            game.is_power_mode = null;
+            validTargets = [];
+            game.phase_move_pending = false;
+            drawBoard();
+        }
 
-        # Store for AI: List of move dicts: {'f1':..., 'r1':..., 'f2':..., 'r2':..., 'value':...}
-        self.available_ai_moves = []
-
-
-    def _initialize_board(self):
-        """Sets up the initial chess board."""
-        board = [[None] * 8 for _ in range(8)]
-
-        for f in range(8):
-            board[f][1] = {'type': 'P', 'color': 'W', 'moved': False}
-            board[f][6] = {'type': 'P', 'color': 'B', 'moved': False}
-
-        back_rank = ['R', 'N', 'B', 'Q', 'K', 'B', 'N', 'R']
-        for f, piece_type in enumerate(back_rank):
-            board[f][0] = {'type': piece_type, 'color': 'W', 'moved': False}
-            board[f][7] = {'type': piece_type, 'color': 'B', 'moved': False}
-
-        return board
-
-    # --- Utility Methods ---
-
-    def _coords_to_indices(self, coord):
-        if len(coord) != 2 or coord[0] not in FILE_MAP or coord[1] not in RANK_MAP:
-            raise ValueError(f"Invalid coordinate: {coord}")
-        f = FILE_MAP[coord[0]]
-        r = RANK_MAP[coord[1]]
-        return f, r
-
-    def _indices_to_coords(self, f, r):
-        file_char = chr(ord('a') + f)
-        rank_char = str(r + 1)
-        return file_char + rank_char
-
-    def _get_piece_power(self, piece_type):
-        return ULTIMATE_POWERS.get(piece_type, ULTIMATE_POWERS['GENERAL'])
-
-    def _is_square_blocked(self, f, r):
-        for color in self.active_blockades:
-            if (f, r) in self.active_blockades[color]:
-                return True
-        return False
-
-    def _is_square_frozen(self, f, r):
-        """Checks if a square is occupied by a frozen piece."""
-        return (f, r) in self.frozen_pieces and self.frozen_pieces[(f, r)] > 0
-
-    def _get_king_pos(self, color):
-        for f in range(8):
-            for r in range(8):
-                piece = self.board[f][r]
-                if piece and piece['color'] == color and piece['type'] == 'K':
-                    return (f, r)
-        return None
-
-    def _is_king_in_check(self, color):
-        king_pos = self._get_king_pos(color)
-        if not king_pos: return False
-
-        opponent_color = 'B' if color == 'W' else 'W'
-        return self._is_square_attacked(*king_pos, opponent_color)
-
-    def has_legal_moves(self, color):
-        """Checks if the player has any legal moves available."""
-        return bool(self.get_all_legal_moves_for_color(color))
-
-    # --- AI Specific Functions (Simplified Minimax) ---
-    # ... (omitting deep search for brevity, relying on evaluation)
-
-    def get_all_legal_moves_for_color(self, color):
-        """Generates all legal moves for a given color, including full move data."""
-        all_moves = []
-        original_turn = self.current_turn
-        self.current_turn = color # Temporarily set turn for validation
-
-        for f1 in range(8):
-            for r1 in range(8):
-                piece = self.board[f1][r1]
-                if piece and piece['color'] == color:
-                    targets = self.get_legal_moves(f1, r1)
-                    for target in targets:
-                        f2, r2 = target['coords']
-                        move = {
-                            'f1': f1, 'r1': r1, 'f2': f2, 'r2': r2,
-                            'piece': piece['type'],
-                            'is_capture': target['is_capture']
+        function handleSquareClick(f, r, coord) {
+            if (game.game_over || (game.game_type === 'bot' && game.current_turn !== userColor)) return;
+            
+            const piece = game.board[f][r];
+            
+            // 1. Handle Power Mode Clicks
+            if (game.is_power_mode) {
+                const f1 = game.selected_square_coords[0];
+                const r1 = game.selected_square_coords[1];
+                const targetCoord = game._indices_to_coords(f, r);
+                
+                if (game.is_power_mode === 'BLOCKADE') {
+                    game.place_blockade(targetCoord);
+                    clearSelection();
+                } else if (game.is_power_mode === 'KNIGHT_FUSION') {
+                    if (validTargets.some(t => t.coords[0] === f && t.coords[1] === r)) {
+                        game.perform_fusion(f, r);
+                        clearSelection();
+                    } else {
+                        game.message = "Invalid fusion target. Select a friendly Bishop within range.";
+                    }
+                } else if (['R_HACK_PENDING', 'R_PHASE_PENDING'].includes(game.is_power_mode)) {
+                    if (validTargets.some(t => t.coords[0] === f && t.coords[1] === r)) {
+                        if (game.is_power_mode === 'R_HACK_PENDING') {
+                            game._handle_hack_command(f, r); 
+                        } else {
+                            game._handle_phase_command(f, r);
                         }
-
-                        # Use the simplified _validate_move (which checks for check safety)
-                        if self._validate_move(f1, r1, f2, r2):
-                            move['value'] = self._evaluate_move(f1, r1, f2, r2, piece)
-                            all_moves.append(move)
-
-        self.current_turn = original_turn # Restore turn
-        return all_moves
-
-    def _evaluate_move(self, f1, r1, f2, r2, moving_piece):
-        """Estimates the value of a move for the current turn (higher is better)."""
-        value = 0
-        opponent_color = 'B' if moving_piece['color'] == 'W' else 'W'
-
-        # 1. Capture Bonus
-        target = self.board[f2][r2]
-        is_roomba_capture = self.roomba_pos == (f2, r2)
-
-        if target and target['color'] != moving_piece['color']: # Check for actual enemy capture
-            target_value = PIECE_VALUES.get(target['type'], 0)
-            value += target_value
-        elif is_roomba_capture:
-            value += PIECE_VALUES['RM']
-
-        # 2. Check/Checkmate Bonus (Requires deeper simulation, simplified here)
-        original_target = self.board[f2][r2]
-
-        # Simulate move
-        self.board[f2][r2], self.board[f1][r1] = moving_piece, None
-
-        if self._is_king_in_check(opponent_color):
-            # Deeper checkmate check is too complex for this simplified AI
-            value += 500 # Simple check bonus
-
-        # Revert move
-        self.board[f1][r1] = moving_piece
-        self.board[f2][r2] = original_target
-
-        # 3. Random element (To prevent perfect repetition, especially for low ELO)
-        value += random.uniform(0, 5)
-
-        return value
-
-    def get_bot_move(self, elo):
-        """Chooses a move based on the simulated ELO."""
-
-        self.available_ai_moves = self.get_all_legal_moves_for_color(self.current_turn)
-
-        if not self.available_ai_moves:
-            return None
-
-        self.available_ai_moves.sort(key=lambda move: move['value'], reverse=True)
-
-        best_move = self.available_ai_moves[0]
-
-        # Simple ELO based selection logic
-        if elo <= 1000:
-            # Low ELO: mostly random, sometimes best
-            if random.random() < (elo / 2000):
-                return best_move
-            else:
-                return random.choice(self.available_ai_moves)
-
-        elif 1000 < elo <= 2000:
-            # Medium ELO: picks from top 5 moves, favors best
-            top_moves = self.available_ai_moves[:max(1, min(5, len(self.available_ai_moves)))]
-
-            confidence_factor = (elo - 1000) / 1000
-
-            if random.random() < (0.5 + confidence_factor * 0.5):
-                return best_move
-            else:
-                return random.choice(top_moves)
-
-        else:
-            # High ELO: almost always best move
-            if random.random() < 0.95:
-                return best_move
-            else:
-                return random.choice(self.available_ai_moves)
-
-    # --- Power Activation Logic ---
-
-    def activate_ultimate(self, f, r):
-        """Starts the power sequence for the selected piece."""
-        piece = self.board[f][r]
-        if not piece or piece['color'] != self.current_turn:
-            self.message = "Cannot activate ultimate: no friendly piece selected."
-            return False
-
-        power_info = self._get_piece_power(piece['type'])
-        self.current_ultimate_power_info = power_info
-        self.selected_square_coords = (f, r)
-        self.is_power_mode = power_info['mode']
-
-        if self.is_power_mode == 'BLOCKADE':
-            # Temporal Blockade: Immediate activation, requires square click
-            if len(self.active_blockades[self.current_turn]) >= 2:
-                self.message = "You already have the maximum number of blockades (2) active."
-                self.is_power_mode = None
-                return False
-            self.message = f"Temporal Blockade ready. {power_info['prompt']}"
-            return True
-
-        elif self.is_power_mode == 'BISHOP_FREEZE':
-            # Cat's Cradle Catastrophe: Only if Bishop is currently attacked
-            if not self._is_square_attacked(f, r, 'B' if self.current_turn == 'W' else 'W', check_blockade=True):
-                self.message = "Bishop must be attacked to use Cat's Cradle Catastrophe!"
-                self.is_power_mode = None
-                return False
-            self.message = "Bishop activated Cat's Cradle! Select the diagonal target square to freeze along that line."
-            return True
-
-        elif self.is_power_mode == 'R_COMMAND_SELECT':
-            if self.r_power_uses[self.current_turn] <= 0:
-                self.message = "Rook ultimate uses exhausted for this team."
-                self.is_power_mode = None
-                return False
-            # Go straight to selection mode (GUI will show buttons)
-            self.message = f"{power_info['name']} opened. Choose a command."
-            return True
-
-        elif self.is_power_mode in ('KNIGHT_FUSION', 'ROOK_ROOMBA', 'MURASAKI'):
-            # These powers require a subsequent move or selection
-            self.message = f"{power_info['name']} ready. {power_info['prompt']}"
-            return True
-
-        self.is_power_mode = None
-        self.message = "Ultimate activated, but no special mode detected. Select action."
-        return True
-
-
-    def place_blockade(self, coord):
-        """Places a blockade at the given algebraic coordinate."""
-        try:
-            f, r = self._coords_to_indices(coord)
-        except ValueError:
-            self.message = "Invalid coordinate for blockade."
-            self.is_power_mode = None
-            return False
-
-        if self.board[f][r] is not None or self._is_square_blocked(f, r):
-            self.message = "Blockade square must be empty and not already blocked."
-            self.is_power_mode = None
-            return False
-
-        if len(self.active_blockades[self.current_turn]) >= 2:
-            self.message = "Maximum blockades (2) already reached for this side."
-            self.is_power_mode = None
-            return False
-
-        self.active_blockades[self.current_turn].append((f, r))
-        self.message = f"Temporal Blockade successfully placed at {coord}."
-        self._next_turn()
-        return True
-
-    def perform_fusion(self, bf, br):
-        """Fuses a selected Knight and the target Bishop into an Archbishop."""
-        nf, nr = self.selected_square_coords
-
-        knight = self.board[nf][nr]
-        bishop = self.board[bf][br]
-
-        if not (knight and bishop and knight['type'] == 'N' and bishop['type'] == 'B' and knight['color'] == bishop['color']):
-            self.message = "Fusion failed: Required pieces (Friendly Knight and Bishop) not found."
-            self.is_power_mode = None
-            return False
-
-        # Fusion check (adjacency or 2-square diagonal) is done in get_legal_moves
-
-        # Replace Knight with Archbishop
-        self.board[nf][nr] = {'type': 'A', 'color': knight['color'], 'moved': True}
-
-        # Remove Bishop
-        self.board[bf][br] = None
-
-        self.message = f"Archbishop formed at {self._indices_to_coords(nf, nr)}! Bishop sacrificed."
-        self.is_power_mode = None
-        self._next_turn()
-        return True
-
-    def _activate_b_ultimate(self, f1, r1, f2, r2):
-        """Activates Bishop Freeze (Cat's Cradle) on the diagonal attack line (f1,r1) -> (f2,r2)."""
-        piece = self.board[f1][r1]
-
-        if abs(f1 - f2) != abs(r1 - r2):
-            self.message = "Bishop must move diagonally to activate Cat's Cradle."
-            self.is_power_mode = None
-            return False
-
-        # 1. Freeze pieces on the line (excluding the bishop itself and the king)
-        df = 1 if f2 > f1 else -1
-        dr = 1 if r2 > r1 else -1
-
-        f, r = f1, r1
-        while 0 <= f <= 7 and 0 <= r <= 7:
-            if (f, r) != (f1, r1) and (f, r) != (f2, r2):
-                target = self.board[f][r]
-                if target and target['type'] != 'K':
-                    self.frozen_pieces[(f, r)] = 2 # Freeze for the opponent's next turn (2 half-turns)
-
-            f += df
-            r += dr
-
-        # 2. Perform the Bishop move
-        target_piece = self.board[f2][r2]
-        self.board[f2][r2] = piece
-        self.board[f1][r1] = None
-        piece['moved'] = True
-
-        capture_msg = f" (Captured {target_piece['color']}{target_piece['type']})" if target_piece else ""
-        self.message = f"Bishop activated Cat's Cradle. Diagonal frozen for 1 turn! Bishop moved to {self._indices_to_coords(f2, r2)}." + capture_msg
-
-        self.is_power_mode = None
-        self._next_turn()
-        return True
-
-    def _execute_k_ultimate_logic(self):
-        """Executes the Murasaki logic (removes random enemy piece) and switches turn."""
-
-        opponent_color = 'B' if self.current_turn == 'W' else 'W'
-        enemy_pieces = []
-
-        # 1. Find all eligible enemy pieces (everything but the King)
-        for f in range(8):
-            for r in range(8):
-                piece = self.board[f][r]
-                if piece and piece['color'] == opponent_color and piece['type'] != 'K':
-                    enemy_pieces.append((f, r, piece))
-
-        if not enemy_pieces:
-            # No eligible target found
-            self.message += " (No eligible target for Murasaki, power dissipated harmlessly.)"
-        else:
-            # 2. Select a random enemy piece to capture and remove it
-            target_f, target_r, target_piece = random.choice(enemy_pieces)
-            self.board[target_f][target_r] = None
-
-            # 3. Update the message
-            target_coord = self._indices_to_coords(target_f, target_r)
-            self.message += f" **Murasaki** beam hits {target_piece['color']}{target_piece['type']} at {target_coord}! Piece vaporized."
-
-        self.is_power_mode = None
-        self._next_turn()
-        return True
-
-
-    def _move_roomba(self):
-        """Moves the Roomba one square closer to the enemy King."""
-        if not self.roomba_pos or self.roomba_moves_remaining <= 0:
-            return
-
-        k_pos = self.roomba_target
-        if not k_pos:
-            self.roomba_pos = None
-            self.roomba_moves_remaining = 0
-            return
-
-        kf, kr = k_pos
-        rf, rr = self.roomba_pos
-
-        df = 0
-        if kf > rf: df = 1
-        elif kf < rf: df = -1
-
-        dr = 0
-        if kr > rr: dr = 1
-        elif kr < rr: dr = -1
-
-        new_rf, new_rr = rf + df, rr + dr
-
-        # Check bounds
-        if not (0 <= new_rf <= 7 and 0 <= new_rr <= 7):
-            self.roomba_pos = None
-            self.roomba_moves_remaining = 0
-            self.message += " (Roomba drove off the board and self-destructed.)"
-            return
-
-
-        # If Roomba reaches King or is blocked/captured
-        if new_rf == kf and new_rr == kr:
-            self.roomba_pos = None
-            self.roomba_moves_remaining = 0
-            self.board[kf][kr] = None # King captured
-            self.game_over = 'CHECKMATE'
-            self.message = "Roomba captured the King! Checkmate!"
-
-        elif self.board[new_rf][new_rr] is not None or self._is_square_blocked(new_rf, new_rr):
-            # Roomba hits a piece or blockade (it stops and destroys itself)
-            target_piece = self.board[new_rf][new_rr]
-            target_coord = self._indices_to_coords(new_rf, new_rr)
-
-            if target_piece:
-                 self.board[new_rf][new_rr] = None # Capture/destroy piece
-                 self.message = f"Roomba collided with {target_piece['color']}{target_piece['type']} at {target_coord} and self-destructed."
-            elif self._is_square_blocked(new_rf, new_rr):
-                 # Remove blockade
-                 self.active_blockades['W'] = [b for b in self.active_blockades['W'] if b != (new_rf, new_rr)]
-                 self.active_blockades['B'] = [b for b in self.active_blockades['B'] if b != (new_rf, new_rr)]
-                 self.message = f"Roomba destroyed blockade at {target_coord} and self-destructed."
-            
-            self.roomba_pos = None
-            self.roomba_moves_remaining = 0
-            
-        else:
-            self.roomba_pos = (new_rf, new_rr)
-            self.roomba_moves_remaining -= 1
-            self.message += f" (Roomba moved to {self._indices_to_coords(new_rf, new_rr)}. Moves left: {self.roomba_moves_remaining})"
-
-            if self.roomba_moves_remaining == 0:
-                self.roomba_pos = None
-                self.message += " (Roomba fuel exhausted and removed.)"
-
-    def _activate_r_ultimate(self, f1, r1, f2, r2):
-        """Launches the Roomba and moves the Rook."""
-        piece = self.board[f1][r1]
-
-        if abs(f2 - f1) > 1 or abs(r2 - r1) > 1 or (f1 == f2 and r1 == r2):
-            self.message = "Rook must retreat to an adjacent square."
-            return False
-
-        if self.board[f2][r2] is not None or self._is_square_blocked(f2, r2):
-            self.message = "Rook retreat square must be empty and not blocked."
-            return False
-
-        # 1. Rook retreats
-        self.board[f2][r2] = piece
-        self.board[f1][r1] = None
-        piece['moved'] = True
-
-        # 2. Roomba deployed
-        self.roomba_pos = (f1, r1)
-        self.roomba_moves_remaining = 4
-        self.roomba_target = self._get_king_pos('B' if self.current_turn == 'W' else 'W')
-
-        if not self.roomba_target:
-            self.message = "Roomba deployment failed: Enemy King not found!"
-            self.roomba_pos = None
-            self.is_power_mode = None
-            return False
-
-        self.is_power_mode = None
-        self.message = f"Rogue Roomba deployed at {self._indices_to_coords(f1, r1)}! Rook retreated to {self._indices_to_coords(f2, r2)}."
-        self._next_turn()
-        return True
-
-    # --- Standard Move/Rule Functions ---
-
-    def _validate_move(self, f1, r1, f2, r2):
-        piece = self.board[f1][r1]
-        if not piece or piece['color'] != self.current_turn: return False
-
-        is_castling_attempt = (piece['type'] == 'K' and abs(f2 - f1) == 2 and r1 == r2)
-        if is_castling_attempt and self._check_castling_rules(f1, r1, f2, r2):
-            return True
-
-        if not self._check_move_rules(f1, r1, f2, r2, piece):
-            return False
-
-        # --- Simulate the move to check for check ---
-        original_target = self.board[f2][r2]
-        is_en_passant = (piece['type'] == 'P' and (f2, r2) == self.en_passant_target)
-        captured_pawn_pos = None
-
-        if is_en_passant:
-            direction = 1 if piece['color'] == 'W' else -1
-            captured_pawn_pos = (f2, r2 - direction)
-            original_captured_pawn = self.board[captured_pawn_pos[0]][captured_pawn_pos[1]]
-            self.board[captured_pawn_pos[0]][captured_pawn_pos[1]] = None
-
-        self.board[f2][r2] = piece
-        self.board[f1][r1] = None
-
-        is_safe = not self._is_king_in_check(self.current_turn)
-
-        self.board[f1][r1] = piece
-        self.board[f2][r2] = original_target
-
-        if is_en_passant:
-            self.board[captured_pawn_pos[0]][captured_pawn_pos[1]] = original_captured_pawn
-
-        return is_safe
-
-    def _is_path_blocked(self, f1, r1, f2, r2):
-        df = 0 if f1 == f2 else 1 if f2 > f1 else -1
-        dr = 0 if r1 == r2 else 1 if r2 > r1 else -1
-        f, r = f1 + df, r1 + dr
-        while (f, r) != (f2, r2):
-            if self._is_square_blocked(f, r):
-                return True
-            f += df
-            r += dr
-        return False
-
-    def get_legal_moves(self, f1, r1):
-        piece = self.board[f1][r1]
-        if not piece or piece['color'] != self.current_turn:
-            return []
-
-        legal_moves = []
-
-        # 1. Standard/Castling/EnPassant Moves
-        for f2 in range(8):
-            for r2 in range(8):
-                if f1 == f2 and r1 == r2:
-                    continue
-
-                # Special check for Phasing Rook
-                if self.phase_move_pending and (f1, r1) == self.selected_square_coords:
-                    # Phasing Rook can move to any unoccupied square
-                    if self.board[f2][r2] is None and not self._is_square_blocked(f2, r2):
-                        legal_moves.append({'coords': (f2, r2), 'is_capture': False, 'is_power_target': True})
-                        continue
-
-                if self._validate_move(f1, r1, f2, r2):
-                    target = self.board[f2][r2]
-
-                    is_castling = (piece['type'] == 'K' and abs(f2 - f1) == 2 and r1 == r2)
-                    is_en_passant_capture = (piece['type'] == 'P' and (f2, r2) == self.en_passant_target)
-
-                    is_capture = target is not None or self.roomba_pos == (f2, r2) or is_en_passant_capture
-
-                    # If Murasaki mode is active, the King should only target friendly Pawns
-                    is_murasaki_friendly_pawn = (
-                        self.is_power_mode == 'MURASAKI' and
-                        piece['type'] == 'K' and
-                        target and target['color'] == piece['color'] and
-                        target['type'] == 'P'
-                    )
-
-                    if self.is_power_mode == 'MURASAKI' and not is_murasaki_friendly_pawn:
-                        continue # Block all other moves in Murasaki mode
-
-                    legal_moves.append({'coords': (f2, r2), 'is_capture': is_capture or is_castling or is_murasaki_friendly_pawn})
-
-        # 2. Special Power Mode Targets (Rook Retreat, Knight Fusion)
-        if self.is_power_mode == 'ROOK_ROOMBA' and (f1, r1) == self.selected_square_coords:
-            for df in [-1, 0, 1]:
-                for dr in [-1, 0, 1]:
-                    if df == 0 and dr == 0: continue
-                    rf2, rr2 = f1 + df, r1 + dr
-                    if 0 <= rf2 <= 7 and 0 <= rr2 <= 7 and \
-                        self.board[rf2][rr2] is None and \
-                        not self._is_square_blocked(rf2, rr2):
-                        legal_moves.append({'coords': (rf2, rr2), 'is_capture': False, 'is_power_target': True})
-
-        elif self.is_power_mode == 'KNIGHT_FUSION' and (f1, r1) == self.selected_square_coords:
-            # Targets are friendly Bishops within fusion range
-            for f2 in range(8):
-                for r2 in range(8):
-                    target = self.board[f2][r2]
-                    if target and target['color'] == self.current_turn and target['type'] == 'B':
-                        kf, kr = f1, r1
-                        bf, br = f2, r2
-                        df, dr = abs(kf - bf), abs(kr - br)
-                        is_adjacent = max(df, dr) == 1
-                        is_diag_two = (df in (1, 2) and dr in (1, 2)) and max(df, dr) == 2
-
-                        if is_adjacent or is_diag_two:
-                            legal_moves.append({'coords': (f2, r2), 'is_capture': True, 'is_power_target': True})
-
-        # 3. Targets for R_COMMAND actions
-        if self.is_power_mode in ('R_HACK_PENDING', 'R_PHASE_PENDING'): # Updated R modes
-            if piece['type'] == 'R' and (f1, r1) == self.selected_square_coords:
-
-                if self.is_power_mode == 'R_HACK_PENDING':
-                    # Hack target: ANY piece except King
-                    for f2 in range(8):
-                        for r2 in range(8):
-                            piece_at_target = self.board[f2][r2]
-                            if piece_at_target and piece_at_target['type'] != 'K':
-                                legal_moves.append({'coords': (f2, r2), 'is_capture': True, 'is_power_target': True})
-
-                elif self.is_power_mode == 'R_PHASE_PENDING':
-                    # Phase target: ANY empty, non-blocked square
-                    for f2 in range(8):
-                        for r2 in range(8):
-                            if self.board[f2][r2] is None and not self._is_square_blocked(f2, r2):
-                                legal_moves.append({'coords': (f2, r2), 'is_capture': False, 'is_power_target': True})
-
-
-        # Filter for unique moves (important after power mode additions)
-        unique_moves = []
-        coords_seen = set()
-        for move in legal_moves:
-            if move['coords'] not in coords_seen:
-                unique_moves.append(move)
-                coords_seen.add(move['coords'])
-
-        return unique_moves
-
-    def _is_square_attacked(self, target_f, target_r, attacking_color, check_blockade=True):
-
-        for f in range(8):
-            for r in range(8):
-                piece = self.board[f][r]
-                if piece and piece['color'] == attacking_color:
-
-                    original_target_piece = self.board[target_f][target_r]
-                    self.board[target_f][target_r] = None
-
-                    can_attack = self._check_move_rules(f, r, target_f, target_r, piece, check_blockade)
-
-                    self.board[target_f][target_r] = original_target_piece
-
-                    if can_attack:
-                        # Special handling for pawns (only capture diagonally, not forward attack)
-                        if piece['type'] == 'P' and f == target_f:
-                            continue
-
-                        return True
-
-        # Roomba attack (Roomba attacks adjacent squares)
-        if self.roomba_pos:
-            rf, rr = self.roomba_pos
-            if abs(rf - target_f) <= 1 and abs(rr - target_r) <= 1:
-                return True
-
-        return False
-
-    def _check_castling_rules(self, f1, r1, f2, r2):
-        color = self.current_turn
-
-        king_piece = self.board[f1][r1]
-        if king_piece is None or king_piece['type'] != 'K' or king_piece['moved'] or self._is_square_frozen(f1, r1):
-            return False
-
-        rook_f = 7 if f2 > f1 else 0
-        rook_r = r1
-        rook_piece = self.board[rook_f][rook_r]
-
-        if rook_piece is None or rook_piece['type'] != 'R' or rook_piece['moved'] or self._is_square_frozen(rook_f, rook_r):
-            return False
-
-        df_step = 1 if f2 > f1 else -1
-
-        for f in range(f1 + df_step, rook_f, df_step):
-            if self.board[f][r1] is not None or self._is_square_blocked(f, r1) or self.roomba_pos == (f, r1):
-                return False
-
-        if self._is_king_in_check(color): return False
-
-        f_pass = f1 + df_step
-        king_squares_to_check = [(f_pass, r1), (f2, r2)]
-
-        for f_check, r_check in king_squares_to_check:
-            if self._is_square_attacked(f_check, r_check, 'B' if color == 'W' else 'W'):
-                return False
-
-        return True
-
-
-    def _check_move_rules(self, f1, r1, f2, r2, piece, check_blockade=True):
-
-        if self._is_square_frozen(f1, r1): return False
-
-        df, dr = f2 - f1, r2 - r1
-        abs_df, abs_dr = abs(df), abs(dr)
-        target = self.board[f2][r2]
-
-        # --- HACKED PIECE CAPTURE CHECK ---
-        is_hacked_capture = (self.hacked_piece == (f1, r1) and target and target['color'] == piece['color'])
-
-        # --- FRIENDLY FIRE CHECK ---
-        is_murasaki_self_capture = (
-            self.is_power_mode == 'MURASAKI' and
-            piece['type'] == 'K' and
-            target and target['color'] == piece['color'] and
-            target['type'] == 'P' # Must be a Pawn sacrifice
-        )
-
-        if target and target['color'] == piece['color'] and not is_murasaki_self_capture and not is_hacked_capture: return False
-        # --- END FRIENDLY FIRE CHECK ---
-
-        if check_blockade and self._is_square_blocked(f2, r2): return False
-
-        p_type = piece['type']
-
-        if p_type == 'P':
-            direction = 1 if piece['color'] == 'W' else -1
-            start_rank = 1 if piece['color'] == 'W' else 6
-
-            # Forward move 1
-            if df == 0 and dr == direction and target is None: return True
-
-            # Forward move 2
-            intermediate_r = r1 + direction
-            if df == 0 and dr == 2 * direction and r1 == start_rank and target is None:
-                if self.board[f1][intermediate_r] is None and not self._is_square_blocked(f1, intermediate_r):
-                    return True
-                return False
-
-            # Standard capture (or Hacked capture of friendly piece)
-            if abs_df == 1 and dr == direction and (target is not None or is_hacked_capture): return True
-
-            # En Passant capture
-            if abs_df == 1 and dr == direction and (f2, r2) == self.en_passant_target: return True
-
-            return False
-
-        if p_type == 'N': return (abs_df == 1 and abs_dr == 2) or (abs_df == 2 and abs_dr == 1)
-
-        if p_type == 'A':
-            is_knight_move = (abs_df == 1 and abs_dr == 2) or (abs_df == 2 and abs_dr == 1)
-            is_bishop_move = (abs_df == abs_dr and abs_df > 0)
-
-            if is_knight_move: return True
-
-            if is_bishop_move:
-                if check_blockade and self._is_path_blocked(f1, r1, f2, r2): return False
-                return self._is_path_clear(f1, r1, f2, r2)
-            return False
-
-        if p_type in ('R', 'Q') and ((df == 0 and abs_dr > 0) or (abs_df > 0 and dr == 0)):
-            if check_blockade and self._is_path_blocked(f1, r1, f2, r2): return False
-            return self._is_path_clear(f1, r1, f2, r2)
-
-        if p_type in ('B', 'Q') and abs_df == abs_dr and abs_df > 0:
-            if check_blockade and self._is_path_blocked(f1, r1, f2, r2): return False
-            return self._is_path_clear(f1, r1, f2, r2)
-
-        if p_type == 'K':
-            if abs_df <= 1 and abs_dr <= 1 and (abs_df + abs_dr > 0):
-                return True
-            return False
-
-        return False
-
-    def _is_path_clear(self, f1, r1, f2, r2):
-        df = 0 if f1 == f2 else 1 if f2 > f1 else -1
-        dr = 0 if r1 == r2 else 1 if r2 > r1 else -1
-        f, r = f1 + df, r1 + dr
-        while (f, r) != (f2, r2):
-            if self.board[f][r] is not None or (self.roomba_pos == (f, r)):
-                return False
-            f += df
-            r += dr
-        return True
-
-
-    def _next_turn(self):
-        """Switches turn and handles power drawbacks/effects, checking for checkmate."""
-
-        self.en_passant_target = None
-        self.phase_move_pending = False # Reset phase move
-        self.swap_targets = [] # Reset swap targets
-
-        # 1. Roomba movement (always check if the King is still safe)
-        if self.roomba_moves_remaining > 0:
-            self._move_roomba()
-            if self.game_over: return # Checkmate by roomba
-
-        # 2. Thaw frozen pieces
-        keys_to_remove = []
-        for pos, turns in self.frozen_pieces.items():
-            if turns > 0:
-                self.frozen_pieces[pos] -= 1
-            if self.frozen_pieces[pos] == 0:
-                keys_to_remove.append(pos)
-
-        for key in keys_to_remove:
-            del self.frozen_pieces[key]
-
-        if keys_to_remove:
-            self.message += f" ({len(keys_to_remove)} pieces thawed out!)"
-
-        # 3. Switch turn and check for mate/stalemate
-        self.current_turn = 'B' if self.current_turn == 'W' else 'W'
-        self.is_power_mode = None
-
-        self.is_check = self._is_king_in_check(self.current_turn)
-        has_moves = self.has_legal_moves(self.current_turn)
-
-        if not has_moves:
-            if self.is_check:
-                winner = 'White' if self.current_turn == 'B' else 'Black'
-                self.message = f"CHECKMATE! {winner} wins!"
-                self.game_over = 'CHECKMATE'
-            else:
-                self.message = "STALEMATE! Game is a draw."
-                self.game_over = 'STALEMATE'
-
-        elif self.is_check:
-            self.message += " CHECK!"
-
-    def execute_move(self, move_str):
-        if self.game_over: return
-
-        try:
-            if len(move_str) != 4: raise ValueError
-            f1, r1 = self._coords_to_indices(move_str[:2])
-            f2, r2 = self._coords_to_indices(move_str[2:])
-        except ValueError:
-            self.message = "Invalid move format."
-            return
-
-        # Power mode validation: ROOK_ROOMBA uses execute_move for retreat
-        if self.is_power_mode == 'ROOK_ROOMBA':
-            start_f, start_r = self.selected_square_coords
-            if (f1, r1) == (start_f, start_r):
-                self._activate_r_ultimate(f1, r1, f2, r2)
-                return
-
-        # Power mode validation: BISHOP_FREEZE uses execute_move for the diagonal move
-        if self.is_power_mode == 'BISHOP_FREEZE':
-            if (f1, r1) == self.selected_square_coords:
-                self._activate_b_ultimate(f1, r1, f2, r2)
-                return
-
-        # Power move execution: PHASE MOVE (Rook moves anywhere)
-        if self.phase_move_pending and (f1, r1) == self.selected_square_coords:
-            if self.board[f2][r2] is not None or self._is_square_blocked(f2, r2):
-                self.message = "Phase move must land on an empty, non-blocked square."
-                self.phase_move_pending = False
-                self.is_power_mode = None
-                return
-
-            piece = self.board[f1][r1]
-            self.board[f2][r2], self.board[f1][r1] = piece, None
-            piece['moved'] = True
-            self.message = f"Rook phased to {self._indices_to_coords(f2, r2)}!"
-            self.phase_move_pending = False
-            self.is_power_mode = None
-            self._next_turn()
-            return
-
-
-        if not self._validate_move(f1, r1, f2, r2):
-            self.message = "Invalid move, piece is frozen, or King remains in check."
-            return
-
-        piece = self.board[f1][r1]
-        target = self.board[f2][r2]
-        df, dr = f2 - f1, r2 - r1
-
-        # --- MURASAKI ACTIVATION LOGIC (Immediate Execution) ---
-        is_murasaki_move = (
-            self.is_power_mode == 'MURASAKI' and
-            piece['type'] == 'K' and
-            target and target['color'] == piece['color'] and
-            target['type'] == 'P'
-        )
-
-        if is_murasaki_move:
-            self.message = f"King sacrifices Pawn at {self._indices_to_coords(f2, r2)}! Domain Expansion: Murasaki activated."
-
-            # Move the King onto the Pawn (Sacrifice)
-            self.board[f2][r2] = piece
-            self.board[f1][r1] = None
-            piece['moved'] = True
-
-            # Execute logic and switch turn immediately
-            self._execute_k_ultimate_logic()
-            return
-        # --- END MURASAKI LOGIC ---
-
-        # --- 1. Castling Logic (Standard move path) ---
-        if piece['type'] == 'K' and abs(df) == 2 and dr == 0:
-            rook_f1 = 7 if df > 0 else 0
-            rook_f2 = 5 if df > 0 else 3
-            rook_piece = self.board[rook_f1][r1]
-
-            self.board[f2][r2], self.board[f1][r1] = piece, None
-            piece['moved'] = True
-
-            self.board[rook_f2][r2], self.board[rook_f1][r1] = rook_piece, None
-            rook_piece['moved'] = True
-
-            self.message = "Castling successful!"
-
-        # --- 2. En Passant Logic (Standard move path) ---
-        elif piece['type'] == 'P' and (f2, r2) == self.en_passant_target:
-            direction = 1 if piece['color'] == 'W' else -1
-            captured_pawn_pos = (f2, r2 - direction)
-
-            self.board[f2][r2] = piece
-            self.board[f1][r1] = None
-            piece['moved'] = True
-
-            self.board[captured_pawn_pos[0]][captured_pawn_pos[1]] = None
-            self.message = "En Passant capture successful!"
-
-        # --- 3. Standard Move Logic (Standard move path) ---
-        else:
-            is_roomba_capture = self.roomba_pos == (f2, r2)
-
-            # Handle Hacked Capture message if applicable
-            is_hacked_capture = (self.hacked_piece == (f1, r1) and target and target['color'] == piece['color'])
-
-            if is_roomba_capture:
-                self.roomba_pos = None
-                self.roomba_moves_remaining = 0
-                self.message = "Roomba destroyed by piece move!"
-            elif target:
-                self.message = f"Captured {target['color']}{target['type']}!"
-                if is_hacked_capture:
-                    self.message = f"Hacked piece {piece['color']}{piece['type']} successfully captured friendly {target['type']}!"
-            else:
-                self.message = "Move successful."
-
-            self.board[f2][r2], self.board[f1][r1] = piece, None
-            piece['moved'] = True
-
-            # Check for two-square pawn push to set En Passant target
-            if piece['type'] == 'P' and abs(dr) == 2:
-                direction = 1 if piece['color'] == 'W' else -1
-                self.en_passant_target = (f2, r1 + direction)
-                self.message += " (En Passant target set)"
-
-            # Check for pawn promotion (simple for now)
-            if piece['type'] == 'P' and (r2 == 7 or r2 == 0):
-                piece['type'] = 'Q'
-                self.message += " (PROMOTED to Queen!)"
-
-        self._next_turn()
-
-
-# --- 2. GUI INTERFACE (UltimateChessApp Class) ---
-
-class UltimateChessApp(tk.Tk):
-    DOT_SYMBOL = '●'
-    # Base Sizes (Desktop)
-    BASE_PIECE_FONT_SIZE = 52
-    BASE_DOT_FONT_SIZE = 36
-    
-    # Small Screen Sizes (Mobile)
-    SMALL_PIECE_FONT_SIZE = 40
-    SMALL_DOT_FONT_SIZE = 28
-    SMALL_PANEL_FONT_SIZE = 9
-    SMALL_TITLE_FONT_SIZE = 14
-    
-    FONT_UPDATE_THRESHOLD = 800  # Window width threshold for small screen mode
-
-    DOT_COLOR = "#383B40"
-
-    HIGHLIGHT_COLOR = '#A8C356'
-    ATTACK_COLOR = '#FF5733'
-    FROZEN_COLOR = '#00BFFF'
-    POWER_TARGET_COLOR = "#FFA500"
-
-    DARK_BG = "#2E2E38"
-    PANEL_BG = "#383B40"
-    LIGHT_SQUARE = "#F0D9B5"
-    DARK_SQUARE = "#B58863"
-    GOLD_PIECE = "#000000"
-    SILVER_PIECE = "#FFFFFF"
-    ACCENT_RED = "#F04747"
-    ACCENT_GREEN = "#43b581"
-
-    MURASAKI_VOID = "#0D0D0D"
-    MURASAKI_RED = "#FF4500"
-    MURASAKI_BLUE = "#00BFFF"
-    MURASAKI_FLASH = "#FFFFFF"
-
-    def __init__(self):
-        super().__init__()
-
-        self.game = UltimateChessGame()
-        self.selected_square = None
-        self.valid_targets = []
-        self.bot_elo = tk.IntVar(value=1500)
-        self.user_color = 'W'
-        self.game_type = 'local'
-        self.is_small_screen = False # New state for responsive design
-
-        self.title("Ultimate Chess (Anime Edition)")
-        self.geometry("850x650") # Default starting size
-        self.configure(bg=self.DARK_BG)
-        
-        # Bind the configure event to handle resizing
-        self.bind('<Configure>', self.on_resize)
-
-        self.container = tk.Frame(self, bg=self.DARK_BG)
-        self.container.pack(fill="both", expand=True)
-        self.current_frame = None
-        self.squares = {}
-        self.board_frame = None
-        self.panel_frame = None
-        self.elo_label = None
-
-        self.hack_btn = None
-        self.phase_btn = None
-        self.board_ui_frame = None
-        self.board_container = None
-
-        self.show_main_menu()
-
-    # --- Responsive Design Handler ---
-
-    def on_resize(self, event):
-        """Checks window width and toggles responsive mode."""
-        if not hasattr(self, 'game') or self.game.game_over:
-            return
-
-        is_currently_small = self.winfo_width() < self.FONT_UPDATE_THRESHOLD
-        
-        if is_currently_small != self.is_small_screen:
-            self.is_small_screen = is_currently_small
-            # Only re-setup if the mode has actually changed
-            if self.board_frame and self.panel_frame:
-                self._reconfigure_game_layout()
-
-    def _reconfigure_game_layout(self):
-        """Destroys and recreates the layout based on self.is_small_screen."""
-        if not self.board_ui_frame:
-            return
-
-        # Destroy old packing/gridding logic
-        self.board_container.pack_forget()
-        self.panel_frame.pack_forget()
-        
-        # Re-pack based on mode
-        if self.is_small_screen:
-            # Mobile: Panel on top, Board below (fills width)
-            self.panel_frame.pack(side="top", fill="x", padx=5, pady=5)
-            self.board_container.pack(side="top", padx=5, pady=5, fill="both", expand=True)
-        else:
-            # Desktop: Board on left, Panel on right
-            self.board_container.pack(side="left", padx=20, pady=20, fill="both", expand=True)
-            self.panel_frame.pack(side="right", fill="y", padx=20, pady=20)
-        
-        # Ensure the board grid within the board_container is correctly applied
-        self.board_frame.grid(row=0, column=1, rowspan=8, sticky="nsew") 
-        
-        self._update_all_fonts()
-        self.draw_board()
-        self.update_status()
-
-    def _get_font_sizes(self):
-        """Returns the current font sizes based on screen mode."""
-        if self.is_small_screen:
-            return {
-                'piece': self.SMALL_PIECE_FONT_SIZE,
-                'dot': self.SMALL_DOT_FONT_SIZE,
-                'panel': self.SMALL_PANEL_FONT_SIZE,
-                'title': self.SMALL_TITLE_FONT_SIZE
-            }
-        else:
-            return {
-                'piece': self.BASE_PIECE_FONT_SIZE,
-                'dot': self.BASE_DOT_FONT_SIZE,
-                'panel': 10,  # Standard size
-                'title': 18   # Standard size
-            }
-    
-    def _update_all_fonts(self):
-        """Updates all font sizes across the application."""
-        sizes = self._get_font_sizes()
-        
-        # Update board square fonts
-        if self.squares:
-            for pos, data in self.squares.items():
-                label = data['label']
-                # Determine font size based on content (smaller for Archbishop/Frozen)
-                current_text = label.cget('text')
-                font_size = sizes['piece']
-                if '♗' in current_text or '♘' in current_text or '❄️' in current_text: # Check for composite symbols like Archbishop or Frozen
-                    font_size = sizes['piece'] - 12
+                        game.r_power_uses[game.current_turn === 'W' ? 'B' : 'W']--; // Deduct use from the initiating side (who is about to move next)
+                        clearSelection();
+                    } else {
+                        game.message = "Invalid target for Hax.exe command.";
+                    }
+                } else {
+                    // This handles Murasaki and Bishop Freeze move completion
+                    const startCoord = game._indices_to_coords(f1, r1);
+                    game.execute_move(startCoord + targetCoord); 
+                    clearSelection();
+                }
                 
-                label.config(font=('Arial', font_size))
-
-        # Update panel fonts
-        if self.status_label:
-            self.status_label.config(font=('Arial', sizes['title'], 'bold'))
-        if self.message_label:
-             self.message_label.config(font=('Arial', sizes['panel'] + 2))
-        if self.ability_title:
-             self.ability_title.config(font=('Arial', sizes['panel'] + 3, 'bold'))
-        if self.ability_desc:
-             self.ability_desc.config(font=('Arial', sizes['panel']))
-        if self.ability_prompt:
-             self.ability_prompt.config(font=('Arial', sizes['panel'] + 1))
-        if self.r_uses_label:
-             self.r_uses_label.config(font=('Arial', sizes['panel'] + 1))
-        
-        # Update button font sizes
-        if self.ultimate_button:
-            self.ultimate_button.config(font=('Arial', sizes['title'] - 2, 'bold'))
-        if self.hack_btn:
-            self.hack_btn.config(font=('Arial', sizes['panel'] + 1))
-        if self.phase_btn:
-            self.phase_btn.config(font=('Arial', sizes['panel'] + 1))
-        
-        # Update File/Rank label fonts
-        if hasattr(self, 'rank_labels'):
-            for label in self.rank_labels + self.file_labels:
-                label.config(font=('Arial', sizes['panel'] + 4, 'bold'))
-
-
-    # --- Frame Switching ---
-    def show_main_menu(self):
-        if self.current_frame:
-            self.current_frame.destroy()
-        self.menu_frame = self._setup_main_menu(self.container)
-        self.current_frame = self.menu_frame
-        self.current_frame.pack(fill="both", expand=True)
-
-    def start_game(self, game_type):
-        self.game = UltimateChessGame()
-        self.game_type = game_type
-
-        self.game.current_turn = 'W'
-
-        if game_type == 'bot':
-            self.user_color = random.choice(['W', 'B'])
-        else:
-            self.user_color = 'W'
-
-        if self.current_frame:
-            self.current_frame.destroy()
+                drawBoard();
+                updateStatus();
+                return;
+            }
             
-        # Re-initialize the game board setup and responsive layout
-        self.board_ui_frame = self._setup_game_board_ui(self.container) # Store a reference to the top-level frame
-        self.current_frame = self.board_ui_frame
-        self.current_frame.pack(fill="both", expand=True)
-        
-        # Initial check for layout based on current size
-        self.is_small_screen = self.winfo_width() < self.FONT_UPDATE_THRESHOLD
-        self._reconfigure_game_layout()
-
-        self.update_idletasks()
-        self.after(50, self._initial_draw_and_check)
-
-    def _initial_draw_and_check(self):
-        self.draw_board()
-        self.update_status()
-
-        is_ai_turn = self.game_type == 'bot' and self.game.current_turn != self.user_color
-        if is_ai_turn and not self.game.game_over:
-            self.handle_ai_turn()
-
-
-    # --- Menu Setup ---
-    def _update_elo_label(self, value):
-        if self.elo_label:
-            self.elo_label.config(text=f"ELO: {self.bot_elo.get()}")
-
-    def _setup_main_menu(self, parent):
-        menu_frame = tk.Frame(parent, bg=self.DARK_BG, padx=50, pady=50)
-
-        tk.Label(menu_frame, text="ULTIMATE CHESS", font=('Arial', 32, 'bold'), fg=self.ACCENT_GREEN, bg=self.DARK_BG).pack(pady=(0, 40))
-
-        # 1. 2 Player Local Button
-        tk.Button(menu_frame, text="2 PLAYER (LOCAL)", command=lambda: self.start_game('local'),
-                    font=('Arial', 18), bg=self.PANEL_BG, fg="white", activebackground="#474751", relief=tk.RAISED, bd=4).pack(pady=10, fill='x')
-
-        # 2. Play with Bot
-        tk.Label(menu_frame, text="Play with Bot (ELOfied)", font=('Arial', 14, 'bold'), fg="white", bg=self.DARK_BG).pack(pady=(20, 5))
-
-        elo_frame = tk.Frame(menu_frame, bg=self.DARK_BG)
-        elo_frame.pack(pady=5, fill='x')
-        self.elo_label = tk.Label(elo_frame, text=f"ELO: {self.bot_elo.get()}", font=('Arial', 14), fg=self.LIGHT_SQUARE, bg=self.DARK_BG)
-        self.elo_label.pack(side='left', padx=10)
-
-        self.elo_scale = tk.Scale(elo_frame, from_=1, to=3000, orient=tk.HORIZONTAL, variable=self.bot_elo, length=300,
-                                    bg=self.PANEL_BG, troughcolor="#474751", fg="white", highlightthickness=0, bd=0,
-                                    command=self._update_elo_label)
-        self.elo_scale.pack(side='left', fill='x', expand=True)
-
-        tk.Button(menu_frame, text="START BOT GAME", command=lambda: self.start_game('bot'),
-                    font=('Arial', 18), bg=self.ACCENT_GREEN, fg="white", activebackground="#43b581", relief=tk.RAISED, bd=4).pack(pady=10, fill='x')
-
-        # 3. Online Play (On Work)
-        online_frame = tk.Frame(menu_frame, bg=self.DARK_BG)
-        online_frame.pack(pady=20, fill='x')
-        tk.Button(online_frame, text="PLAY WITH FRIEND (ONLINE)", state=tk.DISABLED,
-                    font=('Arial', 18), bg=self.PANEL_BG, fg="#888888", relief=tk.RAISED, bd=4).pack(side='left', fill='x', expand=True)
-        tk.Label(online_frame, text="[COMING SOON]", font=('Arial', 12, 'bold'), fg=self.ACCENT_RED, bg=self.DARK_BG).pack(side='right', padx=10)
-
-        return menu_frame
-
-    # --- Game Board Setup (Refactored for responsiveness) ---
-    def _setup_game_board_ui(self, parent):
-        """Creates all the widgets but does NOT pack/grid them yet."""
-        
-        self.board_ui_frame = tk.Frame(parent, bg=self.DARK_BG) # Top-level container
-        
-        self.board_container = tk.Frame(self.board_ui_frame, bg=self.DARK_BG)
-
-        rank_range = range(8) if self.user_color == 'W' else range(7, -1, -1)
-
-        # 1. Rank Labels
-        self.rank_labels = []
-        for r_index in range(8):
-            rank_display = str(rank_range[r_index] + 1)
-            rank_label = tk.Label(self.board_container, text=rank_display, font=('Arial', 10, 'bold'), bg=self.DARK_BG, fg="white")
-            rank_label.grid(row=r_index, column=0, padx=(0, 5), sticky="e")
-            self.rank_labels.append(rank_label)
-
-        # 2. Frame for the actual 8x8 squares
-        self.board_frame = tk.Frame(self.board_container, bg=self.DARK_SQUARE, bd=2, relief=tk.RAISED)
-
-        self.board_container.grid_columnconfigure(1, weight=1)
-        for i in range(8):
-            self.board_container.grid_rowconfigure(i, weight=1)
-
-        # 3. File Labels (a-h)
-        self.file_labels = []
-        file_chars = 'abcdefgh'
-        for f in range(8):
-            file_label = tk.Label(self.board_container, text=file_chars[f], font=('Arial', 10, 'bold'), bg=self.DARK_BG, fg="white")
-            file_label.grid(row=8, column=f+1, pady=(5, 0), sticky="n")
-            self.file_labels.append(file_label)
-
-        # 4. UI Panel
-        self.panel_frame = tk.Frame(self.board_ui_frame, bg=self.PANEL_BG, padx=15, pady=15, bd=2, relief=tk.RIDGE)
-        
-        sizes = self._get_font_sizes()
-
-        tk.Label(self.panel_frame, text="ULTIMATE CHESS", bg=self.PANEL_BG, fg="#FFFFFF", font=('Arial', sizes['title'], 'bold')).pack(pady=10)
-        self.status_label = tk.Label(self.panel_frame, text="", bg=self.PANEL_BG, fg="white", font=('Arial', sizes['title']))
-        self.status_label.pack(pady=5, fill="x")
-
-        # R_COMMAND USES DISPLAY
-        self.r_uses_label = tk.Label(self.panel_frame, text="", bg=self.PANEL_BG, fg="#FFD700", font=('Arial', sizes['panel'] + 1))
-        self.r_uses_label.pack(pady=2, fill="x")
-
-        self.message_label = tk.Label(self.panel_frame, text="", bg=self.PANEL_BG, fg=self.ACCENT_GREEN, font=('Arial', sizes['panel'] + 2), wraplength=250)
-        self.message_label.pack(pady=5, fill="x")
-
-        self.ability_info_frame = tk.Frame(self.panel_frame, bg="#474751", bd=1, relief=tk.GROOVE)
-        self.ability_info_frame.pack(pady=15, fill="x")
-        tk.Label(self.ability_info_frame, text="--- ULTIMATE POWER ---", bg="#474751", fg="#FFFFFF", font=('Arial', sizes['panel'] + 1, 'bold')).pack(pady=(5, 2))
-        self.ability_title = tk.Label(self.ability_info_frame, text="", bg="#474751", fg='white', font=('Arial', sizes['panel'] + 3, 'bold'))
-        self.ability_title.pack(pady=(2, 5), fill="x")
-        self.ability_desc = tk.Label(self.ability_info_frame, text="", bg="#474751", fg=self.LIGHT_SQUARE, font=('Arial', sizes['panel']), wraplength=220, justify=tk.LEFT)
-        self.ability_desc.pack(padx=5, pady=(0, 5), fill="x")
-        self.ability_prompt = tk.Label(self.ability_info_frame, text="", bg="#474751", fg=self.ACCENT_GREEN, font=('Arial', sizes['panel'] + 1))
-        self.ability_prompt.pack(pady=(5, 5), fill="x")
-
-        # --- NEW COMMAND BUTTONS CONTAINER ---
-        self.cmd_frame = tk.Frame(self.panel_frame, bg=self.PANEL_BG)
-        self.cmd_frame.pack(pady=10, fill="x")
-
-        self.hack_btn = tk.Button(self.cmd_frame, text="/HACK (Friendly Fire)", command=self._initiate_hack,
-                                    state=tk.DISABLED, bg="#474751", fg="white", relief=tk.RAISED, font=('Arial', sizes['panel'] + 1))
-        self.hack_btn.pack(side="top", fill="x", pady=2)
-
-        self.phase_btn = tk.Button(self.cmd_frame, text="/PHASE (Teleport Rook)", command=self._initiate_phase,
-                                    state=tk.DISABLED, bg="#474751", fg="white", relief=tk.RAISED, font=('Arial', sizes['panel'] + 1))
-        self.phase_btn.pack(side="top", fill="x", pady=2)
-        # --- END NEW COMMAND BUTTONS ---
-
-        self.ultimate_button = tk.Button(self.panel_frame, text="ACTIVATE ULTIMATE", command=self.activate_ultimate_gui,
-                                            bg=ACCENT_RED, activebackground="#A52A2A", fg="white", font=('Arial', sizes['title'] - 2, 'bold'),
-                                            relief=tk.RAISED, bd=4)
-        self.ultimate_button.pack(pady=20, fill="x")
-
-        # 5. Board squares setup
-        self.squares = {}
-        for r in range(8):
-            self.board_frame.grid_columnconfigure(r, weight=1)
-            self.board_frame.grid_rowconfigure(r, weight=1)
-
-            for f in range(8):
-                color = self.LIGHT_SQUARE if (f + r) % 2 == 0 else self.DARK_SQUARE
+            // 2. Handle Standard Selection/Move
+            if (selectedSquare) {
+                const [f1, r1] = selectedSquare;
+                const startCoord = game._indices_to_coords(f1, r1);
+                const endCoord = game._indices_to_coords(f, r);
                 
-                label = tk.Label(self.board_frame, text="",
-                                    font=('Arial', self.BASE_PIECE_FONT_SIZE), # Base size, updated in _update_all_fonts
-                                    relief=tk.FLAT, bd=0,
-                                    width=2, height=1, anchor='center')
+                if (f === f1 && r === r1) {
+                    game.message = "Deselected.";
+                    clearSelection();
+                } else if (validTargets.some(t => t.coords[0] === f && t.coords[1] === r)) {
+                    // Valid Move or Power Move (Rook retreat/Bishop freeze)
+                    game.execute_move(startCoord + endCoord);
+                    clearSelection();
+                    // if (game.game_type === 'bot' && game.current_turn !== userColor) handleAITurn();
+                } else if (piece && piece.color === game.current_turn) {
+                    // Select new friendly piece
+                    selectedSquare = [f, r];
+                    game.message = `Selected new piece at ${endCoord}.`;
+                    validTargets = game.get_legal_moves(f, r);
+                } else {
+                    game.message = "Invalid move destination.";
+                }
 
-                if self.user_color == 'W':
-                        grid_r = 7 - r
-                else:
-                        grid_r = r
+            } else {
+                // Initial selection
+                if (piece && piece.color === game.current_turn) {
+                    selectedSquare = [f, r];
+                    game.message = `Selected ${piece.color}${piece.type} at ${coord}.`;
+                    validTargets = game.get_legal_moves(f, r);
+                } else {
+                    game.message = "Invalid selection. Please select one of your pieces.";
+                }
+            }
 
-                label.grid(row=grid_r, column=f, sticky="nsew")
-                self.squares[(f, r)] = {'label': label, 'color': color, 'f': f, 'r': r}
-                label.bind("<Button-1>", lambda event, f=f, r=r: self.handle_click(f, r))
+            drawBoard();
+            updateStatus();
+        }
 
-        return self.board_ui_frame
-
-    # --- Rook Ultimate Button Handlers ---
-
-    def _initiate_hack(self):
-        if self.game.is_power_mode == 'R_COMMAND_SELECT' and self.selected_square:
-            self.game.is_power_mode = 'R_HACK_PENDING'
-            self.game.message = "HACK: Select a non-King piece to grant it friendly fire capture."
-            f, r = self.selected_square
-            self.valid_targets = self.game.get_legal_moves(f, r)
-            self.draw_board()
-            self.update_status()
-
-    def _initiate_phase(self):
-        if self.game.is_power_mode == 'R_COMMAND_SELECT' and self.selected_square:
-            self.game.is_power_mode = 'R_PHASE_PENDING'
-            self.game.message = "PHASE: Select an empty square for the Rook to teleport."
-            f, r = self.selected_square
-            self.valid_targets = self.game.get_legal_moves(f, r)
-            self.draw_board()
-            self.update_status()
-
-    # --- Rook Ultimate Click Execution ---
-
-    def _handle_rook_command_click(self, f, r):
-        """Handles subsequent clicks after a command button is issued."""
-        mode = self.game.is_power_mode
-        current_turn = self.game.current_turn
-
-        if self.selected_square is None or not self._is_valid_target(f, r):
-            self.game.message = "Invalid target. Selection cleared. Try activating ULTIMATE again."
-            # The usage deduction has not happened yet, so no need to increment r_power_uses.
-            self.clear_selection()
-            self.draw_board()
-            self.update_status()
-            return
-
-        f1, r1 = self.selected_square
-
-        # 1. Deduct use (only happens on successful target click)
-        self.game.r_power_uses[current_turn] -= 1
-
-        # 2. Execute command based on mode
-        if mode == 'R_HACK_PENDING':
-            target_piece = self.game.board[f][r]
-
-            # Since get_legal_moves already filtered out Kings, this is safe.
-            self.game.hacked_piece = (f, r)
-            self.game.message = f"HACK successful! {target_piece['color']}{target_piece['type']} at {self.game._indices_to_coords(f, r)} can now capture friendly pieces."
-
-        elif mode == 'R_PHASE_PENDING':
-            # Phase is placing the rook on an empty square
-            rook_piece_data = {'type': 'R', 'color': current_turn, 'moved': True}
-            self.game.board[f][r] = rook_piece_data
-            self.game.message = f"PHASE successful! Rook teleported to {self.game._indices_to_coords(f, r)}."
-
-        # 3. Rook disappearance (The initiating piece, which is R at f1, r1, is gone)
-        self.game.board[f1][r1] = None
-
-        # 4. Final cleanup and turn switch
-        self.game.is_power_mode = None
-        self.game.selected_square_coords = None
-        self.game._next_turn()
-        self.clear_selection()
-
-        if self.game_type == 'bot' and not self.game.game_over and self.game.current_turn != self.user_color:
-            self.handle_ai_turn()
-
-
-    def draw_board(self):
-        """Draws all pieces, blockades, Roomba, and Frozen symbols on the board, and handles game over overlay."""
-
-        sizes = self._get_font_sizes()
-        
-        for f in range(8):
-            for r in range(8):
-                piece = self.game.board[f][r]
-                symbol = ' '
-                fg_color = self.SILVER_PIECE
-                bg_color = self.squares[(f, r)]['color']
-                font_size = sizes['piece']
-
-                # Highlight hacked piece (priority over normal piece color, below highlights)
-                if self.game.hacked_piece == (f, r):
-                    fg_color = '#FFD700'
-
-                if piece:
-                    piece_key = piece['color'] + piece['type']
-                    symbol = UNICODE_PIECES.get(piece_key, piece_key)
-                    fg_color = self.GOLD_PIECE if piece['color'] == 'W' else self.SILVER_PIECE
-                    if piece['type'] == 'A': font_size = sizes['piece'] - 12
-                elif self.game.roomba_pos == (f, r):
-                    symbol = UNICODE_PIECES['RM']
-                    fg_color = '#FFD700' ; bg_color = '#474751'
-                elif self.game._is_square_blocked(f, r):
-                    symbol = UNICODE_PIECES['BL']
-                    fg_color = '#FF4500'
-
-                if self.game.hacked_piece == (f, r):
-                    fg_color = '#FFD700' # Ensure hacked color is applied
-
-                # Apply highlighting (selected square, targets)
-                target_info = next((t for t in self.valid_targets if t['coords'] == (f, r)), None)
-
-                if self.selected_square == (f, r):
-                    bg_color = self.HIGHLIGHT_COLOR
-
-                elif target_info:
-                    is_empty_square = (piece is None) and (self.game.roomba_pos != (f,r)) and not self.game._is_square_blocked(f,r)
-
-                    if is_empty_square and not target_info.get('is_power_target'):
-                        symbol = self.DOT_SYMBOL
-                        fg_color = self.DOT_COLOR
-                        font_size = sizes['dot']
-                    elif target_info.get('is_power_target'):
-                        bg_color = self.POWER_TARGET_COLOR
-                    elif target_info['is_capture'] or piece:
-                        bg_color = self.ATTACK_COLOR
-
-                # Apply Frozen overlay (takes precedence over normal background/piece rendering)
-                if self.game._is_square_frozen(f, r):
-                    bg_color = self.FROZEN_COLOR
-                    if piece and UNICODE_PIECES['FR'] not in symbol:
-                        symbol = symbol.strip() + ' ' + UNICODE_PIECES['FR']
-
-                square_data = self.squares[(f, r)]
-                square_data['label'].config(text=symbol, fg=fg_color, bg=bg_color, font=('Arial', font_size))
-
-        # Check for game over and draw overlay
-        if self.game.game_over:
-            if hasattr(self, 'overlay'):
-                self.overlay.destroy()
-
-            self.overlay = tk.Canvas(self.board_frame, bg=self.DARK_BG, highlightthickness=0, relief='flat')
-            self.overlay.place(relx=0.5, rely=0.5, anchor='center', relwidth=1.0, relheight=1.0)
-
-            self.update_idletasks()
-            board_width = self.board_frame.winfo_width()
-            board_height = self.board_frame.winfo_height()
-
-            if self.game.game_over == 'CHECKMATE':
-                winner = 'White' if self.game.current_turn == 'B' else 'Black'
-                full_message = f"CHECKMATE!\n{winner} WINS!\n\n(Click to return to Menu)"
-                fg_color = self.ACCENT_RED
-            else: # STALEMATE
-                full_message = "STALEMATE\nDraw!\n\n(Click to return to Menu)"
-                fg_color = self.LIGHT_SQUARE
+        function activateUltimateWeb() {
+            if (game.is_power_mode) {
+                game.is_power_mode = null;
+                game.message = "Ultimate power sequence cancelled.";
+                clearSelection();
+                return;
+            }
             
-            # Use smaller font for game over overlay on small screens
-            overlay_font_size = 30 if not self.is_small_screen else 20
-
-            self.overlay.create_text(
-                board_width / 2, board_height / 2,
-                text=full_message,
-                font=('Arial', overlay_font_size, 'bold'),
-                fill=fg_color,
-                justify=tk.CENTER
-            )
-
-            self.overlay.bind("<Button-1>", self.return_to_menu_after_game)
-
-    def _is_valid_target(self, f, r):
-        return any(t['coords'] == (f, r) for t in self.valid_targets)
-
-    def return_to_menu_after_game(self, event):
-        if self.game.game_over:
-            if hasattr(self, 'overlay'):
-                self.overlay.destroy()
-            self.show_main_menu()
-
-    def clear_selection(self):
-        self.selected_square = None
-        self.game.selected_square_coords = None
-        self.game.is_power_mode = None
-        self.valid_targets = []
-        self.game.phase_move_pending = False
-        self.game.swap_targets = []
-        self.draw_board()
-
-    def update_ability_panel(self, piece=None):
-        info = self.game.current_ultimate_power_info
-
-        # Update Rook uses display
-        r_uses_text = "Rook Uses: W: {W}/2 | B: {B}/2".format(**self.game.r_power_uses)
-        if self.game.hacked_piece:
-            hf, hr = self.game.hacked_piece
-            h_piece = self.game.board[hf][hr]
-            h_coord = self.game._indices_to_coords(hf, hr)
-            r_uses_text += f" | HACKED: {h_piece['color']}{h_piece['type']} at {h_coord}"
-        self.r_uses_label.config(text=r_uses_text)
+            if (!selectedSquare) {
+                game.message = "Please select a piece first before activating ULTIMATE.";
+                updateStatus();
+                return;
+            }
+            
+            const [f, r] = selectedSquare;
+            const isActivated = game.activate_ultimate(f, r);
+            
+            if (isActivated && game.is_power_mode) {
+                // Re-calculate targets for the power mode if a new target selection is needed
+                validTargets = game.get_legal_moves(f, r);
+            } else if (isActivated) {
+                // Power was executed immediately (e.g. if the next move in Python was handled internally)
+                clearSelection();
+            }
+            
+            drawBoard();
+            updateStatus();
+        }
         
-        sizes = self._get_font_sizes()
-        
-        # Ensure panel fonts are updated before setting text
-        self.ability_title.config(font=('Arial', sizes['panel'] + 3, 'bold'))
-        self.ability_desc.config(font=('Arial', sizes['panel']))
-        self.ability_prompt.config(font=('Arial', sizes['panel'] + 1))
-        self.hack_btn.config(font=('Arial', sizes['panel'] + 1))
-        self.phase_btn.config(font=('Arial', sizes['panel'] + 1))
-        self.ultimate_button.config(font=('Arial', sizes['title'] - 2, 'bold'))
-
-
-        if self.game.is_power_mode:
-            self.ability_title.config(text=f"POWER MODE: {info['name']}", fg=self.ACCENT_RED)
-            self.ability_desc.config(text=info['desc'], fg=self.LIGHT_SQUARE)
-
-            if self.game.is_power_mode == 'R_COMMAND_SELECT':
-                self.ability_prompt.config(text="Status: Select /HACK or /PHASE.", fg='#FFD700')
-            elif self.game.is_power_mode in ('R_HACK_PENDING', 'R_PHASE_PENDING'):
-                self.ability_prompt.config(text=self.game.message, fg=self.ACCENT_GREEN)
-            else:
-                self.ability_prompt.config(text=f"Action: {info['prompt']}", fg=self.ACCENT_GREEN)
-
-            self.ultimate_button.config(text="CANCEL POWER", bg=self.ACCENT_RED)
-
-            # Show command buttons only when in R_COMMAND_SELECT mode
-            if self.game.is_power_mode == 'R_COMMAND_SELECT':
-                self.hack_btn.config(state=tk.NORMAL)
-                self.phase_btn.config(state=tk.NORMAL)
-            else:
-                self.hack_btn.config(state=tk.DISABLED)
-                self.phase_btn.config(state=tk.DISABLED)
-
-            return
-
-        # Default display when no power is active
-        self.hack_btn.config(state=tk.DISABLED)
-        self.phase_btn.config(state=tk.DISABLED)
-
-        if piece:
-            piece_type = piece['type']
-            info = self.game._get_piece_power(piece_type)
-
-            self.ability_title.config(text=f"{piece_type} ULTIMATE: {info['name']}", fg=self.ACCENT_GREEN)
-            self.ability_desc.config(text=info['desc'], fg=self.LIGHT_SQUARE)
-            self.ability_prompt.config(text="Action: Click ACTIVATE to use this power.", fg='white')
-        else:
-            info = ULTIMATE_POWERS['GENERAL']
-            self.ability_title.config(text="Select a Piece", fg='white')
-            self.ability_desc.config(text="General Ultimate: " + info['desc'], fg=self.LIGHT_SQUARE)
-            self.ability_prompt.config(text="Action: Make a standard move.", fg='white')
-
-        self.ultimate_button.config(text="ACTIVATE ULTIMATE", bg=self.ACCENT_RED)
-
-
-    def update_status(self):
-        if self.game.game_over:
-            self.status_label.config(text=self.game.game_over, fg=self.ACCENT_RED)
-            self.message_label.config(text=self.game.message, fg=self.ACCENT_RED)
-            self.ultimate_button.config(state=tk.DISABLED)
-            return
-
-        turn_text = "WHITE" if self.game.current_turn == 'W' else "BLACK"
-
-        mode_label = ""
-        is_user_turn = self.game_type == 'local' or self.game.current_turn == self.user_color
-
-        if self.game_type == 'bot':
-            player_role = "YOU" if self.game.current_turn == self.user_color else "AI"
-            mode_label = f" ({player_role} turn)"
-        
-        sizes = self._get_font_sizes()
-
-        self.status_label.config(text=f"Current Turn: {turn_text}{mode_label}",
-                                    fg=self.GOLD_PIECE if self.game.current_turn == 'W' else self.SILVER_PIECE,
-                                    font=('Arial', sizes['title'], 'bold'))
-
-        if self.game.is_check:
-            self.message_label.config(text=self.game.message, fg=self.ACCENT_RED, font=('Arial', sizes['panel'] + 2))
-        else:
-            self.message_label.config(text=self.game.message, fg=self.LIGHT_SQUARE, font=('Arial', sizes['panel'] + 2))
-
-        is_piece_selected = self.selected_square is not None
-        can_activate = is_piece_selected and not self.game.is_power_mode
-
-        if is_user_turn:
-            if self.game.is_power_mode:
-                self.ultimate_button.config(state=tk.NORMAL, text="CANCEL POWER")
-            else:
-                self.ultimate_button.config(state=tk.NORMAL if can_activate else tk.DISABLED, text="ACTIVATE ULTIMATE")
-        else:
-            self.ultimate_button.config(state=tk.DISABLED)
-
-        piece = self.game.board[self.selected_square[0]][self.selected_square[1]] if self.selected_square else None
-        self.update_ability_panel(piece)
-
-
-    def handle_click(self, f, r):
-        if self.game.game_over: return
-
-        if self.game_type == 'bot' and self.game.current_turn != self.user_color:
-            self.game.message = "Please wait for the AI to move."
-            self.update_status()
-            return
-
-        f1, r1 = self.selected_square if self.selected_square else (None, None)
-
-        is_power_command_active = self.game.is_power_mode in ('R_HACK_PENDING', 'R_PHASE_PENDING', 'BLOCKADE', 'KNIGHT_FUSION')
-
-        # --- Handle Power Interaction (Second click) ---
-        if is_power_command_active:
-
-            if self.game.is_power_mode == 'BLOCKADE':
-                # Blockade logic (Temporal Blockade)
-                algebraic_coord = self.game._indices_to_coords(f, r)
-                self.game.place_blockade(algebraic_coord)
-                self.clear_selection()
-
-            elif self.game.is_power_mode == 'KNIGHT_FUSION':
-                # Fusion logic (Second click selects the Bishop)
-                if self._is_valid_target(f, r):
-                    self.game.perform_fusion(f, r)
-                else:
-                    self.game.message = "Invalid fusion target. Select a friendly Bishop within range."
-                    # Stay in KNIGHT_FUSION mode if invalid target
-                    self.draw_board()
-                    self.update_status()
-                    return
-                self.clear_selection() # Fusion successful
-
-            elif self.game.is_power_mode in ('R_HACK_PENDING', 'R_PHASE_PENDING'):
-                # Rook Command execution
-                self._handle_rook_command_click(f, r)
-
-            return
-
-        # --- Standard Move/Selection ---
-
-        if self.selected_square is None:
-            piece = self.game.board[f][r]
-            if piece and piece['color'] == self.game.current_turn:
-                self.selected_square = (f, r)
-                self.valid_targets = self.game.get_legal_moves(f, r)
-                self.game.message = f"Selected {piece['color']}{piece['type']} at {self.game._indices_to_coords(f, r)}. {len(self.valid_targets)} moves available."
-            else:
-                self.game.message = "Invalid selection. Please select one of your pieces."
-
-        else:
-            # A piece is selected, attempting a move/power finalization
-            target_is_valid = self._is_valid_target(f, r)
-
-            if (f, r) == (f1, r1):
-                self.game.message = "Deselected."
-                self.clear_selection()
-                return
-
-            target_piece = self.game.board[f][r]
-
-            if target_piece and target_piece['color'] == self.game.current_turn and not target_is_valid:
-                # Selecting a different friendly piece
-                self.game.message = f"Selected new piece at {self.game._indices_to_coords(f, r)}."
-                self.selected_square = (f, r)
-                self.valid_targets = self.game.get_legal_moves(f, r)
-
-            elif target_is_valid:
-                # Execute standard move, Rook retreat, Bishop freeze, or Murasaki sacrifice
-                start_coord = self.game._indices_to_coords(f1, r1)
-                end_coord = self.game._indices_to_coords(f, r)
-
-                self.game.execute_move(start_coord + end_coord)
-
-                # Check if the execution resulted in a turn switch (normal move or ultimate completion)
-                if self.game.is_power_mode is None:
-                    self.clear_selection()
-                    if self.game_type == 'bot' and not self.game.game_over and self.game.current_turn != self.user_color:
-                        self.handle_ai_turn()
-
-            else:
-                self.game.message = "Invalid move destination."
-
-        self.draw_board()
-        self.update_status()
-
-    def activate_ultimate_gui(self):
-        if self.game_type == 'bot' and self.game.current_turn != self.user_color:
-            return
-
-        if self.game.is_power_mode:
-            # Cancel current power mode sequence
-            self.game.is_power_mode = None
-            self.game.message = "Ultimate power sequence cancelled."
-            self.clear_selection()
-            return
-
-        if self.selected_square is None:
-            self.game.message = "Please select a piece first before activating ULTIMATE."
-            self.update_status()
-            return
-
-        f, r = self.selected_square
-        piece = self.game.board[f][r]
-
-        is_activated = self.game.activate_ultimate(f, r)
-
-        if is_activated and self.game.is_power_mode in ('R_COMMAND_SELECT', 'KNIGHT_FUSION', 'BISHOP_FREEZE', 'MURASAKI', 'ROOK_ROOMBA'):
-            # Enter the secondary selection mode
-            self.game.selected_square_coords = self.selected_square
-            self.valid_targets = self.game.get_legal_moves(f, r)
-
-        elif is_activated and self.game.is_power_mode is None:
-            # Power completed in one step (currently none, but future proofing)
-            self.clear_selection()
-            if self.game_type == 'bot' and not self.game.game_over and self.game.current_turn != self.user_color:
-                self.handle_ai_turn()
-
-        self.draw_board()
-        self.update_status()
-
-    # --- AI Handler ---
-
-    def _execute_ai_move(self):
-        if self.game_type != 'bot' or self.game.current_turn == self.user_color or self.game.game_over:
-            return
-
-        elo_level = self.bot_elo.get()
-        ai_move = self.game.get_bot_move(elo_level)
-
-        if ai_move:
-            f1, r1 = ai_move['f1'], ai_move['r1']
-            f2, r2 = ai_move['f2'], ai_move['r2']
-
-            start_coord = self.game._indices_to_coords(f1, r1)
-            end_coord = self.game._indices_to_coords(f2, r2)
-            move_str = start_coord + end_coord
-
-            self.selected_square = (f1, r1)
-            self.valid_targets = [{'coords': (f2, r2), 'is_capture': ai_move['is_capture']}]
-            self.draw_board()
-            self.update_status()
-
-            self.after(200, lambda: self._commit_ai_move(move_str))
-
-        else:
-            self.draw_board()
-            self.update_status()
-
-    def _commit_ai_move(self, move_str):
-        if self.game_type != 'bot' or self.game.game_over:
-            return
-
-        self.game.execute_move(move_str)
-
-        self.clear_selection()
-
-        if not self.game.game_over and self.game.current_turn != self.user_color:
-            self.handle_ai_turn()
-
-        self.draw_board()
-        self.update_status()
-    
-    def handle_ai_turn(self):
-        """Disables controls and waits for AI move."""
-        # This function is the entry point for the AI turn simulation
-        self.ultimate_button.config(state=tk.DISABLED) # Prevent user interaction
-        # Placeholder for AI delay and move execution
-        self.after(500, self._execute_ai_move)
-
-
-# --- 3. MAIN EXECUTION ---
-
-if __name__ == '__main__':
-    # If running locally, this will launch the Tkinter application.
-    # Note: If you try to run this code in an environment without a desktop
-    # GUI available (like a standard server environment), it will fail.
-    app = UltimateChessApp()
-    app.mainloop()
+        function handleCommand(mode) {
+            // Handles /HACK or /PHASE button click
+            if (game.is_power_mode === 'R_COMMAND_SELECT') {
+                game.is_power_mode = mode;
+                game.message = mode === 'R_HACK_PENDING' ? 
+                    "HACK: Select a non-King piece to grant it friendly fire capture." :
+                    "PHASE: Select an empty square for the Rook to teleport.";
+                
+                // Re-calculate targets specific to the command
+                const [f, r] = game.selected_square_coords;
+                validTargets = game.get_legal_moves(f, r);
+                
+                drawBoard();
+                updateStatus();
+            }
+        }
+
+        // --- Initial Call ---
+        window.onload = () => {
+             // Initial ELO setup for the label
+             dom.eloValue.textContent = document.getElementById('elo-slider').value;
+        };
+    </script>
+</body>
+</html>
