@@ -249,51 +249,6 @@
             font-size: 12px;
             display: none; /* Hide the tag since the button is now active */
         }
-        
-        /* --- Popup/Modal Styles (NEW) --- */
-        #invitation-popup-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        
-        .invitation-modal {
-            background-color: var(--panel-bg);
-            padding: 30px;
-            border-radius: 8px;
-            max-width: 400px;
-            text-align: center;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
-        }
-        
-        .invitation-modal h3 {
-            color: #FFD700;
-            font-size: 20px;
-            margin-top: 0;
-        }
-        
-        .modal-buttons button {
-            padding: 10px 20px;
-            margin: 10px 10px 0;
-            font-size: 16px;
-            width: 120px;
-        }
-        
-        .accept-btn {
-            background-color: var(--accent-green);
-        }
-        
-        .deny-btn {
-            background-color: var(--accent-red);
-        }
-
 
         /* --- Game UI Layout --- */
         #game-ui {
@@ -448,6 +403,7 @@
             height: 100%;
             background-color: rgba(46, 46, 56, 0.85); /* royal-bg with transparency */
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
@@ -734,9 +690,6 @@
                 <button id="ultimate-button" onclick="app.activate_ultimate_gui()">ACTIVATE ULTIMATE</button>
             </div>
         </div>
-        
-        <div id="invitation-popup-container" class="hidden">
-            </div>
     </div>
 
     <script>
@@ -1719,7 +1672,6 @@
                 const target = this.board[f2][r2];
 
                 // --- HACKED PIECE CAPTURE CHECK ---
-                // The hacking piece (f1, r1) is allowed to capture a friendly piece (target.color == piece.color)
                 const is_hacked_capture = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
 
                 // --- FRIENDLY FIRE CHECK (MURASAKI) ---
@@ -1822,9 +1774,6 @@
 
                 this.en_passant_target = null;
                 this.phase_move_pending = false;
-                
-                // HACK: The hack status is cleared only after the turn switch, 
-                // allowing the hacked piece to make ONE move. This is handled below.
 
                 // 1. Roomba movement (always check if the King is still safe)
                 if (this.roomba_moves_remaining > 0) {
@@ -1853,10 +1802,10 @@
                     this.message += ` (${keys_to_remove.length} pieces thawed out!)`;
                 }
 
-                // 3. Clear one-turn states and switch turn
-                this.hacked_piece = null; // Clears hack status when turn changes
+                // 3. Switch turn and check for mate/stalemate
                 this.current_turn = this.current_turn === 'W' ? 'B' : 'W';
                 this.is_power_mode = null;
+                this.hacked_piece = null; // HACK only lasts for one turn
 
                 this.is_check = this._is_king_in_check(this.current_turn);
                 const has_moves = this.has_legal_moves(this.current_turn);
@@ -1945,10 +1894,6 @@
                 const target = this.board[f2][r2];
                 const df = f2 - f1;
                 const dr = r2 - r1;
-                
-                // Check if this move is a Hacked Capture
-                const is_hacked_capture_move = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
-
 
                 // --- MURASAKI ACTIVATION LOGIC (Immediate Execution) ---
                 const is_murasaki_move = (
@@ -2006,6 +1951,7 @@
                 // --- 3. Standard Move Logic (Standard move path) ---
                 } else {
                     const is_roomba_capture = this.roomba_pos && this.roomba_pos.f === f2 && this.roomba_pos.r === r2;
+                    const is_hacked_capture = (this.hacked_piece && this.hacked_piece.f === f1 && this.hacked_piece.r === r1 && target && target.color === piece.color);
 
                     if (is_roomba_capture) {
                         this.roomba_pos = null;
@@ -2013,15 +1959,13 @@
                         this.message = "Roomba destroyed by piece move!";
                     } else if (target) {
                         this.message = `Captured ${target.color}${target.type}!`;
-                        if (is_hacked_capture_move) {
-                            // If it was a hacked move, the target was friendly (already checked by _validate_move)
+                        if (is_hacked_capture) {
                             this.message = `Hacked piece ${piece.color}${piece.type} successfully captured friendly ${target.type}!`;
                         }
                     } else {
                         this.message = "Move successful.";
                     }
 
-                    // Perform the physical move
                     this.board[f2][r2] = piece;
                     this.board[f1][r1] = null;
                     piece.moved = true;
@@ -2073,7 +2017,7 @@
             _setup_elements() {
                 this.elements.gameContainer = document.getElementById('game-container');
                 this.elements.mainMenu = document.getElementById('main-menu');
-                this.elements.onlineLobby = document.getElementById('online-lobby'); 
+                this.elements.onlineLobby = document.getElementById('online-lobby'); // NEW
                 this.elements.gameUI = document.getElementById('game-ui');
                 this.elements.boardFrame = document.getElementById('board-frame');
                 this.elements.panelFrame = document.getElementById('panel-frame');
@@ -2094,7 +2038,6 @@
                 // NEW Lobby elements
                 this.elements.dynamicPlayerList = document.getElementById('dynamic-player-list');
                 this.elements.lobbyStatusMessage = document.getElementById('lobby-status-message');
-                this.elements.invitationPopupContainer = document.getElementById('invitation-popup-container');
             }
 
             _setup_event_listeners() {
@@ -2132,7 +2075,6 @@
                 this.elements.onlineLobby.classList.add('hidden');
                 this.elements.gameUI.classList.add('hidden');
                 this.elements.overlay.classList.add('hidden');
-                this.elements.invitationPopupContainer.classList.add('hidden');
             }
 
             show_main_menu() {
@@ -2140,36 +2082,39 @@
                 this.elements.mainMenu.classList.remove('hidden');
             }
             
+            // NEW: Show online lobby
             showOnlineLobby() {
                 this._hide_all_screens();
                 this._renderOnlinePlayers(); // Generate player list
                 this.elements.onlineLobby.classList.remove('hidden');
             }
             
+            // NEW: Simulation of player list
             _renderOnlinePlayers() {
-                // IMPORTANT: This is a simulation. These players are NOT real users.
                 const players = [
                     { name: 'Cody_The_Haxor', elo: 1850, status: 'Ready' },
                     { name: 'Anime_King_24', elo: 1200, status: 'Ready' },
                     { name: 'Network_Ghost', elo: 2500, status: 'In Match', busy: true },
+                    // If no one is "found" dynamically, we can use a message:
+                    // { name: 'No person found', elo: '???', status: 'Offline', busy: true }
                 ];
 
                 this.elements.dynamicPlayerList.innerHTML = '';
                 
+                // Determine if any "Ready" players exist for the status message
                 const readyPlayers = players.filter(p => !p.busy);
-                const allPlayers = players;
 
-                if (allPlayers.length === 0) {
+                if (readyPlayers.length === 0) {
                     this.elements.lobbyStatusMessage.textContent = "No players found online right now. Try again later.";
                     this.elements.dynamicPlayerList.innerHTML = `
                         <div class="player-card" style="cursor: default; background-color: var(--royal-bg); border: 1px dashed #777;">
-                            No players currently available.
+                            No players currently ready.
                         </div>
                     `;
                     return;
                 }
 
-                allPlayers.forEach(player => {
+                readyPlayers.forEach(player => {
                     const card = document.createElement('div');
                     card.className = 'player-card';
                     
@@ -2178,8 +2123,8 @@
                         card.style.cursor = 'default';
                         card.querySelector('.status').style.color = 'var(--accent-red)';
                     } else {
-                        // Action: Show invite SENT popup
-                        card.onclick = () => this.showInviteSentPopup(player.name);
+                        // The core logic the user requested: tapping sends a request
+                        card.onclick = () => this.sendMatchRequest(player.name);
                     }
 
                     card.innerHTML = `
@@ -2191,61 +2136,12 @@
 
                 this.elements.lobbyStatusMessage.textContent = `Found ${readyPlayers.length} challenger(s) ready to play. Click a name to send a challenge.`;
             }
-            
-            // NEW: Function to display the invitation sent popup
-            showInviteSentPopup(opponentName) {
-                this._hide_all_screens(); 
-                
-                this.elements.invitationPopupContainer.classList.remove('hidden');
-                this.elements.invitationPopupContainer.innerHTML = `
-                    <div class="invitation-modal">
-                        <h3>INVITE SENT</h3>
-                        <p style="color: var(--light-square);">
-                            A challenge has been sent to **${opponentName}**.<br>
-                            Waiting for them to accept the Ultimate Match.
-                        </p>
-                        <div class="modal-buttons">
-                            <button class="deny-btn" onclick="app._handleInviteResponse('${opponentName}', 'denied')">Cancel Request (X)</button>
-                        </div>
-                    </div>
-                `;
-                
-                // Simulate receiving the response after a short delay
-                setTimeout(() => {
-                    this.showInviteReceivedPopup(opponentName);
-                }, 1500); // 1.5 second simulated latency
-            }
-            
-            // NEW: Function to simulate the opponent's device receiving and handling the invite
-            showInviteReceivedPopup(opponentName) {
-                this._hide_all_screens(); 
-                this.elements.invitationPopupContainer.classList.remove('hidden');
-                this.elements.invitationPopupContainer.innerHTML = `
-                    <div class="invitation-modal">
-                        <h3>🔔 INVITATION RECEIVED!</h3>
-                        <p style="color: var(--light-square);">
-                            **${opponentName}** has challenged you to an Ultimate Chess match!
-                            <br>
-                            *Abilities: ENABLED*
-                        </p>
-                        <div class="modal-buttons">
-                            <button class="accept-btn" onclick="app._handleInviteResponse('${opponentName}', 'accepted')">Accept (✔)</button>
-                            <button class="deny-btn" onclick="app._handleInviteResponse('${opponentName}', 'denied')">Deny (X)</button>
-                        </div>
-                    </div>
-                `;
-            }
-            
-            // NEW: Function to handle the final handshake logic
-            _handleInviteResponse(opponentName, response) {
-                this.elements.invitationPopupContainer.classList.add('hidden');
 
-                if (response === 'accepted') {
-                    // Start the game, assigning the opponent's name
-                    this.start_game('online', opponentName);
-                } else {
-                    alert(`Challenge to ${opponentName} denied/cancelled. Returning to lobby.`);
-                    this.showOnlineLobby();
+            // NEW: Send match request simulation
+            sendMatchRequest(playerName) {
+                if (confirm(`Would you like to send a challenge request to ${playerName} for an Ultimate Match? (Abilities Enabled)`)) {
+                    // SIMULATION: If accepted, start the game.
+                    this.start_game('online', playerName);
                 }
             }
 
