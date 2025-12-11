@@ -3,113 +3,973 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multiplayer Circle Game</title>
+    <title>Infinite Drift City: Tokyo Night</title>
     <style>
-        body { margin: 0; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        canvas { background-color: #fff; border: 1px solid #ccc; }
+        body { margin: 0; overflow: hidden; background-color: #14141e; }
+        canvas { display: block; }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            font-size: 24px;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff3232;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            font-size: 48px;
+            text-shadow: 3px 3px 0 #000;
+            display: none;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border: 2px solid white;
+            text-align: center;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255,255,255,0.7);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
-    <canvas id="gameCanvas" width="800" height="600"></canvas>
 
-    <script src="/socket.io/socket.io.js"></script>
+<div id="ui">SCORE: 0</div>
+<div id="game-over">BUSTED<br><span style="font-size:20px; color:white">Press R to Restart</span></div>
+<div id="controls">WASD / Arrows to Drive | SPACE to Drift</div>
+<canvas id="gameCanvas"></canvas>
 
-    <script>
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const socket = io();
+<script>
+/**
+ * ------------------------------------------------------------------
+ * JS PORT OF INFINITE DRIFT CITY
+ * ------------------------------------------------------------------
+ */
 
-        let players = {};
-        let movementInput = {
-            up: false, down: false, left: false, right: false, isSprinting: false
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d', { alpha: false }); // Optimize for no transparency on main canvas
+const uiScore = document.getElementById('ui');
+const uiGameOver = document.getElementById('game-over');
+
+// --- Configuration ---
+const FPS = 60;
+const BLOCK_SIZE = 380;
+const BUILDING_GAP = 20;
+
+// --- Colors (RGB Strings) ---
+const C = {
+    BG_VOID: 'rgb(20, 20, 30)',
+    ASPHALT: 'rgb(50, 50, 55)',
+    PAINT_YELLOW: 'rgb(210, 180, 20)',
+    PAINT_WHITE: 'rgb(220, 220, 220)',
+    SIDEWALK: 'rgb(130, 130, 135)',
+    WOOD_DARK: 'rgb(80, 40, 30)',
+    WOOD_RED: 'rgb(140, 30, 20)',
+    CONCRETE: 'rgb(150, 150, 160)',
+    CONCRETE_DARK: 'rgb(100, 100, 110)',
+    ROOF_TILE: 'rgb(60, 60, 70)',
+    LANTERN_RED: 'rgb(220, 50, 50)',
+    NEON_PINK: 'rgb(255, 50, 150)',
+    NEON_BLUE: 'rgb(50, 150, 255)',
+    NEON_CYAN: 'rgb(50, 255, 255)',
+    NEON_GREEN: 'rgb(50, 255, 100)',
+    WIN_WARM: 'rgb(255, 240, 180)',
+    WIN_COOL: 'rgb(200, 220, 255)',
+    WIN_DARK: 'rgb(40, 40, 50)',
+    SAKURA_PINK: 'rgb(255, 180, 200)',
+    SAKURA_DARK: 'rgb(200, 120, 140)',
+    PLAYER: 'rgb(255, 40, 40)',
+    COP_BODY: 'rgb(20, 20, 20)'
+};
+
+// --- Physics Constants ---
+const ACCELERATION = 0.20;
+const FRICTION = 0.96;
+const TURN_SPEED = 4.0;
+const DRIFT_SLIDE = 0.99;
+const MAX_SPEED_PLAYER = 9.0;
+const MAX_SPEED_COP = 10.2;
+
+// --- Helper: Vector2 Class ---
+class Vector2 {
+    constructor(x, y) { this.x = x; this.y = y; }
+    add(v) { return new Vector2(this.x + v.x, this.y + v.y); }
+    sub(v) { return new Vector2(this.x - v.x, this.y - v.y); }
+    mul(s) { return new Vector2(this.x * s, this.y * s); }
+    length() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+    normalize() {
+        let l = this.length();
+        return l === 0 ? new Vector2(0,0) : new Vector2(this.x/l, this.y/l);
+    }
+    distanceTo(v) { return Math.sqrt(Math.pow(this.x - v.x, 2) + Math.pow(this.y - v.y, 2)); }
+    rotate(deg) {
+        let rad = deg * Math.PI / 180;
+        let cs = Math.cos(rad), sn = Math.sin(rad);
+        return new Vector2(this.x * cs - this.y * sn, this.x * sn + this.y * cs);
+    }
+    dot(v) { return this.x * v.x + this.y * v.y; }
+    lerp(v, t) { return new Vector2(this.x + (v.x - this.x)*t, this.y + (v.y - this.y)*t); }
+}
+
+// --- Helper: Seeded Random ---
+// Simple hash function to replicate Python's random.seed per building
+class SeededRandom {
+    constructor(seedStr) {
+        this.seed = this.hash(seedStr);
+    }
+    hash(str) {
+        let hash = 0, i, chr;
+        if (str.length === 0) return hash;
+        for (i = 0; i < str.length; i++) {
+            chr = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + chr;
+            hash |= 0; 
+        }
+        return Math.abs(hash);
+    }
+    random() {
+        let x = Math.sin(this.seed++) * 10000;
+        return x - Math.floor(x);
+    }
+    range(min, max) { return Math.floor(this.random() * (max - min + 1)) + min; }
+    choice(arr) { return arr[Math.floor(this.random() * arr.length)]; }
+}
+
+// --- Input Handling ---
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+    if (e.code === 'KeyR' && gameState.gameOver) resetGame();
+});
+
+// --- Classes ---
+
+class Camera {
+    constructor() {
+        this.offset = new Vector2(0, 0);
+        this.viewRect = { left: 0, top: 0, right: 0, bottom: 0 };
+    }
+    update(target) {
+        let targetX = -target.pos.x + canvas.width / 2;
+        let targetY = -target.pos.y + canvas.height / 2;
+        this.offset.x += (targetX - this.offset.x) * 0.1;
+        this.offset.y += (targetY - this.offset.y) * 0.1;
+        
+        // Define visible area with margin
+        this.viewRect.left = -this.offset.x - 600;
+        this.viewRect.top = -this.offset.y - 600;
+        this.viewRect.right = -this.offset.x + canvas.width + 600;
+        this.viewRect.bottom = -this.offset.y + canvas.height + 600;
+    }
+    apply(ctx) {
+        ctx.translate(this.offset.x, this.offset.y);
+    }
+}
+
+class Car {
+    constructor(x, y, color, isCop = false) {
+        this.pos = new Vector2(x, y);
+        this.vel = new Vector2(0, 0);
+        this.angle = 0;
+        this.color = color;
+        this.isCop = isCop;
+        this.width = 44; 
+        this.height = 22;
+        
+        // Render texture to offscreen canvas for performance
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = this.width;
+        this.canvas.height = this.height;
+        this.drawTexture(this.canvas.getContext('2d'));
+        
+        // Physics state
+        this.accInput = 0;
+        this.rotDir = 0;
+        this.stuckTimer = 0;
+        this.reversing = false;
+        this.active = true; // For pooling if needed
+    }
+
+    drawTexture(ctx) {
+        const w = this.width, h = this.height;
+        
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath(); ctx.roundRect(4,4,w-4,h-4,6); ctx.fill();
+
+        // Tires
+        ctx.fillStyle = '#19191e';
+        const tires = [[8,0], [32,0], [8,17], [32,17]];
+        tires.forEach(p => ctx.fillRect(p[0], p[1], 9, 5));
+
+        // Body
+        if (this.isCop) {
+            ctx.fillStyle = '#0f0f14'; // Black
+            ctx.beginPath(); ctx.roundRect(2,2,w-4,h-4,4); ctx.fill();
+            ctx.fillStyle = '#f5f5fa'; // White door
+            ctx.fillRect(14, 2, 16, h-4);
+        } else {
+            ctx.fillStyle = this.color;
+            ctx.beginPath(); ctx.roundRect(2,2,w-4,h-4,5); ctx.fill();
+            ctx.fillStyle = 'rgba(0,0,0,0.2)'; // Stripe
+            ctx.fillRect(2, 8, w-4, 6);
+            ctx.fillStyle = 'rgba(0,0,0,0.3)'; // Vents
+            ctx.fillRect(30, 6, 6, 2);
+            ctx.fillRect(30, 14, 6, 2);
+        }
+
+        // Cabin
+        ctx.fillStyle = '#141923';
+        ctx.fillRect(11, 4, 18, 14);
+
+        // Windshields
+        ctx.fillStyle = '#6496c8'; // Front
+        ctx.beginPath(); ctx.moveTo(25,5); ctx.lineTo(29,6); ctx.lineTo(29,16); ctx.lineTo(25,17); ctx.fill();
+        ctx.fillStyle = '#3c3c50'; // Rear
+        ctx.beginPath(); ctx.moveTo(11,5); ctx.lineTo(13,6); ctx.lineTo(13,16); ctx.lineTo(11,17); ctx.fill();
+
+        // Lights
+        ctx.fillStyle = '#ffffdc'; // Headlights
+        ctx.beginPath(); ctx.ellipse(w-4, 5.5, 2, 1.5, 0, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(w-4, h-5.5, 2, 1.5, 0, 0, Math.PI*2); ctx.fill();
+
+        ctx.fillStyle = '#dc0000'; // Tail lights
+        ctx.fillRect(1, 4, 3, 4);
+        ctx.fillRect(1, h-8, 3, 4);
+
+        // Cop Lights
+        if (this.isCop) {
+            ctx.fillStyle = '#ff0000'; ctx.fillRect(18, 2, 6, 5);
+            ctx.fillStyle = '#0000ff'; ctx.fillRect(18, 15, 6, 5);
+        }
+    }
+
+    physics(buildings, drift) {
+        // Rotation
+        if (this.rotDir !== 0 && this.vel.length() > 0.5) {
+            let rad = this.angle * Math.PI / 180;
+            // Check if moving forward or backward relative to facing
+            let forward = new Vector2(Math.cos(rad), Math.sin(rad));
+            let flip = this.vel.dot(forward) >= 0 ? 1 : -1;
+            this.angle += this.rotDir * TURN_SPEED * flip;
+        }
+
+        let rad = this.angle * Math.PI / 180;
+        let forward = new Vector2(Math.cos(rad), Math.sin(rad));
+        
+        // Acceleration
+        this.vel = this.vel.add(forward.mul(this.accInput));
+
+        // Friction / Drift
+        let speed = this.vel.length();
+        if (drift && speed > 3) {
+            this.vel = this.vel.mul(DRIFT_SLIDE);
+        } else {
+            if (speed > 0.5) {
+                // Kill lateral velocity (grip)
+                let dot = this.vel.dot(forward);
+                let projected = forward.mul(dot);
+                // Lerp towards pure forward vector
+                this.vel = this.vel.lerp(projected, 0.12);
+            }
+            this.vel = this.vel.mul(FRICTION);
+        }
+
+        // Cap Speed
+        let limit = this.isCop ? MAX_SPEED_COP : MAX_SPEED_PLAYER;
+        if (this.vel.length() > limit) {
+            this.vel = this.vel.normalize().mul(limit);
+        }
+
+        this.pos = this.pos.add(this.vel);
+
+        // Building Collisions (AABB approximate)
+        let hitbox = { x: this.pos.x - 20, y: this.pos.y - 10, w: 40, h: 20, cx: this.pos.x, cy: this.pos.y };
+        
+        for (let b of buildings) {
+            if (checkRectCollide(hitbox, b.rect)) {
+                // Resolve Collision
+                let dx = hitbox.cx - (b.rect.x + b.rect.w/2);
+                let dy = hitbox.cy - (b.rect.y + b.rect.h/2);
+                let wCombined = (hitbox.w + b.rect.w) / 2;
+                let hCombined = (hitbox.h + b.rect.h) / 2;
+                
+                let ox = wCombined - Math.abs(dx);
+                let oy = hCombined - Math.abs(dy);
+
+                if (ox < oy) {
+                    this.pos.x += dx > 0 ? ox : -ox;
+                    this.vel.x *= 0.5;
+                } else {
+                    this.pos.y += dy > 0 ? oy : -oy;
+                    this.vel.y *= 0.5;
+                }
+                // Update hitbox center for next check
+                hitbox.cx = this.pos.x; hitbox.cy = this.pos.y;
+            }
+        }
+    }
+
+    updateCop(target, buildings) {
+        let lookAhead = target.vel.mul(25);
+        let futurePos = target.pos.add(lookAhead);
+        let diff = futurePos.sub(this.pos);
+
+        // Stuck check
+        if (this.vel.length() < 1.0) this.stuckTimer++;
+        else this.stuckTimer = 0;
+
+        if (this.stuckTimer > 50) this.reversing = true;
+        if (this.stuckTimer > 90) { this.reversing = false; this.stuckTimer = 0; }
+
+        if (this.reversing) {
+            this.accInput = -ACCELERATION * 0.6;
+            this.rotDir = 1;
+        } else {
+            this.accInput = ACCELERATION * 0.98;
+            let targetAngle = Math.atan2(diff.y, diff.x) * 180 / Math.PI;
+            let angleDiff = (targetAngle - this.angle + 180) % 360 - 180;
+            // Normalize angle diff
+            if (angleDiff < -180) angleDiff += 360;
+            if (angleDiff > 180) angleDiff -= 360;
+
+            if (angleDiff > 8) this.rotDir = 1;
+            else if (angleDiff < -8) this.rotDir = -1;
+            else this.rotDir = 0;
+        }
+
+        this.physics(buildings, false);
+    }
+}
+
+class Building {
+    constructor(gx, gy, isPark) {
+        this.gx = gx;
+        this.gy = gy;
+        this.rect = {
+            x: gx * BLOCK_SIZE + BUILDING_GAP,
+            y: gy * BLOCK_SIZE + BUILDING_GAP,
+            w: BLOCK_SIZE - BUILDING_GAP * 2,
+            h: BLOCK_SIZE - BUILDING_GAP * 2
         };
+        
+        // Use offscreen canvas for complex building rendering
+        this.canvas = document.createElement('canvas');
+        this.canvas.width = this.rect.w;
+        this.canvas.height = this.rect.h;
+        const ctxB = this.canvas.getContext('2d');
+        const rng = new SeededRandom(`jp_build_${gx}_${gy}`);
+        
+        if (isPark) this.drawPark(ctxB, this.rect.w, this.rect.h);
+        else this.drawBuilding(ctxB, this.rect.w, this.rect.h, rng);
+    }
 
-        // --- Communication Handlers ---
-        socket.on('currentPlayers', (serverPlayers) => { players = serverPlayers; });
-        socket.on('newPlayer', (playerInfo) => { players[playerInfo.id] = playerInfo; });
+    drawPark(ctx, w, h) {
+        ctx.fillStyle = '#328c32'; // Zoo base
+        ctx.fillRect(0,0,w,h);
+        ctx.fillStyle = '#b4aa96'; // Paths
+        ctx.fillRect(w/2-20, 0, 40, h);
+        ctx.fillRect(0, h/2-20, w, 40);
+        
+        // Pond
+        for(let r=60; r>10; r-=5) {
+            ctx.fillStyle = `rgb(50, 150, ${250-r})`;
+            ctx.beginPath(); ctx.arc(w/2+80, h/2-80, r, 0, Math.PI*2); ctx.fill();
+        }
+    }
 
-        socket.on('playerMoved', (playerInfo) => {
-            players[playerInfo.id].x = playerInfo.x;
-            players[playerInfo.id].y = playerInfo.y;
-            players[playerInfo.id].isSprinting = playerInfo.isSprinting;
-        });
-
-        socket.on('playerDisconnected', (playerId) => {
-            delete players[playerId];
-        });
-
-        // --- Game Rendering ---
-
-        function drawPlayer(player) {
-            ctx.beginPath();
-            const radius = player.isSprinting ? 15 : 10;
-            ctx.arc(player.x, player.y, radius, 0, Math.PI * 2);
-
-            ctx.fillStyle = player.color;
-            ctx.fill();
-
-            if (player.id === socket.id) {
-                ctx.strokeStyle = '#000000';
-                ctx.lineWidth = 3;
-                ctx.stroke();
+    drawBuilding(ctx, w, h, rng) {
+        // Sidewalk
+        ctx.fillStyle = C.SIDEWALK;
+        ctx.fillRect(0,0,w,h);
+        
+        // Props on sidewalk
+        for(let i=0; i<rng.range(3,7); i++) {
+            let cx = rng.range(5, w-20);
+            let cy = rng.range(5, h-20);
+            if (cx > 30 && cx < w-30 && cy > 30 && cy < h-50) continue;
+            
+            let prop = rng.choice(['planter', 'box', 'trash']);
+            if (prop === 'planter') {
+                ctx.fillStyle = '#644632'; ctx.fillRect(cx, cy, 12, 12);
+                ctx.fillStyle = '#3c8c3c'; ctx.beginPath(); ctx.arc(cx+6, cy+6, 5, 0, Math.PI*2); ctx.fill();
+            } else if (prop === 'box') {
+                ctx.fillStyle = '#64646e'; ctx.fillRect(cx, cy, 10, 16);
             }
-
-            ctx.fillStyle = '#000';
-            ctx.font = '10px Arial';
-            ctx.textAlign = 'center';
-            const label = player.isSprinting ? 'SPRINT' : '';
-            ctx.fillText(label, player.x, player.y + radius + 10);
         }
 
-        function gameLoop() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const bPad = 12;
+        const wallH = 35;
+        const iw = w - bPad*2, ih = h - bPad*2;
+        const rx = bPad, ry = bPad; // Roof x,y relative to canvas
 
-            for (const id in players) {
-                drawPlayer(players[id]);
-            }
+        const style = rng.choice(['modern', 'izakaya', 'brick', 'school']);
 
-            requestAnimationFrame(gameLoop);
-        }
-
-        // --- Input Handling ---
-
-        function updateServerMovement() {
-            socket.emit('movement', movementInput);
-        }
-
-        document.addEventListener('keydown', (e) => {
-            let changed = false;
-            switch (e.key) {
-                case 'w': movementInput.up = true; changed = true; break;
-                case 's': movementInput.down = true; changed = true; break;
-                case 'a': movementInput.left = true; changed = true; break;
-                case 'd': movementInput.right = true; changed = true; break;
-                case 'Shift':
-                    if (!movementInput.isSprinting) {
-                        movementInput.isSprinting = true;
-                        changed = true;
+        if (style === 'school') {
+            ctx.fillStyle = 'rgb(230, 220, 190)';
+            ctx.fillRect(rx, ry, iw, ih-wallH);
+            ctx.fillStyle = 'rgb(200, 190, 160)';
+            ctx.fillRect(rx, ry+ih-wallH, iw, wallH);
+            
+            // Clock
+            ctx.fillStyle = '#b4aa96';
+            ctx.fillRect(rx + iw/2 - 20, ry + ih/2 - 20, 40, 40);
+            ctx.fillStyle = '#fff';
+            ctx.beginPath(); ctx.arc(rx + iw/2, ry + ih/2, 15, 0, Math.PI*2); ctx.fill();
+            
+            // Windows
+            ctx.fillStyle = 'rgb(100, 150, 200)';
+            for(let r=0; r<3; r++) {
+                for(let c=0; c<6; c++) {
+                    if (rng.random() > 0.1) {
+                        ctx.fillRect(rx + c*(iw/6) + 8, ry + r*25 + 15, 20, 15);
                     }
-                    break;
+                }
             }
-            if (changed) updateServerMovement();
-        });
+        } else if (style === 'izakaya') {
+            ctx.fillStyle = C.WOOD_DARK;
+            ctx.fillRect(rx-2, ry-2, iw+4, ih-wallH+4); // Roof rim
+            ctx.fillStyle = C.ROOF_TILE;
+            ctx.fillRect(rx, ry, iw, ih-wallH);
+            ctx.fillStyle = C.WOOD_RED;
+            ctx.fillRect(rx, ry+ih-wallH, iw, wallH);
 
-        document.addEventListener('keyup', (e) => {
-            let changed = false;
-            switch (e.key) {
-                case 'w': movementInput.up = false; changed = true; break;
-                case 's': movementInput.down = false; changed = true; break;
-                case 'a': movementInput.left = false; changed = true; break;
-                case 'd': movementInput.right = false; changed = true; break;
-                case 'Shift':
-                    movementInput.isSprinting = false;
-                    changed = true;
-                    break;
+            // Lanterns
+            for(let i=0; i<4; i++) {
+                let lx = rx + (iw/4)*i + 20;
+                let ly = ry+ih-wallH + 5;
+                ctx.fillStyle = C.LANTERN_RED;
+                ctx.beginPath(); ctx.arc(lx, ly, 6, 0, Math.PI*2); ctx.fill();
             }
-            if (changed) updateServerMovement();
-        });
+        } else if (style === 'modern') {
+            let base = rng.range(140, 170);
+            ctx.fillStyle = `rgb(${base},${base},${base+10})`;
+            ctx.fillRect(rx, ry, iw, ih-wallH);
+            ctx.fillStyle = `rgb(${base-20},${base-20},${base-10})`;
+            ctx.fillRect(rx, ry+ih-wallH, iw, wallH);
+            
+            // Neon sign logic handles in update loop for flicker, but structure here
+            // Windows
+            let ww = iw/3 - 5, wh = (ih-wallH)/3 - 5;
+            for(let r=0; r<3; r++){
+                for(let c=0; c<3; c++){
+                    let wx = rx + c*(ww+5) + 8;
+                    let wy = ry + r*(wh+5) + 8;
+                    ctx.fillStyle = rng.choice([C.WIN_COOL, C.WIN_WARM, C.WIN_DARK]);
+                    ctx.fillRect(wx, wy, ww, wh);
+                }
+            }
+        } else {
+            // Brick
+            let br = rng.range(140, 180);
+            ctx.fillStyle = `rgb(${br}, ${rng.range(80,110)}, 80)`;
+            ctx.fillRect(rx, ry, iw, ih-wallH);
+            ctx.fillStyle = '#828287';
+            ctx.fillRect(rx, ry+ih-wallH, iw, wallH);
+            
+            // Windows
+            let rows=4, cols=5;
+            let ww = iw/cols, wh = (ih-wallH)/rows;
+            for(let r=0; r<rows; r++){
+                for(let c=0; c<cols; c++){
+                    ctx.fillStyle = rng.choice([C.WIN_WARM, C.WIN_DARK]);
+                    ctx.fillRect(rx + c*ww + 8, ry + r*wh + 8, ww-16, wh-20);
+                }
+            }
+        }
+    }
+}
 
-        gameLoop();
-    </script>
+class AnimatedSprite {
+    constructor(x, y) {
+        this.pos = new Vector2(x, y);
+        this.frame = 0;
+    }
+}
+
+class Person extends AnimatedSprite {
+    constructor(x, y, areaRect, seed) {
+        super(x, y);
+        this.area = areaRect;
+        this.rng = new SeededRandom(seed || "p" + Math.random());
+        this.shirt = this.rng.choice(['#fff', '#323264', '#c8c8c8', '#14141e']);
+        
+        let angle = this.rng.random() * Math.PI * 2;
+        this.vel = new Vector2(Math.cos(angle), Math.sin(angle)).mul(0.4);
+        this.angle = angle;
+    }
+
+    update() {
+        // Bounce bounds
+        if (this.area) {
+            let next = this.pos.add(this.vel.mul(5));
+            if (next.x < this.area.x || next.x > this.area.x + this.area.w ||
+                next.y < this.area.y || next.y > this.area.y + this.area.h) {
+                this.vel = this.vel.mul(-1); // Reverse
+                this.vel = this.vel.rotate(this.rng.range(-45, 45));
+            }
+        }
+        
+        this.pos = this.pos.add(this.vel);
+        this.frame += 0.2;
+        
+        // Random turn
+        if (Math.random() < 0.01) {
+            this.vel = this.vel.rotate(Math.random() > 0.5 ? 90 : -90);
+            this.angle = Math.atan2(this.vel.y, this.vel.x);
+        }
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.pos.x, this.pos.y);
+        ctx.rotate(Math.atan2(this.vel.y, this.vel.x));
+        
+        let swing = Math.sin(this.frame) * 3;
+        
+        // Body
+        ctx.fillStyle = this.shirt;
+        ctx.beginPath(); ctx.roundRect(-5, -3, 10, 6, 2); ctx.fill();
+        
+        // Head
+        ctx.fillStyle = '#ffd2b4';
+        ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI*2); ctx.fill();
+        
+        // Hands
+        ctx.beginPath(); ctx.arc(4, swing, 2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(4, -swing, 2, 0, Math.PI*2); ctx.fill();
+        
+        ctx.restore();
+    }
+}
+
+class Particle {
+    constructor(x, y) {
+        this.pos = new Vector2(x, y);
+        this.vel = new Vector2((Math.random()-0.5)*8, (Math.random()-0.5)*8);
+        this.life = 20;
+    }
+    update() {
+        this.pos = this.pos.add(this.vel);
+        this.life--;
+    }
+    draw(ctx) {
+        ctx.fillStyle = `rgba(255, 100, 0, ${this.life/20})`;
+        ctx.fillRect(this.pos.x, this.pos.y, 5, 5);
+    }
+}
+
+class Skid {
+    constructor(pos, angle) {
+        this.pos = pos; // Vector2
+        this.angle = angle;
+        this.life = 100;
+    }
+    update() { this.life -= 2; }
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.pos.x, this.pos.y);
+        ctx.rotate(this.angle * Math.PI / 180);
+        ctx.fillStyle = `rgba(30, 30, 30, ${this.life/100 * 0.5})`;
+        ctx.fillRect(-5, -2, 10, 4);
+        ctx.restore();
+    }
+}
+
+class Sakura {
+    constructor(x, y) {
+        this.x = x; this.y = y;
+        this.img = document.createElement('canvas');
+        this.img.width = 40; this.img.height = 40;
+        const c = this.img.getContext('2d');
+        // Trunk
+        c.fillStyle = '#46281e'; c.fillRect(18,20,4,20);
+        // Leaves
+        for(let i=0; i<30; i++) {
+            c.fillStyle = Math.random() > 0.5 ? C.SAKURA_PINK : C.SAKURA_DARK;
+            c.beginPath();
+            c.arc(Math.random()*30+5, Math.random()*25+5, Math.random()*2+3, 0, Math.PI*2);
+            c.fill();
+        }
+    }
+}
+
+// --- Game Logic ---
+
+let gameState = {
+    player: null,
+    buildings: [],
+    people: [],
+    cops: [],
+    skids: [],
+    particles: [],
+    sakura: [],
+    loadedChunks: new Set(),
+    score: 0,
+    spawnTimer: 0,
+    gameOver: false
+};
+
+let roadPattern;
+
+function createRoadPattern() {
+    const pCanvas = document.createElement('canvas');
+    pCanvas.width = BLOCK_SIZE;
+    pCanvas.height = BLOCK_SIZE;
+    const ctxP = pCanvas.getContext('2d');
+    
+    // Asphalt noise
+    ctxP.fillStyle = C.ASPHALT;
+    ctxP.fillRect(0,0,BLOCK_SIZE,BLOCK_SIZE);
+    for(let i=0; i<500; i++) {
+        let v = Math.floor(Math.random()*30 + 30);
+        ctxP.fillStyle = `rgb(${v},${v},${v+5})`;
+        ctxP.fillRect(Math.random()*BLOCK_SIZE, Math.random()*BLOCK_SIZE, 2, 2);
+    }
+    
+    // Manhole
+    let mx = BLOCK_SIZE/2 + (Math.random()-0.5)*100;
+    let my = BLOCK_SIZE/2 + (Math.random()-0.5)*100;
+    ctxP.fillStyle = '#46464b'; ctxP.beginPath(); ctxP.arc(mx, my, 14, 0, Math.PI*2); ctxP.fill();
+    ctxP.strokeStyle = '#28282d'; ctxP.lineWidth=2; ctxP.stroke();
+
+    roadPattern = pCanvas;
+}
+
+function checkRectCollide(r1, r2) {
+    return (r1.x < r2.x + r2.w && r1.x + r1.w > r2.x &&
+            r1.y < r2.y + r2.h && r1.y + r1.h > r2.y);
+}
+
+function resetGame() {
+    gameState = {
+        player: new Car(0, 0, C.PLAYER),
+        buildings: [],
+        people: [],
+        cops: [],
+        skids: [],
+        particles: [],
+        sakura: [],
+        loadedChunks: new Set(),
+        score: 0,
+        spawnTimer: 0,
+        gameOver: false
+    };
+    uiGameOver.style.display = 'none';
+}
+
+function updateChunks(camRect) {
+    const startGx = Math.floor(camRect.left / BLOCK_SIZE) - 1;
+    const endGx = Math.floor(camRect.right / BLOCK_SIZE) + 1;
+    const startGy = Math.floor(camRect.top / BLOCK_SIZE) - 1;
+    const endGy = Math.floor(camRect.bottom / BLOCK_SIZE) + 1;
+
+    // Despawn
+    const margin = 800;
+    gameState.buildings = gameState.buildings.filter(b => {
+        let keep = checkRectCollide(
+            {x: b.rect.x - margin, y: b.rect.y - margin, w: b.rect.w + margin*2, h: b.rect.h + margin*2}, 
+            {x: camRect.left, y: camRect.top, w: camRect.right-camRect.left, h: camRect.bottom-camRect.top}
+        );
+        if(!keep) gameState.loadedChunks.delete(`${b.gx},${b.gy}`);
+        return keep;
+    });
+    
+    // Remove offscreen sprites
+    const filterSprite = s => {
+        return (s.pos || s).x > camRect.left - margin && (s.pos || s).x < camRect.right + margin &&
+               (s.pos || s).y > camRect.top - margin && (s.pos || s).y < camRect.bottom + margin;
+    };
+    gameState.people = gameState.people.filter(filterSprite);
+    gameState.sakura = gameState.sakura.filter(s => s.x > camRect.left - margin && s.x < camRect.right + margin && s.y > camRect.top - margin && s.y < camRect.bottom + margin);
+
+    // Spawn
+    for (let gx = startGx; gx < endGx; gx++) {
+        for (let gy = startGy; gy < endGy; gy++) {
+            let key = `${gx},${gy}`;
+            if (!gameState.loadedChunks.has(key)) {
+                gameState.loadedChunks.add(key);
+                generateChunk(gx, gy);
+            }
+        }
+    }
+}
+
+function generateChunk(gx, gy) {
+    const isRoadX = (gx % 3 === 0);
+    const isRoadY = (gy % 3 === 0);
+    const rng = new SeededRandom(`chunk_${gx}_${gy}`);
+    const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
+    const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
+
+    if (isRoadX || isRoadY) {
+        if (rng.random() < 0.1) {
+            gameState.people.add(new Person(cx + rng.range(-50,50), cy + rng.range(-50,50), null, `p_${gx}_${gy}`));
+        }
+    } else {
+        // Not a road, put a building or park
+        if (rng.random() < 0.08) {
+            gameState.buildings.push(new Building(gx, gy, true)); // Park
+            // Add Sakura
+            for(let i=0; i<rng.range(3,6); i++) {
+                gameState.sakura.push(new Sakura(cx + rng.range(-100,100), cy + rng.range(-100,100)));
+            }
+        } else {
+            gameState.buildings.push(new Building(gx, gy, false));
+            // Add People on sidewalk
+            let sidewalkRect = { x: gx*BLOCK_SIZE, y: gy*BLOCK_SIZE, w: BLOCK_SIZE, h: BLOCK_SIZE };
+            if (rng.random() < 0.95) {
+                for(let i=0; i<rng.range(4, 10); i++) {
+                    let px, py;
+                    let side = rng.choice(['n','s','e','w']);
+                    let offset = BLOCK_SIZE/2 - 30;
+                    if (side==='n') { px = cx + rng.range(-offset, offset); py = cy - offset; }
+                    else if (side==='s') { px = cx + rng.range(-offset, offset); py = cy + offset; }
+                    else if (side==='e') { px = cx + offset; py = cy + rng.range(-offset, offset); }
+                    else { px = cx - offset; py = cy + rng.range(-offset, offset); }
+                    gameState.people.push(new Person(px, py, sidewalkRect, `ppl_${gx}_${gy}_${i}`));
+                }
+            }
+            if (rng.random() < 0.3) {
+                gameState.sakura.push(new Sakura(cx + rng.choice([-150, 150]), cy + rng.range(-100,100)));
+            }
+        }
+    }
+}
+
+function drawFloor(ctx, camera) {
+    // Determine visible grid cells for floor drawing
+    const bs = BLOCK_SIZE;
+    const startGx = Math.floor(camera.viewRect.left / bs) - 1;
+    const endGx = Math.floor(camera.viewRect.right / bs) + 1;
+    const startGy = Math.floor(camera.viewRect.top / bs) - 1;
+    const endGy = Math.floor(camera.viewRect.bottom / bs) + 1;
+
+    for (let gx = startGx; gx < endGx; gx++) {
+        for (let gy = startGy; gy < endGy; gy++) {
+            let isRoadX = (gx % 3 === 0);
+            let isRoadY = (gy % 3 === 0);
+            let x = gx * bs, y = gy * bs;
+
+            if (isRoadX || isRoadY) {
+                ctx.drawImage(roadPattern, x, y);
+
+                ctx.lineWidth = 3;
+                if (isRoadY) {
+                    ctx.strokeStyle = C.PAINT_WHITE;
+                    ctx.beginPath(); ctx.moveTo(x, y+10); ctx.lineTo(x+bs, y+10); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(x, y+bs-10); ctx.lineTo(x+bs, y+bs-10); ctx.stroke();
+                }
+                if (isRoadX) {
+                    ctx.strokeStyle = C.PAINT_WHITE;
+                    ctx.beginPath(); ctx.moveTo(x+10, y); ctx.lineTo(x+10, y+bs); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(x+bs-10, y); ctx.lineTo(x+bs-10, y+bs); ctx.stroke();
+                }
+                
+                // Yellow dashes
+                ctx.strokeStyle = C.PAINT_YELLOW;
+                if (isRoadY && !isRoadX) {
+                    ctx.beginPath(); ctx.setLineDash([20, 20]); ctx.moveTo(x, y+bs/2); ctx.lineTo(x+bs, y+bs/2); ctx.stroke(); ctx.setLineDash([]);
+                }
+                if (isRoadX && !isRoadY) {
+                    ctx.beginPath(); ctx.setLineDash([20, 20]); ctx.moveTo(x+bs/2, y); ctx.lineTo(x+bs/2, y+bs); ctx.stroke(); ctx.setLineDash([]);
+                }
+
+                // Crosswalk
+                if (isRoadX && isRoadY) {
+                    ctx.strokeStyle = C.PAINT_WHITE;
+                    ctx.lineWidth = 12;
+                    // North
+                    for(let i=x+20; i<x+100; i+=24) { ctx.beginPath(); ctx.moveTo(i, y+20); ctx.lineTo(i, y+100); ctx.stroke(); }
+                    // South
+                    for(let i=x+20; i<x+100; i+=24) { ctx.beginPath(); ctx.moveTo(i, y+bs-100); ctx.lineTo(i, y+bs-20); ctx.stroke(); }
+                }
+            } else {
+                ctx.fillStyle = C.BG_VOID;
+                ctx.fillRect(x,y,bs,bs);
+            }
+        }
+    }
+}
+
+// --- Main Loop ---
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+createRoadPattern();
+resetGame();
+
+const camera = new Camera();
+
+function loop() {
+    // Logic
+    if (!gameState.gameOver) {
+        let p = gameState.player;
+        
+        // Input to physics
+        p.accInput = 0;
+        p.rotDir = 0;
+        if (keys['ArrowUp'] || keys['KeyW']) p.accInput = ACCELERATION;
+        if (keys['ArrowDown'] || keys['KeyS']) p.accInput = -ACCELERATION * 0.5;
+        if (keys['ArrowLeft'] || keys['KeyA']) p.rotDir = -1;
+        if (keys['ArrowRight'] || keys['KeyD']) p.rotDir = 1;
+        
+        let drift = keys['Space'];
+        p.physics(gameState.buildings, drift);
+
+        // Skids
+        if (Math.abs(p.rotDir) > 0 && p.vel.length() > 4) {
+            gameState.skids.push(new Skid(new Vector2(p.pos.x, p.pos.y), p.angle));
+        }
+
+        // Camera
+        camera.update(p);
+        updateChunks(camera.viewRect);
+
+        // Entities
+        gameState.people.forEach(pp => pp.update());
+        gameState.skids.forEach((s,i) => { s.update(); if(s.life <=0) gameState.skids.splice(i,1); });
+        gameState.particles.forEach((pt,i) => { pt.update(); if(pt.life<=0) gameState.particles.splice(i,1); });
+
+        // Cops
+        gameState.spawnTimer++;
+        if (gameState.spawnTimer > 120) { // Slower spawn than python
+            gameState.spawnTimer = 0;
+            let ang = Math.random() * Math.PI * 2;
+            let dist = 800;
+            let cx = p.pos.x + Math.cos(ang)*dist;
+            let cy = p.pos.y + Math.sin(ang)*dist;
+            let cgx = Math.floor(cx/BLOCK_SIZE), cgy = Math.floor(cy/BLOCK_SIZE);
+            if (cgx%3 === 0 || cgy%3 === 0) {
+                gameState.cops.push(new Cop(cx, cy, gameState.player));
+            }
+        }
+
+        gameState.cops.forEach((cop, i) => {
+            cop.updateCop(p, gameState.buildings);
+            
+            // Collision with Player
+            if (cop.pos.distanceTo(p.pos) < 30) {
+                gameState.gameOver = true;
+                uiGameOver.style.display = 'block';
+                for(let k=0; k<50; k++) gameState.particles.push(new Particle(p.pos.x, p.pos.y));
+            }
+
+            // Cop vs Cop
+            for (let j=i+1; j<gameState.cops.length; j++) {
+                let c2 = gameState.cops[j];
+                if (cop.pos.distanceTo(c2.pos) < 45) {
+                    cop.active = false; c2.active = false;
+                    gameState.score += 100;
+                    for(let k=0; k<30; k++) gameState.particles.push(new Particle(cop.pos.x, cop.pos.y));
+                }
+            }
+        });
+        gameState.cops = gameState.cops.filter(c => c.active);
+    } else {
+        gameState.particles.forEach((pt,i) => { pt.update(); if(pt.life<=0) gameState.particles.splice(i,1); });
+    }
+
+    // Drawing
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset Identity
+    ctx.fillStyle = C.BG_VOID;
+    ctx.fillRect(0,0,canvas.width, canvas.height);
+
+    camera.apply(ctx);
+
+    drawFloor(ctx, camera);
+
+    // Sort Z-Index (Painter's Algo) by Y position
+    // We combine all drawables into a list: Buildings, People, Cops, Player, Sakura, Skids(drawn first)
+    gameState.skids.forEach(s => s.draw(ctx));
+
+    let drawList = [
+        ...gameState.buildings.map(b => ({y: b.rect.y + b.rect.h, type: 'b', obj: b})),
+        ...gameState.people.map(p => ({y: p.pos.y, type: 'p', obj: p})),
+        ...gameState.cops.map(c => ({y: c.pos.y, type: 'c', obj: c})),
+        ...gameState.sakura.map(s => ({y: s.y, type: 's', obj: s})),
+        {y: gameState.player.pos.y, type: 'pl', obj: gameState.player}
+    ];
+
+    drawList.sort((a,b) => a.y - b.y);
+
+    drawList.forEach(item => {
+        // Optimize: check visibility
+        if (item.type === 'b') {
+            // Shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            ctx.fillRect(item.obj.rect.x + 8, item.obj.rect.y + 8, item.obj.rect.w, item.obj.rect.h);
+            ctx.drawImage(item.obj.canvas, item.obj.rect.x, item.obj.rect.y);
+        } else if (item.type === 'pl' || item.type === 'c') {
+            let c = item.obj;
+            ctx.save();
+            ctx.translate(c.pos.x, c.pos.y);
+            ctx.rotate(c.angle * Math.PI / 180);
+            ctx.translate(-c.width/2, -c.height/2);
+            ctx.drawImage(c.canvas, 0, 0);
+            ctx.restore();
+        } else if (item.type === 'p') {
+            item.obj.draw(ctx);
+        } else if (item.type === 's') {
+            ctx.drawImage(item.obj.img, item.obj.x-20, item.obj.y-40);
+        }
+    });
+
+    gameState.particles.forEach(p => p.draw(ctx));
+
+    // UI Updates
+    uiScore.innerText = `SCORE: ${gameState.score}`;
+
+    // Offscreen Indicators (Draw on top, ignoring camera transform for rotation but position needs logic)
+    // Actually easier to draw relative to center of screen in UI layer style, but we are inside camera transform context
+    // Let's reset transform to draw indicators
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    
+    gameState.cops.forEach(c => {
+        let screenPos = c.pos.add(camera.offset);
+        // If off screen
+        if (screenPos.x < 0 || screenPos.x > canvas.width || screenPos.y < 0 || screenPos.y > canvas.height) {
+            let cx = canvas.width/2;
+            let cy = canvas.height/2;
+            let dx = screenPos.x - cx;
+            let dy = screenPos.y - cy;
+            // Clamp to screen edge
+            let angle = Math.atan2(dy, dx);
+            // Just place indicator at edge
+            let ex = cx + Math.cos(angle) * (Math.min(canvas.width, canvas.height)/2 - 40);
+            let ey = cy + Math.sin(angle) * (Math.min(canvas.width, canvas.height)/2 - 40);
+            
+            ctx.fillStyle = '#ff3232';
+            ctx.beginPath(); ctx.arc(ex, ey, 14, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = 'white'; ctx.lineWidth=2; ctx.stroke();
+            ctx.fillStyle = 'white'; ctx.font='bold 20px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+            ctx.fillText('!', ex, ey);
+        }
+    });
+
+    requestAnimationFrame(loop);
+}
+
+// Start
+requestAnimationFrame(loop);
+
+</script>
 </body>
 </html>
