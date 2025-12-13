@@ -4,13 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tokyo Drift Chase</title>
+    <!-- Imported Pixel Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
             padding: 0;
             overflow: hidden;
             background-color: #14141e; /* COLOR_BG_VOID */
-            font-family: Arial, sans-serif;
+            font-family: 'Press Start 2P', cursive; /* Updated Font */
             touch-action: none; /* Prevent mobile scrolling */
         }
         canvas {
@@ -81,6 +83,14 @@ const COLORS = {
     TEXT_WHITE: '#ffffff'
 };
 
+const CAR_TYPES = {
+    'sedan': { w: 48, h: 24, speed: 1.0, colors: ['#3c5a96', '#969696', '#dcdcdc', '#503250', '#8c2828'] },
+    'coupe': { w: 44, h: 22, speed: 1.3, colors: ['#c83232', '#3264c8', '#e6e632', '#141414'] },
+    'hatchback': { w: 40, h: 22, speed: 0.9, colors: ['#32965a', '#c87832', '#9696c8'] },
+    'taxi': { w: 48, h: 24, speed: 1.1, colors: ['#e6af2d'] }, // Japanese Taxi
+    'truck': { w: 56, h: 26, speed: 0.7, colors: ['#ffffff', '#32465a'] }
+};
+
 // Physics
 const ACCELERATION = 0.20;
 const FRICTION = 0.96;
@@ -88,6 +98,7 @@ const TURN_SPEED = 4.0;
 const DRIFT_SLIDE = 0.99;
 const MAX_SPEED_PLAYER = 9.0;
 const MAX_SPEED_COP = 10.2;
+const MAX_SPEED_CIVILIAN_BASE = 6.0;
 
 // --- Utility Classes ---
 
@@ -211,12 +222,28 @@ function createRoadTexture(size) {
     ctx.fillRect(0, 0, size, size);
     
     // Noise
-    for (let i = 0; i < 500; i++) {
+    for (let i = 0; i < 800; i++) {
         const x = randInt(0, size);
         const y = randInt(0, size);
-        const c = randInt(30, 60);
+        const c = randInt(35, 55);
         ctx.fillStyle = `rgb(${c},${c},${c+5})`;
         ctx.fillRect(x, y, 2, 2);
+    }
+    
+    // Cracks
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 1;
+    for(let i=0; i<3; i++) {
+        let x = randInt(0, size);
+        let y = randInt(0, size);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        for(let j=0; j<5; j++) {
+            x += randInt(-10, 10);
+            y += randInt(-10, 10);
+            ctx.lineTo(x, y);
+        }
+        ctx.stroke();
     }
 
     // Manhole
@@ -369,23 +396,52 @@ class CarHealth {
 }
 
 class Car {
-    constructor(x, y, colorHex, isCop=false) {
+    constructor(x, y, typeOrColor, isCop=false, isCivilian=false) {
         this.pos = new Vector2(x, y);
         this.vel = new Vector2(0, 0);
         this.angle = 0; // Degrees
         this.rotDirection = 0;
         this.accInput = 0;
-        this.color = colorHex;
         this.isCop = isCop;
+        this.isCivilian = isCivilian;
+        
+        // Defaults
         this.width = 48;
         this.height = 24;
+        this.speedTrait = 1.0;
+        this.color = '#fff';
+        this.type = 'sedan';
+
+        if (isCivilian) {
+            this.type = typeOrColor || 'sedan'; // Pass type string for civilians
+            const stats = CAR_TYPES[this.type];
+            this.width = stats.w;
+            this.height = stats.h;
+            this.color = randChoice(stats.colors);
+            // "Weirdly Perfection" - random variation on top of base speed
+            this.speedTrait = stats.speed * randFloat(0.85, 1.15); 
+        } else if (isCop) {
+            this.color = COLORS.COP_BODY;
+            this.speedTrait = 1.2;
+        } else {
+            // Player
+            this.color = typeOrColor; // Hex for player
+        }
         
         // Generate sprite
         this.sprite = this.createCarSprite();
         
-        this.health = isCop ? null : new CarHealth();
+        this.health = (isCop || isCivilian) ? null : new CarHealth();
         this.stuckTimer = 0;
         this.reversing = false; // For AI
+        
+        // Civilian specific
+        this.targetHeading = null;
+        this.blockedTimer = 0;
+        this.cooldownTimer = 0;
+        this.laneSwitchDir = 0; // -1 left, 1 right, 0 none
+        this.patience = randInt(60, 150);
+        this.brakingVisual = false;
     }
 
     createCarSprite() {
@@ -405,29 +461,38 @@ class Car {
         else ctx.rect(4, 6, w-2, h-6);
         ctx.fill();
 
-        // Wheels
+        // Wheels with more detail
         const tireColor = '#191919';
-        const rimColor = this.isCop ? '#505050' : '#b4b4b4';
-        const axleF = 36, axleR = 10;
+        const rimColor = this.isCop ? '#505050' : '#dcdcdc';
+        const axleF = w - 12, axleR = 10;
         const tires = [[axleF, 1], [axleF, h-5], [axleR, 1], [axleR, h-5]];
         tires.forEach(([tx, ty]) => {
             ctx.fillStyle = tireColor;
             ctx.fillRect(tx, ty, 10, 4);
+            // Rim detail
             ctx.fillStyle = rimColor;
             ctx.fillRect(tx+3, ty+1, 4, 2);
+            ctx.fillStyle = '#000'; // Hubcap center
+            ctx.fillRect(tx+4, ty+1.5, 2, 1);
         });
 
         const bodyY = 3, bodyH = h - 6;
         
-        // Body
+        // Body Base
         if (this.isCop) {
             ctx.fillStyle = '#0a0a0f'; // Dark Body
             ctx.beginPath(); 
             if (ctx.roundRect) ctx.roundRect(2, bodyY, w-4, bodyH, 1);
             else ctx.rect(2, bodyY, w-4, bodyH);
             ctx.fill();
+            
             ctx.fillStyle = COLORS.COP_DOOR; // White Door
             ctx.fillRect(14, bodyY, 18, bodyH);
+            
+            // "POLICE" text hint
+            ctx.fillStyle = '#000';
+            ctx.fillRect(16, bodyY+2, 14, 2);
+            
             ctx.fillStyle = '#9696a0'; // Pillar
             ctx.fillRect(23, bodyY, 1, bodyH);
         } else {
@@ -436,50 +501,100 @@ class Car {
             if (ctx.roundRect) ctx.roundRect(2, bodyY, w-4, bodyH, 4);
             else ctx.rect(2, bodyY, w-4, bodyH);
             ctx.fill();
-            // Shade
+            
+            // Texture details based on type
+            if (this.type === 'taxi') {
+                ctx.fillStyle = '#000'; // Stripe
+                ctx.fillRect(0, bodyY+bodyH/2-1, w, 2);
+            }
+            
+            // Hood Vents
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRect(w - 12, bodyY + 4, 4, 2);
+            ctx.fillRect(w - 12, bodyY + bodyH - 6, 4, 2);
+
+            // Side Skirt Shadow
             ctx.fillStyle = 'rgba(0,0,0,0.2)';
-            ctx.fillRect(15, bodyY + bodyH - 2, 20, 1);
+            ctx.fillRect(10, bodyY + bodyH - 2, 28, 1);
         }
 
-        // Bumpers
-        ctx.fillStyle = '#141419';
-        ctx.fillRect(w-4, bodyY, 2, bodyH); // Front
-        ctx.fillRect(2, bodyY, 2, bodyH);   // Rear
-
+        // Bumpers (Detailed)
+        ctx.fillStyle = '#222';
+        ctx.fillRect(w-3, bodyY, 2, bodyH); // Front Bumper
+        ctx.fillRect(w-4, bodyY+1, 1, bodyH-2); // Front detail
+        
+        ctx.fillRect(1, bodyY, 2, bodyH);   // Rear Bumper
+        
         // Cabin/Glass
         let cabinRect = this.isCop ? {x:10, y:bodyY+2, w:24, h:bodyH-4} : {x:12, y:bodyY+3, w:20, h:bodyH-6};
-        ctx.fillStyle = '#1e2832'; // Glass
+        
+        // Type adjustments
+        if (this.type === 'truck') cabinRect = {x: 8, y: bodyY+2, w: 16, h: bodyH-4};
+        if (this.type === 'coupe') cabinRect = {x: 10, y: bodyY+3, w: 18, h: bodyH-6};
+
+        ctx.fillStyle = '#2d3c46'; // Dark Glass
         ctx.beginPath(); 
         if (ctx.roundRect) ctx.roundRect(cabinRect.x, cabinRect.y, cabinRect.w, cabinRect.h, 2);
         else ctx.rect(cabinRect.x, cabinRect.y, cabinRect.w, cabinRect.h);
         ctx.fill();
         
+        // Glass Reflection
+        ctx.fillStyle = '#506e82';
+        ctx.beginPath();
+        ctx.moveTo(cabinRect.x + 4, cabinRect.y);
+        ctx.lineTo(cabinRect.x + 8, cabinRect.y);
+        ctx.lineTo(cabinRect.x + 4, cabinRect.y + cabinRect.h);
+        ctx.lineTo(cabinRect.x, cabinRect.y + cabinRect.h);
+        ctx.fill();
+
         // Roof
         let roofColor = this.isCop ? '#0a0a0f' : this.color;
         let roofRect = {x:cabinRect.x+2, y:cabinRect.y+1, w:cabinRect.w-4, h:cabinRect.h-2};
+        
+        if (this.type === 'truck') {
+            // Truck Bed
+            ctx.fillStyle = '#333';
+            ctx.fillRect(24, bodyY+2, w-30, bodyH-4);
+            ctx.fillStyle = '#222'; // Bed lines
+            for(let i=26; i<w-6; i+=4) ctx.fillRect(i, bodyY+2, 1, bodyH-4);
+        }
+
         ctx.fillStyle = roofColor;
         ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
+        
+        // Taxi sign
+        if (this.type === 'taxi') {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(roofRect.x + roofRect.w/2 - 2, roofRect.y + 1, 4, roofRect.h - 2);
+        }
+
+        // Sunroof (Player only or Coupe)
+        if (!this.isCop && !this.isCivilian || this.type === 'coupe') {
+            ctx.fillStyle = '#111';
+            ctx.fillRect(roofRect.x + 4, roofRect.y + 2, roofRect.w - 8, roofRect.h - 4);
+            ctx.fillStyle = '#222'; // Sunroof shine
+            ctx.fillRect(roofRect.x + 4, roofRect.y + 2, 2, roofRect.h - 4);
+        }
 
         // Lights
-        // Headlights
-        ctx.fillStyle = '#c8c8c8';
-        ctx.fillRect(w-5, bodyY+1, 3, 4);
-        ctx.fillRect(w-5, bodyY+bodyH-5, 3, 4);
-        ctx.fillStyle = '#ffffc8'; // Bright spot
+        // Headlights (Detailed)
+        ctx.fillStyle = '#e6e6e6'; // Casing
+        ctx.fillRect(w-5, bodyY+1, 4, 4);
+        ctx.fillRect(w-5, bodyY+bodyH-5, 4, 4);
+        ctx.fillStyle = '#fff'; // Bulb
         ctx.fillRect(w-3, bodyY+2, 2, 2);
         ctx.fillRect(w-3, bodyY+bodyH-4, 2, 2);
-        // Taillights
-        ctx.fillStyle = '#640000';
-        ctx.fillRect(1, bodyY+1, 2, 5);
-        ctx.fillRect(1, bodyY+bodyH-6, 2, 5);
-        ctx.fillStyle = '#ff3232'; // Brake light
-        ctx.fillRect(0, bodyY+2, 2, 3);
-        ctx.fillRect(0, bodyY+bodyH-5, 2, 3);
-
-        // Mirrors
-        ctx.fillStyle = roofColor;
-        ctx.fillRect(24, bodyY-2, 3, 2);
-        ctx.fillRect(24, bodyY+bodyH, 3, 2);
+        
+        // Taillights (Detailed)
+        ctx.fillStyle = '#800000'; // Dark Red Housing
+        ctx.fillRect(1, bodyY+1, 3, 5);
+        ctx.fillRect(1, bodyY+bodyH-6, 3, 5);
+        
+        // Brake Lights (Will be drawn dynamically if braking, else dim)
+        // Draw static part
+        ctx.fillStyle = '#500000'; // Off state
+        ctx.fillRect(1, bodyY+2, 2, 3);
+        ctx.fillRect(1, bodyY+bodyH-5, 2, 3);
 
         // Accessories
         if (this.isCop) {
@@ -489,18 +604,26 @@ class Car {
             ctx.fillRect(barX, roofRect.y-1, 4, roofRect.h+2);
             ctx.fillStyle = '#dc0000'; // Red
             ctx.fillRect(barX, roofRect.y-2, 4, 4);
+            ctx.fillStyle = '#fff'; // Center white
+            ctx.fillRect(barX+1, roofRect.y, 2, roofRect.h);
             ctx.fillStyle = '#0032ff'; // Blue
             ctx.fillRect(barX, roofRect.y + roofRect.h - 2, 4, 4);
+            
             // Push bar
-            ctx.fillStyle = '#282828';
-            ctx.fillRect(w-2, bodyY+4, 2, bodyH-8);
-        } else {
-            // Spoiler
+            ctx.fillStyle = '#333';
+            ctx.fillRect(w-1, bodyY+4, 1, bodyH-8);
+            ctx.fillStyle = '#111';
+            ctx.fillRect(w-2, bodyY+4, 1, 2);
+            ctx.fillRect(w-2, bodyY+bodyH-6, 1, 2);
+        } else if (!this.isCivilian) {
+            // Spoiler (Player only)
             ctx.fillStyle = '#141414';
-            ctx.fillRect(5, bodyY+2, 2, 2);
-            ctx.fillRect(5, bodyY+bodyH-4, 2, 2);
-            ctx.fillStyle = '#1e1e1e';
-            ctx.fillRect(3, bodyY+1, 3, bodyH-2);
+            ctx.fillRect(5, bodyY+1, 2, 3);
+            ctx.fillRect(5, bodyY+bodyH-4, 2, 3);
+            ctx.fillStyle = '#1e1e1e'; // Wing
+            ctx.fillRect(3, bodyY, 3, bodyH);
+            ctx.fillStyle = '#333'; // Carbon highlight
+            ctx.fillRect(3, bodyY+2, 1, bodyH-4);
         }
 
         return cvs;
@@ -515,9 +638,79 @@ class Car {
         return new Rect(this.pos.x - (this.width-10)/2, this.pos.y - (this.height-10)/2, this.width-10, this.height-10);
     }
 
+    // New Smart Raycast System
+    checkSensors(allCars, player, buildings) {
+        let results = {
+            front: false,
+            left: false,
+            right: false,
+            frontDist: 999,
+            rightClear: true,
+            leftClear: true
+        };
+
+        const rayDist = 200;
+        const sideRayDist = 60;
+        const rad = degToRad(this.angle);
+        const forward = new Vector2(Math.cos(rad), -Math.sin(rad));
+        const right = new Vector2(Math.cos(rad + Math.PI/2), -Math.sin(rad + Math.PI/2));
+        const left = new Vector2(Math.cos(rad - Math.PI/2), -Math.sin(rad - Math.PI/2));
+
+        // Helper for point-box collision (simplified)
+        const checkRay = (start, dir, length, widthCheck=30) => {
+            let hit = false;
+            let minDist = length;
+            
+            let end = start.add(dir.mult(length));
+            
+            // Check cars
+            // Handle null player for menu
+            let objects = [...allCars];
+            if (player) objects.push(player);
+
+            for (let obj of objects) {
+                if (obj === this) continue;
+                
+                // Simple distance check first
+                let d = this.pos.distanceTo(obj.pos);
+                if (d > length + 50) continue;
+
+                // Project obj pos onto ray
+                let toObj = obj.pos.sub(start);
+                let dot = toObj.dot(dir);
+                let latDist = Math.abs(toObj.dot(new Vector2(-dir.y, dir.x))); // Perpendicular distance
+
+                if (dot > 0 && dot < length && latDist < widthCheck) {
+                    hit = true;
+                    if (dot < minDist) minDist = dot;
+                }
+            }
+            return { hit, dist: minDist };
+        };
+
+        // Front Ray (Traffic)
+        let fRay = checkRay(this.pos, forward, rayDist, 25);
+        if (fRay.hit) {
+            results.front = true;
+            results.frontDist = fRay.dist;
+        }
+
+        // Side Rays (Blind spots for lane change)
+        let rRay = checkRay(this.pos, right, sideRayDist, 40);
+        if (rRay.hit) results.rightClear = false;
+
+        let lRay = checkRay(this.pos, left, sideRayDist, 40);
+        if (lRay.hit) results.leftClear = false;
+
+        return results;
+    }
+
     physics(buildings, drift) {
         let turnSpeed = TURN_SPEED;
-        let maxSpeed = this.isCop ? MAX_SPEED_COP : MAX_SPEED_PLAYER;
+        let maxSpeed = this.isCop ? MAX_SPEED_COP : (this.isCivilian ? MAX_SPEED_CIVILIAN_BASE : MAX_SPEED_PLAYER);
+        
+        if (this.isCivilian) maxSpeed *= this.speedTrait;
+
         let acc = this.accInput;
 
         // Damage Effects
@@ -535,12 +728,6 @@ class Car {
 
         // Turning
         if (this.rotDirection !== 0 && this.vel.mag() > 0.5) {
-            // Determine forward/backward movement for flip
-            // Convert angle to rads, counter-clockwise logic from Python adapted
-            // Python: cos(rad), -sin(rad). 
-            // In JS canvas 0 is Right, 90 is Down.
-            // Python physics assumes 0 is Right, +Angle is Up (negative Y).
-            // Let's stick to the Python Math model: y is inverted relative to angle.
             let rad = degToRad(this.angle);
             let headingVec = new Vector2(Math.cos(rad), -Math.sin(rad));
             let dot = this.vel.dot(headingVec);
@@ -561,17 +748,17 @@ class Car {
         if (drift && speed > 3) {
             this.vel = this.vel.mult(DRIFT_SLIDE);
         } else {
-            if (speed > 0.5) {
-                // Lerp towards forward vector
+            if (speed > 0.1) {
                 let dot = this.vel.dot(forward);
                 let direction = dot > 0 ? 1 : -1;
                 let targetVel = forward.mult(speed * direction);
                 this.vel = this.vel.lerp(targetVel, 0.12);
+                this.vel = this.vel.mult(FRICTION);
+            } else {
+                if (Math.abs(acc) < 0.01) this.vel = new Vector2(0, 0);
             }
-            this.vel = this.vel.mult(FRICTION);
         }
 
-        // Cap speed
         if (this.vel.mag() > maxSpeed) {
             this.vel = this.vel.normalize().mult(maxSpeed);
         }
@@ -597,8 +784,12 @@ class Car {
                     if (dy > 0) this.pos.y += oy; else this.pos.y -= oy;
                     this.vel.y *= 0.5;
                 }
-                // Re-calc hitbox for next check
                 hitbox = this.getHitbox();
+                
+                if (this.isCivilian) {
+                    this.reversing = !this.reversing;
+                    this.stuckTimer = 0;
+                }
             }
         }
     }
@@ -606,11 +797,9 @@ class Car {
     updateCop(player, buildings) {
         if (!this.isCop) return;
 
-        // Predict player pos
         let futurePos = player.pos.add(player.vel.mult(25));
         let diff = futurePos.sub(this.pos);
         
-        // Stuck logic
         if (this.vel.mag() < 1.0) this.stuckTimer++;
         else this.stuckTimer = 0;
 
@@ -622,17 +811,10 @@ class Car {
             this.rotDirection = 1;
         } else {
             this.accInput = ACCELERATION * 0.98;
-            // Angle to target
-            // atan2(y, x). Remember Y is inverted in our physics model vs screen
-            // Our physics: Y goes down is +? No, standard screen.
-            // Angle model: 0 is Right, +Angle is Up (Negative Y).
-            // So dy should be inverted for atan2
             let targetAngle = Math.atan2(-diff.y, diff.x) * 180 / Math.PI;
             
-            // Normalize angles
             let currentAngle = this.angle;
             let angleDiff = (targetAngle - currentAngle + 180) % 360 - 180;
-            // Handle JS modulo negative result
              if (angleDiff < -180) angleDiff += 360;
              if (angleDiff > 180) angleDiff -= 360;
 
@@ -643,13 +825,197 @@ class Car {
 
         this.physics(buildings, false);
     }
+    
+    updateCivilian(buildings, allCars, player) {
+        if (!this.isCivilian) return;
+
+        // Grid info
+        const gx = Math.floor(this.pos.x / BLOCK_SIZE);
+        const gy = Math.floor(this.pos.y / BLOCK_SIZE);
+        const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
+        const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
+        const isIntersection = (gx % 3 === 0) && (gy % 3 === 0);
+        
+        // Init heading if null
+        if (this.targetHeading === null) {
+            this.targetHeading = Math.round(this.angle / 90) * 90;
+        }
+
+        // --- 1. SENSOR CHECK ---
+        const sensors = this.checkSensors(allCars, player, buildings);
+        let braking = false;
+        let coasting = false; // NEW: Coasting state
+        let yielding = false;
+
+        // --- 2. INTERSECTION & YIELD LOGIC ---
+        let distToCenter = Math.sqrt((this.pos.x - cx)**2 + (this.pos.y - cy)**2);
+        let insideBox = isIntersection && distToCenter < 140; 
+
+        // If approaching intersection, check for cross traffic
+        if (isIntersection && !insideBox && distToCenter < 280) {
+            let intendedTurn = (this.targetHeading - this.angle + 360) % 360; 
+            let isRightTurn = (Math.abs(intendedTurn - 90) < 45); 
+
+            for(let other of allCars) {
+                if (other === this) continue;
+                let otherDist = Math.sqrt((other.pos.x - cx)**2 + (other.pos.y - cy)**2);
+                
+                // General Intersection Yield (stop crashes)
+                // Only yield if other car is closer or already entering
+                if (otherDist < distToCenter * 0.8 || otherDist < 120) {
+                    let angleDiff = Math.abs(this.angle - other.angle);
+                    // If perpendicular (cross traffic)
+                    if (angleDiff > 80 && angleDiff < 100 || angleDiff > 260 && angleDiff < 280) {
+                        yielding = true;
+                    }
+                    // Special Right Turn Yield (Oncoming)
+                    if (isRightTurn && Math.abs(angleDiff - 180) < 20) {
+                        // Oncoming traffic within range
+                        if (otherDist < 250) yielding = true;
+                    }
+                }
+            }
+        }
+
+        // Inside box = Right of way (Clear it!)
+        if (insideBox) {
+            yielding = false;
+            // Only stop if literally touching bumper to bumper
+            if (sensors.front && sensors.frontDist > 50) braking = false;
+        } else {
+            // Front sensor brake logic modified for coasting
+            if (sensors.front) {
+                if (sensors.frontDist < 30) braking = true; // Panic stop only when VERY close
+                else if (sensors.frontDist < 100) coasting = true; // Just lift off gas
+            }
+            if (yielding) braking = true;
+        }
+
+        // --- 3. LANE LOGIC & OVERTAKING ---
+        if ((braking || coasting) && !yielding && !insideBox) {
+            this.blockedTimer++;
+            // If stuck behind someone slow, try to overtake
+            if (this.blockedTimer > this.patience && this.speedTrait > 1.0) {
+                 // Check if lane change is safe
+                 if (this.laneSwitchDir === 0) {
+                     // Prefer passing on Right (center) if safe
+                     if (sensors.rightClear) this.laneSwitchDir = 1;
+                     else if (sensors.leftClear) this.laneSwitchDir = -1;
+                 }
+            }
+        } else {
+            this.blockedTimer = 0;
+            this.laneSwitchDir = 0;
+        }
+
+        // --- 4. STUCK/REVERSE ---
+        if (this.vel.mag() < 0.5 && !braking) this.stuckTimer++;
+        else this.stuckTimer = 0;
+
+        if (this.stuckTimer > 100) this.reversing = true;
+        if (this.stuckTimer > 150 || (this.reversing && this.vel.mag() > 2)) { 
+            this.reversing = false; 
+            this.stuckTimer = 0; 
+            this.angle += 45; // Hard steer to unstick
+        }
+
+        // --- 5. EXECUTION ---
+        this.brakingVisual = false;
+
+        if (this.reversing) {
+             this.accInput = -ACCELERATION * 0.5;
+             this.rotDirection = -1; 
+             // Reverse lights (not red)
+        } else {
+            if (braking) {
+                // Hard Brake
+                this.accInput = -ACCELERATION * 1.5; 
+                this.brakingVisual = true; 
+                
+                if (this.vel.mag() < 0.1) {
+                    this.vel = new Vector2(0, 0);
+                    this.accInput = 0;
+                }
+            } else if (coasting) {
+                // Gentle Slow Down (No Brake Lights)
+                this.accInput = 0; // Lift off gas
+                // Friction will naturally slow the car
+            } else {
+                this.accInput = ACCELERATION * 0.4; 
+            }
+
+            // --- LHT LANE CALCULATIONS ---
+            let laneOffset = 80;
+            if (this.laneSwitchDir === 1) laneOffset = 20; // Move to center (Overtake)
+            if (this.laneSwitchDir === -1) laneOffset = 140; // Move to shoulder?
+
+            let targetX = this.pos.x;
+            let targetY = this.pos.y;
+            let h = (this.targetHeading % 360 + 360) % 360;
+            
+            if (h === 0) targetY = cy - laneOffset;       
+            else if (h === 180) targetY = cy + laneOffset; 
+            else if (h === 90) targetX = cx + laneOffset;  
+            else if (h === 270) targetX = cx - laneOffset; 
+
+            let lookAhead = 150;
+            let steeringTarget = new Vector2(targetX, targetY);
+            if (h === 0 || h === 180) steeringTarget.x = this.pos.x + (h===0?lookAhead:-lookAhead);
+            else steeringTarget.y = this.pos.y + (h===90?lookAhead:-lookAhead);
+
+            let diff = steeringTarget.sub(this.pos);
+            let desiredAngle = Math.atan2(-diff.y, diff.x) * 180 / Math.PI;
+
+            // Pick Heading at Intersection
+            if (this.cooldownTimer > 0) this.cooldownTimer--;
+            if (isIntersection && distToCenter < 60 && this.cooldownTimer <= 0) {
+                // Bias towards going straight (less chaos)
+                const directions = [0, 90, 180, 270];
+                // Remove U-turn
+                let valid = directions.filter(d => Math.abs(d - this.targetHeading) !== 180);
+                const newHeading = randChoice(valid);
+                this.targetHeading = newHeading;
+                this.cooldownTimer = 200; 
+            }
+
+            let currentAngle = this.angle;
+            let targetSteer = (isIntersection && distToCenter < 90) ? this.targetHeading : desiredAngle;
+            
+            let angleDiff = (targetSteer - currentAngle + 180) % 360 - 180;
+            if (angleDiff < -180) angleDiff += 360;
+            if (angleDiff > 180) angleDiff -= 360;
+
+            if (angleDiff > 4) this.rotDirection = -1;
+            else if (angleDiff < -4) this.rotDirection = 1;
+            else this.rotDirection = 0;
+        }
+
+        // Deadlock Breaker: If stuck yielding for too long, just go
+        if (yielding) {
+            this.blockedTimer++;
+            if (this.blockedTimer > 150) yielding = false; // "I'm going!"
+        }
+
+        this.physics(buildings, false);
+    }
 
     draw(ctx) {
         ctx.save();
         ctx.translate(this.pos.x, this.pos.y);
-        // Canvas rotation is clockwise. Our angle is CCW.
         ctx.rotate(-degToRad(this.angle));
         ctx.drawImage(this.sprite, -this.width/2, -this.height/2);
+        
+        // Draw Dynamic Brake Lights
+        if (this.brakingVisual) {
+            ctx.fillStyle = '#ff0000';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ff0000';
+            const bodyY = 3, bodyH = this.height - 6;
+            ctx.fillRect(1, bodyY+2, 3, 3);
+            ctx.fillRect(1, bodyY+bodyH-5, 3, 3);
+            ctx.shadowBlur = 0;
+        }
+        
         ctx.restore();
     }
 }
@@ -657,8 +1023,15 @@ class Car {
 class Person {
     constructor(x, y, walkArea) {
         this.pos = new Vector2(x, y);
-        this.shirtColor = randChoice(['#14141e', '#c8c8c8', '#323264', '#b4b4be', '#ffffff']);
-        this.skinColor = '#ffd2b4';
+        this.angle = -randFloat(0, Math.PI * 2) * 180 / Math.PI;
+        
+        this.skinColor = randChoice(['#ffdbac', '#f1c27d', '#e0ac69', '#8d5524', '#c68642']);
+        this.shirtColor = randChoice(['#ffffff', '#14141e', '#c83232', '#3264c8', '#32c864', '#ffff32', '#ff96c8', '#a0a0a0', '#503250']);
+        this.pantColor = randChoice(['#1e1e28', '#2d2d3c', '#283250', '#50463c', '#3c3c46', '#202020']);
+        this.hairColor = randChoice(['#000000', '#281e14', '#4b3c28', '#e6c86e', '#8c2828', '#c8c8c8', '#e6e6e6']);
+        this.hairStyle = randChoice(['bald', 'short', 'short_messy', 'long', 'ponytail', 'cap', 'afro', 'mohawk']);
+        this.shoeColor = randChoice(['#000000', '#ffffff', '#50321e', '#323232']);
+        
         let angleRad = randFloat(0, Math.PI * 2);
         this.vel = new Vector2(Math.cos(angleRad), Math.sin(angleRad)).mult(0.4);
         this.angle = -angleRad * 180 / Math.PI;
@@ -669,15 +1042,14 @@ class Person {
         this.isAngry = false;
         this.shoutTimer = 0;
         this.curseWord = "";
-        this.frame = 0;
-        this.curseList = ["WTF!", "HEY!", "WATCH IT!", "IDIOT!", "NOOO!"];
+        this.frame = randFloat(0, 10);
+        this.curseList = ["HEY!", "WATCH IT!", "I'M WALKIN!", "IDIOT!", "NOOO!", "WHAT?!", "CRAZY!"];
     }
 
     die(bloodGroup) {
         if (this.isDead) return;
         this.isDead = true;
         this.vel = new Vector2(0,0);
-        // Spawn blood
         for (let i=0; i<2; i++) {
             bloodGroup.push(new Blood(this.pos.x + randInt(-5,5), this.pos.y + randInt(-5,5)));
         }
@@ -688,13 +1060,11 @@ class Person {
 
         let dist = this.pos.distanceTo(player.pos);
 
-        // 1. Death
         if (dist < 30 && player.vel.mag() > 2.0) {
             this.die(bloodGroup);
             return;
         }
 
-        // 2. Angry
         if (dist < 70 && !this.isAngry) {
             this.isAngry = true;
             this.shoutTimer = 120;
@@ -711,7 +1081,6 @@ class Person {
                 this.angle = -angleRad * 180 / Math.PI;
             }
         } else {
-            // Walk
             if (this.walkArea) {
                 let futurePos = this.pos.add(this.vel.mult(5));
                 if (!this.walkArea.collidePoint(futurePos.x, futurePos.y)) {
@@ -737,35 +1106,85 @@ class Person {
         ctx.translate(this.pos.x, this.pos.y);
         
         if (this.isDead) {
-            // Crushed
             ctx.rotate(-degToRad(this.angle));
-            // Blood pool
             ctx.fillStyle = '#960000';
-            ctx.beginPath(); ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI*2); ctx.fill();
-            // Shirt
+            ctx.beginPath(); ctx.ellipse(0, 0, 14, 8, 0, 0, Math.PI*2); ctx.fill();
             ctx.fillStyle = this.shirtColor;
-            ctx.fillRect(-6, -2, 12, 4);
-            // Head
+            ctx.fillRect(-6, -4, 12, 8);
             ctx.fillStyle = this.skinColor;
-            ctx.beginPath(); ctx.arc(8, 0, 3, 0, Math.PI*2); ctx.fill();
+            ctx.fillRect(4, -3, 6, 6);
         } else {
             ctx.rotate(-degToRad(this.angle));
-            let swing = Math.sin(this.frame) * 3;
-            if (this.isAngry) swing = 0;
+            let speed = this.isAngry ? 0 : 1;
+            let walkCycle = this.frame * 0.8 * speed; 
+            let leftLeg = Math.sin(walkCycle) * 4;
+            let rightLeg = Math.sin(walkCycle + Math.PI) * 4;
+            let leftArm = Math.sin(walkCycle + Math.PI) * 4;
+            let rightArm = Math.sin(walkCycle) * 4;
             
-            // Body
-            drawRect(ctx, this.shirtColor, -5, -3, 10, 6, 3);
-            // Head
-            drawCircle(ctx, this.skinColor, 0, 0, 4);
-            // Hands
             if (this.isAngry) {
-                // Hands up
+                leftLeg = 0; rightLeg = 0;
+                leftArm = 0; rightArm = 0;
+            }
+
+            ctx.fillStyle = this.pantColor;
+            ctx.fillRect(leftLeg - 2, -6, 6, 4);
+            ctx.fillRect(rightLeg - 2, 2, 6, 4);
+
+            ctx.fillStyle = this.shoeColor;
+            ctx.fillRect(leftLeg + 2, -6, 3, 4);
+            ctx.fillRect(rightLeg + 2, 2, 3, 4);
+
+            ctx.fillStyle = this.shirtColor; 
+            ctx.fillRect(leftArm - 2, -9, 7, 3);
+            ctx.fillRect(rightArm - 2, 6, 7, 3);
+            
+            ctx.fillStyle = this.skinColor;
+            if (this.isAngry) {
                 let shake = randInt(-1, 1);
-                drawCircle(ctx, this.skinColor, 6 + shake, -3 - 3, 2);
-                drawCircle(ctx, this.skinColor, 6 + shake, 3 + 3, 2);
+                ctx.fillRect(2 + shake, -10, 5, 5);
+                ctx.fillRect(2 + shake, 5, 5, 5);
             } else {
-                drawCircle(ctx, this.skinColor, 3, 3 + swing, 2);
-                drawCircle(ctx, this.skinColor, 3, -3 - swing, 2);
+                ctx.fillRect(leftArm + 4, -9, 3, 3); 
+                ctx.fillRect(rightArm + 4, 6, 3, 3); 
+            }
+
+            ctx.fillStyle = this.shirtColor;
+            ctx.fillRect(-4, -6, 10, 12);
+            ctx.fillStyle = 'rgba(0,0,0,0.15)';
+            ctx.fillRect(0, -2, 2, 4);
+
+            ctx.fillStyle = this.skinColor;
+            ctx.fillRect(-2, -4, 7, 8);
+            
+            if (this.hairStyle === 'cap') {
+                ctx.fillStyle = this.hairColor;
+                ctx.fillRect(-3, -5, 7, 10);
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(2, -5, 3, 10);
+            } else if (this.hairStyle === 'mohawk') {
+                ctx.fillStyle = this.skinColor;
+                ctx.fillRect(-3, -5, 6, 10);
+                ctx.fillStyle = this.hairColor;
+                ctx.fillRect(-4, -1, 8, 2); 
+            } else if (this.hairStyle === 'afro') {
+                ctx.fillStyle = this.hairColor;
+                ctx.fillRect(-4, -6, 10, 12);
+            } else if (this.hairStyle !== 'bald') {
+                ctx.fillStyle = this.hairColor;
+                if (this.hairStyle === 'short') {
+                    ctx.fillRect(-3, -5, 6, 10);
+                } else if (this.hairStyle === 'short_messy') {
+                    ctx.fillRect(-3, -5, 7, 10);
+                    ctx.fillRect(-4, -3, 2, 2);
+                    ctx.fillRect(-4, 1, 2, 2);
+                } else if (this.hairStyle === 'long') {
+                    ctx.fillRect(-4, -5, 6, 10);
+                    ctx.fillRect(-6, -6, 4, 12); 
+                } else if (this.hairStyle === 'ponytail') {
+                    ctx.fillRect(-3, -5, 6, 10);
+                    ctx.fillRect(-7, -2, 4, 4); 
+                }
             }
         }
         ctx.restore();
@@ -783,7 +1202,6 @@ class Building {
         this.h = BLOCK_SIZE - BUILDING_GAP * 2;
         this.rect = new Rect(x - this.w/2, y - this.h/2, this.w, this.h);
         
-        // Use a consistent seeded RNG so buildings look the same when you return
         this.rng = new SeededRNG(Math.abs(gx * 73856093 ^ gy * 19349663));
         
         this.sprite = this.generateSprite(isPark);
@@ -795,7 +1213,6 @@ class Building {
         cvs.width = this.w;
         cvs.height = this.h;
         const ctx = cvs.getContext('2d');
-        // Disable smoothing for sharp pixels on building sprite generation
         ctx.imageSmoothingEnabled = false;
         
         const w = this.w, h = this.h;
@@ -804,37 +1221,51 @@ class Building {
         if (isPark) {
             ctx.fillStyle = COLORS.ZOO_BASE;
             ctx.fillRect(0, 0, w, h);
+            
+            ctx.fillStyle = '#2d7d2d';
+            for(let i=0; i<300; i++) {
+                ctx.fillRect(rng.randInt(0,w), rng.randInt(0,h), 2, 2);
+            }
+
             ctx.fillStyle = '#b4aa96';
             ctx.fillRect(w/2 - 20, 0, 40, h);
             ctx.fillRect(0, h/2 - 20, w, 40);
             
-            // Pond
             for (let r=60; r>10; r-=5) {
-                // Color math approx
                 ctx.fillStyle = `rgb(50, 150, ${250-r})`;
                 ctx.beginPath(); ctx.arc(w/2+80, h/2-80, r, 0, Math.PI*2); ctx.fill();
             }
         } else {
-            // Base sidewalk
             ctx.fillStyle = COLORS.SIDEWALK;
             ctx.fillRect(0, 0, w, h);
+            
+            ctx.fillStyle = '#737378';
+            for(let i=0; i<w; i+=20) {
+                ctx.fillRect(i, 0, 1, h);
+                ctx.fillRect(0, i, w, 1);
+            }
 
-            // Props
             for (let i=0; i<5; i++) {
                 let px = rng.randInt(5, w-20);
                 let py = rng.randInt(5, h-20);
-                if (px > 30 && px < w-30 && py > 30 && py < h-50) continue; // Skip center
+                if (px > 30 && px < w-30 && py > 30 && py < h-50) continue; 
 
-                let type = rng.choice(['planter', 'box']);
+                let type = rng.choice(['planter', 'box', 'vent']);
                 if (type === 'planter') {
                     ctx.fillStyle = '#644632'; ctx.fillRect(px, py, 12, 12);
                     ctx.fillStyle = '#3c8c3c'; ctx.beginPath(); ctx.arc(px+6, py+6, 5, 0, Math.PI*2); ctx.fill();
-                } else {
+                } else if (type === 'box') {
                     ctx.fillStyle = '#64646e'; ctx.fillRect(px, py, 10, 16);
+                    ctx.fillStyle = '#50505a'; ctx.fillRect(px+1, py+1, 8, 14);
+                } else {
+                    ctx.fillStyle = '#aaa'; ctx.fillRect(px, py, 12, 12);
+                    ctx.fillStyle = '#555'; 
+                    ctx.fillRect(px+2, py+2, 8, 2);
+                    ctx.fillRect(px+2, py+5, 8, 2);
+                    ctx.fillRect(px+2, py+8, 8, 2);
                 }
             }
 
-            // Building Structure
             let pad = 12;
             let wallH = 35;
             let iw = w - pad*2, ih = h - pad*2;
@@ -847,47 +1278,87 @@ class Building {
 
             if (style === 'school') {
                 ctx.fillStyle = COLORS.SCHOOL_BEIGE; ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
+                ctx.fillStyle = '#dcd2b4';
+                for(let i=0; i<roofRect.w; i+=4) ctx.fillRect(roofRect.x+i, roofRect.y, 1, roofRect.h);
+
                 ctx.fillStyle = '#c8beace'; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
-                // Clock
                 ctx.fillStyle = '#b4aa96'; ctx.fillRect(roofRect.x+roofRect.w/2-20, roofRect.y+roofRect.h/2-20, 40, 40);
                 drawCircle(ctx, COLORS.CLOCK_FACE, roofRect.x+roofRect.w/2, roofRect.y+roofRect.h/2, 15);
-                // Windows
+                ctx.strokeStyle = '#000'; ctx.beginPath(); ctx.moveTo(roofRect.x+roofRect.w/2, roofRect.y+roofRect.h/2); ctx.lineTo(roofRect.x+roofRect.w/2, roofRect.y+roofRect.h/2-10); ctx.stroke();
                 ctx.fillStyle = '#6496c8';
                 for(let r=0; r<3; r++) {
                     for(let c=0; c<6; c++) {
-                        if (rng.next()>0.2) ctx.fillRect(roofRect.x + c*(iw/6)+8, roofRect.y + r*25+15, 20, 15);
+                        if (rng.next()>0.2) {
+                            let wx = roofRect.x + c*(iw/6)+8;
+                            let wy = roofRect.y + r*25+15;
+                            ctx.fillStyle = '#465a6e'; 
+                            ctx.fillRect(wx-1, wy-1, 22, 17);
+                            ctx.fillStyle = '#6496c8'; 
+                            ctx.fillRect(wx, wy, 20, 15);
+                            ctx.fillStyle = '#a0c8fa'; 
+                            ctx.beginPath(); ctx.moveTo(wx+12, wy); ctx.lineTo(wx+16, wy); ctx.lineTo(wx+4, wy+15); ctx.lineTo(wx, wy+15); ctx.fill();
+                        }
                     }
                 }
             } else if (style === 'izakaya') {
                 ctx.fillStyle = COLORS.WOOD_DARK; ctx.fillRect(roofRect.x-2, roofRect.y-2, roofRect.w+4, roofRect.h+4);
                 ctx.fillStyle = COLORS.ROOF_TILE_JP; ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
+                ctx.fillStyle = '#2d2d32'; 
+                for(let i=0; i<roofRect.h; i+=6) {
+                    ctx.fillRect(roofRect.x, roofRect.y+i, roofRect.w, 2);
+                }
+
                 ctx.fillStyle = COLORS.WOOD_RED; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
-                // Lanterns
                 for(let i=0; i<4; i++) {
-                    drawCircle(ctx, COLORS.LANTERN_RED, wallRect.x + (iw/4)*i + 20, wallRect.y+5, 6);
+                    let lx = wallRect.x + (iw/4)*i + 20;
+                    let ly = wallRect.y+5;
+                    drawCircle(ctx, '#000', lx, ly-2, 2); 
+                    drawCircle(ctx, COLORS.LANTERN_RED, lx, ly, 6);
+                    ctx.fillStyle = '#ffaa32'; 
+                    ctx.fillRect(lx-2, ly-2, 4, 4);
                 }
             } else if (style === 'modern') {
                 ctx.fillStyle = '#9696a0'; ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
-                ctx.strokeStyle = COLORS.CONCRETE_DARK; ctx.lineWidth = 3; ctx.strokeRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
+                for(let i=0; i<200; i++) {
+                    ctx.fillStyle = rng.next() > 0.5 ? '#a0a0aa' : '#8c8c96';
+                    ctx.fillRect(roofRect.x + rng.randInt(0, roofRect.w), roofRect.y + rng.randInt(0, roofRect.h), 2, 2);
+                }
+                
+                ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+                ctx.strokeRect(roofRect.x+4, roofRect.y+4, roofRect.w-8, roofRect.h-8);
+
                 ctx.fillStyle = '#787882'; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
-                // Windows
                 let winW = iw/3 - 5, winH = (ih-wallH)/3 - 5;
                 for(let r=0; r<3; r++) {
                     for(let c=0; c<3; c++) {
                         let wx = roofRect.x + c*(winW+5) + 8, wy = roofRect.y + r*(winH+5) + 8;
                         ctx.fillStyle = rng.choice([COLORS.WIN_LIT_COOL, COLORS.WIN_LIT_WARM, COLORS.WIN_DARK]);
                         ctx.fillRect(wx, wy, winW, winH);
+                        if (rng.next() > 0.6) {
+                            ctx.fillStyle = COLORS.AC;
+                            ctx.fillRect(wx+winW-10, wy+winH, 10, 8);
+                            drawCircle(ctx, '#333', wx+winW-5, wy+winH+4, 3); 
+                        }
                     }
                 }
             } else { // Brick
                 ctx.fillStyle = '#a06450'; ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
+                ctx.fillStyle = '#8c5040';
+                for(let by = roofRect.y; by < roofRect.bottom; by+=6) {
+                    ctx.fillRect(roofRect.x, by, roofRect.w, 1);
+                    for(let bx = roofRect.x + (by%12===0?0:6); bx < roofRect.right; bx+=12) {
+                        ctx.fillRect(bx, by, 1, 6);
+                    }
+                }
+
                 ctx.fillStyle = COLORS.SIDEWALK; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
-                // Windows
                 let ww = iw/5, wh = (ih-wallH)/4;
                 for(let r=0; r<4; r++) {
                     for(let c=0; c<5; c++) {
                         ctx.fillStyle = rng.choice([COLORS.WIN_LIT_WARM, COLORS.WIN_DARK]);
                         ctx.fillRect(roofRect.x + c*ww + 8, roofRect.y + r*wh + 8, ww-16, wh-20);
+                        ctx.fillStyle = '#555';
+                        ctx.fillRect(roofRect.x + c*ww + 7, roofRect.y + r*wh + 8 + wh - 20, ww-14, 2);
                     }
                 }
             }
@@ -896,10 +1367,8 @@ class Building {
     }
 
     draw(ctx) {
-        // Shadow
         ctx.fillStyle = 'rgba(0,0,0,0.25)';
         ctx.fillRect(this.rect.x+8, this.rect.y+8, this.w, this.h);
-        // Building
         ctx.drawImage(this.sprite, this.rect.x, this.rect.y);
     }
 }
@@ -909,21 +1378,35 @@ class Sakura {
         this.pos = new Vector2(x, y);
         this.rect = new Rect(x-20, y-20, 40, 40);
         this.sprite = this.generate();
+        this.petals = [];
+        for(let i=0; i<5; i++) {
+            this.petals.push({x: randInt(-15, 15), y: randInt(10, 20), c: randChoice([COLORS.SAKURA_PINK, '#fff'])});
+        }
     }
     generate() {
         const cvs = document.createElement('canvas');
         cvs.width = 40; cvs.height = 40;
         const ctx = cvs.getContext('2d');
-        // Trunk
         ctx.fillStyle = '#46281e'; ctx.fillRect(18, 20, 4, 20);
-        // Leaves
-        for(let i=0; i<30; i++) {
-            ctx.fillStyle = randChoice([COLORS.SAKURA_PINK, COLORS.SAKURA_DARK, '#ffc8dc']);
+        for(let i=0; i<15; i++) {
+            ctx.fillStyle = COLORS.SAKURA_DARK;
+            drawCircle(ctx, ctx.fillStyle, randInt(5,35), randInt(10,35), randInt(3,5));
+        }
+        for(let i=0; i<20; i++) {
+            ctx.fillStyle = COLORS.SAKURA_PINK;
             drawCircle(ctx, ctx.fillStyle, randInt(5,35), randInt(5,30), randInt(3,5));
+        }
+        for(let i=0; i<10; i++) {
+            ctx.fillStyle = '#ffdcdc';
+            drawCircle(ctx, ctx.fillStyle, randInt(10,30), randInt(5,25), randInt(1,3));
         }
         return cvs;
     }
     draw(ctx) {
+        this.petals.forEach(p => {
+            ctx.fillStyle = p.c;
+            ctx.fillRect(this.pos.x + p.x, this.pos.y + p.y, 3, 3);
+        });
         ctx.drawImage(this.sprite, this.rect.x, this.rect.y);
     }
 }
@@ -999,7 +1482,6 @@ class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
         this.ctx = this.canvas.getContext('2d');
-        // VITAL: Disable smoothing for pixel art look
         this.ctx.imageSmoothingEnabled = false;
         
         this.resize();
@@ -1017,6 +1499,15 @@ class Game {
         this.restartRect = new Rect(0,0,0,0);
         this.playRect = new Rect(0,0,0,0);
         
+        // Traffic Light System
+        // States: NS_GREEN, NS_YELLOW, EW_GREEN, EW_YELLOW
+        this.trafficLightState = 'NS_GREEN'; 
+        this.trafficTimer = 0;
+        this.scanlineY = 0;
+
+        // Initialize game world so background renders in Menu
+        this.initGame();
+
         this.loop = this.loop.bind(this);
         requestAnimationFrame(this.loop);
     }
@@ -1027,12 +1518,16 @@ class Game {
         this.buildings = [];
         this.people = [];
         this.cops = [];
+        this.civilians = [];
         this.sakura = [];
         this.particles = [];
         this.skids = [];
         this.blood = [];
         this.loadedChunks = new Set();
         
+        // Setup menu camera pos
+        this.menuCamPos = new Vector2(0, 0);
+
         this.spawnTimer = 0;
         this.score = 0;
     }
@@ -1040,7 +1535,6 @@ class Game {
     resize() {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
-        // Re-disable smoothing after resize reset
         this.ctx.imageSmoothingEnabled = false;
     }
 
@@ -1050,7 +1544,7 @@ class Game {
 
         if (this.state === 'MENU') {
             if (this.playRect.collidePoint(mx, my)) {
-                this.initGame();
+                this.initGame(); // Reset for fair start
                 this.state = 'PLAY';
             }
         } else if (this.state === 'GAMEOVER') {
@@ -1067,15 +1561,52 @@ class Game {
         const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
         const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
         
-        // Use seeded RNG for consistent prop placement if needed, 
-        // though for entities we typically accept some randomness.
-        // For consistent world, we use the SeededRNG.
         let seed = Math.abs(gx * 73856093 ^ gy * 19349663);
         let rng = new SeededRNG(seed);
 
         if (isRoadX || isRoadY) {
+            // Spawn People
             if (rng.next() < 0.1) {
                 this.people.push(new Person(cx + rng.randInt(-50,50), cy + rng.randInt(-50,50), null));
+            }
+            // Spawn Civilians - HIGH DENSITY
+            // Spawn 0 to 3 cars per road chunk
+            let density = rng.choice([0, 1, 1, 2, 2, 3]); 
+            
+            for(let i=0; i<density; i++) {
+                 // Determine heading based on road type
+                 let heading = 0;
+                 if (isRoadX && !isRoadY) heading = rng.choice([90, 270]); // Vertical road
+                 else if (!isRoadX && isRoadY) heading = rng.choice([0, 180]); // Horizontal
+                 else heading = rng.choice([0, 90, 180, 270]); // Intersection
+
+                 // SPAWN IN CORRECT LANE (LEFT-HAND TRAFFIC - JAPAN STYLE)
+                 let laneOffset = 80;
+                 let jitter = rng.randInt(-20, 20); // Minor lateral variation
+                 let longScatter = rng.randInt(-150, 150); // Spread along road
+
+                 let spawnX = cx;
+                 let spawnY = cy;
+
+                 if (heading === 0) { // Right -> Top Lane (LHT)
+                    spawnY = cy - laneOffset + jitter;
+                    spawnX = cx + longScatter;
+                 } else if (heading === 180) { // Left -> Bottom Lane (LHT)
+                    spawnY = cy + laneOffset + jitter;
+                    spawnX = cx + longScatter;
+                 } else if (heading === 90) { // Down -> Right Lane (LHT - Right is Left relative to Down)
+                    spawnX = cx + laneOffset + jitter;
+                    spawnY = cy + longScatter;
+                 } else if (heading === 270) { // Up -> Left Lane (LHT - Left is Left relative to Up)
+                    spawnX = cx - laneOffset + jitter;
+                    spawnY = cy + longScatter;
+                 }
+
+                 let type = rng.choice(Object.keys(CAR_TYPES));
+                 let civCar = new Car(spawnX, spawnY, type, false, true);
+                 civCar.angle = heading;
+                 civCar.targetHeading = heading;
+                 this.civilians.push(civCar);
             }
         } else {
             const sidewalkRect = new Rect(gx * BLOCK_SIZE, gy * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE).inflate(-10, -10);
@@ -1126,28 +1657,17 @@ class Game {
             }
         }
 
-        // Cleanup Logic
-        // The previous logic had a bug where buildings were removed from the array 
-        // but their keys remained in loadedChunks, preventing regeneration.
-        // We now explicitly check bounds and remove from both.
-        
-        const margin = 1200; // Keep slightly larger area to prevent pop-in
+        const margin = 1200; 
         const keepRect = view.inflate(margin, margin);
         
-        // 1. Cull Buildings & Update LoadedChunks
         for (let i = this.buildings.length - 1; i >= 0; i--) {
             let b = this.buildings[i];
-            // If building is completely outside keep rect
             if (!keepRect.collideRect(b.rect)) {
-                // IMPORTANT: Remove the chunk key so it can be generated again later
                 this.loadedChunks.delete(`${b.gx},${b.gy}`);
                 this.buildings.splice(i, 1);
             }
         }
 
-        // 2. Cull Transients (People, Sakura, etc)
-        // Since people and sakura are generated by generateChunk(), they should also disappear 
-        // if the chunk unloads.
         const cull = (arr) => {
             return arr.filter(obj => {
                 if (obj.rect) return keepRect.collideRect(obj.rect);
@@ -1159,20 +1679,64 @@ class Game {
         this.sakura = cull(this.sakura);
         this.skids = cull(this.skids);
         this.blood = cull(this.blood);
+        this.civilians = cull(this.civilians);
     }
 
     update() {
-        if (this.state !== 'PLAY') return;
+        if (this.state === 'GAMEOVER') return;
 
         // Input
         this.player.rotDirection = 0;
         this.player.accInput = 0;
+        
+        if (this.state === 'MENU') {
+            // Auto-move camera for menu background
+            this.menuCamPos.y -= 6;
+            this.camera.update({ pos: this.menuCamPos }, this.canvas.width, this.canvas.height);
+            
+            // Only generate world, no player physics
+            this.updateChunks();
+            
+            // Spawn Cops around Camera in Menu
+            this.spawnTimer++;
+            if (this.spawnTimer > 120) { 
+                this.spawnTimer = 0;
+                let angle = randFloat(0, Math.PI*2);
+                let dist = 800;
+                let cx = this.menuCamPos.x + Math.cos(angle)*dist;
+                let cy = this.menuCamPos.y + Math.sin(angle)*dist;
+                let gx = Math.floor(cx / BLOCK_SIZE);
+                let gy = Math.floor(cy / BLOCK_SIZE);
+                if ((gx % 3 === 0) || (gy % 3 === 0)) {
+                    this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
+                }
+            }
+            
+            // Update other cars (civilians)
+            this.civilians.forEach((civ, i) => {
+                // Pass null for player so they don't react to ghost player
+                civ.updateCivilian(this.buildings, this.civilians, null);
+            });
+            
+            // Update cops (simple movement or none)
+            // Cops rely on player target, so let's just make them drive forward or despawn?
+            // Actually, let's just filter them out or let them drift.
+            // For now, let's just update chunks/civilians.
+            
+            // Cull entities
+            // Reuse updateChunks culling logic which runs every frame
+            
+            return; // Skip rest of update loop (player physics, collisions, etc)
+        }
+
+        // --- PLAY STATE ---
+
+        // Player Control
         if (this.keys['ArrowLeft'] || this.keys['a'] || this.keys['A']) this.player.rotDirection = -1;
         if (this.keys['ArrowRight'] || this.keys['d'] || this.keys['D']) this.player.rotDirection = 1;
         if (this.keys['ArrowUp'] || this.keys['w'] || this.keys['W']) this.player.accInput = ACCELERATION;
         if (this.keys['ArrowDown'] || this.keys['s'] || this.keys['S']) this.player.accInput = -ACCELERATION * 0.5;
-        let drift = this.keys[' '] || this.keys['Shift'];
-
+        
         if (this.keys['r'] || this.keys['R']) {
              if (this.player.health && this.player.health.checkFullyDestroyed()) {
                  this.initGame();
@@ -1180,10 +1744,16 @@ class Game {
              }
         }
 
-        this.camera.update(this.player, this.canvas.width, this.canvas.height);
-        this.updateChunks();
+        let drift = (this.keys[' '] || this.keys['Shift']) && this.state === 'PLAY';
 
+        // Physics First
         this.player.physics(this.buildings, drift);
+
+        // Camera Second
+        this.camera.update(this.player, this.canvas.width, this.canvas.height);
+        
+        // World Generation Third
+        this.updateChunks();
 
         // Spawn Cops
         this.spawnTimer++;
@@ -1213,7 +1783,7 @@ class Game {
             
             // Cop collision
             if (cop.getHitbox().collideRect(this.player.getHitbox())) {
-                this.player.health.takeDamage(10);
+                this.player.health.takeDamage(30); // Increased Police Damage
                 // Bounce
                 let bounce = this.player.pos.sub(cop.pos).normalize().mult(5);
                 this.player.vel = this.player.vel.add(bounce);
@@ -1233,6 +1803,37 @@ class Game {
             }
         });
         this.cops = this.cops.filter(c => !c.dead);
+
+        // Civilians
+        this.civilians.forEach((civ, i) => {
+            // Pass the whole list of cars so they can see each other
+            civ.updateCivilian(this.buildings, this.civilians, this.player);
+
+            // Civilian vs Player Collision (Bounce Only)
+            if (civ.getHitbox().collideRect(this.player.getHitbox())) {
+                // Minor damage
+                this.player.health.takeDamage(5);
+                
+                // Calculate Bounce
+                let pCenter = this.player.pos;
+                let cCenter = civ.pos;
+                let bounceVec = pCenter.sub(cCenter).normalize();
+                
+                // Push player away
+                this.player.vel = this.player.vel.add(bounceVec.mult(4));
+                // Push civilian away
+                civ.vel = civ.vel.sub(bounceVec.mult(4));
+                
+                // Sparks
+                for(let k=0; k<3; k++) this.particles.push(new Particle(this.player.pos.x + randInt(-10,10), this.player.pos.y + randInt(-10,10), 'spark'));
+                
+                // Add score for causing chaos
+                if (!civ.hitOnce) {
+                    this.score += 10;
+                    civ.hitOnce = true;
+                }
+            }
+        });
 
         // People
         this.people.forEach(p => p.update(this.player, this.blood));
@@ -1269,7 +1870,6 @@ class Game {
                 if (isRoadX || isRoadY) {
                     this.ctx.drawImage(roadPatternCanvas, sx, sy);
                     
-                    // Markings
                     this.ctx.fillStyle = COLORS.PAINT_WHITE;
                     if (isRoadY) {
                         this.ctx.fillRect(sx, sy+10, bs, 3);
@@ -1288,14 +1888,21 @@ class Game {
                         for(let i=0; i<bs; i+=40) this.ctx.fillRect(sx+bs/2, sy+i+10, 3, 20);
                     }
 
-                    // Intersection
                     if (isRoadX && isRoadY) {
-                        this.ctx.fillStyle = COLORS.PAINT_WHITE;
-                        for(let i=120; i<260; i+=20) {
-                            this.ctx.fillRect(sx+20, sy+i, 80, 12);
-                            this.ctx.fillRect(sx+bs-100, sy+i, 80, 12);
-                            this.ctx.fillRect(sx+i, sy+20, 12, 80);
-                            this.ctx.fillRect(sx+i, sy+bs-100, 12, 80);
+                        this.ctx.fillStyle = '#fff';
+                        const stripeW = 8;
+                        const stripeGap = 8;
+                        const crossW = 80;
+                        const crossH = 20;
+                        
+                        for (let i = 20; i < bs - 20; i += stripeW + stripeGap) {
+                            this.ctx.fillRect(sx + i, sy + 20, stripeW, 40);
+                            this.ctx.fillRect(sx + i, sy + bs - 60, stripeW, 40);
+                        }
+                        
+                        for (let i = 20; i < bs - 20; i += stripeW + stripeGap) {
+                            this.ctx.fillRect(sx + 20, sy + i, 40, stripeW);
+                            this.ctx.fillRect(sx + bs - 60, sy + i, 40, stripeW);
                         }
                     }
                 }
@@ -1311,7 +1918,6 @@ class Game {
         this.cops.forEach(cop => {
             let dist = this.player.pos.distanceTo(cop.pos);
             if (dist > 1500) return;
-            // Check if on screen
             let screenPos = this.camera.apply(cop.getRect());
             if (screenPos.x > 0 && screenPos.x < this.canvas.width && screenPos.y > 0 && screenPos.y < this.canvas.height) return;
 
@@ -1331,39 +1937,113 @@ class Game {
         });
     }
 
-    draw() {
-        const ctx = this.ctx;
+    drawCRT(ctx, w, h) {
+        // 1. Scanlines (Stripes)
+        ctx.fillStyle = "rgba(0, 0, 0, 0.3)"; // Darker
+        for (let i = 0; i < h; i += 3) {
+            ctx.fillRect(0, i, w, 1);
+        }
+
+        // 2. Moving Scan Bar (Rolling shutter effect)
+        this.scanlineY = (this.scanlineY || 0) + 1.5;
+        if (this.scanlineY > h) this.scanlineY = 0;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+        ctx.fillRect(0, this.scanlineY, w, 50);
+
+        // 3. Vignette (Dark corners)
+        let grad = ctx.createRadialGradient(w/2, h/2, h/3, w/2, h/2, h);
+        grad.addColorStop(0, "rgba(0,0,0,0)");
+        grad.addColorStop(1, "rgba(0,0,0,0.6)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // 4. Noise (Static)
+        // For performance, let's just do a flickering overlay.
+        if (Math.random() > 0.8) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05})`;
+            ctx.fillRect(0, 0, w, h);
+        }
+    }
+
+    drawMenu(ctx, w, h) {
+        ctx.save();
+        
+        // Title: TOKYO
+        ctx.textAlign = 'center';
+        const cx = w / 2;
+        const cy = h / 2;
+
+        // Glitch Offset
+        let jx = randInt(-2, 2);
+        let jy = randInt(-2, 2);
+
+        // "TOKYO"
+        ctx.font = '40px "Press Start 2P", cursive'; 
+        let grad = ctx.createLinearGradient(0, cy - 180, 0, cy - 140);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(1, '#ffcccc'); 
+        
+        ctx.fillStyle = '#000';
+        ctx.fillText("TOKYO", cx + 4 + jx, cy - 120 + 4 + jy); 
+        ctx.fillStyle = grad;
+        ctx.fillText("TOKYO", cx + jx, cy - 120 + jy);
+
+        // "DRIFT"
+        ctx.font = '60px "Press Start 2P", cursive';
+        ctx.fillStyle = '#000';
+        ctx.fillText("DRIFT", cx + 5 - jx, cy - 50 + 5 - jy); 
+        ctx.fillStyle = '#d32f2f'; // Red
+        ctx.fillText("DRIFT", cx - jx, cy - 50 - jy);
+
+        // "- CHASE -"
+        ctx.font = '25px "Press Start 2P", cursive';
+        ctx.fillStyle = '#000';
+        ctx.fillText("- CHASE -", cx + 3, cy + 10 + 3);
+        ctx.fillStyle = '#ffeb3b'; // Yellow
+        ctx.fillText("- CHASE -", cx, cy + 10);
+
+        // Button: START ENGINE
+        let btnW = 320;
+        let btnH = 60;
+        this.playRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
+
+        // Button Shadow 
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.playRect.x + 8, this.playRect.y + 8, btnW, btnH);
+
+        // Button Border 
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.playRect.x - 4, this.playRect.y - 4, btnW + 8, btnH + 8);
+
+        // Button Fill (Red)
+        ctx.fillStyle = '#d32f2f';
+        ctx.fillRect(this.playRect.x, this.playRect.y, btnW, btnH);
+
+        // Button Text
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px "Press Start 2P", cursive';
+        ctx.fillText("START ENGINE", cx, this.playRect.y + 40);
+
+        // Instruction Text
+        ctx.font = '14px "Press Start 2P", cursive';
+        ctx.fillStyle = '#fff';
+        ctx.fillText("PRESS [WASD] TO DRIVE", cx, h - 40);
+
+        // Scanlines Overlay
+        this.drawCRT(ctx, w, h);
+
+        ctx.restore();
+    }
+
+    draw(ctx) {
         const w = this.canvas.width;
         const h = this.canvas.height;
 
-        // Background
         ctx.fillStyle = COLORS.BG_VOID;
         ctx.fillRect(0, 0, w, h);
 
-        if (this.state === 'MENU') {
-            ctx.fillStyle = COLORS.TEXT_WHITE;
-            ctx.font = 'bold 40px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText("TOKYO DRIFT CHASE", w/2, h/2 - 80);
-
-            let btnW = 200, btnH = 60;
-            this.playRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
-            
-            drawRect(ctx, '#fff', this.playRect.x-2, this.playRect.y-2, btnW+4, btnH+4, 5);
-            drawRect(ctx, '#c82828', this.playRect.x, this.playRect.y, btnW, btnH, 5);
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 20px Arial';
-            ctx.fillText("P L A Y", w/2, h/2 + 57);
-
-            return;
-        }
-
-        // --- Game Render ---
-        
         this.drawFloor();
 
-        // Object sorting by Y for primitive depth
-        // Note: Buildings, People, Cops need to be sorted.
         let renderList = [
             ...this.blood.map(o => ({obj:o, type:'blood', y:o.pos.y})),
             ...this.skids.map(o => ({obj:o, type:'skid', y:o.pos.y})),
@@ -1371,44 +2051,32 @@ class Game {
             ...this.people.map(o => ({obj:o, type:'person', y:o.rect.bottom})),
             ...this.sakura.map(o => ({obj:o, type:'sakura', y:o.rect.bottom})),
             ...this.cops.map(o => ({obj:o, type:'car', y:o.pos.y})),
+            ...this.civilians.map(o => ({obj:o, type:'car', y:o.pos.y})),
             {obj: this.player, type:'car', y:this.player.pos.y}
         ];
 
         renderList.sort((a,b) => a.y - b.y);
 
         renderList.forEach(item => {
-            // Cull drawing
             let screenRect;
             if (item.type === 'car') screenRect = this.camera.apply(item.obj.getRect());
             else screenRect = this.camera.apply(item.obj.rect);
 
             if (screenRect.right < -50 || screenRect.left > w + 50 || screenRect.bottom < -50 || screenRect.top > h + 50) return;
-
-            // Apply camera offset manually for draw calls
-            // Since we don't have a global transform (to keep UI static), 
-            // we pass the context relative to screen.
-            // But our objects store WORLD coordinates.
-            // We need to translate context by camera offset.
-            
-            // Save context, translate by camera, draw object, restore
-            // Actually, simpler: translate context ONCE for the world layer?
-            // Yes, let's restructure render loop.
         });
 
-        // Better Render Loop: Use Global Transform
         ctx.save();
         ctx.translate(this.camera.offset.x, this.camera.offset.y);
 
-        // Draw Blood & Skids (Background layer)
         this.blood.forEach(b => b.draw(ctx));
         this.skids.forEach(s => s.draw(ctx));
 
-        // Draw Sorted Entities
-        // Filter out blood/skids from renderList as they are drawn.
         renderList.filter(i => i.type !== 'blood' && i.type !== 'skid').forEach(item => {
+             // Don't draw player in menu
+             if (this.state === 'MENU' && item.obj === this.player) return;
+
              item.obj.draw(ctx);
              
-             // Speech Bubbles
              if (item.type === 'person' && item.obj.isAngry && !item.obj.isDead) {
                  let bx = item.obj.pos.x, by = item.obj.rect.top - 15;
                  ctx.fillStyle = '#fff';
@@ -1426,50 +2094,50 @@ class Game {
              }
         });
 
-        // Particles
         this.particles.forEach(p => p.draw(ctx));
 
         ctx.restore();
 
-        // --- UI Layer (Static) ---
-        
-        // Indicators
-        this.drawIndicators();
+        if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+            this.drawIndicators();
 
-        // Score
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 20px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(`SCORE: ${this.score}`, 20, 30);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px "Press Start 2P", cursive';
+            ctx.textAlign = 'left';
+            ctx.fillText(`SCORE: ${this.score}`, 20, 40);
 
-        // Health UI
-        this.player.health.drawUI(ctx, w - 60, 10);
+            this.player.health.drawUI(ctx, w - 60, 10);
+        }
 
-        // Game Over Overlay
+        if (this.state === 'MENU') {
+            this.drawMenu(ctx, w, h);
+            return;
+        }
+
         if (this.state === 'GAMEOVER') {
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
             ctx.fillRect(0, 0, w, h);
             
             ctx.fillStyle = '#ff3232';
-            ctx.font = 'bold 50px Arial';
+            ctx.font = '50px "Press Start 2P", cursive';
             ctx.textAlign = 'center';
             ctx.fillText("WASTED", w/2, h/2 - 20);
             
-            let btnW = 200, btnH = 60;
+            let btnW = 220, btnH = 60;
             this.restartRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
             
             drawRect(ctx, '#fff', this.restartRect.x, this.restartRect.y, btnW, btnH, 5);
             drawRect(ctx, '#c83232', this.restartRect.x+2, this.restartRect.y+2, btnW-4, btnH-4, 5);
             
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 20px Arial';
+            ctx.font = '20px "Press Start 2P", cursive';
             ctx.fillText("RESTART", w/2, h/2 + 57);
         }
     }
 
     loop() {
         this.update();
-        this.draw();
+        this.draw(this.ctx);
         requestAnimationFrame(this.loop);
     }
 }
