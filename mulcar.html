@@ -3,9 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Tokyo Drift Chase</title>
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+<title>Tokyo Drift Chase Online</title>
+<!-- Imported Pixel Font -->
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<!-- MQTT.js Client Library for Serverless Multiplayer -->
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <style>
 body {
 margin: 0;
@@ -21,6 +23,45 @@ display: block;
 image-rendering: pixelated;
 image-rendering: crisp-edges;
 }
+/* ONLINE STATUS UI */
+#online-ui {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background-color: #505050; /* Bubble square gray color */
+    padding: 12px 16px;
+    border-radius: 12px;
+    border: 3px solid #2d2d32;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 4px 0 rgba(0,0,0,0.5);
+    pointer-events: none; /* Let clicks pass through */
+    z-index: 100;
+}
+
+.status-dot {
+    width: 12px;
+    height: 12px;
+    background-color: #32ff64; /* Green circle */
+    border-radius: 50%;
+    box-shadow: 0 0 8px #32ff64;
+    animation: pulse 2s infinite;
+}
+
+.status-text {
+    color: #ffffff;
+    font-size: 12px;
+    text-transform: uppercase;
+    text-shadow: 2px 2px #000;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(0.9); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
 #ui-layer {
 position: absolute;
 top: 0;
@@ -32,18 +73,23 @@ pointer-events: none;
 </style>
 </head>
 <body>
+
+<!-- Online UI Bubble -->
+<div id="online-ui">
+    <div class="status-dot"></div>
+    <div class="status-text" id="online-text">online: 1</div>
+</div>
+
 <canvas id="gameCanvas"></canvas>
 <script>
 /**
-* TOKYO DRIFT CHASE - HTML5 PORT
-* with UNIQUE POWERS & SLIDING ANIMATIONS
+* TOKYO DRIFT CHASE - ONLINE MULTIPLAYER EDITION
+* Powered by MQTT over WebSockets (Public Broker)
 */
-
 // --- Constants & Configuration ---
 const FPS = 60;
 const BLOCK_SIZE = 380;
 const BUILDING_GAP = 20;
-
 // Colors
 const COLORS = {
 BG_VOID: '#14141e',
@@ -80,7 +126,6 @@ HP_YELLOW: '#dcc832',
 HP_RED: '#c83232',
 TEXT_WHITE: '#ffffff'
 };
-
 const CAR_TYPES = {
 'sedan': { w: 48, h: 24, speed: 1.0, colors: ['#3c5a96', '#969696', '#dcdcdc', '#503250', '#8c2828'] },
 'coupe': { w: 44, h: 22, speed: 1.3, colors: ['#c83232', '#3264c8', '#e6e632', '#141414'] },
@@ -88,7 +133,6 @@ const CAR_TYPES = {
 'taxi': { w: 48, h: 24, speed: 1.1, colors: ['#e6af2d'] }, // Japanese Taxi
 'truck': { w: 56, h: 26, speed: 0.7, colors: ['#ffffff', '#32465a'] }
 };
-
 // --- PLAYER ROSTER (Updated with Unique Powers) ---
 const PLAYER_ROSTER = [
 {
@@ -273,7 +317,6 @@ powerData: { name: "Hellfire", color: "#ff0000", cooldown: 60 * 60 },
 pedData: { style: 'cultist', shirt: '#000', hair: '#f00', hairStyle: 'long', ability: 'drain', abilityColor: '#f00' }
 }
 ];
-
 // Physics
 const ACCELERATION = 0.20;
 const FRICTION = 0.96;
@@ -282,9 +325,7 @@ const DRIFT_SLIDE = 0.99;
 const MAX_SPEED_PLAYER = 9.0;
 const MAX_SPEED_COP = 10.2;
 const MAX_SPEED_CIVILIAN_BASE = 6.0;
-
 // --- Utility Classes ---
-
 class Vector2 {
 constructor(x, y) {
 this.x = x;
@@ -313,7 +354,6 @@ lerp(v, t) {
 return new Vector2(this.x + (v.x - this.x) * t, this.y + (v.y - this.y) * t,);
 }
 }
-
 class Rect {
 constructor(x, y, w, h) {
 this.x = x;
@@ -327,10 +367,8 @@ get top() { return this.y; }
 get bottom() { return this.y + this.h; }
 get centerx() { return this.x + this.w / 2; }
 get centery() { return this.y + this.h / 2; }
-
 set centerx(v) { this.x = v - this.w / 2; }
 set centery(v) { this.y = v - this.h / 2; }
-
 collidePoint(px, py) {
 return px >= this.x && px <= this.x + this.w && py >= this.y && py <= this.y + this.h;
 }
@@ -342,7 +380,6 @@ inflate(dw, dh) {
 return new Rect(this.x - dw/2, this.y - dh/2, this.w + dw, this.h + dh);
 }
 }
-
 // --- Seeded Random for Map Consistency ---
 class SeededRNG {
 constructor(seed) {
@@ -363,13 +400,11 @@ choice(arr) {
 return arr[Math.floor(this.next() * arr.length)];
 }
 }
-
 // --- Helper Functions (Standard) ---
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 function randFloat(min, max) { return Math.random() * (max - min) + min; }
 function randChoice(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 function degToRad(deg) { return deg * Math.PI / 180; }
-
 // --- Drawing Helpers ---
 function drawRect(ctx, color, x, y, w, h, radius = 0) {
 ctx.fillStyle = color;
@@ -385,25 +420,20 @@ ctx.fill();
 ctx.fillRect(x, y, w, h);
 }
 }
-
 function drawCircle(ctx, color, x, y, r) {
 ctx.fillStyle = color;
 ctx.beginPath();
 ctx.arc(x, y, r, 0, Math.PI * 2);
 ctx.fill();
 }
-
 // --- Asset Generation (Caching complex drawings) ---
-
 function createRoadTexture(size) {
 const cvs = document.createElement('canvas');
 cvs.width = size;
 cvs.height = size;
 const ctx = cvs.getContext('2d');
-
 ctx.fillStyle = COLORS.ASPHALT;
 ctx.fillRect(0, 0, size, size);
-
 // Noise
 for (let i = 0; i < 800; i++) {
 const x = randInt(0, size);
@@ -412,7 +442,6 @@ const c = randInt(35, 55);
 ctx.fillStyle = `rgb(${c},${c},${c+5})`;
 ctx.fillRect(x, y, 2, 2);
 }
-
 // Cracks
 ctx.strokeStyle = '#222';
 ctx.lineWidth = 1;
@@ -428,17 +457,14 @@ ctx.lineTo(x, y);
 }
 ctx.stroke();
 }
-
 // Manhole
 const mx = size/2 + randInt(-50, 50);
 const my = size/2 + randInt(-50, 50);
-
 ctx.fillStyle = '#46464b';
 ctx.beginPath(); ctx.arc(mx, my, 14, 0, Math.PI*2); ctx.fill();
 ctx.strokeStyle = '#28282d';
 ctx.lineWidth = 2;
 ctx.stroke();
-
 ctx.strokeStyle = '#28282d';
 for(let i=0; i<360; i+=45) {
 let rad = degToRad(i);
@@ -447,41 +473,32 @@ ctx.moveTo(mx, my);
 ctx.lineTo(mx + Math.cos(rad)*10, my + Math.sin(rad)*10);
 ctx.stroke();
 }
-
 return cvs;
 }
-
 const roadPatternCanvas = createRoadTexture(BLOCK_SIZE);
-
 // --- Game Objects ---
-
 class Camera {
 constructor() {
 this.offset = new Vector2(0, 0);
 this.viewRect = new Rect(0, 0, 0, 0); // Updates in update()
 }
-
 update(target, gameW, gameH) {
 // Target is typically the player car or ped
 // We want target to be in center.
 // Camera offset shifts the WORLD, so if player moves right (+x), offset moves left (-x)
 const targetX = -target.pos.x + gameW / 2;
 const targetY = -target.pos.y + gameH / 2;
-
 this.offset.x += (targetX - this.offset.x) * 0.1;
 this.offset.y += (targetY - this.offset.y) * 0.1;
-
 // View rect determines what chunks to load. Inflate slightly for smooth loading.
 this.viewRect = new Rect(-this.offset.x - 600, -this.offset.y - 600, gameW + 1200, gameH + 1200);
 }
-
 apply(rect) {
 // Transforms a world rect to screen rect
 if (!rect) return new Rect(0,0,0,0); // Safety check
 return new Rect(rect.x + this.offset.x, rect.y + this.offset.y, rect.w, rect.h);
 }
 }
-
 class CarHealth {
 constructor(maxHp = 100) {
 this.maxHp = maxHp;
@@ -494,27 +511,22 @@ this.parts = {
 'rr_wheel': maxHp
 };
 }
-
 getColor(hp) {
 if (hp > this.maxHp * 0.5) return COLORS.HP_GREEN;
 if (hp > 0) return COLORS.HP_YELLOW;
 return COLORS.HP_RED;
 }
-
 checkFullyDestroyed() {
 for (let key in this.parts) {
 if (this.parts[key] > 0) return false;
 }
 return true;
 }
-
 takeDamage(amount) {
 let aliveKeys = Object.keys(this.parts).filter(k => this.parts[k] > 0);
 if (aliveKeys.length === 0) return;
-
 let target = randChoice(aliveKeys);
 this.parts[target] -= amount;
-
 // Splash damage
 if (Math.random() > 0.5) {
 if (this.parts['front_torso'] > 0) this.parts['front_torso'] -= amount / 2;
@@ -522,7 +534,6 @@ if (this.parts['front_torso'] > 0) this.parts['front_torso'] -= amount / 2;
 if (this.parts['back_torso'] > 0) this.parts['back_torso'] -= amount / 2;
 }
 }
-
 drawUI(ctx, x, y) {
 const s = 2.5; // Scale
 const wBody = 16 * s;
@@ -530,9 +541,7 @@ const hFront = 14 * s;
 const hBack = 14 * s;
 const wWheel = 4 * s;
 const hWheel = 8 * s;
-
 const cx = x + wBody / 2;
-
 // Helpers
 const drawPart = (color, px, py, pw, ph, rad=0) => {
 ctx.fillStyle = color;
@@ -548,13 +557,11 @@ ctx.rect(px, py, pw, ph);
 ctx.fill();
 ctx.stroke();
 };
-
 // Wheels
 drawPart(this.getColor(this.parts['fl_wheel']), cx - wBody/2 - wWheel + 2, y + 4*s, wWheel, hWheel);
 drawPart(this.getColor(this.parts['fr_wheel']), cx + wBody/2 - 2, y + 4*s, wWheel, hWheel);
 drawPart(this.getColor(this.parts['rl_wheel']), cx - wBody/2 - wWheel + 2, y + hFront + 2*s, wWheel, hWheel);
 drawPart(this.getColor(this.parts['rr_wheel']), cx + wBody/2 - 2, y + hFront + 2*s, wWheel, hWheel);
-
 // Body
 // Front (Hood)
 ctx.fillStyle = this.getColor(this.parts['front_torso']);
@@ -563,14 +570,12 @@ ctx.beginPath();
 if (ctx.roundRect) ctx.roundRect(cx - wBody/2, y, wBody, hFront, [4*s, 4*s, 0, 0]);
 else ctx.rect(cx - wBody/2, y, wBody, hFront);
 ctx.fill(); ctx.stroke();
-
 // Back (Cabin)
 ctx.fillStyle = this.getColor(this.parts['back_torso']);
 ctx.beginPath();
 if (ctx.roundRect) ctx.roundRect(cx - wBody/2, y + hFront, wBody, hBack, [0, 0, 2*s, 2*s]);
 else ctx.rect(cx - wBody/2, y + hFront, wBody, hBack);
 ctx.fill(); ctx.stroke();
-
 // Windshield line
 ctx.beginPath();
 ctx.moveTo(cx - wBody/2, y + hFront);
@@ -578,7 +583,6 @@ ctx.lineTo(cx + wBody/2, y + hFront);
 ctx.stroke();
 }
 }
-
 class Car {
 constructor(x, y, typeOrColor, isCop=false, isCivilian=false) {
 this.pos = new Vector2(x, y);
@@ -589,7 +593,6 @@ this.accInput = 0;
 this.isCop = isCop;
 this.isCivilian = isCivilian;
 this.id = null; // Specific ID for special cars
-
 // Defaults
 this.width = 48;
 this.height = 24;
@@ -597,24 +600,20 @@ this.speedTrait = 1.0;
 this.color = '#fff';
 this.type = 'sedan';
 this.hasSpoiler = false;
-
 // Custom Player Stats (populated later for player)
 this.customMaxSpeed = null;
 this.customTurnSpeed = null;
 this.customAccel = null;
-
 // Tracking for Ghostly Rider achievement
 this.lastRotDirection = 0;
 this.turnComplete = false;
 this.isCollidingWithBuilding = false;
 this.isCollidingWithCop = false;
-
 // Status Effects
 this.stunTimer = 0; // For EMP
 this.spinTimer = 0; // For Oil Slick
 this.dead = false;
 this.isPhasing = false; // For Night Shade
-
 if (isCivilian) {
 this.type = typeOrColor || 'sedan'; // Pass type string for civilians
 const stats = CAR_TYPES[this.type];
@@ -632,17 +631,13 @@ this.color = typeOrColor; // Hex for player
 // Default HP check, overridden in initGame
 this.health = new CarHealth(100);
 }
-
 // Generate sprite
 this.sprite = this.createCarSprite();
-
 if (isCop || isCivilian) {
 this.health = null;
 }
-
 this.stuckTimer = 0;
 this.reversing = false; // For AI
-
 // Civilian specific
 this.targetHeading = null;
 this.blockedTimer = 0;
@@ -651,25 +646,19 @@ this.laneSwitchDir = 0; // -1 left, 1 right, 0 none
 this.patience = randInt(60, 150);
 this.brakingVisual = false;
 }
-
 createCarSprite() {
 const cvs = document.createElement('canvas');
-
 // Increase canvas size for Angel Wings or other large features
 let padding = 0;
 if (this.id === 'angel' || this.id === 'demon' || this.id === 'ufo' || this.id === 'monster') padding = 20;
-
 cvs.width = this.width + padding*2;
 cvs.height = this.height + padding*2;
 const ctx = cvs.getContext('2d');
 // Disable smoothing for sharp pixels on sprite generation
 ctx.imageSmoothingEnabled = false;
-
 // Center drawing if padded
 ctx.translate(padding, padding);
-
 const w = this.width, h = this.height;
-
 // Shadow/Underbody
 ctx.fillStyle = 'rgba(0,0,0,0.4)';
 ctx.beginPath();
@@ -680,7 +669,6 @@ if (ctx.roundRect) ctx.roundRect(4, 6, w-2, h-6, 4);
 else ctx.rect(4, 6, w-2, h-6);
 }
 ctx.fill();
-
 // Special Rendering for UFO
 if (this.id === 'ufo') {
 ctx.fillStyle = '#222';
@@ -700,7 +688,6 @@ ctx.fillRect(lx-1, ly-1, 3, 3);
 }
 return cvs;
 }
-
 // Special Rendering for F1
 if (this.id === 'f1') {
 // Wheels exposed
@@ -724,15 +711,12 @@ ctx.fillStyle = '#000';
 ctx.fillRect(w/2 - 12, h-4, 24, 4);
 return cvs;
 }
-
 // Standard Car Rendering
 // Wheels with more detail
 const tireColor = '#191919';
 const rimColor = this.isCop ? '#505050' : '#dcdcdc';
 let axleF = w - 12, axleR = 10;
-
 if (this.id === 'monster') { axleF = w-14; axleR = 14; }
-
 const tires = [[axleF, 1], [axleF, h-5], [axleR, 1], [axleR, h-5]];
 tires.forEach(([tx, ty]) => {
 ctx.fillStyle = tireColor;
@@ -743,9 +727,7 @@ ctx.fillRect(tx, ty, tw, th);
 ctx.fillStyle = rimColor;
 ctx.fillRect(tx+3, ty+1, 4, 2);
 });
-
 const bodyY = 3, bodyH = h - 6;
-
 // Body Base
 if (this.isCop) {
 ctx.fillStyle = '#0a0a0f'; // Dark Body
@@ -753,14 +735,11 @@ ctx.beginPath();
 if (ctx.roundRect) ctx.roundRect(2, bodyY, w-4, bodyH, 1);
 else ctx.rect(2, bodyY, w-4, bodyH);
 ctx.fill();
-
 ctx.fillStyle = COLORS.COP_DOOR; // White Door
 ctx.fillRect(14, bodyY, 18, bodyH);
-
 // "POLICE" text hint
 ctx.fillStyle = '#000';
 ctx.fillRect(16, bodyY+2, 14, 2);
-
 ctx.fillStyle = '#9696a0'; // Pillar
 ctx.fillRect(23, bodyY, 1, bodyH);
 } else {
@@ -769,7 +748,6 @@ ctx.beginPath();
 if (ctx.roundRect) ctx.roundRect(2, bodyY, w-4, bodyH, 4);
 else ctx.rect(2, bodyY, w-4, bodyH);
 ctx.fill();
-
 // Texture details based on type
 if (this.type === 'taxi') {
 ctx.fillStyle = '#000'; // Stripe
@@ -792,38 +770,30 @@ ctx.lineTo(w-10, bodyY);
 ctx.lineTo(w/2, bodyY + bodyH/2);
 ctx.fill();
 }
-
 // Hood Vents
 ctx.fillStyle = 'rgba(0,0,0,0.3)';
 ctx.fillRect(w - 12, bodyY + 4, 4, 2);
 ctx.fillRect(w - 12, bodyY + bodyH - 6, 4, 2);
-
 // Side Skirt Shadow
 ctx.fillStyle = 'rgba(0,0,0,0.2)';
 ctx.fillRect(10, bodyY + bodyH - 2, 28, 1);
 }
-
 // Bumpers (Detailed)
 ctx.fillStyle = '#222';
 ctx.fillRect(w-3, bodyY, 2, bodyH); // Front Bumper
 ctx.fillRect(w-4, bodyY+1, 1, bodyH-2); // Front detail
-
 ctx.fillRect(1, bodyY, 2, bodyH); // Rear Bumper
-
 // Cabin/Glass
 let cabinRect = this.isCop ? {x:10, y:bodyY+2, w:24, h:bodyH-4} : {x:12, y:bodyY+3, w:20, h:bodyH-6};
-
 // Type adjustments
 if (this.type === 'truck') cabinRect = {x: 8, y: bodyY+2, w: 16, h: bodyH-4};
 if (this.type === 'coupe') cabinRect = {x: 10, y: bodyY+3, w: 18, h: bodyH-6};
 if (this.id === 'cybertruck') cabinRect = {x: 14, y: bodyY+4, w: 20, h: bodyH-8};
-
 ctx.fillStyle = '#2d3c46'; // Dark Glass
 ctx.beginPath();
 if (ctx.roundRect) ctx.roundRect(cabinRect.x, cabinRect.y, cabinRect.w, cabinRect.h, 2);
 else ctx.rect(cabinRect.x, cabinRect.y, cabinRect.w, cabinRect.h);
 ctx.fill();
-
 // Glass Reflection
 ctx.fillStyle = '#506e82';
 ctx.beginPath();
@@ -832,11 +802,9 @@ ctx.lineTo(cabinRect.x + 8, cabinRect.y);
 ctx.lineTo(cabinRect.x + 4, cabinRect.y + cabinRect.h);
 ctx.lineTo(cabinRect.x, cabinRect.y + cabinRect.h);
 ctx.fill();
-
 // Roof
 let roofColor = this.isCop ? '#0a0a0f' : this.color;
 let roofRect = {x:cabinRect.x+2, y:cabinRect.y+1, w:cabinRect.w-4, h:cabinRect.h-2};
-
 if (this.type === 'truck') {
 // Truck Bed
 ctx.fillStyle = '#333';
@@ -844,16 +812,13 @@ ctx.fillRect(24, bodyY+2, w-30, bodyH-4);
 ctx.fillStyle = '#222'; // Bed lines
 for(let i=26; i<w-6; i+=4) ctx.fillRect(i, bodyY+2, 1, bodyH-4);
 }
-
 ctx.fillStyle = roofColor;
 ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
-
 // Taxi sign
 if (this.type === 'taxi') {
 ctx.fillStyle = '#fff';
 ctx.fillRect(roofRect.x + roofRect.w/2 - 2, roofRect.y + 1, 4, roofRect.h - 2);
 }
-
 // Sunroof (Player only or Coupe)
 if ((!this.isCop && !this.isCivilian || this.type === 'coupe') && this.id !== 'cybertruck') {
 ctx.fillStyle = '#111';
@@ -861,7 +826,6 @@ ctx.fillRect(roofRect.x + 4, roofRect.y + 2, roofRect.w - 8, roofRect.h - 4);
 ctx.fillStyle = '#222'; // Sunroof shine
 ctx.fillRect(roofRect.x + 4, roofRect.y + 2, 2, roofRect.h - 4);
 }
-
 // Lights
 // Headlights (Detailed)
 ctx.fillStyle = '#e6e6e6'; // Casing
@@ -870,18 +834,15 @@ ctx.fillRect(w-5, bodyY+bodyH-5, 4, 4);
 ctx.fillStyle = '#fff'; // Bulb
 ctx.fillRect(w-3, bodyY+2, 2, 2);
 ctx.fillRect(w-3, bodyY+bodyH-4, 2, 2);
-
 // Taillights (Detailed)
 ctx.fillStyle = '#800000'; // Dark Red Housing
 ctx.fillRect(1, bodyY+1, 3, 5);
 ctx.fillRect(1, bodyY+bodyH-6, 3, 5);
-
 // Brake Lights (Will be drawn dynamically if braking, else dim)
 // Draw static part
 ctx.fillStyle = '#500000'; // Off state
 ctx.fillRect(1, bodyY+2, 2, 3);
 ctx.fillRect(1, bodyY+bodyH-5, 2, 3);
-
 // Accessories
 if (this.isCop || this.id === 'interceptor') {
 // Lightbar
@@ -894,7 +855,6 @@ ctx.fillStyle = '#fff'; // Center white
 ctx.fillRect(barX+1, roofRect.y, 2, roofRect.h);
 ctx.fillStyle = '#0032ff'; // Blue
 ctx.fillRect(barX, roofRect.y + roofRect.h - 2, 4, 4);
-
 // Push bar
 ctx.fillStyle = '#333';
 ctx.fillRect(w-1, bodyY+4, 1, bodyH-8);
@@ -913,12 +873,10 @@ ctx.fillRect(3, bodyY, 3, bodyH);
 ctx.fillStyle = '#333'; // Carbon highlight
 ctx.fillRect(3, bodyY+2, 1, bodyH-4);
 }
-
 // ANGEL WINGS logic
 if (this.id === 'angel') {
 ctx.fillStyle = '#fff';
 ctx.strokeStyle = '#e0e0e0';
-
 // Left Wing
 ctx.beginPath(); ctx.moveTo(10, bodyY); ctx.lineTo(0, bodyY - 8); ctx.lineTo(12, bodyY - 12); ctx.lineTo(20, bodyY); ctx.fill();
 // Right Wing
@@ -933,19 +891,15 @@ ctx.beginPath(); ctx.moveTo(w-5, bodyY); ctx.lineTo(w+5, bodyY-10); ctx.lineTo(w
 ctx.beginPath(); ctx.moveTo(w-5, bodyY+bodyH); ctx.lineTo(w+5, bodyY+bodyH+10); ctx.lineTo(w-15, bodyY+bodyH-5); ctx.fill();
 }
 }
-
 return cvs;
 }
-
 getRect() {
 return new Rect(this.pos.x - this.width/2, this.pos.y - this.height/2, this.width, this.height);
 }
-
 getHitbox() {
 // Hitbox is slightly smaller than sprite
 return new Rect(this.pos.x - (this.width-10)/2, this.pos.y - (this.height-10)/2, this.width-10, this.height-10);
 }
-
 // New Smart Raycast System
 checkSensors(allCars, player, buildings) {
 let results = {
@@ -956,38 +910,30 @@ frontDist: 999,
 rightClear: true,
 leftClear: true
 };
-
 const rayDist = 200;
 const sideRayDist = 60;
 const rad = degToRad(this.angle);
 const forward = new Vector2(Math.cos(rad), -Math.sin(rad));
 const right = new Vector2(Math.cos(rad + Math.PI/2), -Math.sin(rad + Math.PI/2));
 const left = new Vector2(Math.cos(rad - Math.PI/2), -Math.sin(rad - Math.PI/2));
-
 // Helper for point-box collision (simplified)
 const checkRay = (start, dir, length, widthCheck=30) => {
 let hit = false;
 let minDist = length;
-
 let end = start.add(dir.mult(length));
-
 // Check cars
 // Handle null player for menu
 let objects = [...allCars];
 if (player) objects.push(player);
-
 for (let obj of objects) {
 if (obj === this) continue;
-
 // Simple distance check first
 let d = this.pos.distanceTo(obj.pos);
 if (d > length + 50) continue;
-
 // Project obj pos onto ray
 let toObj = obj.pos.sub(start);
 let dot = toObj.dot(dir);
 let latDist = Math.abs(toObj.dot(new Vector2(-dir.y, dir.x))); // Perpendicular distance
-
 if (dot > 0 && dot < length && latDist < widthCheck) {
 hit = true;
 if (dot < minDist) minDist = dot;
@@ -995,53 +941,41 @@ if (dot < minDist) minDist = dot;
 }
 return { hit, dist: minDist };
 };
-
 // Front Ray (Traffic)
 let fRay = checkRay(this.pos, forward, rayDist, 25);
 if (fRay.hit) {
 results.front = true;
 results.frontDist = fRay.dist;
 }
-
 // Side Rays (Blind spots for lane change)
 let rRay = checkRay(this.pos, right, sideRayDist, 40);
 if (rRay.hit) results.rightClear = false;
-
 let lRay = checkRay(this.pos, left, sideRayDist, 40);
 if (lRay.hit) results.leftClear = false;
-
 return results;
 }
-
 physics(buildings, drift, fireWheelActive) {
 // USE CUSTOM STATS IF AVAILABLE (PLAYER), ELSE DEFAULTS
 let turnSpeed = this.customTurnSpeed || TURN_SPEED;
 let maxSpeed = this.customMaxSpeed || (this.isCop ? MAX_SPEED_COP : (this.isCivilian ? MAX_SPEED_CIVILIAN_BASE : MAX_SPEED_PLAYER));
 let acceleration = this.customAccel || ACCELERATION;
-
 // --- Fire Wheel Skill Check ---
 if (!this.isCop && !this.isCivilian && fireWheelActive) {
 maxSpeed *= 1.5; // 5x faster in both modes
 acceleration *= 2;
 }
-
 if (this.isCivilian) maxSpeed *= this.speedTrait;
-
 let acc = this.accInput;
-
 // Damage Effects
 if (this.health) {
 let rr = this.health.parts['rr_wheel'] <= 0;
 let rl = this.health.parts['rl_wheel'] <= 0;
 if (rr && rl) { acc = 0; maxSpeed = 0; }
 else if (rr || rl) { maxSpeed *= 0.6; acc *= 0.6; }
-
 if (this.health.parts['back_torso'] <= 0) maxSpeed *= 0.75;
-
 if (this.rotDirection === -1 && this.health.parts['fl_wheel'] <= 0) turnSpeed *= 0.2;
 if (this.rotDirection === 1 && this.health.parts['fr_wheel'] <= 0) turnSpeed *= 0.2;
 }
-
 // Ghostly Rider Achievement Tracking (Player only) - DEPRECATED LOGIC
 if (!this.isCop && !this.isCivilian) {
 if (this.rotDirection !== 0 && this.lastRotDirection === 0 && this.vel.mag() > 0.5) {
@@ -1050,26 +984,19 @@ this.turnComplete = true; // Set to true at start, cleared if hit building
 }
 this.lastRotDirection = this.rotDirection;
 }
-
-
 // Turning
 if (this.rotDirection !== 0 && this.vel.mag() > 0.5) {
 let rad = degToRad(this.angle);
 let headingVec = new Vector2(Math.cos(rad), -Math.sin(rad));
 let dot = this.vel.dot(headingVec);
 let flip = dot > 0 ? 1 : -1;
-
 this.angle -= this.rotDirection * turnSpeed * flip;
 }
-
 // Velocity
 let rad = degToRad(this.angle);
 let forward = new Vector2(Math.cos(rad), -Math.sin(rad));
-
 this.vel = this.vel.add(forward.mult(acc));
-
 let speed = this.vel.mag();
-
 // Friction / Drift
 if (drift && speed > 3) {
 this.vel = this.vel.mult(DRIFT_SLIDE);
@@ -1084,35 +1011,27 @@ this.vel = this.vel.mult(FRICTION);
 if (Math.abs(acc) < 0.01) this.vel = new Vector2(0, 0);
 }
 }
-
 if (this.vel.mag() > maxSpeed) {
 this.vel = this.vel.normalize().mult(maxSpeed);
 }
-
 this.pos = this.pos.add(this.vel);
-
 // Building Collisions
 // Skip collisions if Phase Shift is active
 if (this.isPhasing) return;
-
 let hitbox = this.getHitbox();
 this.isCollidingWithBuilding = false; // Reset collision state
 for (let b of buildings) {
 if (hitbox.collideRect(b.rect)) {
-
 if (!this.isCop && !this.isCivilian) {
 this.turnComplete = false; // Failed Ghostly Rider check
 this.isCollidingWithBuilding = true;
 }
-
 let dx = hitbox.centerx - b.rect.centerx;
 let dy = hitbox.centery - b.rect.centery;
 let wCombined = (hitbox.w + b.rect.w) / 2;
 let hCombined = (hitbox.h + b.rect.h) / 2;
-
 let ox = wCombined - Math.abs(dx);
 let oy = hCombined - Math.abs(dy);
-
 if (ox < oy) {
 if (dx > 0) this.pos.x += ox; else this.pos.x -= ox;
 this.vel.x *= 0.5;
@@ -1121,7 +1040,6 @@ if (dy > 0) this.pos.y += oy; else this.pos.y -= oy;
 this.vel.y *= 0.5;
 }
 hitbox = this.getHitbox();
-
 if (this.isCivilian) {
 this.reversing = !this.reversing;
 this.stuckTimer = 0;
@@ -1129,17 +1047,14 @@ this.stuckTimer = 0;
 }
 }
 }
-
 updateCop(player, buildings, isGhostlyRiderActive) {
 if (!this.isCop) return;
-
 // Stunned Logic
 if (this.stunTimer > 0) {
 this.stunTimer--;
 this.vel = this.vel.mult(0.9); // Slow down significantly
 return; // No AI when stunned
 }
-
 // Oil Slick Spin Logic
 if (this.spinTimer > 0) {
 this.spinTimer--;
@@ -1148,7 +1063,6 @@ this.vel = this.vel.mult(0.96); // Slide
 this.physics(buildings, true, false); // Physics with drift enabled
 return;
 }
-
 // If player is invisible, ignore them!
 if (isGhostlyRiderActive) {
 this.accInput = ACCELERATION * 0.1; // Just cruise slowly
@@ -1156,70 +1070,55 @@ this.rotDirection = 0;
 this.physics(buildings, false, false);
 return;
 }
-
 let futurePos = player.pos.add(player.vel.mult(25));
 let diff = futurePos.sub(this.pos);
-
 if (this.vel.mag() < 1.0) this.stuckTimer++;
 else this.stuckTimer = 0;
-
 if (this.stuckTimer > 50) this.reversing = true;
 if (this.stuckTimer > 90) { this.reversing = false; this.stuckTimer = 0; }
-
 if (this.reversing) {
 this.accInput = -ACCELERATION * 0.6;
 this.rotDirection = 1;
 } else {
 this.accInput = ACCELERATION * 0.98;
 let targetAngle = Math.atan2(-diff.y, diff.x) * 180 / Math.PI;
-
 let currentAngle = this.angle;
 let angleDiff = (targetAngle - currentAngle + 180) % 360 - 180;
 if (angleDiff < -180) angleDiff += 360;
 if (angleDiff > 180) angleDiff -= 360;
-
 if (angleDiff > 8) this.rotDirection = -1;
 else if (angleDiff < -8) this.rotDirection = 1;
 else this.rotDirection = 0;
 }
-
 this.physics(buildings, false, false);
 }
-
 updateCivilian(buildings, allCars, player) {
 if (!this.isCivilian) return;
-
 // Grid info
 const gx = Math.floor(this.pos.x / BLOCK_SIZE);
 const gy = Math.floor(this.pos.y / BLOCK_SIZE);
 const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
 const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
 const isIntersection = (gx % 3 === 0) && (gy % 3 === 0);
-
 // Init heading if null
 if (this.targetHeading === null) {
 this.targetHeading = Math.round(this.angle / 90) * 90;
 }
-
 // --- 1. SENSOR CHECK ---
 const sensors = this.checkSensors(allCars, player, buildings);
 let braking = false;
 let coasting = false; // NEW: Coasting state
 let yielding = false;
-
 // --- 2. INTERSECTION & YIELD LOGIC ---
 let distToCenter = Math.sqrt((this.pos.x - cx)**2 + (this.pos.y - cy)**2);
 let insideBox = isIntersection && distToCenter < 140;
-
 // If approaching intersection, check for cross traffic
 if (isIntersection && !insideBox && distToCenter < 280) {
 let intendedTurn = (this.targetHeading - this.angle + 360) % 360;
 let isRightTurn = (Math.abs(intendedTurn - 90) < 45);
-
 for(let other of allCars) {
 if (other === this) continue;
 let otherDist = Math.sqrt((other.pos.x - cx)**2 + (other.pos.y - cy)**2);
-
 // General Intersection Yield (stop crashes)
 // Only yield if other car is closer or already entering
 if (otherDist < distToCenter * 0.8 || otherDist < 120) {
@@ -1236,7 +1135,6 @@ if (otherDist < 250) yielding = true;
 }
 }
 }
-
 // Inside box = Right of way (Clear it!)
 if (insideBox) {
 yielding = false;
@@ -1250,7 +1148,6 @@ else if (sensors.frontDist < 100) coasting = true; // Just lift off gas
 }
 if (yielding) braking = true;
 }
-
 // --- 3. LANE LOGIC & OVERTAKING ---
 if ((braking || coasting) && !yielding && !insideBox) {
 this.blockedTimer++;
@@ -1267,21 +1164,17 @@ else if (sensors.leftClear) this.laneSwitchDir = -1;
 this.blockedTimer = 0;
 this.laneSwitchDir = 0;
 }
-
 // --- 4. STUCK/REVERSE ---
 if (this.vel.mag() < 0.5 && !braking) this.stuckTimer++;
 else this.stuckTimer = 0;
-
 if (this.stuckTimer > 100) this.reversing = true;
 if (this.stuckTimer > 150 || (this.reversing && this.vel.mag() > 2)) {
 this.reversing = false;
 this.stuckTimer = 0;
 this.angle += 45; // Hard steer to unstick
 }
-
 // --- 5. EXECUTION ---
 this.brakingVisual = false;
-
 if (this.reversing) {
 this.accInput = -ACCELERATION * 0.5;
 this.rotDirection = -1;
@@ -1291,7 +1184,6 @@ if (braking) {
 // Hard Brake
 this.accInput = -ACCELERATION * 1.5;
 this.brakingVisual = true;
-
 if (this.vel.mag() < 0.1) {
 this.vel = new Vector2(0, 0);
 this.accInput = 0;
@@ -1303,29 +1195,23 @@ this.accInput = 0; // Lift off gas
 } else {
 this.accInput = ACCELERATION * 0.4;
 }
-
 // --- LHT LANE CALCULATIONS ---
 let laneOffset = 80;
 if (this.laneSwitchDir === 1) laneOffset = 20; // Move to center (Overtake)
 if (this.laneSwitchDir === -1) laneOffset = 140; // Move to shoulder?
-
 let targetX = this.pos.x;
 let targetY = this.pos.y;
 let h = (this.targetHeading % 360 + 360) % 360;
-
 if (h === 0) targetY = cy - laneOffset;
 else if (h === 180) targetY = cy + laneOffset;
 else if (h === 90) targetX = cx + laneOffset;
 else if (h === 270) targetX = cx - laneOffset;
-
 let lookAhead = 150;
 let steeringTarget = new Vector2(targetX, targetY);
 if (h === 0 || h === 180) steeringTarget.x = this.pos.x + (h===0?lookAhead:-lookAhead);
 else steeringTarget.y = this.pos.y + (h===90?lookAhead:-lookAhead);
-
 let diff = steeringTarget.sub(this.pos);
 let desiredAngle = Math.atan2(-diff.y, diff.x) * 180 / Math.PI;
-
 // Pick Heading at Intersection
 if (this.cooldownTimer > 0) this.cooldownTimer--;
 if (isIntersection && distToCenter < 60 && this.cooldownTimer <= 0) {
@@ -1337,39 +1223,29 @@ const newHeading = randChoice(valid);
 this.targetHeading = newHeading;
 this.cooldownTimer = 200;
 }
-
 let currentAngle = this.angle;
 let targetSteer = (isIntersection && distToCenter < 90) ? this.targetHeading : desiredAngle;
-
 let angleDiff = (targetSteer - currentAngle + 180) % 360 - 180;
 if (angleDiff < -180) angleDiff += 360;
 if (angleDiff > 180) angleDiff -= 360;
-
 if (angleDiff > 4) this.rotDirection = -1;
 else if (angleDiff < -4) this.rotDirection = 1;
 else this.rotDirection = 0;
 }
-
 // Deadlock Breaker: If stuck yielding for too long, just go
 if (yielding) {
 this.blockedTimer++;
 if (this.blockedTimer > 150) yielding = false; // "I'm going!"
 }
-
 this.physics(buildings, false, false);
 }
-
 draw(ctx) {
 ctx.save();
-
 let padding = (this.id === 'angel' || this.id === 'demon' || this.id === 'ufo' || this.id === 'monster') ? 20 : 0;
-
 ctx.translate(this.pos.x, this.pos.y);
 ctx.rotate(-degToRad(this.angle));
-
 // Draw car sprite centered properly even with padding
 ctx.drawImage(this.sprite, -this.width/2 - padding, -this.height/2 - padding);
-
 // Draw Dynamic Brake Lights
 if (this.brakingVisual) {
 ctx.fillStyle = '#ff0000';
@@ -1380,32 +1256,28 @@ ctx.fillRect(1, bodyY+2, 3, 3);
 ctx.fillRect(1, bodyY+bodyH-5, 3, 3);
 ctx.shadowBlur = 0;
 }
-
 // EMP Visual Indicator (on car)
 if (this.stunTimer > 0) {
 ctx.strokeStyle = '#3296ff';
 ctx.lineWidth = 2;
 ctx.beginPath();
-ctx.arc(0, 0, this.width, 0, Math.PI*2);
+ctx.arc(0, 0, this.width, 0, Math.PI * 2);
 ctx.stroke();
 }
 // Phase Visual
 if (this.isPhasing) {
 ctx.strokeStyle = '#9d4edd';
 ctx.lineWidth = 2;
-ctx.beginPath(); ctx.arc(0,0, this.width+5, 0, Math.PI*2); ctx.stroke();
+ctx.beginPath(); ctx.arc(0,0, this.width+5, 0, Math.PI * 2); ctx.stroke();
 }
-
 ctx.restore();
 }
 }
-
 class Person {
 constructor(x, y, walkArea, isPlayer=false, customConfig=null) {
 this.pos = new Vector2(x, y);
 this.angle = -randFloat(0, Math.PI * 2) * 180 / Math.PI;
 this.isPlayer = isPlayer;
-
 if (customConfig && isPlayer) {
 this.skinColor = '#ffdbac'; // Default skin for now, could be added to config
 this.shirtColor = customConfig.shirt || '#d32f2f';
@@ -1423,32 +1295,27 @@ this.hairColor = randChoice(['#000000', '#281e14', '#4b3c28', '#e6c86e', '#8c282
 this.hairStyle = randChoice(['bald', 'short', 'short_messy', 'long', 'ponytail', 'cap', 'afro', 'mohawk']);
 this.shoeColor = randChoice(['#000000', '#ffffff', '#50321e', '#323232']);
 }
-
 let angleRad = randFloat(0, Math.PI * 2);
 this.vel = new Vector2(Math.cos(angleRad), Math.sin(angleRad)).mult(0.4);
 this.angle = -angleRad * 180 / Math.PI;
 this.walkArea = walkArea;
 this.rect = new Rect(x-7, y-7, 14, 14);
-
 this.isDead = false;
 this.isAngry = false;
 this.shoutTimer = 0;
 this.curseWord = "";
 this.frame = randFloat(0, 10);
 this.curseList = ["HEY!", "WATCH IT!", "I'M WALKIN!", "IDIOT!", "NOOO!", "WHAT?!", "CRAZY!"];
-
 // Ability Stats
 this.abilityActive = false;
 this.abilityTimer = 0;
 this.abilityCooldown = 0;
 this.moveSpeed = 3.5;
-
 if (this.isPlayer) {
 this.vel = new Vector2(0,0);
 this.walkArea = null; // Player can walk anywhere
 }
 }
-
 die(bloodGroup) {
 if (this.isDead || this.isPlayer) return; // Player character doesn't die same way for now
 this.isDead = true;
@@ -1457,10 +1324,8 @@ for (let i=0; i<2; i++) {
 bloodGroup.push(new Blood(this.pos.x + randInt(-5,5), this.pos.y + randInt(-5,5)));
 }
 }
-
 update(playerCar, bloodGroup) {
 if (this.isDead) return;
-
 // Player controlled character logic handled in Game loop
 if (this.isPlayer) {
 this.rect.centerx = this.pos.x;
@@ -1475,21 +1340,17 @@ this.frame = 0;
 }
 return;
 }
-
 let dist = this.pos.distanceTo(playerCar.pos);
-
 if (dist < 30 && playerCar.vel.mag() > 2.0) {
 this.die(bloodGroup);
 return;
 }
-
 if (dist < 70 && !this.isAngry) {
 this.isAngry = true;
 this.shoutTimer = 120;
 this.curseWord = randChoice(this.curseList);
 this.vel = new Vector2(0,0);
 }
-
 if (this.isAngry) {
 this.shoutTimer--;
 if (this.shoutTimer <= 0) {
@@ -1513,16 +1374,13 @@ this.vel = this.vel.rotate(rot);
 this.angle = (this.angle + rot) % 360;
 }
 }
-
 this.rect.centerx = this.pos.x;
 this.rect.centery = this.pos.y;
 this.frame += 0.2;
 }
-
 draw(ctx) {
 ctx.save();
 ctx.translate(this.pos.x, this.pos.y);
-
 if (this.isDead) {
 ctx.rotate(-degToRad(this.angle));
 ctx.fillStyle = '#960000';
@@ -1535,37 +1393,30 @@ ctx.fillRect(4, -3, 6, 6);
 ctx.rotate(-degToRad(this.angle - 90)); // Fix orientation: 0 deg faces right
 let speed = this.isAngry ? 0 : 1;
 let walkCycle = this.frame * 0.8 * speed;
-
 // Flash Run Animation
 if (this.isPlayer && this.abilityActive && this.ability === 'flash_run') {
 walkCycle = this.frame * 2.0; // super fast legs
 }
-
 let leftLeg = Math.sin(walkCycle) * 4;
 let rightLeg = Math.sin(walkCycle + Math.PI) * 4;
 let leftArm = Math.sin(walkCycle + Math.PI) * 4;
 let rightArm = Math.sin(walkCycle) * 4;
-
 if (this.isAngry) {
 leftLeg = 0; rightLeg = 0;
 leftArm = 0; rightArm = 0;
 }
-
 // Legs
 ctx.fillStyle = this.pantColor;
 ctx.fillRect(-6, leftLeg - 2, 4, 6); // Left
 ctx.fillRect(2, rightLeg - 2, 4, 6); // Right
-
 // Shoes
 ctx.fillStyle = this.shoeColor;
 ctx.fillRect(-6, leftLeg + 2, 4, 3);
 ctx.fillRect(2, rightLeg + 2, 4, 3);
-
 // Arms
 ctx.fillStyle = this.shirtColor;
 ctx.fillRect(-9, leftArm - 2, 3, 7);
 ctx.fillRect(6, rightArm - 2, 3, 7);
-
 // Hands
 ctx.fillStyle = this.skinColor;
 if (this.isAngry) {
@@ -1576,19 +1427,15 @@ ctx.fillRect(5 + shake, -8, 5, 5);
 ctx.fillRect(-9, leftArm + 4, 3, 3);
 ctx.fillRect(6, rightArm + 4, 3, 3);
 }
-
 // Body
 ctx.fillStyle = this.shirtColor;
 ctx.fillRect(-6, -4, 12, 10);
-
 // Collar/Neck
 ctx.fillStyle = 'rgba(0,0,0,0.15)';
 ctx.fillRect(-2, -4, 4, 2);
-
 // Head
 ctx.fillStyle = this.skinColor;
 ctx.fillRect(-4, -8, 8, 7);
-
 // Hair
 if (this.hairStyle === 'cap') {
 ctx.fillStyle = this.hairColor;
@@ -1623,7 +1470,6 @@ ctx.fillRect(-2, -11, 4, 4);
 ctx.restore();
 }
 }
-
 class Building {
 constructor(gx, gy, isPark) {
 this.gx = gx;
@@ -1634,36 +1480,28 @@ this.pos = new Vector2(x, y);
 this.w = BLOCK_SIZE - BUILDING_GAP * 2;
 this.h = BLOCK_SIZE - BUILDING_GAP * 2;
 this.rect = new Rect(x - this.w/2, y - this.h/2, this.w, this.h);
-
 this.rng = new SeededRNG(Math.abs(gx * 73856093 ^ gy * 19349663));
-
 this.sprite = this.generateSprite(isPark);
 this.style = isPark ? 'park' : 'building';
 }
-
 generateSprite(isPark) {
 const cvs = document.createElement('canvas');
 cvs.width = this.w;
 cvs.height = this.h;
 const ctx = cvs.getContext('2d');
 ctx.imageSmoothingEnabled = false;
-
 const w = this.w, h = this.h;
 const rng = this.rng;
-
 if (isPark) {
 ctx.fillStyle = COLORS.ZOO_BASE;
 ctx.fillRect(0, 0, w, h);
-
 ctx.fillStyle = '#2d7d2d';
 for(let i=0; i<300; i++) {
 ctx.fillRect(rng.randInt(0,w), rng.randInt(0,h), 2, 2);
 }
-
 ctx.fillStyle = '#b4aa96';
 ctx.fillRect(w/2 - 20, 0, 40, h);
 ctx.fillRect(0, h/2 - 20, w, 40);
-
 for (let r=60; r>10; r-=5) {
 ctx.fillStyle = `rgb(50, 150, ${250-r})`;
 ctx.beginPath(); ctx.arc(w/2+80, h/2-80, r, 0, Math.PI*2); ctx.fill();
@@ -1671,18 +1509,15 @@ ctx.beginPath(); ctx.arc(w/2+80, h/2-80, r, 0, Math.PI*2); ctx.fill();
 } else {
 ctx.fillStyle = COLORS.SIDEWALK;
 ctx.fillRect(0, 0, w, h);
-
 ctx.fillStyle = '#737378';
 for(let i=0; i<w; i+=20) {
 ctx.fillRect(i, 0, 1, h);
 ctx.fillRect(0, i, w, 1);
 }
-
 for (let i=0; i<5; i++) {
 let px = rng.randInt(5, w-20);
 let py = rng.randInt(5, h-20);
 if (px > 30 && px < w-30 && py > 30 && py < h-50) continue;
-
 let type = rng.choice(['planter', 'box', 'vent', 'light']);
 if (type === 'planter') {
 ctx.fillStyle = '#644632'; ctx.fillRect(px, py, 12, 12);
@@ -1701,22 +1536,18 @@ ctx.fillRect(px+2, py+5, 8, 2);
 ctx.fillRect(px+2, py+8, 8, 2);
 }
 }
-
 let pad = 12;
 let wallH = 35;
 let iw = w - pad*2, ih = h - pad*2;
 let roofRect = {x:pad, y:pad, w:iw, h:ih - wallH};
 let wallRect = {x:pad, y:pad+ih-wallH, w:iw, h:wallH};
-
 let styles = ['modern', 'izakaya', 'brick', 'school'];
 let style = rng.choice(styles);
 this.buildingStyle = style;
-
 if (style === 'school') {
 ctx.fillStyle = COLORS.SCHOOL_BEIGE; ctx.fillRect(roofRect.x, roofRect.y, roofRect.w, roofRect.h);
 ctx.fillStyle = '#dcd2b4';
 for(let i=0; i<roofRect.w; i+=4) ctx.fillRect(roofRect.x+i, roofRect.y, 1, roofRect.h);
-
 ctx.fillStyle = '#c8beace'; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
 ctx.fillStyle = '#b4aa96'; ctx.fillRect(roofRect.x+roofRect.w/2-20, roofRect.y+roofRect.h/2-20, 40, 40);
 drawCircle(ctx, COLORS.CLOCK_FACE, roofRect.x+roofRect.w/2, roofRect.y+roofRect.h/2, 15);
@@ -1743,7 +1574,6 @@ ctx.fillStyle = '#2d2d32';
 for(let i=0; i<roofRect.h; i+=6) {
 ctx.fillRect(roofRect.x, roofRect.y+i, roofRect.w, 2);
 }
-
 ctx.fillStyle = COLORS.WOOD_RED; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
 for(let i=0; i<4; i++) {
 let lx = wallRect.x + (iw/4)*i + 20;
@@ -1759,10 +1589,8 @@ for(let i=0; i<200; i++) {
 ctx.fillStyle = rng.next() > 0.5 ? '#a0a0aa' : '#8c8c96';
 ctx.fillRect(roofRect.x + rng.randInt(0, roofRect.w), roofRect.y + rng.randInt(0, roofRect.h), 2, 2);
 }
-
 ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
 ctx.strokeRect(roofRect.x+4, roofRect.y+4, roofRect.w-8, roofRect.h-8);
-
 ctx.fillStyle = '#787882'; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
 let winW = iw/3 - 5, winH = (ih-wallH)/3 - 5;
 for(let r=0; r<3; r++) {
@@ -1786,7 +1614,6 @@ for(let bx = roofRect.x + (by%12===0?0:6); bx < roofRect.right; bx+=12) {
 ctx.fillRect(bx, by, 1, 6);
 }
 }
-
 ctx.fillStyle = COLORS.SIDEWALK; ctx.fillRect(wallRect.x, wallRect.y, wallRect.w, wallRect.h);
 let ww = iw/5, wh = (ih-wallH)/4;
 for(let r=0; r<4; r++) {
@@ -1801,14 +1628,12 @@ ctx.fillRect(roofRect.x + c*ww + 7, roofRect.y + r*wh + 8 + wh - 20, ww-14, 2);
 }
 return cvs;
 }
-
 draw(ctx) {
 ctx.fillStyle = 'rgba(0,0,0,0.25)';
 ctx.fillRect(this.rect.x+8, this.rect.y+8, this.w, this.h);
 ctx.drawImage(this.sprite, this.rect.x, this.rect.y);
 }
 }
-
 class Sakura {
 constructor(x, y) {
 this.pos = new Vector2(x, y);
@@ -1846,7 +1671,6 @@ ctx.fillRect(this.pos.x + p.x, this.pos.y + p.y, 3, 3);
 ctx.drawImage(this.sprite, this.rect.x, this.rect.y);
 }
 }
-
 class Blood {
 constructor(x, y) {
 this.pos = new Vector2(x, y);
@@ -1865,14 +1689,12 @@ ctx.arc(this.pos.x + randInt(-5,5), this.pos.y + randInt(-5,5), this.size/3, 0, 
 ctx.fill();
 }
 }
-
 class Particle {
 constructor(x, y, type) {
 this.pos = new Vector2(x, y);
 this.type = type;
 this.life = type === 'smoke' ? 40 : 20;
 this.maxLife = this.life;
-
 if (type === 'smoke') {
 this.vel = new Vector2(randFloat(-1, 1), randFloat(-1, 1));
 this.size = randInt(4, 10);
@@ -1929,7 +1751,6 @@ ctx.fillRect(this.pos.x - this.size/2, this.pos.y - this.size/2, this.size, this
 }
 }
 }
-
 class Skid {
 constructor(x, y, angle) {
 this.pos = new Vector2(x, y);
@@ -1947,7 +1768,6 @@ ctx.fillRect(-5, -2, 10, 4);
 ctx.restore();
 }
 }
-
 // New: Fire Trail for Floor (Fire Wheel) - Revamped for pixel vibe
 class FireTrail {
 constructor(x, y, angle) {
@@ -1956,7 +1776,6 @@ this.angle = angle;
 this.life = 40;
 this.maxLife = 40;
 this.pixels = [];
-
 // Generate a cluster of "pixel fire"
 for(let i=0; i<12; i++) {
 this.pixels.push({
@@ -1973,9 +1792,7 @@ draw(ctx) {
 ctx.save();
 ctx.translate(this.pos.x, this.pos.y);
 ctx.rotate(-degToRad(this.angle));
-
 let globalAlpha = this.life / this.maxLife;
-
 this.pixels.forEach(p => {
 if (this.life * p.decay < this.maxLife) {
 ctx.fillStyle = p.color;
@@ -1986,12 +1803,10 @@ let jy = randInt(-1, 1);
 ctx.fillRect(p.x + jx, p.y + jy, p.size, p.size);
 }
 });
-
 ctx.restore();
 ctx.globalAlpha = 1.0;
 }
 }
-
 // New: Oil Slick for Drifter
 class OilSlick {
 constructor(x, y) {
@@ -2013,7 +1828,6 @@ ctx.ellipse(this.pos.x - 5, this.pos.y - 5, 8, 4, 0.5, 0, Math.PI*2);
 ctx.fill();
 }
 }
-
 // New: Shockwave for Angel Ability & EMP
 class Shockwave {
 constructor(x, y, color, maxR) {
@@ -2039,133 +1853,178 @@ ctx.globalAlpha = 1.0;
 }
 }
 
-// --- Main Game Class ---
-// --- AUTO-MATCHMAKING MULTIPLAYER ---
+// --- MULTIPLAYER CLASSES ---
 
-class RemoteCar {
-    constructor(carIndex) {
-        let spec = PLAYER_ROSTER[carIndex] || PLAYER_ROSTER[0];
-        this.car = new Car(0, 0, spec.color);
-        this.car.type = spec.type;
-        this.car.id = spec.id;
-        this.car.hasSpoiler = spec.hasSpoiler;
-        this.car.sprite = this.car.createCarSprite();
-        
-        // Ghost visuals
-        this.pos = new Vector2(0, 0);
-        this.angle = 0;
-        this.targetPos = new Vector2(0, 0);
+class RemoteCar extends Car {
+    constructor(id, x, y, carTypeIndex, name) {
+        // Find car config
+        let config = PLAYER_ROSTER[carTypeIndex] || PLAYER_ROSTER[0];
+        super(x, y, config.color, false, false);
+        this.remoteId = id;
+        this.playerName = name || "Guest";
+        this.targetPos = new Vector2(x, y);
         this.targetAngle = 0;
-        this.name = "RIVAL";
-        this.isActive = false;
-    }
-
-    update() {
-        if (!this.isActive) return;
-        this.pos = this.pos.lerp(this.targetPos, 0.15);
         
-        let angleDiff = (this.targetAngle - this.angle + 180) % 360 - 180;
-        if (angleDiff < -180) angleDiff += 360;
-        if (angleDiff > 180) angleDiff -= 360;
-        this.angle += angleDiff * 0.15;
-
-        this.car.pos = this.pos;
-        this.car.angle = this.angle;
+        // Apply sprite config
+        this.type = config.type;
+        this.id = config.id;
+        this.hasSpoiler = config.hasSpoiler;
+        this.sprite = this.createCarSprite(); // Re-gen sprite
+        
+        this.health = null; // No local health tracking for remote
     }
 
-    draw(ctx, camera) {
-        if (!this.isActive) return;
-        this.car.draw(ctx);
+    interpolate() {
+        // Simple Lerp
+        this.pos = this.pos.lerp(this.targetPos, 0.1);
+        
+        // Angle lerp
+        let diff = (this.targetAngle - this.angle + 180) % 360 - 180;
+        if (diff < -180) diff += 360;
+        if (diff > 180) diff -= 360;
+        this.angle += diff * 0.1;
+    }
+    
+    // Override physics to do nothing, position is set by network
+    physics() {
+        this.interpolate();
+    }
+    
+    draw(ctx) {
+        super.draw(ctx);
         // Draw Name Tag
         ctx.save();
-        ctx.translate(this.pos.x, this.pos.y - 40);
-        ctx.fillStyle = '#32ff64'; 
-        ctx.font = '10px "Press Start 2P"';
-        ctx.textAlign = 'center';
-        ctx.shadowColor = '#000'; ctx.shadowBlur = 4;
-        ctx.fillText(this.name, 0, 0);
+        ctx.translate(this.pos.x, this.pos.y);
+        ctx.fillStyle = "rgba(0,0,0,0.5)";
+        ctx.fillRect(-30, -40, 60, 16);
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.font = "10px 'Press Start 2P'";
+        ctx.fillText(this.playerName, 0, -28);
         ctx.restore();
     }
 }
 
-class Network {
-    constructor(game) {
-        this.game = game;
-        this.peer = null;
-        this.conn = null;
-        this.roomId = null;
-        this.isConnected = false;
-        this.statusMsg = "";
+// Manages Real-Time Multiplayer via MQTT over WebSockets
+class MultiplayerManager {
+    constructor() {
+        this.client = null;
+        this.connected = false;
+        this.remotePlayers = {}; // id -> { car: RemoteCar, lastSeen: timestamp }
+        this.myId = 'p_' + Math.random().toString(36).substr(2, 9);
+        this.lastPublish = 0;
+        this.publishInterval = 50; // ms (20 updates/sec)
+        
+        // Topic Prefix (unique enough to avoid collisions with other users of the broker)
+        this.topicBase = 'tokyo_drift_chase_v1/global/'; 
     }
 
-    joinRoom(roomName) {
-        this.roomId = "tdc_room_" + roomName.toLowerCase().replace(/[^a-z0-9]/g, '');
-        this.statusMsg = "SEARCHING...";
-        this.peer = new Peer(this.roomId, { debug: 1 });
+    connect() {
+        console.log("Connecting to MQTT Broker...");
+        // Public EMQX Broker (WebSocket Secure Port)
+        this.client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
 
-        this.peer.on('open', (id) => {
-            this.statusMsg = "ROOM CREATED. WAITING...";
-            this.peer.on('connection', (conn) => this.handleConnection(conn));
+        this.client.on('connect', () => {
+            console.log("Connected to Global Server");
+            this.connected = true;
+            this.client.subscribe(this.topicBase + '#');
         });
 
-        this.peer.on('error', (err) => {
-            if (err.type === 'unavailable-id') {
-                this.statusMsg = "ROOM FOUND! JOINING...";
-                this.connectAsClient();
-            } else {
-                this.statusMsg = "ERROR: " + err.type;
+        this.client.on('message', (topic, message) => {
+            // parse topic to get ID
+            // topic: tokyo_drift_chase_v1/global/{id}
+            const parts = topic.split('/');
+            const senderId = parts[parts.length - 1];
+
+            if (senderId === this.myId) return;
+
+            try {
+                const data = JSON.parse(message.toString());
+                this.handleUpdate(senderId, data);
+            } catch (e) {
+                // ignore garbled
             }
         });
-    }
-
-    connectAsClient() {
-        this.peer = new Peer();
-        this.peer.on('open', () => {
-            let conn = this.peer.connect(this.roomId);
-            this.handleConnection(conn);
+        
+        this.client.on('error', (err) => {
+            console.error("Connection Error", err);
         });
     }
 
-    handleConnection(conn) {
-        this.conn = conn;
-        this.conn.on('open', () => {
-            this.isConnected = true;
-            this.statusMsg = "CONNECTED!";
-            this.send({ type: 'INIT', carIndex: this.game.selectedCarIndex });
-        });
-        this.conn.on('data', (data) => this.handleData(data));
-        this.conn.on('close', () => {
-            this.isConnected = false;
-            this.statusMsg = "OPPONENT LEFT";
-            if(this.game.remoteCar) this.game.remoteCar.isActive = false;
-        });
-    }
-
-    handleData(data) {
-        if (!this.game.remoteCar) return;
-        if (data.type === 'INIT') {
-            this.game.remoteCar = new RemoteCar(data.carIndex);
-            this.game.remoteCar.isActive = true;
-        } else if (data.type === 'UPDATE') {
-            this.game.remoteCar.targetPos = new Vector2(data.x, data.y);
-            this.game.remoteCar.targetAngle = data.a;
-            this.game.remoteCar.isActive = true;
+    handleUpdate(id, data) {
+        if (!this.remotePlayers[id]) {
+            // New Player
+            const newCar = new RemoteCar(id, data.x, data.y, data.t, data.n);
+            this.remotePlayers[id] = { car: newCar, lastSeen: Date.now() };
+        } else {
+            // Update Existing
+            const p = this.remotePlayers[id];
+            p.lastSeen = Date.now();
+            p.car.targetPos = new Vector2(data.x, data.y);
+            p.car.targetAngle = data.a;
+            // Update name/type if changed (rare)
+            if (p.car.playerName !== data.n) p.car.playerName = data.n;
         }
     }
 
-    send(data) {
-        if (this.isConnected && this.conn) this.conn.send(data);
+    update(player) {
+        const now = Date.now();
+
+        // 1. Publish My State
+        if (this.connected && now - this.lastPublish > this.publishInterval) {
+            const payload = {
+                x: Math.round(player.pos.x),
+                y: Math.round(player.pos.y),
+                a: Math.round(player.angle),
+                t: player.selectedCarIndex,
+                n: "Racer " + this.myId.substr(0,4).toUpperCase()
+            };
+            this.client.publish(this.topicBase + this.myId, JSON.stringify(payload));
+            this.lastPublish = now;
+        }
+
+        // 2. Prune disconnected players (timeout > 5 sec)
+        for (const id in this.remotePlayers) {
+            if (now - this.remotePlayers[id].lastSeen > 5000) {
+                delete this.remotePlayers[id];
+            } else {
+                // Interpolate
+                this.remotePlayers[id].car.physics(); 
+            }
+        }
+
+        // 3. Update UI
+        this.updateUI();
+    }
+
+    updateUI() {
+        const uiText = document.getElementById('online-text');
+        const count = 1 + Object.keys(this.remotePlayers).length;
+        uiText.innerText = "online: " + count;
+    }
+
+    draw(ctx, camera) {
+        for (const id in this.remotePlayers) {
+            const p = this.remotePlayers[id];
+            // View Culling
+            let rect = p.car.getRect();
+            let screenRect = camera.apply(rect);
+            if (screenRect.right > 0 && screenRect.left < ctx.canvas.width && 
+                screenRect.bottom > 0 && screenRect.top < ctx.canvas.height) {
+                p.car.draw(ctx);
+            }
+        }
     }
 }
+
+// --- Main Game Class ---
 class Game {
 constructor() {
 this.canvas = document.getElementById('gameCanvas');
 this.ctx = this.canvas.getContext('2d');
 this.ctx.imageSmoothingEnabled = false;
-
 this.resize();
 window.addEventListener('resize', () => this.resize());
-
 // Inputs
 this.keys = {};
 this.kPressed = false; // For K key toggle
@@ -2174,19 +2033,15 @@ this.leftPressed = false; // Menu navigation
 this.rightPressed = false; // Menu navigation
 this.fPressed = false; // Enter/Exit Car
 this.ePressed = false; // Repair
-
 window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
 this.canvas.addEventListener('mousedown', e => this.onClick(e));
-
 // Game State
 this.state = 'MENU'; // MENU, CAR_SELECT, PLAY, GAMEOVER, SETTINGS
 this.selectedCarIndex = 0; // Default car selection
-
 this.score = 0;
 this.highScore = 0;
 this.achievements = []; // { name: '...', timer: 180 }
-
 // Buttons
 this.restartRect = new Rect(0,0,0,0);
 this.playRect = new Rect(0,0,0,0);
@@ -2195,12 +2050,10 @@ this.settingsRect = new Rect(0,0,0,0);
 this.resetProgressRect = new Rect(0,0,0,0);
 this.backRect = new Rect(0,0,0,0);
 this.tvToggleRect = new Rect(0,0,0,0);
-
 // Confirm Dialog Buttons
 this.confirmYesRect = new Rect(0,0,0,0);
 this.confirmNoRect = new Rect(0,0,0,0);
 this.showResetConfirm = false;
-
 // --- ACHIEVEMENT & SKILL MECHANISMS ---
 this.hasGhostlyRider = false;
 this.ghostlyRiderActive = false;
@@ -2208,61 +2061,39 @@ this.ghostlyRiderCooldown = 0;
 this.ghostlyRiderDuration = 0;
 this.ghostlyRiderCooldownMax = 15 * FPS;
 this.ghostlyRiderDurationMax = 15 * FPS;
-
 this.hasFireWheel = false;
 this.fireWheelActive = false;
 this.fireWheelCooldown = 0;
 this.fireWheelDuration = 0;
 this.fireWheelCooldownMax = 15 * FPS;
 this.fireWheelDurationMax = 15 * FPS;
-
 // Z Power
 this.powerCooldown = 0;
 this.powerActive = false; // For duration based powers (Ramming)
 this.powerTimer = 0;
 this.timeScale = 1.0; // Global time scale for Time Slow ability
-
 this.turnCount = 0;
 this.driftTime = 0;
-
 this.showProgress = false;
-
 // TV Mode Settings
 this.tvMode = true; // Default ON
-
 // Intersection turn tracking
 this.isInsideIntersection = false;
 this.playerInitialAngle = null;
-
 // On-Foot Mechanics
 this.isWalking = false;
 this.playerPed = null; // Will be an instance of Person when walking
 
+// --- MULTIPLAYER SETUP ---
+this.multiplayer = new MultiplayerManager();
+
 // Load Data
 this.loadData();
-// MULTIPLAYER SETUP
-this.network = new Network(this);
-this.remoteCar = new RemoteCar(0); 
-this.mpInput = ""; 
-this.mpActive = false; 
-
-// TYPING LISTENER
-window.addEventListener('keydown', e => {
-    if (this.state === 'MENU' && this.mpActive) {
-        if (e.key === 'Backspace') {
-            this.mpInput = this.mpInput.slice(0, -1);
-        } else if (e.key.length === 1 && e.key.match(/[a-zA-Z0-9]/)) {
-            if (this.mpInput.length < 10) this.mpInput += e.key.toUpperCase();
-        }
-    }
-});
 // Initialize game world so background renders in Menu
 this.initGame();
-
 this.loop = this.loop.bind(this);
 requestAnimationFrame(this.loop);
 }
-
 // --- Persistence ---
 saveData() {
 const data = {
@@ -2273,7 +2104,6 @@ tvMode: this.tvMode
 localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
 this.highScore = data.highScore;
 }
-
 loadData() {
 const saved = localStorage.getItem('tokyo_drift_chase_v2');
 if (saved) {
@@ -2285,7 +2115,6 @@ this.hasFireWheel = false;
 if (data.tvMode !== undefined) this.tvMode = data.tvMode;
 }
 }
-
 resetData() {
 localStorage.removeItem('tokyo_drift_chase_v2');
 this.highScore = 0;
@@ -2293,25 +2122,22 @@ this.hasGhostlyRider = false;
 this.hasFireWheel = false;
 this.tvMode = true; // Default back to true
 }
-
 initGame() {
 // Init player based on Selection
 let carSpec = PLAYER_ROSTER[this.selectedCarIndex];
-
 // Create car
 this.player = new Car(0, 0, carSpec.color);
-
 // Apply stats & ID
 this.player.type = carSpec.type;
 this.player.id = carSpec.id; // Important for sprite gen
 this.player.hasSpoiler = carSpec.hasSpoiler;
 this.player.sprite = this.player.createCarSprite();
-
 this.player.customMaxSpeed = carSpec.stats.speed;
 this.player.customTurnSpeed = carSpec.stats.turn;
 this.player.customAccel = carSpec.stats.accel;
 this.player.health = new CarHealth(carSpec.stats.hp);
 this.player.powerData = carSpec.powerData;
+this.player.selectedCarIndex = this.selectedCarIndex; // For networking
 
 this.camera = new Camera();
 this.buildings = [];
@@ -2325,13 +2151,10 @@ this.floorEffects = []; // New layer for floor trails & oil
 this.shockwaves = []; // New list for Angel ability
 this.blood = [];
 this.loadedChunks = new Set();
-
 // Setup menu camera pos
 this.menuCamPos = new Vector2(0, 0);
-
 this.spawnTimer = 0;
 this.score = 0;
-
 // Reset state
 this.ghostlyRiderActive = false;
 this.ghostlyRiderCooldown = 0;
@@ -2339,54 +2162,37 @@ this.ghostlyRiderDuration = 0;
 this.fireWheelActive = false;
 this.fireWheelDuration = 0;
 this.fireWheelCooldown = 0;
-
 this.powerCooldown = 0;
 this.powerActive = false;
 this.powerTimer = 0;
 this.timeScale = 1.0;
-
 this.turnCount = 0;
 this.driftTime = 0;
-
 this.isInsideIntersection = false;
 this.playerInitialAngle = null;
-
 // Reset walking state
 this.isWalking = false;
 this.playerPed = null;
-}
 
+// Connect Multiplayer
+this.multiplayer.connect();
+}
 resize() {
 this.canvas.width = window.innerWidth;
 this.canvas.height = window.innerHeight;
 this.ctx.imageSmoothingEnabled = false;
 }
-
 onClick(e) {
 const mx = e.clientX;
 const my = e.clientY;
-
 if (this.state === 'MENU') {
-        if (this.mpActive) {
-            // JOIN BUTTON CLICK
-            if (mx > this.canvas.width/2 - 100 && mx < this.canvas.width/2 + 100 &&
-                my > this.canvas.height/2 + 20 && my < this.canvas.height/2 + 70) {
-                if (this.mpInput.length > 0) this.network.joinRoom(this.mpInput);
-            }
-            // BACK (Click bottom area)
-            if (my > this.canvas.height - 100) this.mpActive = false;
-        } else {
-            if (this.playRect.collidePoint(mx, my)) this.state = 'CAR_SELECT';
-            if (this.settingsRect.collidePoint(mx, my)) this.state = 'SETTINGS';
-            
-            // MULTIPLAYER BUTTON
-            if (mx > this.canvas.width/2 - 160 && mx < this.canvas.width/2 + 160 &&
-                my > this.canvas.height/2 + 220 && my < this.canvas.height/2 + 280) {
-                this.mpActive = true;
-                this.mpInput = "";
-            }
-        }
-    } else if (this.state === 'SETTINGS') {
+if (this.playRect.collidePoint(mx, my)) {
+this.state = 'CAR_SELECT';
+}
+if (this.settingsRect.collidePoint(mx, my)) {
+this.state = 'SETTINGS';
+}
+} else if (this.state === 'SETTINGS') {
 if (this.showResetConfirm) {
 if (this.confirmYesRect.collidePoint(mx, my)) {
 this.resetData();
@@ -2397,7 +2203,6 @@ this.showResetConfirm = false;
 }
 return; // Block other clicks
 }
-
 if (this.backRect.collidePoint(mx, my)) {
 this.state = 'MENU';
 this.saveData(); // Save settings when leaving
@@ -2427,9 +2232,7 @@ this.state = 'PLAY';
 }
 }
 }
-
 // --- New Achievement Logic ---
-
 showAchievement(name) {
 // Only show if not already showing the same one and not in the list
 if (!this.achievements.some(a => a.name === name)) {
@@ -2437,25 +2240,19 @@ this.achievements.push({ name: name, timer: 180 }); // 3 seconds @ 60 FPS
 // Don't save achievement unlock to persistence, but track for session
 }
 }
-
 updateAchievementLogic(drift) {
 const player = this.player;
-
 // --- 1. Ghostly Rider: 10 non-bumping intersection turns ---
 if (!this.hasGhostlyRider) {
-
 const playerX = player.pos.x;
 const playerY = player.pos.y;
 const blockX = Math.floor(playerX / BLOCK_SIZE);
 const blockY = Math.floor(playerY / BLOCK_SIZE);
-
 const isRoadX = (blockX % 3 === 0);
 const isRoadY = (blockY % 3 === 0);
 const inIntersectionBlock = isRoadX && isRoadY;
-
 const getCardinalAngle = (angle) => Math.round(((angle % 360) + 360) % 360 / 90) * 90;
 const currentCardinalAngle = getCardinalAngle(player.angle);
-
 if (inIntersectionBlock) {
 if (!this.isInsideIntersection) {
 this.isInsideIntersection = true;
@@ -2464,7 +2261,6 @@ this.playerInitialAngle = currentCardinalAngle;
 } else if (this.isInsideIntersection) {
 this.isInsideIntersection = false;
 const turnSuccess = (currentCardinalAngle !== this.playerInitialAngle);
-
 if (turnSuccess && !player.isCollidingWithBuilding) {
 this.turnCount++;
 } else if (player.isCollidingWithBuilding) {
@@ -2473,17 +2269,14 @@ this.turnCount = 0;
 player.isCollidingWithBuilding = false;
 this.playerInitialAngle = null;
 }
-
 if (player.isCollidingWithBuilding) {
 this.turnCount = 0;
 }
-
 if (this.turnCount >= 10) {
 this.hasGhostlyRider = true;
 this.showAchievement("Ghostly Rider Unlocked!");
 }
 }
-
 // --- 2. Fire Wheel: 30 seconds of drifting without hitting a cop ---
 if (!this.hasFireWheel) {
 if (drift && player.vel.mag() > 4) {
@@ -2502,12 +2295,10 @@ this.hasFireWheel = true;
 this.showAchievement("Fire Wheel Unlocked!");
 }
 }
-
 // Update achievement pop-up timers
 this.achievements.forEach(a => a.timer--);
 this.achievements = this.achievements.filter(a => a.timer > 0);
 }
-
 updateSkillMechanics() {
 // K key toggle logic
 if (this.keys['k'] && !this.kPressed) {
@@ -2515,7 +2306,6 @@ this.showProgress = !this.showProgress;
 this.kPressed = true;
 }
 if (!this.keys['k']) this.kPressed = false;
-
 // --- Ghostly Rider ---
 if (this.hasGhostlyRider) {
 if ((this.keys['x'] || this.keys['X']) && !this.ghostlyRiderActive && this.ghostlyRiderCooldown <= 0) {
@@ -2530,7 +2320,6 @@ if (this.ghostlyRiderDuration <= 0) this.ghostlyRiderActive = false;
 } else if (this.ghostlyRiderCooldown > 0) {
 this.ghostlyRiderCooldown--;
 }
-
 // --- Fire Wheel ---
 if (this.hasFireWheel) {
 if ((this.keys['c'] || this.keys['C']) && !this.fireWheelActive && this.fireWheelCooldown <= 0) {
@@ -2545,14 +2334,12 @@ if (this.fireWheelDuration <= 0) this.fireWheelActive = false;
 } else if (this.fireWheelCooldown > 0) {
 this.fireWheelCooldown--;
 }
-
 // --- Z POWER (Unique per Car) ---
 if ((this.keys['z'] || this.keys['Z']) && !this.zPressed && this.powerCooldown <= 0) {
 this.zPressed = true;
 this.activatePower();
 }
 if (!this.keys['z'] && !this.keys['Z']) this.zPressed = false;
-
 if (this.powerCooldown > 0) this.powerCooldown--;
 if (this.powerActive) {
 this.powerTimer--;
@@ -2563,9 +2350,7 @@ this.player.isPhasing = false;
 this.timeScale = 1.0;
 }
 }
-
 // --- Process Active Powers ---
-
 // Update Shockwaves (Angel, Mecha, Cyber-X)
 for (let i = this.shockwaves.length - 1; i >= 0; i--) {
 let sw = this.shockwaves[i];
@@ -2574,7 +2359,6 @@ if (!sw.active) {
 this.shockwaves.splice(i, 1);
 continue;
 }
-
 // Collision
 this.cops.forEach(cop => {
 if (cop.dead) return;
@@ -2598,12 +2382,9 @@ cop.vel = cop.vel.add(pushVec);
 });
 }
 }
-
 activatePower() {
 if (!this.player.powerData) return;
-
 const pid = this.player.id;
-
 if (pid === 'standard') {
 if (this.player.health) {
 for (let k in this.player.health.parts) {
@@ -2645,14 +2426,12 @@ let angle = this.player.angle;
 let rad = degToRad(angle);
 let dir = new Vector2(Math.cos(rad), -Math.sin(rad));
 let coneOrigin = this.player.pos.add(dir.mult(40));
-
 // Spawn fire
 for(let i=0; i<30; i++) {
 let spread = (Math.random() - 0.5) * 1.0;
 let pVel = dir.rotate(spread * 30).mult(randFloat(5, 10));
 this.particles.push(new Particle(coneOrigin.x, coneOrigin.y, 'spark'));
 }
-
 // Check cone collision
 this.cops.forEach(cop => {
 let toCop = cop.pos.sub(coneOrigin);
@@ -2714,40 +2493,32 @@ this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y, '#ff000
 this.powerCooldown = this.player.powerData.cooldown;
 }
 }
-
 generateChunk(gx, gy) {
 const isRoadX = (gx % 3 === 0);
 const isRoadY = (gy % 3 === 0);
 const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
 const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
-
 let seed = Math.abs(gx * 73856093 ^ gy * 19349663);
 let rng = new SeededRNG(seed);
-
 if (isRoadX || isRoadY) {
 if (rng.next() < 0.1) {
 this.people.push(new Person(cx + rng.randInt(-50,50), cy + rng.randInt(-50,50), null));
 }
 let density = rng.choice([0, 1, 1, 2, 2, 3]);
-
 for(let i=0; i<density; i++) {
 let heading = 0;
 if (isRoadX && !isRoadY) heading = rng.choice([90, 270]);
 else if (!isRoadX && isRoadY) heading = rng.choice([0, 180]);
 else heading = rng.choice([0, 90, 180, 270]);
-
 let laneOffset = 80;
 let jitter = rng.randInt(-20, 20);
 let longScatter = rng.randInt(-150, 150);
-
 let spawnX = cx;
 let spawnY = cy;
-
 if (heading === 0) { spawnY = cy - laneOffset + jitter; spawnX = cx + longScatter; }
 else if (heading === 180) { spawnY = cy + laneOffset + jitter; spawnX = cx + longScatter; }
 else if (heading === 90) { spawnX = cx + laneOffset + jitter; spawnY = cy + longScatter; }
 else if (heading === 270) { spawnX = cx - laneOffset + jitter; spawnY = cy + longScatter; }
-
 let type = rng.choice(Object.keys(CAR_TYPES));
 let civCar = new Car(spawnX, spawnY, type, false, true);
 civCar.angle = heading;
@@ -2779,14 +2550,12 @@ this.people.push(new Person(px, py, sidewalkRect));
 }
 }
 }
-
 updateChunks() {
 const view = this.camera.viewRect;
 const startGx = Math.floor(view.left / BLOCK_SIZE) - 1;
 const endGx = Math.floor(view.right / BLOCK_SIZE) + 1;
 const startGy = Math.floor(view.top / BLOCK_SIZE) - 1;
 const endGy = Math.floor(view.bottom / BLOCK_SIZE) + 1;
-
 for(let gx = startGx; gx < endGx; gx++) {
 for(let gy = startGy; gy < endGy; gy++) {
 let key = `${gx},${gy}`;
@@ -2796,10 +2565,8 @@ this.loadedChunks.add(key);
 }
 }
 }
-
 const margin = 1200;
 const keepRect = view.inflate(margin, margin);
-
 for (let i = this.buildings.length - 1; i >= 0; i--) {
 let b = this.buildings[i];
 if (!keepRect.collideRect(b.rect)) {
@@ -2807,14 +2574,12 @@ this.loadedChunks.delete(`${b.gx},${b.gy}`);
 this.buildings.splice(i, 1);
 }
 }
-
 const cull = (arr) => {
 return arr.filter(obj => {
 if (obj.rect) return keepRect.collideRect(obj.rect);
 return keepRect.collidePoint(obj.pos.x, obj.pos.y);
 });
 };
-
 this.people = cull(this.people);
 this.sakura = cull(this.sakura);
 this.skids = cull(this.skids);
@@ -2823,23 +2588,18 @@ this.blood = cull(this.blood);
 this.civilians = cull(this.civilians);
 this.cops = cull(this.cops);
 }
-
 update() {
 if (this.state === 'GAMEOVER') return;
-
 // Apply Time Scale
 let dt = this.timeScale;
-
 // Input
 this.player.rotDirection = 0;
 this.player.accInput = 0;
-
 if (this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') {
 // Auto-move camera for menu background
 this.menuCamPos.y -= 6;
 this.camera.update({ pos: this.menuCamPos }, this.canvas.width, this.canvas.height);
 this.updateChunks();
-
 // Spawn Cops around Camera in Menu
 this.spawnTimer++;
 if (this.spawnTimer > 120) {
@@ -2854,14 +2614,11 @@ if ((gx % 3 === 0) || (gy % 3 === 0)) {
 this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
 }
 }
-
 this.civilians.forEach((civ, i) => {
 civ.updateCivilian(this.buildings, this.civilians, null);
 });
-
 const keepRect = this.camera.viewRect.inflate(1200, 1200);
 this.cops = this.cops.filter(cop => keepRect.collideRect(cop.getRect()));
-
 // Handle Selection Input
 if (this.state === 'CAR_SELECT') {
 if ((this.keys['arrowleft'] || this.keys['a']) && !this.leftPressed) {
@@ -2870,7 +2627,6 @@ if (this.selectedCarIndex < 0) this.selectedCarIndex = PLAYER_ROSTER.length - 1;
 this.leftPressed = true;
 }
 if (!this.keys['arrowleft'] && !this.keys['a']) this.leftPressed = false;
-
 if ((this.keys['arrowright'] || this.keys['d']) && !this.rightPressed) {
 this.selectedCarIndex++;
 if (this.selectedCarIndex >= PLAYER_ROSTER.length) this.selectedCarIndex = 0;
@@ -2878,24 +2634,15 @@ this.rightPressed = true;
 }
 if (!this.keys['arrowright'] && !this.keys['d']) this.rightPressed = false;
 }
-
 return; // Skip rest of update loop
 }
-
 // --- PLAY STATE ---
-// SYNC MULTIPLAYER
-if (this.network.isConnected && this.spawnTimer % 3 === 0) {
-    this.network.send({
-        type: 'UPDATE',
-        x: this.player.pos.x,
-        y: this.player.pos.y,
-        a: this.player.angle
-    });
-}
-if (this.remoteCar) this.remoteCar.update();
+
+// Update Multiplayer
+this.multiplayer.update(this.player, this.buildings);
+
 // Skill Mechanics
 this.updateSkillMechanics();
-
 // 1. Toggle Walking Logic (Key: F)
 if (this.keys['f'] && !this.fPressed) {
 this.fPressed = true;
@@ -2909,9 +2656,7 @@ let rad = degToRad(this.player.angle);
 let sideX = Math.cos(rad + Math.PI/2);
 let sideY = -Math.sin(rad + Math.PI/2);
 let dist = 50; // Increased slightly for safety
-
 let spawnPos = new Vector2(this.player.pos.x + sideX * dist, this.player.pos.y + sideY * dist);
-
 // Simple check against buildings
 let inBuilding = false;
 for(let b of this.buildings) {
@@ -2920,7 +2665,6 @@ inBuilding = true;
 break;
 }
 }
-
 if (inBuilding) {
 // Try right side
 sideX = -sideX;
@@ -2938,7 +2682,6 @@ if (inBuilding) {
 spawnPos = new Vector2(this.player.pos.x, this.player.pos.y);
 }
 }
-
 let pedData = PLAYER_ROSTER.find(c => c.id === this.player.id).pedData;
 this.playerPed = new Person(spawnPos.x, spawnPos.y, null, true, pedData);
 }
@@ -2954,7 +2697,6 @@ this.timeScale = 1.0;
 }
 }
 if (!this.keys['f']) this.fPressed = false;
-
 // 2. Repair Logic (Key: E)
 if (this.keys['e'] && !this.ePressed && this.isWalking) {
 this.ePressed = true;
@@ -2973,7 +2715,6 @@ this.particles.push(new Particle(this.player.pos.x + randInt(-20,20), this.playe
 }
 }
 if (!this.keys['e']) this.ePressed = false;
-
 // 3. Movement Logic
 if (this.isWalking && this.playerPed) {
 // Control Pedestrian
@@ -2983,14 +2724,11 @@ if (this.keys['arrowleft'] || this.keys['a']) mx = -1;
 if (this.keys['arrowright'] || this.keys['d']) mx = 1;
 if (this.keys['arrowup'] || this.keys['w']) my = -1;
 if (this.keys['arrowdown'] || this.keys['s']) my = 1;
-
 // --- PEDESTRIAN ABILITIES (Spacebar) ---
 if (this.playerPed.abilityCooldown > 0) this.playerPed.abilityCooldown--;
-
 if (this.keys[' ']) {
 // Ability Logic
 const ability = this.playerPed.ability;
-
 // FLASH RUN (Time)
 if (ability === 'flash_run') {
 // Hold to activate
@@ -3040,13 +2778,10 @@ this.timeScale = 1.0;
 this.playerPed.moveSpeed = 3.5;
 }
 }
-
 // Logic for passive/movement updates
 let moveVec = new Vector2(mx, my);
 if (moveVec.mag() > 0) moveVec = moveVec.normalize().mult(moveSpeed);
-
 this.playerPed.vel = moveVec;
-
 // Collision for pedestrian vs buildings
 let nextPos = this.playerPed.pos.add(this.playerPed.vel);
 let collided = false;
@@ -3061,30 +2796,24 @@ this.playerPed.update(null, null); // Manual update call for player
 this.playerPed.vel = new Vector2(0,0);
 this.playerPed.update(null, null);
 }
-
 // Apply friction to car so it stops eventually if left rolling
 this.player.vel = this.player.vel.mult(0.95);
 this.player.pos = this.player.pos.add(this.player.vel.mult(dt));
-
 } else {
 // Control Car
 if (this.keys['arrowleft'] || this.keys['a']) this.player.rotDirection = -1;
 if (this.keys['arrowright'] || this.keys['d']) this.player.rotDirection = 1;
 if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = this.player.customAccel || ACCELERATION;
 if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -(this.player.customAccel || ACCELERATION) * 0.5;
-
 let drift = (this.keys[' ']) && this.state === 'PLAY';
 this.player.physics(this.buildings, drift, this.fireWheelActive);
-
 if (this.fireWheelActive) {
 if (Math.random() < 0.8) {
 this.floorEffects.push(new FireTrail(this.player.pos.x, this.player.pos.y, this.player.angle));
 }
 }
-
 this.updateAchievementLogic(drift);
 }
-
 if (this.keys['r']) {
 if (this.player.health && this.player.health.checkFullyDestroyed()) {
 let tempGhostlyRider = this.hasGhostlyRider;
@@ -3095,12 +2824,10 @@ this.hasFireWheel = tempFireWheel;
 return;
 }
 }
-
 // Update Floor Effects (Fire & Oil)
 this.floorEffects.forEach((f, i) => {
 f.update();
 if(f.life<=0) this.floorEffects.splice(i, 1);
-
 // Cop interaction with Oil
 if (f instanceof OilSlick) {
 this.cops.forEach(cop => {
@@ -3110,14 +2837,11 @@ cop.spinTimer = 60; // 1 second spin
 });
 }
 });
-
 // Camera tracks player OR car
 let targetObj = this.isWalking ? this.playerPed : this.player;
 this.camera.update(targetObj, this.canvas.width, this.canvas.height);
-
 // World Generation
 this.updateChunks();
-
 // Spawn Cops
 this.spawnTimer++;
 if (this.spawnTimer > 120 / dt) {
@@ -3126,20 +2850,17 @@ let angle = randFloat(0, Math.PI*2);
 let dist = 800;
 let cx = (-this.camera.offset.x + this.canvas.width/2) + Math.cos(angle)*dist;
 let cy = (-this.camera.offset.y + this.canvas.height/2) + Math.sin(angle)*dist;
-
 let gx = Math.floor(cx / BLOCK_SIZE);
 let gy = Math.floor(cy / BLOCK_SIZE);
 if ((gx % 3 === 0) || (gy % 3 === 0)) {
 this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
 }
 }
-
 // Skids
 if (Math.abs(this.player.rotDirection) > 0 && this.player.vel.mag() > 4 && !this.isWalking) {
 this.skids.push(new Skid(this.player.pos.x, this.player.pos.y, this.player.angle));
 }
 this.skids.forEach((s,i) => { s.update(); if(s.life<=0) this.skids.splice(i,1); });
-
 // Cops
 this.cops.forEach((cop, i) => {
 // Apply slow mo to cops
@@ -3153,7 +2874,6 @@ cop.vel = cop.vel.mult(1/dt); // Restore velocity magnitude for physics calc
 // For now, let's just accept the physics update might be full speed if not careful.
 // Fix: Override position update in physics? No, just manually dampen movement if time slowed.
 if (dt < 1.0) cop.pos = cop.pos.sub(cop.vel.mult(1 - dt));
-
 // Cop collision
 if (cop.getHitbox().collideRect(this.player.getHitbox())) {
 if ((this.player.id === 'tank' && this.powerActive) || (this.player.id === 'monster' && this.powerActive)) {
@@ -3176,7 +2896,6 @@ for(let k=0; k<5; k++) this.particles.push(new Particle(this.player.pos.x, this.
 if (!this.player.isPhasing) this.player.health.takeDamage(5);
 }
 }
-
 // Cop vs Cop
 for (let j=i+1; j<this.cops.length; j++) {
 let other = this.cops[j];
@@ -3188,7 +2907,6 @@ for(let k=0; k<15; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, '
 }
 });
 this.cops = this.cops.filter(c => !c.dead);
-
 // Civilians
 this.civilians.forEach((civ, i) => {
 if (dt < 1.0) civ.pos = civ.pos.sub(civ.vel.mult(1 - dt)); // Slow mo
@@ -3202,7 +2920,6 @@ for(let k=0; k<10; k++) this.particles.push(new Particle(civ.pos.x, civ.pos.y, '
 this.civilians.splice(i, 1);
 return;
 }
-
 if (!this.player.isPhasing) {
 this.player.health.takeDamage(5);
 let pCenter = this.player.pos;
@@ -3218,25 +2935,20 @@ civ.hitOnce = true;
 }
 }
 });
-
 // People
 this.people.forEach(p => p.update(this.player, this.blood));
-
 // Particles
 this.particles.forEach((p,i) => { p.update(); if(p.life<=0) this.particles.splice(i,1); });
-
 // Smoke
 if (this.player.health.parts['front_torso'] <= 0 && Math.random() < 0.3) {
 this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'smoke'));
 }
-
 // Game Over Check
 if (this.player.health.checkFullyDestroyed()) {
 this.saveData(); // Save score
 this.state = 'GAMEOVER';
 }
 }
-
 drawFloor() {
 const bs = BLOCK_SIZE;
 const view = this.camera.viewRect;
@@ -3244,14 +2956,12 @@ const startGx = Math.floor(view.left / bs) - 1;
 const endGx = Math.floor(view.right / bs) + 1;
 const startGy = Math.floor(view.top / bs) - 1;
 const endGy = Math.floor(view.bottom / bs) + 1;
-
 for (let gx = startGx; gx < endGx; gx++) {
 for (let gy = startGy; gy < endGy; gy++) {
 let isRoadX = (gx % 3 === 0);
 let isRoadY = (gy % 3 === 0);
 let sx = gx * bs + this.camera.offset.x;
 let sy = gy * bs + this.camera.offset.y;
-
 if (isRoadX || isRoadY) {
 this.ctx.drawImage(roadPatternCanvas, sx, sy);
 this.ctx.fillStyle = COLORS.PAINT_WHITE;
@@ -3287,29 +2997,23 @@ this.ctx.fillRect(sx + bs - 60, sy + i, 40, stripeW);
 }
 }
 }
-
 drawIndicators() {
 const cx = this.canvas.width/2;
 const cy = this.canvas.height/2;
 const pad = 20;
-
 // Skip drawing if ghostly rider is active
 if (this.ghostlyRiderActive) return;
-
 this.cops.forEach(cop => {
 let dist = this.player.pos.distanceTo(cop.pos);
 if (dist > 1500) return;
 let screenPos = this.camera.apply(cop.getRect());
 if (screenPos.x > 0 && screenPos.x < this.canvas.width && screenPos.y > 0 && screenPos.y < this.canvas.height) return;
-
 let dx = cop.pos.x - this.player.pos.x;
 let dy = cop.pos.y - this.player.pos.y;
 if (dx===0) dx=0.1; if (dy===0) dy=0.1;
-
 let scale = Math.min(Math.abs((cx-pad)/dx), Math.abs((cy-pad)/dy));
 let dxDraw = cx + dx * scale;
 let dyDraw = cy + dy * scale;
-
 this.ctx.fillStyle = '#ff3232';
 this.ctx.beginPath(); this.ctx.arc(dxDraw, dyDraw, 14, 0, Math.PI*2); this.ctx.fill();
 this.ctx.strokeStyle = '#fff'; this.ctx.lineWidth=2; this.ctx.stroke();
@@ -3317,27 +3021,23 @@ this.ctx.fillStyle = '#fff'; this.ctx.font = 'bold 16px Arial'; this.ctx.textAli
 this.ctx.fillText("!", dxDraw, dyDraw);
 });
 }
-
 drawCRT(ctx, w, h, intensity = 1.0) {
 // 1. Scanlines (Stripes)
 ctx.fillStyle = `rgba(0, 0, 0, ${0.3 * intensity})`; // Darker
 for (let i = 0; i < h; i += 3) {
 ctx.fillRect(0, i, w, 1);
 }
-
 // 2. Moving Scan Bar (Rolling shutter effect)
 this.scanlineY = (this.scanlineY || 0) + 1.5;
 if (this.scanlineY > h) this.scanlineY = 0;
 ctx.fillStyle = `rgba(255, 255, 255, ${0.07 * intensity})`;
 ctx.fillRect(0, this.scanlineY, w, 50);
-
 // 3. Vignette (Dark corners)
 let grad = ctx.createRadialGradient(w/2, h/2, h/3, w/2, h/2, h);
 grad.addColorStop(0, "rgba(0,0,0,0)");
 grad.addColorStop(1, `rgba(0,0,0,${0.6 * intensity})`);
 ctx.fillStyle = grad;
 ctx.fillRect(0, 0, w, h);
-
 // 4. Noise (Static)
 // For performance, let's just do a flickering overlay.
 if (Math.random() > 0.8) {
@@ -3345,137 +3045,108 @@ ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05 * intensity})`;
 ctx.fillRect(0, 0, w, h);
 }
 }
-
 drawSettings(ctx, w, h) {
 ctx.save();
 ctx.fillStyle = 'rgba(20, 20, 30, 0.95)';
 ctx.fillRect(0, 0, w, h);
-
 ctx.textAlign = 'center';
 const cx = w / 2;
 const cy = h / 2;
-
 // Container Block
 let contW = 500;
 let contH = 400;
 drawRect(ctx, '#444', cx - contW/2, cy - contH/2, contW, contH, 10);
 drawRect(ctx, '#222', cx - contW/2 + 5, cy - contH/2 + 5, contW - 10, contH - 10, 8);
-
 ctx.fillStyle = '#fff';
 ctx.font = '30px "Press Start 2P", cursive';
 ctx.fillText("SETTINGS", cx, cy - 130);
-
 // Reset Progress Button
 let btnW = 350;
 let btnH = 60;
 this.resetProgressRect = new Rect(cx - btnW/2, cy - 40, btnW, btnH);
-
 drawRect(ctx, '#000', this.resetProgressRect.x, this.resetProgressRect.y, btnW, btnH, 5);
 drawRect(ctx, '#c83232', this.resetProgressRect.x+4, this.resetProgressRect.y+4, btnW-8, btnH-8, 5);
-
 ctx.fillStyle = '#fff';
 ctx.font = '20px "Press Start 2P", cursive';
 ctx.fillText("RESET PROGRESS", cx, cy - 5);
-
 // TV Toggle Button
 this.tvToggleRect = new Rect(cx - btnW/2, cy + 40, btnW, btnH);
-
 drawRect(ctx, '#000', this.tvToggleRect.x, this.tvToggleRect.y, btnW, btnH, 5);
 drawRect(ctx, this.tvMode ? COLORS.NEON_GREEN : '#555', this.tvToggleRect.x+4, this.tvToggleRect.y+4, btnW-8, btnH-8, 5);
-
 ctx.fillStyle = '#fff';
 ctx.fillText(`TV EFFECTS: ${this.tvMode ? "ON" : "OFF"}`, cx, cy + 75);
-
 // Back Button
 this.backRect = new Rect(cx - btnW/2, cy + 120, btnW, btnH);
 drawRect(ctx, '#000', this.backRect.x, this.backRect.y, btnW, btnH, 5);
 drawRect(ctx, '#505050', this.backRect.x+4, this.backRect.y+4, btnW-8, btnH-8, 5);
-
 ctx.fillStyle = '#fff';
 ctx.fillText("BACK", cx, cy + 155);
-
 // Confirmation Modal Overlay
 if (this.showResetConfirm) {
 ctx.fillStyle = 'rgba(0,0,0,0.8)';
 ctx.fillRect(0,0,w,h);
-
 let mw = 400, mh = 250;
-drawRect(ctx, '#222', cx - mw/2, cy - mh/2, mw, mh, 10);
-drawRect(ctx, '#f00', cx - mw/2, cy - mh/2, mw, 5);
-
+drawRect(ctx, '#222', cx - mw/2, cy - mh/2 , mw, mh, 10);
+drawRect(ctx, '#f00', cx - mw/2, cy - mh/2 , mw, 5);
 ctx.fillStyle = '#fff';
 ctx.font = '18px "Press Start 2P", cursive';
 ctx.fillText("ARE YOU SURE?", cx, cy - 40);
 ctx.font = '12px "Press Start 2P", cursive';
 ctx.fillStyle = '#aaa';
 ctx.fillText("This cannot be undone.", cx, cy - 10);
-
 let bw = 120, bh = 50;
 this.confirmYesRect = new Rect(cx - bw - 20, cy + 40, bw, bh);
 this.confirmNoRect = new Rect(cx + 20, cy + 40, bw, bh);
-
 drawRect(ctx, '#fff', this.confirmYesRect.x, this.confirmYesRect.y, bw, bh, 5);
 drawRect(ctx, '#900', this.confirmYesRect.x+2, this.confirmYesRect.y+2, bw-4, bh-4, 5);
 ctx.fillStyle = '#fff'; ctx.fillText("YES", cx - bw/2 - 20, cy + 72);
-
 drawRect(ctx, '#fff', this.confirmNoRect.x, this.confirmNoRect.y, bw, bh, 5);
 drawRect(ctx, '#333', this.confirmNoRect.x+2, this.confirmNoRect.y+2, bw-4, bh-4, 5);
 ctx.fillStyle = '#fff'; ctx.fillText("NO", cx + bw/2 + 20, cy + 72);
 }
-
 this.drawCRT(ctx, w, h);
 ctx.restore();
 }
-
 drawMenu(ctx, w, h) {
 ctx.save();
-
 // Title: TOKYO
 ctx.textAlign = 'center';
 const cx = w / 2;
 const cy = h / 2;
-
 // Glitch Offset
 let jx = randInt(-2, 2);
 let jy = randInt(-2, 2);
-
 // "TOKYO"
 ctx.font = '40px "Press Start 2P", cursive';
 let grad = ctx.createLinearGradient(0, cy - 180, 0, cy - 140);
 grad.addColorStop(0, '#ffffff');
 grad.addColorStop(1, '#ffcccc');
-
 ctx.fillStyle = '#000';
 ctx.fillText("TOKYO", cx + 4 + jx, cy - 120 + 4 + jy);
 ctx.fillStyle = grad;
 ctx.fillText("TOKYO", cx + jx, cy - 120 + jy);
-
 // "DRIFT"
 ctx.font = '60px "Press Start 2P", cursive';
 ctx.fillStyle = '#000';
 ctx.fillText("DRIFT", cx + 5 - jx, cy - 50 + 5 - jy);
 ctx.fillStyle = '#d32f2f'; // Red
 ctx.fillText("DRIFT", cx - jx, cy - 50 - jy);
-
 // "- CHASE -"
 ctx.font = '25px "Press Start 2P", cursive';
 ctx.fillStyle = '#000';
 ctx.fillText("- CHASE -", cx + 3, cy + 10 + 3);
 ctx.fillStyle = '#ffeb3b'; // Yellow
 ctx.fillText("- CHASE -", cx, cy + 10);
-
 // High Score
 ctx.font = '20px "Press Start 2P", cursive';
 ctx.textAlign = 'left';
 ctx.fillStyle = '#fff';
-ctx.fillText("HIGH SCORE: " + this.highScore, 20, 40);
+ctx.fillText(`HIGH SCORE: ${this.highScore}`, 20, 40);
 ctx.textAlign = 'center';
-
 // Button: SELECT RIDE
 let btnW = 320;
 let btnH = 60;
 this.playRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
-
 // Button Shadow
 ctx.fillStyle = '#000';
 ctx.fillRect(this.playRect.x + 8, this.playRect.y + 8, btnW, btnH);
@@ -3489,72 +3160,56 @@ ctx.fillRect(this.playRect.x, this.playRect.y, btnW, btnH);
 ctx.fillStyle = '#fff';
 ctx.font = '24px "Press Start 2P", cursive';
 ctx.fillText("SELECT RIDE", cx, this.playRect.y + 40);
-
 // Button: SETTINGS
 this.settingsRect = new Rect(cx - btnW/2, cy + 140, btnW, btnH);
-
 ctx.fillStyle = '#000';
 ctx.fillRect(this.settingsRect.x + 8, this.settingsRect.y + 8, btnW, btnH);
 ctx.fillStyle = '#000';
 ctx.fillRect(this.settingsRect.x - 4, this.settingsRect.y - 4, btnW + 8, btnH + 8);
 ctx.fillStyle = '#505050';
 ctx.fillRect(this.settingsRect.x, this.settingsRect.y, btnW, btnH);
-
 ctx.fillStyle = '#fff';
 ctx.fillText("SETTINGS", cx, this.settingsRect.y + 40);
-
 // Instruction Text
 ctx.font = '14px "Press Start 2P", cursive';
 ctx.fillStyle = '#fff';
 ctx.fillText("PRESS [WASD] TO DRIVE", cx, h - 40);
-
 // Scanlines Overlay
 this.drawCRT(ctx, w, h);
-
 ctx.restore();
 }
-
 drawCarSelection(ctx, w, h) {
 ctx.save();
 const cx = w / 2;
 const cy = h / 2;
-
 // Background overlay
 ctx.fillStyle = 'rgba(20, 20, 30, 0.9)';
 ctx.fillRect(0, 0, w, h);
-
 // Title
 ctx.font = '30px "Press Start 2P", cursive';
 ctx.textAlign = 'center';
 ctx.fillStyle = '#fff';
 ctx.fillText("SELECT YOUR VEHICLE", cx, cy - 200);
-
 const carSpec = PLAYER_ROSTER[this.selectedCarIndex];
-
 // Check Locked
 let isLocked = false;
 if (carSpec.unlockScore && this.highScore < carSpec.unlockScore) {
 isLocked = true;
 }
-
 // --- DRAW PREVIEW CAR (SCALED UP) ---
 let previewCar = new Car(0, 0, isLocked ? '#222' : carSpec.color, false, false);
 previewCar.type = carSpec.type;
 previewCar.id = carSpec.id; // Important for preview
 previewCar.hasSpoiler = carSpec.hasSpoiler;
 previewCar.sprite = previewCar.createCarSprite();
-
 const scale = 4;
 const pW = previewCar.width * scale;
 const pH = previewCar.height * scale;
-
 // Draw Car Shadow
 ctx.fillStyle = 'rgba(0,0,0,0.5)';
 ctx.beginPath(); ctx.ellipse(cx, cy - 50 + pH/2, pW/2 + 20, 20, 0, 0, Math.PI*2); ctx.fill();
-
 ctx.imageSmoothingEnabled = false;
 ctx.drawImage(previewCar.sprite, cx - pW/2, cy - 50 - pH/2, pW, pH);
-
 if (isLocked) {
 ctx.font = '40px "Press Start 2P", cursive';
 ctx.fillStyle = '#f00';
@@ -3562,83 +3217,67 @@ ctx.fillText("LOCKED", cx, cy - 50);
 ctx.font = '14px "Press Start 2P", cursive';
 ctx.fillText(`NEED ${carSpec.unlockScore} HIGH SCORE`, cx, cy - 20);
 }
-
 // --- CAR INFO ---
 // Arrows
 ctx.font = '40px "Press Start 2P", cursive';
 ctx.fillStyle = '#ffeb3b';
 ctx.fillText("<", cx - 200, cy - 50);
 ctx.fillText(">", cx + 200, cy - 50);
-
 // Name
 ctx.font = '24px "Press Start 2P", cursive';
 ctx.fillStyle = isLocked ? '#555' : COLORS.NEON_CYAN;
 ctx.fillText(carSpec.name, cx, cy + 60);
-
 // Desc
 ctx.font = '14px "Press Start 2P", cursive';
 ctx.fillStyle = '#aaa';
 ctx.fillText(carSpec.desc, cx, cy + 90);
-
 // --- STATS BARS ---
 const drawStat = (label, value, max, yPos) => {
 const barW = 200;
 const barH = 15;
 const xPos = cx - barW/2;
-
 ctx.textAlign = 'right';
 ctx.fillStyle = '#fff';
 ctx.font = '12px "Press Start 2P", cursive';
 ctx.fillText(label, xPos - 10, yPos + 12);
-
 // BG
 ctx.fillStyle = '#333';
 ctx.fillRect(xPos, yPos, barW, barH);
-
 // Fill
 const fillW = (value / max) * barW;
 ctx.fillStyle = value > max * 0.7 ? COLORS.HP_GREEN : (value > max * 0.4 ? COLORS.HP_YELLOW : COLORS.HP_RED);
 ctx.fillRect(xPos, yPos, fillW, barH);
 };
-
 drawStat("SPEED", carSpec.stats.speed, 12.0, cy + 130);
 drawStat("HANDLING", carSpec.stats.turn, 6.0, cy + 155);
 drawStat("ARMOR", carSpec.stats.hp, 200, cy + 180);
-
 // --- DRIVE BUTTON ---
 let btnW = 200;
 let btnH = 50;
 this.selectRect = new Rect(cx - btnW/2, h - 100, btnW, btnH);
-
 drawRect(ctx, '#fff', this.selectRect.x, this.selectRect.y, btnW, btnH, 5);
 drawRect(ctx, isLocked ? '#333' : COLORS.NEON_PINK, this.selectRect.x+2, this.selectRect.y+2, btnW-4, btnH-4, 5);
-
 ctx.textAlign = 'center';
 ctx.fillStyle = isLocked ? '#888' : '#fff';
 ctx.font = '20px "Press Start 2P", cursive';
 ctx.fillText(isLocked ? "LOCKED" : "DRIVE!", cx, h - 68);
-
 // Show High Score
 ctx.font = '12px "Press Start 2P", cursive';
 ctx.fillStyle = '#fff';
 ctx.fillText(`HIGH SCORE: ${this.highScore}`, cx, h - 20);
-
 this.drawCRT(ctx, w, h);
 ctx.restore();
 }
-
 drawAchievementPopUp(ctx, w, h) {
 const popupH = 60;
 const popupW = 380;
 const cornerPad = 20;
-
 this.achievements.forEach((ach, index) => {
 // New Sliding Animation Logic
 // Timer starts at 180 (3s)
 // 180 -> 150: Slide In (0.5s)
 // 150 -> 30: Hold (2s)
 // 30 -> 0: Slide Out (0.5s)
-
 let xOffset = 0;
 if (ach.timer > 150) {
 // Slide In (lerp from width to 0 offset)
@@ -3655,41 +3294,32 @@ xOffset = t * (popupW + cornerPad);
 } else {
 xOffset = 0;
 }
-
 let x = w - popupW - cornerPad + xOffset;
 let y = h - popupH - (cornerPad + index * (popupH + 10));
-
 ctx.save();
-
 // --- Custom Styling: Cooler Box ---
 drawRect(ctx, 'rgba(0, 0, 0, 0.9)', x + 5, y + 5, popupW, popupH, 5);
 drawRect(ctx, 'rgba(255, 255, 255, 0.2)', x - 2, y - 2, popupW + 4, popupH + 4, 7);
 drawRect(ctx, 'rgba(10, 10, 10, 0.95)', x, y, popupW, popupH, 5);
 drawRect(ctx, COLORS.NEON_CYAN, x, y, popupW, 8);
-
 ctx.fillStyle = COLORS.NEON_PINK;
 drawRect(ctx, ctx.fillStyle, x + 12, y + 15, 30, 30);
-
 ctx.font = '10px "Press Start 2P", cursive';
 ctx.fillStyle = '#fff';
 ctx.textAlign = 'left';
 ctx.fillText("ACHIEVEMENT UNLOCKED", x + 50, y + 23);
-
 ctx.font = '14px "Press Start 2P", cursive';
 ctx.fillStyle = COLORS.NEON_CYAN;
 ctx.fillText(ach.name, x + 50, y + 45);
-
 ctx.restore();
 });
 }
-
 drawSkillInventory(ctx, w, h) {
 const boxSize = 60;
 const pad = 10;
 const baseY = h - boxSize - 10;
 const centerX = w / 2;
 let x = centerX;
-
 let inventory = [];
 if (this.hasGhostlyRider) inventory.push({
 name: "Ghostly Rider",
@@ -3707,7 +3337,6 @@ cooldown: this.fireWheelCooldown,
 cooldownMax: this.fireWheelCooldownMax,
 color: '#ff6432' // Orange/Red
 });
-
 // Show Unique Z Power
 if (this.player.powerData) {
 inventory.push({
@@ -3719,21 +3348,16 @@ cooldownMax: this.player.powerData.cooldown,
 color: this.player.powerData.color
 });
 }
-
 x -= (inventory.length * boxSize + (inventory.length - 1) * pad) / 2;
-
 inventory.forEach((skill, index) => {
 let boxX = x + index * (boxSize + pad);
-
 ctx.save();
 // Outer Border
 drawRect(ctx, '#000', boxX - 2, baseY - 2, boxSize + 4, boxSize + 4);
 // Inner Background
 drawRect(ctx, 'rgba(30, 30, 30, 0.9)', boxX, baseY, boxSize, boxSize);
-
 // Draw Pixel Art Icon
 this.drawSkillIcon(ctx, skill, boxX, baseY, boxSize);
-
 // Cooldown Overlay
 if (skill.cooldown > 0) {
 let cooldownPercent = skill.cooldown / skill.cooldownMax;
@@ -3741,35 +3365,29 @@ let cooldownH = boxSize * cooldownPercent;
 ctx.globalAlpha = 0.7;
 drawRect(ctx, 'rgba(0, 0, 0, 0.9)', boxX, baseY + boxSize - cooldownH, boxSize, cooldownH);
 ctx.globalAlpha = 1.0;
-
 // Cooldown timer text
 ctx.font = '14px "Press Start 2P", cursive';
 ctx.fillStyle = '#fff';
 ctx.fillText(Math.ceil(skill.cooldown / FPS), boxX + boxSize/2, baseY + boxSize/2 + 5);
 }
-
 // Active Indicator
 if (skill.active) {
 ctx.strokeStyle = skill.color;
 ctx.lineWidth = 4;
 ctx.strokeRect(boxX, baseY, boxSize, boxSize);
 }
-
 // Keybind Text
 ctx.font = '10px "Press Start 2P", cursive';
 ctx.fillStyle = '#fff';
 ctx.textAlign = 'center';
 ctx.fillText(skill.key, boxX + boxSize/2, baseY + boxSize - 5);
-
 ctx.restore();
 });
 }
-
 // Helper function to draw the pixel art icons inside the skill box
 drawSkillIcon(ctx, skill, boxX, baseY, boxSize) {
 const cx = boxX + boxSize / 2;
 const cy = baseY + boxSize / 2;
-
 if (skill.name === "Ghostly Rider" || skill.name === "Phase Shift" || skill.name === "Warp Speed") {
 ctx.save();
 ctx.globalAlpha = 0.6;
@@ -3785,7 +3403,6 @@ ctx.fillStyle = '#000';
 ctx.fillRect(cx - 2, cy - 12, 1, 1);
 ctx.fillRect(cx + 1, cy - 12, 1, 1);
 ctx.restore();
-
 } else if (skill.name === "Fire Wheel" || skill.name === "Flamethrower") {
 ctx.save();
 ctx.fillStyle = '#ffeb3b';
@@ -3855,21 +3472,15 @@ ctx.beginPath(); ctx.moveTo(cx, cy-10); ctx.lineTo(cx-8, cy+10); ctx.lineTo(cx+8
 ctx.restore();
 }
 }
-
-
 drawAchievementProgress(ctx, w, h) {
 const cx = w / 2;
 const baseY = 80;
-
 ctx.save();
 ctx.textAlign = 'center';
 ctx.font = '16px "Press Start 2P", cursive';
-
 // --- 1. Ghostly Rider Progress ---
 if (!this.hasGhostlyRider) {
-
 const turnResetting = this.player.isCollidingWithBuilding;
-
 // Use cyan/white for normal progress, red/orange if failed
 const turnColor = (this.turnCount > 0 && !turnResetting) ? COLORS.NEON_CYAN : COLORS.PAINT_WHITE;
 if (turnResetting) {
@@ -3877,10 +3488,8 @@ ctx.fillStyle = COLORS.HP_RED;
 } else {
 ctx.fillStyle = turnColor;
 }
-
 const turnStatus = `GHOSTLY RIDER: ${Math.min(this.turnCount, 10)}/10 TURNS`;
 ctx.fillText(turnStatus, cx, baseY);
-
 if (turnResetting && this.turnCount < 10) {
 ctx.font = '10px "Press Start 2P", cursive';
 ctx.fillStyle = COLORS.HP_RED;
@@ -3888,16 +3497,13 @@ ctx.fillText("RESET! HIT BUILDING", cx, baseY + 18);
 }
 ctx.font = '16px "Press Start 2P", cursive'; // Restore font size
 }
-
 // --- 2. Fire Wheel Progress ---
 if (!this.hasFireWheel) {
 const maxFrames = 30 * FPS;
 const driftSeconds = (this.driftTime / FPS);
 const maxSeconds = 30.0;
-
 let driftColor = COLORS.TEXT_WHITE;
 let copHit = this.player.isCollidingWithCop;
-
 if (this.driftTime > 0) {
 // Active drift: use neon green
 driftColor = COLORS.NEON_GREEN;
@@ -3906,40 +3512,30 @@ if (copHit) {
 driftColor = COLORS.HP_RED;
 }
 }
-
 const displayDrift = Math.min(driftSeconds, maxSeconds).toFixed(1);
 const driftStatus = `FIRE WHEEL: ${displayDrift}/${maxSeconds.toFixed(1)} SECS DRIFTED`;
-
 ctx.fillStyle = driftColor;
 ctx.fillText(driftStatus, cx, baseY + 50);
-
 // Add reset message if relevant
 if (this.driftTime > 0 && copHit) {
 ctx.font = '10px "Press Start 2P", cursive';
 ctx.fillStyle = COLORS.HP_RED;
 ctx.fillText("RESET! HIT COP", cx, baseY + 68);
 }
-
 ctx.font = '16px "Press Start 2P", cursive'; // Restore font size
 }
-
 ctx.restore();
 }
-
 draw(ctx) {
 const w = this.canvas.width;
 const h = this.canvas.height;
-
 ctx.fillStyle = COLORS.BG_VOID;
 ctx.fillRect(0, 0, w, h);
-
 this.drawFloor();
-
 let renderList = [
 ...this.blood.map(o => ({obj:o, type:'blood', y:o.pos.y})),
 ...this.skids.map(o => ({obj:o, type:'skid', y:o.pos.y})),
 ...this.floorEffects.map(o => ({obj:o, type:'floor', y:o.pos.y})), // Add fire trail here
-{obj: (this.remoteCar && this.remoteCar.isActive ? this.remoteCar : {pos:{y:-99999}}), type:'remote', y:(this.remoteCar && this.remoteCar.isActive ? this.remoteCar.pos.y : -99999)},
 ...this.buildings.map(o => ({obj:o, type:'building', y:o.rect.bottom})),
 ...this.people.map(o => ({obj:o, type:'person', y:o.rect.bottom})),
 ...this.sakura.map(o => ({obj:o, type:'sakura', y:o.pos.y})),
@@ -3947,18 +3543,12 @@ let renderList = [
 ...this.civilians.map(o => ({obj:o, type:'car', y:o.pos.y})),
 {obj: this.player, type:'car', y:this.player.pos.y}
 ];
-
 // Add player character to render list if walking
 if (this.isWalking && this.playerPed) {
 renderList.push({obj: this.playerPed, type:'person', y:this.playerPed.rect.bottom});
 }
-
 renderList.sort((a,b) => a.y - b.y);
-
-if (item.type === 'remote' && item.obj.draw) {
-    item.obj.draw(ctx, this.camera);
-    return;
-}renderList.forEach(item => {
+renderList.forEach(item => {
 let screenRect;
 if (item.type === 'car' || item.type === 'sakura' || item.type === 'floor') {
 // For floor effects we need a faux rect or just use pos
@@ -3966,29 +3556,22 @@ if(item.obj.getRect) screenRect = this.camera.apply(item.obj.getRect());
 else screenRect = this.camera.apply(new Rect(item.obj.pos.x, item.obj.pos.y, 20, 20));
 }
 else screenRect = this.camera.apply(item.obj.rect);
-
 if (screenRect.right < -50 || screenRect.left > w + 50 || screenRect.bottom < -50 || screenRect.top > h + 50) return;
 });
-
 ctx.save();
 ctx.translate(this.camera.offset.x, this.camera.offset.y);
-
 // Ghostly Rider visual
 if (this.ghostlyRiderActive || this.player.isPhasing) ctx.globalAlpha = 0.5;
-
 // Draw Layer 1: Floor
 this.blood.forEach(b => b.draw(ctx));
 this.skids.forEach(s => s.draw(ctx));
-
 // Draw Shockwaves
 this.shockwaves.forEach(sw => sw.draw(ctx));
-
 // Draw Layer 2: Sorted Objects (includes Fire Trails now if sorted)
 renderList.forEach(item => {
 // Don't draw player in menu
 if ((this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') && item.obj === this.player) return;
 if (item.type === 'blood' || item.type === 'skid') return; // already drawn
-
 // Handle Ghostly Rider transparency
 if ((this.ghostlyRiderActive || this.player.isPhasing) && item.obj !== this.player && item.type === 'car') {
 ctx.globalAlpha = 1.0;
@@ -3997,7 +3580,6 @@ ctx.globalAlpha = 0.5;
 } else {
 item.obj.draw(ctx);
 }
-
 // Juggernaut Visual
 if (item.obj === this.player && this.powerActive && (this.player.id === 'tank' || this.player.id === 'monster')) {
 ctx.save();
@@ -4006,28 +3588,8 @@ ctx.fillStyle = '#ff0000';
 ctx.beginPath();
 ctx.arc(this.player.pos.x, this.player.pos.y, 40, 0, Math.PI*2);
 ctx.fill();
-  if (this.mpActive) {
-    ctx.fillStyle = 'rgba(0,0,0,0.9)'; ctx.fillRect(0,0,w,h);
-    ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
-    ctx.font = '30px "Press Start 2P"'; ctx.fillText("ENTER ROOM NAME", cx, cy - 50);
-    drawRect(ctx, '#333', cx - 150, cy - 20, 300, 50, 5);
-    ctx.fillStyle = '#ffeb3b';
-    ctx.fillText(this.mpInput + (Math.floor(Date.now()/500)%2==0 ? "_" : ""), cx, cy + 20);
-    drawRect(ctx, '#fff', cx - 100, cy + 50, 200, 50, 5);
-    drawRect(ctx, '#32c832', cx - 98, cy + 52, 196, 46, 5);
-    ctx.fillStyle = '#000'; ctx.fillText("JOIN", cx, cy + 90);
-    ctx.fillStyle = '#00ffff'; ctx.font = '15px "Press Start 2P"';
-    ctx.fillText(this.network.statusMsg, cx, cy + 160);
-    ctx.fillStyle = '#555'; ctx.fillText("CLICK BOTTOM TO CANCEL", cx, h - 50);
-} else {
-    let mpBtnRect = new Rect(cx - 160, cy + 220, 320, 60);
-    drawRect(ctx, '#000', mpBtnRect.x+4, mpBtnRect.y+4, mpBtnRect.w, mpBtnRect.h, 5);
-    drawRect(ctx, '#3296ff', mpBtnRect.x, mpBtnRect.y, mpBtnRect.w, mpBtnRect.h, 5);
-    ctx.fillStyle = '#fff'; ctx.fillText("MULTIPLAYER", cx, mpBtnRect.y + 40);
-}
 ctx.restore();
 }
-
 // Anger bubble
 if (item.type === 'person' && item.obj.isAngry && !item.obj.isDead) {
 let bx = item.obj.pos.x, by = item.obj.rect.top - 15;
@@ -4044,21 +3606,21 @@ ctx.fillText(txt, bx, by + 4);
 }
 });
 
+// Draw Multiplayer Remote Players
+if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+    this.multiplayer.draw(ctx, this.camera);
+}
+
 ctx.globalAlpha = 1.0;
 this.particles.forEach(p => p.draw(ctx));
-
 ctx.restore();
-
 if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
 this.drawIndicators();
-
 ctx.fillStyle = '#fff';
 ctx.font = '20px "Press Start 2P", cursive';
 ctx.textAlign = 'left';
 ctx.fillText(`SCORE: ${this.score}`, 20, 40);
-
 this.player.health.drawUI(ctx, w - 60, 10);
-
 // Draw hints for walking mechanics
 if (this.state === 'PLAY') {
 if (!this.isWalking && this.player.vel.mag() < 0.5) {
@@ -4081,67 +3643,53 @@ ctx.fillText("[E] REPAIR", w/2, h - 100);
 ctx.fillText("RETURN TO CAR", w/2, h - 100);
 }
 }
-
 if (this.showProgress) {
 this.drawAchievementProgress(ctx, w, h);
 }
 }
-
 this.drawAchievementPopUp(ctx, w, h);
 this.drawSkillInventory(ctx, w, h);
-
 // Draw TV Mode if enabled during gameplay (lower intensity)
 if (this.tvMode) {
 this.drawCRT(ctx, w, h, 0.4);
 }
 }
-
 if (this.state === 'MENU') {
 this.drawMenu(ctx, w, h);
 return;
 }
-
 if (this.state === 'SETTINGS') {
 this.drawSettings(ctx, w, h);
 return;
 }
-
 if (this.state === 'CAR_SELECT') {
 this.drawCarSelection(ctx, w, h);
 return;
 }
-
 if (this.state === 'GAMEOVER') {
 ctx.fillStyle = 'rgba(0,0,0,0.6)';
 ctx.fillRect(0, 0, w, h);
-
 ctx.fillStyle = '#ff3232';
 ctx.font = '50px "Press Start 2P", cursive';
 ctx.textAlign = 'center';
 ctx.fillText("WASTED", w/2, h/2 - 20);
-
 let btnW = 220, btnH = 60;
 this.restartRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
-
 drawRect(ctx, '#fff', this.restartRect.x, this.restartRect.y, btnW, btnH, 5);
 drawRect(ctx, '#c83232', this.restartRect.x+2, this.restartRect.y+2, btnW-4, btnH-4, 5);
-
 ctx.fillStyle = '#fff';
 ctx.font = '20px "Press Start 2P", cursive';
 ctx.fillText("RESTART", w/2, h/2 + 57);
 }
 }
-
 loop() {
 this.update();
 this.draw(this.ctx);
 requestAnimationFrame(this.loop);
 }
 }
-
 // Start Game
 const game = new Game();
-
 </script>
 </body>
 </html>
