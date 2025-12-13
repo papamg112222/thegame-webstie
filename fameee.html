@@ -38,7 +38,7 @@
 <script>
 /**
  * TOKYO DRIFT CHASE - HTML5 PORT
- * with CAR SELECTION, ANGEL WING & PERSISTENCE UPDATE
+ * with TV MODE SETTING
  */
 
 // --- Constants & Configuration ---
@@ -1716,6 +1716,7 @@ class Game {
         this.settingsRect = new Rect(0,0,0,0); 
         this.resetProgressRect = new Rect(0,0,0,0); 
         this.backRect = new Rect(0,0,0,0);
+        this.tvToggleRect = new Rect(0,0,0,0);
         
         // --- ACHIEVEMENT & SKILL MECHANISMS ---
         this.hasGhostlyRider = false;
@@ -1739,6 +1740,9 @@ class Game {
         this.driftTime = 0; 
         
         this.showProgress = false; 
+        
+        // TV Mode Settings
+        this.tvMode = true; // Default ON
 
         // Intersection turn tracking
         this.isInsideIntersection = false;
@@ -1759,7 +1763,8 @@ class Game {
         const data = {
             highScore: Math.max(this.score, this.highScore),
             hasGhostlyRider: this.hasGhostlyRider,
-            hasFireWheel: this.hasFireWheel
+            hasFireWheel: this.hasFireWheel,
+            tvMode: this.tvMode
         };
         localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
         this.highScore = data.highScore;
@@ -1772,6 +1777,7 @@ class Game {
             this.highScore = data.highScore || 0;
             this.hasGhostlyRider = data.hasGhostlyRider || false;
             this.hasFireWheel = data.hasFireWheel || false;
+            if (data.tvMode !== undefined) this.tvMode = data.tvMode;
         }
     }
     
@@ -1780,6 +1786,7 @@ class Game {
         this.highScore = 0;
         this.hasGhostlyRider = false;
         this.hasFireWheel = false;
+        this.tvMode = true; // Default back to true
     }
 
     initGame() {
@@ -1857,10 +1864,14 @@ class Game {
         } else if (this.state === 'SETTINGS') {
             if (this.backRect.collidePoint(mx, my)) {
                 this.state = 'MENU';
+                this.saveData(); // Save settings when leaving
             }
             if (this.resetProgressRect.collidePoint(mx, my)) {
                 this.resetData();
                 alert("Progress Reset!");
+            }
+            if (this.tvToggleRect.collidePoint(mx, my)) {
+                this.tvMode = !this.tvMode;
             }
         } else if (this.state === 'CAR_SELECT') {
             // Check for drive button
@@ -2415,9 +2426,9 @@ class Game {
         });
     }
 
-    drawCRT(ctx, w, h) {
+    drawCRT(ctx, w, h, intensity = 1.0) {
         // 1. Scanlines (Stripes)
-        ctx.fillStyle = "rgba(0, 0, 0, 0.3)"; // Darker
+        ctx.fillStyle = `rgba(0, 0, 0, ${0.3 * intensity})`; // Darker
         for (let i = 0; i < h; i += 3) {
             ctx.fillRect(0, i, w, 1);
         }
@@ -2425,20 +2436,20 @@ class Game {
         // 2. Moving Scan Bar (Rolling shutter effect)
         this.scanlineY = (this.scanlineY || 0) + 1.5;
         if (this.scanlineY > h) this.scanlineY = 0;
-        ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.07 * intensity})`;
         ctx.fillRect(0, this.scanlineY, w, 50);
 
         // 3. Vignette (Dark corners)
         let grad = ctx.createRadialGradient(w/2, h/2, h/3, w/2, h/2, h);
         grad.addColorStop(0, "rgba(0,0,0,0)");
-        grad.addColorStop(1, "rgba(0,0,0,0.6)");
+        grad.addColorStop(1, `rgba(0,0,0,${0.6 * intensity})`);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, w, h);
 
         // 4. Noise (Static)
         // For performance, let's just do a flickering overlay.
         if (Math.random() > 0.8) {
-            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05})`;
+            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05 * intensity})`;
             ctx.fillRect(0, 0, w, h);
         }
     }
@@ -2459,22 +2470,31 @@ class Game {
         // Reset Progress Button
         let btnW = 350;
         let btnH = 60;
-        this.resetProgressRect = new Rect(cx - btnW/2, cy - 20, btnW, btnH);
+        this.resetProgressRect = new Rect(cx - btnW/2, cy - 40, btnW, btnH);
         
         drawRect(ctx, '#000', this.resetProgressRect.x, this.resetProgressRect.y, btnW, btnH, 5);
         drawRect(ctx, '#c83232', this.resetProgressRect.x+4, this.resetProgressRect.y+4, btnW-8, btnH-8, 5);
         
         ctx.fillStyle = '#fff';
         ctx.font = '20px "Press Start 2P", cursive';
-        ctx.fillText("RESET PROGRESS", cx, cy + 15);
+        ctx.fillText("RESET PROGRESS", cx, cy - 5);
+        
+        // TV Toggle Button
+        this.tvToggleRect = new Rect(cx - btnW/2, cy + 40, btnW, btnH);
+        
+        drawRect(ctx, '#000', this.tvToggleRect.x, this.tvToggleRect.y, btnW, btnH, 5);
+        drawRect(ctx, this.tvMode ? COLORS.NEON_GREEN : '#555', this.tvToggleRect.x+4, this.tvToggleRect.y+4, btnW-8, btnH-8, 5);
+        
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`TV EFFECTS: ${this.tvMode ? "ON" : "OFF"}`, cx, cy + 75);
         
         // Back Button
-        this.backRect = new Rect(cx - btnW/2, cy + 80, btnW, btnH);
+        this.backRect = new Rect(cx - btnW/2, cy + 120, btnW, btnH);
         drawRect(ctx, '#000', this.backRect.x, this.backRect.y, btnW, btnH, 5);
         drawRect(ctx, '#505050', this.backRect.x+4, this.backRect.y+4, btnW-8, btnH-8, 5);
         
         ctx.fillStyle = '#fff';
-        ctx.fillText("BACK", cx, cy + 115);
+        ctx.fillText("BACK", cx, cy + 155);
         
         this.drawCRT(ctx, w, h);
         ctx.restore();
@@ -3017,6 +3037,11 @@ class Game {
             
             this.drawAchievementPopUp(ctx, w, h);
             this.drawSkillInventory(ctx, w, h);
+            
+            // Draw TV Mode if enabled during gameplay (lower intensity)
+            if (this.tvMode) {
+                this.drawCRT(ctx, w, h, 0.4);
+            }
         }
 
         if (this.state === 'MENU') {
