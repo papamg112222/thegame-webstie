@@ -1206,12 +1206,13 @@ class Car {
 }
 
 class Person {
-    constructor(x, y, walkArea) {
+    constructor(x, y, walkArea, isPlayer=false) {
         this.pos = new Vector2(x, y);
         this.angle = -randFloat(0, Math.PI * 2) * 180 / Math.PI;
+        this.isPlayer = isPlayer;
         
         this.skinColor = randChoice(['#ffdbac', '#f1c27d', '#e0ac69', '#8d5524', '#c68642']);
-        this.shirtColor = randChoice(['#ffffff', '#14141e', '#c83232', '#3264c8', '#32c864', '#ffff32', '#ff96c8', '#a0a0a0', '#503250']);
+        this.shirtColor = isPlayer ? '#ff3232' : randChoice(['#ffffff', '#14141e', '#c83232', '#3264c8', '#32c864', '#ffff32', '#ff96c8', '#a0a0a0', '#503250']);
         this.pantColor = randChoice(['#1e1e28', '#2d2d3c', '#283250', '#50463c', '#3c3c46', '#202020']);
         this.hairColor = randChoice(['#000000', '#281e14', '#4b3c28', '#e6c86e', '#8c2828', '#c8c8c8', '#e6e6e6']);
         this.hairStyle = randChoice(['bald', 'short', 'short_messy', 'long', 'ponytail', 'cap', 'afro', 'mohawk']);
@@ -1229,10 +1230,18 @@ class Person {
         this.curseWord = "";
         this.frame = randFloat(0, 10);
         this.curseList = ["HEY!", "WATCH IT!", "I'M WALKIN!", "IDIOT!", "NOOO!", "WHAT?!", "CRAZY!"];
+        
+        if (this.isPlayer) {
+            this.vel = new Vector2(0,0);
+            this.hairStyle = 'short_messy';
+            this.skinColor = '#ffdbac';
+            this.shirtColor = '#d32f2f'; // Racing Suit color
+            this.pantColor = '#222';
+        }
     }
 
     die(bloodGroup) {
-        if (this.isDead) return;
+        if (this.isDead || this.isPlayer) return; // Player character doesn't die same way for now
         this.isDead = true;
         this.vel = new Vector2(0,0);
         for (let i=0; i<2; i++) {
@@ -1240,12 +1249,27 @@ class Person {
         }
     }
 
-    update(player, bloodGroup) {
+    update(playerCar, bloodGroup) {
         if (this.isDead) return;
 
-        let dist = this.pos.distanceTo(player.pos);
+        // Player controlled character logic handled in Game loop
+        if (this.isPlayer) {
+            this.rect.centerx = this.pos.x;
+            this.rect.centery = this.pos.y;
+            // Animate only if moving
+            if (this.vel.mag() > 0.1) {
+                this.frame += 0.2;
+                // Face movement direction
+                this.angle = Math.atan2(this.vel.y, this.vel.x) * 180 / Math.PI;
+            } else {
+                this.frame = 0;
+            }
+            return;
+        }
 
-        if (dist < 30 && player.vel.mag() > 2.0) {
+        let dist = this.pos.distanceTo(playerCar.pos);
+
+        if (dist < 30 && playerCar.vel.mag() > 2.0) {
             this.die(bloodGroup);
             return;
         }
@@ -1299,7 +1323,7 @@ class Person {
             ctx.fillStyle = this.skinColor;
             ctx.fillRect(4, -3, 6, 6);
         } else {
-            ctx.rotate(-degToRad(this.angle));
+            ctx.rotate(-degToRad(this.angle - 90)); // Fix orientation: 0 deg faces right
             let speed = this.isAngry ? 0 : 1;
             let walkCycle = this.frame * 0.8 * speed; 
             let leftLeg = Math.sin(walkCycle) * 4;
@@ -1312,63 +1336,72 @@ class Person {
                 leftArm = 0; rightArm = 0;
             }
 
+            // Legs
             ctx.fillStyle = this.pantColor;
-            ctx.fillRect(leftLeg - 2, -6, 6, 4);
-            ctx.fillRect(rightLeg - 2, 2, 6, 4);
+            ctx.fillRect(-6, leftLeg - 2, 4, 6); // Left
+            ctx.fillRect(2, rightLeg - 2, 4, 6); // Right
 
+            // Shoes
             ctx.fillStyle = this.shoeColor;
-            ctx.fillRect(leftLeg + 2, -6, 3, 4);
-            ctx.fillRect(rightLeg + 2, 2, 3, 4);
+            ctx.fillRect(-6, leftLeg + 2, 4, 3);
+            ctx.fillRect(2, rightLeg + 2, 4, 3);
 
+            // Arms
             ctx.fillStyle = this.shirtColor; 
-            ctx.fillRect(leftArm - 2, -9, 7, 3);
-            ctx.fillRect(rightArm - 2, 6, 7, 3);
+            ctx.fillRect(-9, leftArm - 2, 3, 7);
+            ctx.fillRect(6, rightArm - 2, 3, 7);
             
+            // Hands
             ctx.fillStyle = this.skinColor;
             if (this.isAngry) {
                 let shake = randInt(-1, 1);
-                ctx.fillRect(2 + shake, -10, 5, 5);
-                ctx.fillRect(2 + shake, 5, 5, 5);
+                ctx.fillRect(-10 + shake, -8, 5, 5);
+                ctx.fillRect(5 + shake, -8, 5, 5);
             } else {
-                ctx.fillRect(leftArm + 4, -9, 3, 3); 
-                ctx.fillRect(rightArm + 4, 6, 3, 3); 
+                ctx.fillRect(-9, leftArm + 4, 3, 3); 
+                ctx.fillRect(6, rightArm + 4, 3, 3); 
             }
 
+            // Body
             ctx.fillStyle = this.shirtColor;
-            ctx.fillRect(-4, -6, 10, 12);
-            ctx.fillStyle = 'rgba(0,0,0,0.15)';
-            ctx.fillRect(0, -2, 2, 4);
-
-            ctx.fillStyle = this.skinColor;
-            ctx.fillRect(-2, -4, 7, 8);
+            ctx.fillRect(-6, -4, 12, 10);
             
+            // Collar/Neck
+            ctx.fillStyle = 'rgba(0,0,0,0.15)';
+            ctx.fillRect(-2, -4, 4, 2);
+
+            // Head
+            ctx.fillStyle = this.skinColor;
+            ctx.fillRect(-4, -8, 8, 7);
+            
+            // Hair
             if (this.hairStyle === 'cap') {
                 ctx.fillStyle = this.hairColor;
-                ctx.fillRect(-3, -5, 7, 10);
+                ctx.fillRect(-5, -9, 10, 7);
                 ctx.fillStyle = 'rgba(0,0,0,0.2)';
-                ctx.fillRect(2, -5, 3, 10);
+                ctx.fillRect(-5, -2, 10, 3); // Visor
             } else if (this.hairStyle === 'mohawk') {
                 ctx.fillStyle = this.skinColor;
-                ctx.fillRect(-3, -5, 6, 10);
+                ctx.fillRect(-5, -9, 10, 6);
                 ctx.fillStyle = this.hairColor;
-                ctx.fillRect(-4, -1, 8, 2); 
+                ctx.fillRect(-1, -10, 2, 8); 
             } else if (this.hairStyle === 'afro') {
                 ctx.fillStyle = this.hairColor;
-                ctx.fillRect(-4, -6, 10, 12);
+                ctx.fillRect(-6, -10, 12, 10);
             } else if (this.hairStyle !== 'bald') {
                 ctx.fillStyle = this.hairColor;
                 if (this.hairStyle === 'short') {
-                    ctx.fillRect(-3, -5, 6, 10);
+                    ctx.fillRect(-5, -9, 10, 6);
                 } else if (this.hairStyle === 'short_messy') {
-                    ctx.fillRect(-3, -5, 7, 10);
-                    ctx.fillRect(-4, -3, 2, 2);
-                    ctx.fillRect(-4, 1, 2, 2);
+                    ctx.fillRect(-5, -9, 10, 7);
+                    ctx.fillRect(-3, -10, 2, 2);
+                    ctx.fillRect(1, -10, 2, 2);
                 } else if (this.hairStyle === 'long') {
-                    ctx.fillRect(-4, -5, 6, 10);
-                    ctx.fillRect(-6, -6, 4, 12); 
+                    ctx.fillRect(-5, -9, 10, 6);
+                    ctx.fillRect(-6, -6, 12, 4); 
                 } else if (this.hairStyle === 'ponytail') {
-                    ctx.fillRect(-3, -5, 6, 10);
-                    ctx.fillRect(-7, -2, 4, 4); 
+                    ctx.fillRect(-5, -9, 10, 6);
+                    ctx.fillRect(-2, -11, 4, 4); 
                 }
             }
         }
@@ -1631,6 +1664,10 @@ class Particle {
             this.vel = new Vector2(randFloat(-4, 4), randFloat(-4, 4));
             this.size = 5;
             this.color = '#ff6400';
+        } else if (type === 'repair') {
+            this.vel = new Vector2(randFloat(-2, 2), randFloat(-2, 2));
+            this.size = randInt(3, 6);
+            this.color = '#32ff64';
         }
     }
     update() {
@@ -1661,13 +1698,25 @@ class Skid {
     }
 }
 
-// New: Fire Trail for Floor (Fire Wheel)
+// New: Fire Trail for Floor (Fire Wheel) - Revamped for pixel vibe
 class FireTrail {
     constructor(x, y, angle) {
         this.pos = new Vector2(x, y);
         this.angle = angle;
         this.life = 40;
         this.maxLife = 40;
+        this.pixels = [];
+        
+        // Generate a cluster of "pixel fire"
+        for(let i=0; i<12; i++) {
+            this.pixels.push({
+                x: randInt(-15, 15),
+                y: randInt(-5, 5),
+                size: randInt(3, 6),
+                color: randChoice(['#ffeb3b', '#ff9800', '#f44336', '#d32f2f']), // Yellow -> Orange -> Red
+                decay: randFloat(0.5, 1.5)
+            });
+        }
     }
     update() { this.life--; }
     draw(ctx) {
@@ -1675,17 +1724,21 @@ class FireTrail {
         ctx.translate(this.pos.x, this.pos.y);
         ctx.rotate(-degToRad(this.angle));
         
-        let alpha = this.life / this.maxLife;
-        // Draw flame on floor
-        let grad = ctx.createLinearGradient(-10, 0, 10, 0);
-        grad.addColorStop(0, `rgba(255, 100, 0, 0)`);
-        grad.addColorStop(0.5, `rgba(255, 200, 0, ${alpha * 0.8})`);
-        grad.addColorStop(1, `rgba(255, 100, 0, 0)`);
+        let globalAlpha = this.life / this.maxLife;
         
-        ctx.fillStyle = grad;
-        ctx.fillRect(-15, -4, 30, 8);
+        this.pixels.forEach(p => {
+            if (this.life * p.decay < this.maxLife) {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = globalAlpha;
+                // Jitter effect
+                let jx = randInt(-1, 1);
+                let jy = randInt(-1, 1);
+                ctx.fillRect(p.x + jx, p.y + jy, p.size, p.size);
+            }
+        });
         
         ctx.restore();
+        ctx.globalAlpha = 1.0;
     }
 }
 
@@ -1753,6 +1806,8 @@ class Game {
         this.zPressed = false; // For Power Ability
         this.leftPressed = false; // Menu navigation
         this.rightPressed = false; // Menu navigation
+        this.fPressed = false; // Enter/Exit Car
+        this.ePressed = false; // Repair
         
         window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
@@ -1807,6 +1862,10 @@ class Game {
         this.isInsideIntersection = false;
         this.playerInitialAngle = null;
         
+        // On-Foot Mechanics
+        this.isWalking = false;
+        this.playerPed = null; // Will be an instance of Person when walking
+
         // Load Data
         this.loadData();
 
@@ -1821,8 +1880,7 @@ class Game {
     saveData() {
         const data = {
             highScore: Math.max(this.score, this.highScore),
-            hasGhostlyRider: this.hasGhostlyRider,
-            hasFireWheel: this.hasFireWheel,
+            // Unlocks are reset on reload, so we DO NOT save them here as requested
             tvMode: this.tvMode
         };
         localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
@@ -1834,8 +1892,9 @@ class Game {
         if (saved) {
             const data = JSON.parse(saved);
             this.highScore = data.highScore || 0;
-            this.hasGhostlyRider = data.hasGhostlyRider || false;
-            this.hasFireWheel = data.hasFireWheel || false;
+            // Unlocks reset to false
+            this.hasGhostlyRider = false;
+            this.hasFireWheel = false;
             if (data.tvMode !== undefined) this.tvMode = data.tvMode;
         }
     }
@@ -1904,6 +1963,10 @@ class Game {
         
         this.isInsideIntersection = false;
         this.playerInitialAngle = null;
+
+        // Reset walking state
+        this.isWalking = false;
+        this.playerPed = null;
     }
 
     resize() {
@@ -1961,7 +2024,7 @@ class Game {
         // Only show if not already showing the same one and not in the list
         if (!this.achievements.some(a => a.name === name)) {
             this.achievements.push({ name: name, timer: 180 }); // 3 seconds @ 60 FPS
-            this.saveData(); // Save unlock immediately
+            // Don't save achievement unlock to persistence, but track for session
         }
     }
 
@@ -2332,11 +2395,101 @@ class Game {
         // Skill Mechanics
         this.updateSkillMechanics();
 
-        // Player Control
-        if (this.keys['arrowleft'] || this.keys['a']) this.player.rotDirection = -1;
-        if (this.keys['arrowright'] || this.keys['d']) this.player.rotDirection = 1;
-        if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = this.player.customAccel || ACCELERATION;
-        if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -(this.player.customAccel || ACCELERATION) * 0.5;
+        // 1. Toggle Walking Logic (Key: F)
+        if (this.keys['f'] && !this.fPressed) {
+            this.fPressed = true;
+            if (!this.isWalking) {
+                // Try to exit car if stopped
+                if (this.player.vel.mag() < 0.5) {
+                    this.isWalking = true;
+                    // Spawn player character at car position
+                    this.playerPed = new Person(this.player.pos.x, this.player.pos.y, null, true);
+                }
+            } else {
+                // Try to enter car if close
+                let dist = this.playerPed.pos.distanceTo(this.player.pos);
+                if (dist < 60) {
+                    this.isWalking = false;
+                    this.playerPed = null;
+                }
+            }
+        }
+        if (!this.keys['f']) this.fPressed = false;
+
+        // 2. Repair Logic (Key: E)
+        if (this.keys['e'] && !this.ePressed && this.isWalking) {
+            this.ePressed = true;
+            let dist = this.playerPed.pos.distanceTo(this.player.pos);
+            if (dist < 60) {
+                // Repair mechanic
+                if (this.player.health) {
+                    for (let k in this.player.health.parts) {
+                        this.player.health.parts[k] = Math.min(this.player.health.maxHp, this.player.health.parts[k] + 10);
+                    }
+                    // Visual feedback
+                    for(let k=0; k<5; k++) {
+                        this.particles.push(new Particle(this.player.pos.x + randInt(-20,20), this.player.pos.y + randInt(-20,20), 'repair'));
+                    }
+                }
+            }
+        }
+        if (!this.keys['e']) this.ePressed = false;
+
+        // 3. Movement Logic
+        if (this.isWalking && this.playerPed) {
+            // Control Pedestrian
+            let moveSpeed = 3.5;
+            let mx = 0, my = 0;
+            if (this.keys['arrowleft'] || this.keys['a']) mx = -1;
+            if (this.keys['arrowright'] || this.keys['d']) mx = 1;
+            if (this.keys['arrowup'] || this.keys['w']) my = -1;
+            if (this.keys['arrowdown'] || this.keys['s']) my = 1;
+            
+            let moveVec = new Vector2(mx, my);
+            if (moveVec.mag() > 0) moveVec = moveVec.normalize().mult(moveSpeed);
+            
+            this.playerPed.vel = moveVec;
+            
+            // Collision for pedestrian vs buildings
+            let nextPos = this.playerPed.pos.add(this.playerPed.vel);
+            let collided = false;
+            for(let b of this.buildings) {
+                if (b.rect.collidePoint(nextPos.x, nextPos.y)) collided = true;
+            }
+            if (!collided) {
+                this.playerPed.update(null, null); // Manual update call for player
+            } else {
+                this.playerPed.update(null, null); // Update animation frame even if stuck
+            }
+
+            // Apply friction to car so it stops eventually if left rolling
+            this.player.vel = this.player.vel.mult(0.95);
+            this.player.pos = this.player.pos.add(this.player.vel);
+
+        } else {
+            // Control Car
+            if (this.keys['arrowleft'] || this.keys['a']) this.player.rotDirection = -1;
+            if (this.keys['arrowright'] || this.keys['d']) this.player.rotDirection = 1;
+            if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = this.player.customAccel || ACCELERATION;
+            if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -(this.player.customAccel || ACCELERATION) * 0.5;
+            
+            // Drift/Boost
+            let drift = (this.keys[' ']) && this.state === 'PLAY';
+
+            // Physics
+            this.player.physics(this.buildings, drift, this.fireWheelActive);
+            
+            // Fire Wheel Trail Generation (ON FLOOR)
+            if (this.fireWheelActive) {
+                // Add visual floor effect instead of particle
+                if (Math.random() < 0.8) { 
+                    this.floorEffects.push(new FireTrail(this.player.pos.x, this.player.pos.y, this.player.angle));
+                }
+            }
+            
+            // Achievement Logic
+            this.updateAchievementLogic(drift);
+        }
         
         if (this.keys['r']) {
              if (this.player.health && this.player.health.checkFullyDestroyed()) {
@@ -2349,20 +2502,6 @@ class Game {
              }
         }
 
-        // Drift/Boost
-        let drift = (this.keys[' ']) && this.state === 'PLAY';
-
-        // Physics
-        this.player.physics(this.buildings, drift, this.fireWheelActive);
-        
-        // Fire Wheel Trail Generation (ON FLOOR)
-        if (this.fireWheelActive) {
-            // Add visual floor effect instead of particle
-            if (Math.random() < 0.8) { 
-                this.floorEffects.push(new FireTrail(this.player.pos.x, this.player.pos.y, this.player.angle));
-            }
-        }
-        
         // Update Floor Effects (Fire & Oil)
         this.floorEffects.forEach((f, i) => { 
             f.update(); 
@@ -2378,11 +2517,9 @@ class Game {
             }
         });
         
-        // Achievement Logic
-        this.updateAchievementLogic(drift);
-
-        // Camera
-        this.camera.update(this.player, this.canvas.width, this.canvas.height);
+        // Camera tracks player OR car
+        let targetObj = this.isWalking ? this.playerPed : this.player;
+        this.camera.update(targetObj, this.canvas.width, this.canvas.height);
         
         // World Generation
         this.updateChunks();
@@ -2393,8 +2530,10 @@ class Game {
             this.spawnTimer = 0;
             let angle = randFloat(0, Math.PI*2);
             let dist = 800;
-            let cx = this.player.pos.x + Math.cos(angle)*dist;
-            let cy = this.player.pos.y + Math.sin(angle)*dist;
+            // Spawn relative to camera center
+            let cx = (-this.camera.offset.x + this.canvas.width/2) + Math.cos(angle)*dist;
+            let cy = (-this.camera.offset.y + this.canvas.height/2) + Math.sin(angle)*dist;
+            
             let gx = Math.floor(cx / BLOCK_SIZE);
             let gy = Math.floor(cy / BLOCK_SIZE);
             if ((gx % 3 === 0) || (gy % 3 === 0)) {
@@ -2403,7 +2542,7 @@ class Game {
         }
 
         // Skids
-        if (Math.abs(this.player.rotDirection) > 0 && this.player.vel.mag() > 4) {
+        if (Math.abs(this.player.rotDirection) > 0 && this.player.vel.mag() > 4 && !this.isWalking) {
             this.skids.push(new Skid(this.player.pos.x, this.player.pos.y, this.player.angle));
         }
         this.skids.forEach((s,i) => { s.update(); if(s.life<=0) this.skids.splice(i,1); });
@@ -2597,9 +2736,15 @@ class Game {
         const cx = w / 2;
         const cy = h / 2;
         
+        // Container Block
+        let contW = 500;
+        let contH = 400;
+        drawRect(ctx, '#444', cx - contW/2, cy - contH/2, contW, contH, 10);
+        drawRect(ctx, '#222', cx - contW/2 + 5, cy - contH/2 + 5, contW - 10, contH - 10, 8);
+
         ctx.fillStyle = '#fff';
         ctx.font = '30px "Press Start 2P", cursive';
-        ctx.fillText("SETTINGS", cx, cy - 100);
+        ctx.fillText("SETTINGS", cx, cy - 130);
         
         // Reset Progress Button
         let btnW = 350;
@@ -2670,6 +2815,13 @@ class Game {
         ctx.fillText("- CHASE -", cx + 3, cy + 10 + 3);
         ctx.fillStyle = '#ffeb3b'; // Yellow
         ctx.fillText("- CHASE -", cx, cy + 10);
+
+        // High Score
+        ctx.font = '20px "Press Start 2P", cursive';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#fff';
+        ctx.fillText("HIGH SCORE: " + this.highScore, 20, 40);
+        ctx.textAlign = 'center';
 
         // Button: SELECT RIDE
         let btnW = 320;
@@ -3127,6 +3279,11 @@ class Game {
             ...this.civilians.map(o => ({obj:o, type:'car', y:o.pos.y})),
             {obj: this.player, type:'car', y:this.player.pos.y}
         ];
+        
+        // Add player character to render list if walking
+        if (this.isWalking && this.playerPed) {
+            renderList.push({obj: this.playerPed, type:'person', y:this.playerPed.rect.bottom});
+        }
 
         renderList.sort((a,b) => a.y - b.y);
 
@@ -3212,7 +3369,29 @@ class Game {
 
             this.player.health.drawUI(ctx, w - 60, 10);
             
+            // Draw hints for walking mechanics
             if (this.state === 'PLAY') {
+                if (!this.isWalking && this.player.vel.mag() < 0.5) {
+                    ctx.font = '12px "Press Start 2P", cursive';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText("[F] EXIT CAR", w/2, h - 100);
+                } else if (this.isWalking) {
+                    let dist = this.playerPed.pos.distanceTo(this.player.pos);
+                    ctx.font = '12px "Press Start 2P", cursive';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#fff';
+                    if (dist < 60) {
+                        ctx.fillText("[F] ENTER CAR", w/2, h - 120);
+                        if (this.player.health.checkFullyDestroyed() === false) {
+                             ctx.fillStyle = '#32ff64';
+                             ctx.fillText("[E] REPAIR", w/2, h - 100);
+                        }
+                    } else {
+                        ctx.fillText("RETURN TO CAR", w/2, h - 100);
+                    }
+                }
+            
                 if (this.showProgress) {
                     this.drawAchievementProgress(ctx, w, h);
                 }
