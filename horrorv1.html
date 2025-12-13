@@ -4,13 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tokyo Drift Chase</title>
+    <!-- Imported Pixel Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
             padding: 0;
             overflow: hidden;
             background-color: #14141e; /* COLOR_BG_VOID */
-            font-family: Arial, sans-serif;
+            font-family: 'Press Start 2P', cursive; /* Updated Font */
             touch-action: none; /* Prevent mobile scrolling */
         }
         canvas {
@@ -662,7 +664,10 @@ class Car {
             let end = start.add(dir.mult(length));
             
             // Check cars
-            let objects = [...allCars, player];
+            // Handle null player for menu
+            let objects = [...allCars];
+            if (player) objects.push(player);
+
             for (let obj of objects) {
                 if (obj === this) continue;
                 
@@ -839,6 +844,7 @@ class Car {
         // --- 1. SENSOR CHECK ---
         const sensors = this.checkSensors(allCars, player, buildings);
         let braking = false;
+        let coasting = false; // NEW: Coasting state
         let yielding = false;
 
         // --- 2. INTERSECTION & YIELD LOGIC ---
@@ -877,13 +883,16 @@ class Car {
             // Only stop if literally touching bumper to bumper
             if (sensors.front && sensors.frontDist > 50) braking = false;
         } else {
-            // Front sensor brake
-            if (sensors.front && sensors.frontDist < 120) braking = true;
+            // Front sensor brake logic modified for coasting
+            if (sensors.front) {
+                if (sensors.frontDist < 30) braking = true; // Panic stop only when VERY close
+                else if (sensors.frontDist < 100) coasting = true; // Just lift off gas
+            }
             if (yielding) braking = true;
         }
 
         // --- 3. LANE LOGIC & OVERTAKING ---
-        if (braking && !yielding && !insideBox) {
+        if ((braking || coasting) && !yielding && !insideBox) {
             this.blockedTimer++;
             // If stuck behind someone slow, try to overtake
             if (this.blockedTimer > this.patience && this.speedTrait > 1.0) {
@@ -919,22 +928,18 @@ class Car {
              // Reverse lights (not red)
         } else {
             if (braking) {
-                // Smart Brake: If critical, hard brake. If yielding/far, coast.
-                let critical = (sensors.front && sensors.frontDist < 80);
+                // Hard Brake
+                this.accInput = -ACCELERATION * 1.5; 
+                this.brakingVisual = true; 
                 
-                if (critical) {
-                    this.accInput = -ACCELERATION * 1.5; 
-                    this.brakingVisual = true; // Only show lights on hard brake
-                } else {
-                    // Soft yield (coasting)
-                    this.accInput = -ACCELERATION * 0.2; 
-                    // No visual sign for coasting/checking
-                }
-
                 if (this.vel.mag() < 0.1) {
                     this.vel = new Vector2(0, 0);
                     this.accInput = 0;
                 }
+            } else if (coasting) {
+                // Gentle Slow Down (No Brake Lights)
+                this.accInput = 0; // Lift off gas
+                // Friction will naturally slow the car
             } else {
                 this.accInput = ACCELERATION * 0.4; 
             }
@@ -948,7 +953,7 @@ class Car {
             let targetY = this.pos.y;
             let h = (this.targetHeading % 360 + 360) % 360;
             
-            if (h === 0) targetY = cy - laneOffset;      
+            if (h === 0) targetY = cy - laneOffset;       
             else if (h === 180) targetY = cy + laneOffset; 
             else if (h === 90) targetX = cx + laneOffset;  
             else if (h === 270) targetX = cx - laneOffset; 
@@ -1498,6 +1503,10 @@ class Game {
         // States: NS_GREEN, NS_YELLOW, EW_GREEN, EW_YELLOW
         this.trafficLightState = 'NS_GREEN'; 
         this.trafficTimer = 0;
+        this.scanlineY = 0;
+
+        // Initialize game world so background renders in Menu
+        this.initGame();
 
         this.loop = this.loop.bind(this);
         requestAnimationFrame(this.loop);
@@ -1516,6 +1525,9 @@ class Game {
         this.blood = [];
         this.loadedChunks = new Set();
         
+        // Setup menu camera pos
+        this.menuCamPos = new Vector2(0, 0);
+
         this.spawnTimer = 0;
         this.score = 0;
     }
@@ -1532,7 +1544,7 @@ class Game {
 
         if (this.state === 'MENU') {
             if (this.playRect.collidePoint(mx, my)) {
-                this.initGame();
+                this.initGame(); // Reset for fair start
                 this.state = 'PLAY';
             }
         } else if (this.state === 'GAMEOVER') {
@@ -1671,20 +1683,60 @@ class Game {
     }
 
     update() {
-        if (this.state !== 'PLAY') return;
-
-        // Traffic Light Cycle (REMOVED - But kept variable structure for safety if needed later, but logical update removed)
-        // No light updates anymore.
+        if (this.state === 'GAMEOVER') return;
 
         // Input
         this.player.rotDirection = 0;
         this.player.accInput = 0;
+        
+        if (this.state === 'MENU') {
+            // Auto-move camera for menu background
+            this.menuCamPos.y -= 6;
+            this.camera.update({ pos: this.menuCamPos }, this.canvas.width, this.canvas.height);
+            
+            // Only generate world, no player physics
+            this.updateChunks();
+            
+            // Spawn Cops around Camera in Menu
+            this.spawnTimer++;
+            if (this.spawnTimer > 120) { 
+                this.spawnTimer = 0;
+                let angle = randFloat(0, Math.PI*2);
+                let dist = 800;
+                let cx = this.menuCamPos.x + Math.cos(angle)*dist;
+                let cy = this.menuCamPos.y + Math.sin(angle)*dist;
+                let gx = Math.floor(cx / BLOCK_SIZE);
+                let gy = Math.floor(cy / BLOCK_SIZE);
+                if ((gx % 3 === 0) || (gy % 3 === 0)) {
+                    this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
+                }
+            }
+            
+            // Update other cars (civilians)
+            this.civilians.forEach((civ, i) => {
+                // Pass null for player so they don't react to ghost player
+                civ.updateCivilian(this.buildings, this.civilians, null);
+            });
+            
+            // Update cops (simple movement or none)
+            // Cops rely on player target, so let's just make them drive forward or despawn?
+            // Actually, let's just filter them out or let them drift.
+            // For now, let's just update chunks/civilians.
+            
+            // Cull entities
+            // Reuse updateChunks culling logic which runs every frame
+            
+            return; // Skip rest of update loop (player physics, collisions, etc)
+        }
+
+        // --- PLAY STATE ---
+
+        // Player Control
         if (this.keys['ArrowLeft'] || this.keys['a'] || this.keys['A']) this.player.rotDirection = -1;
         if (this.keys['ArrowRight'] || this.keys['d'] || this.keys['D']) this.player.rotDirection = 1;
         if (this.keys['ArrowUp'] || this.keys['w'] || this.keys['W']) this.player.accInput = ACCELERATION;
         if (this.keys['ArrowDown'] || this.keys['s'] || this.keys['S']) this.player.accInput = -ACCELERATION * 0.5;
-        let drift = this.keys[' '] || this.keys['Shift'];
-
+        
         if (this.keys['r'] || this.keys['R']) {
              if (this.player.health && this.player.health.checkFullyDestroyed()) {
                  this.initGame();
@@ -1692,10 +1744,16 @@ class Game {
              }
         }
 
-        this.camera.update(this.player, this.canvas.width, this.canvas.height);
-        this.updateChunks();
+        let drift = (this.keys[' '] || this.keys['Shift']) && this.state === 'PLAY';
 
+        // Physics First
         this.player.physics(this.buildings, drift);
+
+        // Camera Second
+        this.camera.update(this.player, this.canvas.width, this.canvas.height);
+        
+        // World Generation Third
+        this.updateChunks();
 
         // Spawn Cops
         this.spawnTimer++;
@@ -1879,31 +1937,110 @@ class Game {
         });
     }
 
-    draw() {
-        const ctx = this.ctx;
+    drawCRT(ctx, w, h) {
+        // 1. Scanlines (Stripes)
+        ctx.fillStyle = "rgba(0, 0, 0, 0.3)"; // Darker
+        for (let i = 0; i < h; i += 3) {
+            ctx.fillRect(0, i, w, 1);
+        }
+
+        // 2. Moving Scan Bar (Rolling shutter effect)
+        this.scanlineY = (this.scanlineY || 0) + 1.5;
+        if (this.scanlineY > h) this.scanlineY = 0;
+        ctx.fillStyle = "rgba(255, 255, 255, 0.07)";
+        ctx.fillRect(0, this.scanlineY, w, 50);
+
+        // 3. Vignette (Dark corners)
+        let grad = ctx.createRadialGradient(w/2, h/2, h/3, w/2, h/2, h);
+        grad.addColorStop(0, "rgba(0,0,0,0)");
+        grad.addColorStop(1, "rgba(0,0,0,0.6)");
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // 4. Noise (Static)
+        // For performance, let's just do a flickering overlay.
+        if (Math.random() > 0.8) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05})`;
+            ctx.fillRect(0, 0, w, h);
+        }
+    }
+
+    drawMenu(ctx, w, h) {
+        ctx.save();
+        
+        // Title: TOKYO
+        ctx.textAlign = 'center';
+        const cx = w / 2;
+        const cy = h / 2;
+
+        // Glitch Offset
+        let jx = randInt(-2, 2);
+        let jy = randInt(-2, 2);
+
+        // "TOKYO"
+        ctx.font = '40px "Press Start 2P", cursive'; 
+        let grad = ctx.createLinearGradient(0, cy - 180, 0, cy - 140);
+        grad.addColorStop(0, '#ffffff');
+        grad.addColorStop(1, '#ffcccc'); 
+        
+        ctx.fillStyle = '#000';
+        ctx.fillText("TOKYO", cx + 4 + jx, cy - 120 + 4 + jy); 
+        ctx.fillStyle = grad;
+        ctx.fillText("TOKYO", cx + jx, cy - 120 + jy);
+
+        // "DRIFT"
+        ctx.font = '60px "Press Start 2P", cursive';
+        ctx.fillStyle = '#000';
+        ctx.fillText("DRIFT", cx + 5 - jx, cy - 50 + 5 - jy); 
+        ctx.fillStyle = '#d32f2f'; // Red
+        ctx.fillText("DRIFT", cx - jx, cy - 50 - jy);
+
+        // "- CHASE -"
+        ctx.font = '25px "Press Start 2P", cursive';
+        ctx.fillStyle = '#000';
+        ctx.fillText("- CHASE -", cx + 3, cy + 10 + 3);
+        ctx.fillStyle = '#ffeb3b'; // Yellow
+        ctx.fillText("- CHASE -", cx, cy + 10);
+
+        // Button: START ENGINE
+        let btnW = 320;
+        let btnH = 60;
+        this.playRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
+
+        // Button Shadow 
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.playRect.x + 8, this.playRect.y + 8, btnW, btnH);
+
+        // Button Border 
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.playRect.x - 4, this.playRect.y - 4, btnW + 8, btnH + 8);
+
+        // Button Fill (Red)
+        ctx.fillStyle = '#d32f2f';
+        ctx.fillRect(this.playRect.x, this.playRect.y, btnW, btnH);
+
+        // Button Text
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px "Press Start 2P", cursive';
+        ctx.fillText("START ENGINE", cx, this.playRect.y + 40);
+
+        // Instruction Text
+        ctx.font = '14px "Press Start 2P", cursive';
+        ctx.fillStyle = '#fff';
+        ctx.fillText("PRESS [WASD] TO DRIVE", cx, h - 40);
+
+        // Scanlines Overlay
+        this.drawCRT(ctx, w, h);
+
+        ctx.restore();
+    }
+
+    draw(ctx) {
         const w = this.canvas.width;
         const h = this.canvas.height;
 
         ctx.fillStyle = COLORS.BG_VOID;
         ctx.fillRect(0, 0, w, h);
-
-        if (this.state === 'MENU') {
-            ctx.fillStyle = COLORS.TEXT_WHITE;
-            ctx.font = 'bold 40px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText("TOKYO DRIFT CHASE", w/2, h/2 - 80);
-
-            let btnW = 200, btnH = 60;
-            this.playRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
-            
-            drawRect(ctx, '#fff', this.playRect.x-2, this.playRect.y-2, btnW+4, btnH+4, 5);
-            drawRect(ctx, '#c82828', this.playRect.x, this.playRect.y, btnW, btnH, 5);
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 20px Arial';
-            ctx.fillText("P L A Y", w/2, h/2 + 57);
-
-            return;
-        }
 
         this.drawFloor();
 
@@ -1935,6 +2072,9 @@ class Game {
         this.skids.forEach(s => s.draw(ctx));
 
         renderList.filter(i => i.type !== 'blood' && i.type !== 'skid').forEach(item => {
+             // Don't draw player in menu
+             if (this.state === 'MENU' && item.obj === this.player) return;
+
              item.obj.draw(ctx);
              
              if (item.type === 'person' && item.obj.isAngry && !item.obj.isDead) {
@@ -1958,39 +2098,46 @@ class Game {
 
         ctx.restore();
 
-        this.drawIndicators();
+        if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+            this.drawIndicators();
 
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 20px Arial';
-        ctx.textAlign = 'left';
-        ctx.fillText(`SCORE: ${this.score}`, 20, 30);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px "Press Start 2P", cursive';
+            ctx.textAlign = 'left';
+            ctx.fillText(`SCORE: ${this.score}`, 20, 40);
 
-        this.player.health.drawUI(ctx, w - 60, 10);
+            this.player.health.drawUI(ctx, w - 60, 10);
+        }
+
+        if (this.state === 'MENU') {
+            this.drawMenu(ctx, w, h);
+            return;
+        }
 
         if (this.state === 'GAMEOVER') {
             ctx.fillStyle = 'rgba(0,0,0,0.6)';
             ctx.fillRect(0, 0, w, h);
             
             ctx.fillStyle = '#ff3232';
-            ctx.font = 'bold 50px Arial';
+            ctx.font = '50px "Press Start 2P", cursive';
             ctx.textAlign = 'center';
             ctx.fillText("WASTED", w/2, h/2 - 20);
             
-            let btnW = 200, btnH = 60;
+            let btnW = 220, btnH = 60;
             this.restartRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
             
             drawRect(ctx, '#fff', this.restartRect.x, this.restartRect.y, btnW, btnH, 5);
             drawRect(ctx, '#c83232', this.restartRect.x+2, this.restartRect.y+2, btnW-4, btnH-4, 5);
             
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 20px Arial';
+            ctx.font = '20px "Press Start 2P", cursive';
             ctx.fillText("RESTART", w/2, h/2 + 57);
         }
     }
 
     loop() {
         this.update();
-        this.draw();
+        this.draw(this.ctx);
         requestAnimationFrame(this.loop);
     }
 }
