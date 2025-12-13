@@ -38,7 +38,7 @@
 <script>
 /**
  * TOKYO DRIFT CHASE - HTML5 PORT
- * Original logic adapted from Pygame
+ * with CAR SELECTION, ANGEL WING & PERSISTENCE UPDATE
  */
 
 // --- Constants & Configuration ---
@@ -90,6 +90,56 @@ const CAR_TYPES = {
     'taxi': { w: 48, h: 24, speed: 1.1, colors: ['#e6af2d'] }, // Japanese Taxi
     'truck': { w: 56, h: 26, speed: 0.7, colors: ['#ffffff', '#32465a'] }
 };
+
+// --- PLAYER ROSTER ---
+const PLAYER_ROSTER = [
+    { 
+        id: 'standard', 
+        name: 'STREET LEGEND', 
+        type: 'sedan', 
+        color: '#dc2828', 
+        desc: "The classic choice. Balanced.",
+        stats: { speed: 9.0, turn: 4.0, accel: 0.20, hp: 100 },
+        hasSpoiler: true
+    },
+    { 
+        id: 'drifter', 
+        name: 'DRIFT KING', 
+        type: 'coupe', 
+        color: '#d2b414', 
+        desc: "High speed, loose handling.",
+        stats: { speed: 10.5, turn: 4.5, accel: 0.25, hp: 80 },
+        hasSpoiler: true 
+    },
+    { 
+        id: 'tank', 
+        name: 'THE BEAST', 
+        type: 'truck', 
+        color: '#14141e', 
+        desc: "Heavy armor. Hard to stop.",
+        stats: { speed: 7.5, turn: 3.0, accel: 0.15, hp: 200 },
+        hasSpoiler: false
+    },
+    { 
+        id: 'mecha', 
+        name: 'MECHA-V', 
+        type: 'coupe', 
+        color: '#32ffff', // Neon Cyan
+        desc: "Experimental Transformer Tech.",
+        stats: { speed: 11.0, turn: 5.5, accel: 0.30, hp: 60 },
+        hasSpoiler: true
+    },
+    { 
+        id: 'angel', 
+        name: 'SERAPHIM', 
+        type: 'coupe', 
+        color: '#ffffff', 
+        desc: "Divine Power. [Z] to Smite.",
+        stats: { speed: 10.0, turn: 5.0, accel: 0.22, hp: 150 },
+        hasSpoiler: false,
+        unlockScore: 500
+    }
+];
 
 // Physics
 const ACCELERATION = 0.20;
@@ -300,19 +350,20 @@ class Camera {
 }
 
 class CarHealth {
-    constructor() {
+    constructor(maxHp = 100) {
+        this.maxHp = maxHp;
         this.parts = {
-            'front_torso': 100,
-            'back_torso': 100,
-            'fl_wheel': 100,
-            'fr_wheel': 100,
-            'rl_wheel': 100,
-            'rr_wheel': 100
+            'front_torso': maxHp,
+            'back_torso': maxHp,
+            'fl_wheel': maxHp,
+            'fr_wheel': maxHp,
+            'rl_wheel': maxHp,
+            'rr_wheel': maxHp
         };
     }
 
     getColor(hp) {
-        if (hp > 50) return COLORS.HP_GREEN;
+        if (hp > this.maxHp * 0.5) return COLORS.HP_GREEN;
         if (hp > 0) return COLORS.HP_YELLOW;
         return COLORS.HP_RED;
     }
@@ -404,6 +455,7 @@ class Car {
         this.accInput = 0;
         this.isCop = isCop;
         this.isCivilian = isCivilian;
+        this.id = null; // Specific ID for special cars
         
         // Defaults
         this.width = 48;
@@ -411,6 +463,12 @@ class Car {
         this.speedTrait = 1.0;
         this.color = '#fff';
         this.type = 'sedan';
+        this.hasSpoiler = false;
+        
+        // Custom Player Stats (populated later for player)
+        this.customMaxSpeed = null;
+        this.customTurnSpeed = null;
+        this.customAccel = null;
         
         // Tracking for Ghostly Rider achievement
         this.lastRotDirection = 0;
@@ -432,12 +490,17 @@ class Car {
         } else {
             // Player
             this.color = typeOrColor; // Hex for player
+            // Default HP check, overridden in initGame
+            this.health = new CarHealth(100); 
         }
         
         // Generate sprite
         this.sprite = this.createCarSprite();
         
-        this.health = (isCop || isCivilian) ? null : new CarHealth();
+        if (isCop || isCivilian) {
+             this.health = null;
+        }
+        
         this.stuckTimer = 0;
         this.reversing = false; // For AI
         
@@ -452,11 +515,19 @@ class Car {
 
     createCarSprite() {
         const cvs = document.createElement('canvas');
-        cvs.width = this.width;
-        cvs.height = this.height;
+        
+        // Increase canvas size for Angel Wings if needed
+        let padding = 0;
+        if (this.id === 'angel') padding = 20;
+
+        cvs.width = this.width + padding*2;
+        cvs.height = this.height + padding*2;
         const ctx = cvs.getContext('2d');
         // Disable smoothing for sharp pixels on sprite generation
         ctx.imageSmoothingEnabled = false;
+        
+        // Center drawing if padded
+        ctx.translate(padding, padding);
         
         const w = this.width, h = this.height;
 
@@ -622,14 +693,45 @@ class Car {
             ctx.fillRect(w-2, bodyY+4, 1, 2);
             ctx.fillRect(w-2, bodyY+bodyH-6, 1, 2);
         } else if (!this.isCivilian) {
-            // Spoiler (Player only)
-            ctx.fillStyle = '#141414';
-            ctx.fillRect(5, bodyY+1, 2, 3);
-            ctx.fillRect(5, bodyY+bodyH-4, 2, 3);
-            ctx.fillStyle = '#1e1e1e'; // Wing
-            ctx.fillRect(3, bodyY, 3, bodyH);
-            ctx.fillStyle = '#333'; // Carbon highlight
-            ctx.fillRect(3, bodyY+2, 1, bodyH-4);
+            // Spoiler logic
+            if (this.hasSpoiler) {
+                // Spoiler (Player only)
+                ctx.fillStyle = '#141414';
+                ctx.fillRect(5, bodyY+1, 2, 3);
+                ctx.fillRect(5, bodyY+bodyH-4, 2, 3);
+                ctx.fillStyle = '#1e1e1e'; // Wing
+                ctx.fillRect(3, bodyY, 3, bodyH);
+                ctx.fillStyle = '#333'; // Carbon highlight
+                ctx.fillRect(3, bodyY+2, 1, bodyH-4);
+            }
+            
+            // ANGEL WINGS logic
+            if (this.id === 'angel') {
+                ctx.fillStyle = '#fff'; // White feather
+                ctx.strokeStyle = '#e0e0e0'; // Grey outline
+                
+                // Left Wing
+                ctx.beginPath();
+                ctx.moveTo(10, bodyY);
+                ctx.lineTo(0, bodyY - 8);
+                ctx.lineTo(12, bodyY - 12);
+                ctx.lineTo(20, bodyY);
+                ctx.fill();
+                
+                // Right Wing
+                ctx.beginPath();
+                ctx.moveTo(10, bodyY + bodyH);
+                ctx.lineTo(0, bodyY + bodyH + 8);
+                ctx.lineTo(12, bodyY + bodyH + 12);
+                ctx.lineTo(20, bodyY + bodyH);
+                ctx.fill();
+                
+                // Halo hint
+                ctx.strokeStyle = '#ffd700';
+                ctx.beginPath();
+                ctx.arc(w - 10, bodyY + bodyH/2, 6, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
 
         return cvs;
@@ -712,14 +814,15 @@ class Car {
     }
 
     physics(buildings, drift, fireWheelActive) {
-        let turnSpeed = TURN_SPEED;
-        let maxSpeed = this.isCop ? MAX_SPEED_COP : (this.isCivilian ? MAX_SPEED_CIVILIAN_BASE : MAX_SPEED_PLAYER);
-        let acceleration = ACCELERATION;
+        // USE CUSTOM STATS IF AVAILABLE (PLAYER), ELSE DEFAULTS
+        let turnSpeed = this.customTurnSpeed || TURN_SPEED;
+        let maxSpeed = this.customMaxSpeed || (this.isCop ? MAX_SPEED_COP : (this.isCivilian ? MAX_SPEED_CIVILIAN_BASE : MAX_SPEED_PLAYER));
+        let acceleration = this.customAccel || ACCELERATION;
         
         // --- Fire Wheel Skill Check ---
         if (!this.isCop && !this.isCivilian && fireWheelActive) {
-             maxSpeed *= 5; // 5x faster in both modes
-             acceleration *= 5;
+             maxSpeed *= 1.5; // 5x faster in both modes
+             acceleration *= 2;
         }
 
         if (this.isCivilian) maxSpeed *= this.speedTrait;
@@ -995,7 +1098,7 @@ class Car {
             let targetY = this.pos.y;
             let h = (this.targetHeading % 360 + 360) % 360;
             
-            if (h === 0) targetY = cy - laneOffset;       
+            if (h === 0) targetY = cy - laneOffset;        
             else if (h === 180) targetY = cy + laneOffset; 
             else if (h === 90) targetX = cx + laneOffset;  
             else if (h === 270) targetX = cx - laneOffset; 
@@ -1043,9 +1146,14 @@ class Car {
 
     draw(ctx) {
         ctx.save();
+        
+        let padding = (this.id === 'angel') ? 20 : 0;
+        
         ctx.translate(this.pos.x, this.pos.y);
         ctx.rotate(-degToRad(this.angle));
-        ctx.drawImage(this.sprite, -this.width/2, -this.height/2);
+        
+        // Draw car sprite centered properly even with padding
+        ctx.drawImage(this.sprite, -this.width/2 - padding, -this.height/2 - padding);
         
         // Draw Dynamic Brake Lights
         if (this.brakingVisual) {
@@ -1518,6 +1626,59 @@ class Skid {
     }
 }
 
+// New: Fire Trail for Floor (Fire Wheel)
+class FireTrail {
+    constructor(x, y, angle) {
+        this.pos = new Vector2(x, y);
+        this.angle = angle;
+        this.life = 40;
+        this.maxLife = 40;
+    }
+    update() { this.life--; }
+    draw(ctx) {
+        ctx.save();
+        ctx.translate(this.pos.x, this.pos.y);
+        ctx.rotate(-degToRad(this.angle));
+        
+        let alpha = this.life / this.maxLife;
+        // Draw flame on floor
+        let grad = ctx.createLinearGradient(-10, 0, 10, 0);
+        grad.addColorStop(0, `rgba(255, 100, 0, 0)`);
+        grad.addColorStop(0.5, `rgba(255, 200, 0, ${alpha * 0.8})`);
+        grad.addColorStop(1, `rgba(255, 100, 0, 0)`);
+        
+        ctx.fillStyle = grad;
+        ctx.fillRect(-15, -4, 30, 8);
+        
+        ctx.restore();
+    }
+}
+
+// New: Shockwave for Angel Ability
+class Shockwave {
+    constructor(x, y) {
+        this.pos = new Vector2(x, y);
+        this.r = 10;
+        this.maxR = 400; // Big range
+        this.active = true;
+    }
+    update() {
+        this.r += 15; // Expand fast
+        if (this.r > this.maxR) this.active = false;
+    }
+    draw(ctx) {
+        let alpha = 1.0 - (this.r / this.maxR);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha})`;
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.r, 0, Math.PI*2);
+        ctx.stroke();
+        
+        ctx.fillStyle = `rgba(255, 215, 0, ${alpha * 0.3})`;
+        ctx.fill();
+    }
+}
+
 // --- Main Game Class ---
 
 class Game {
@@ -1532,47 +1693,59 @@ class Game {
         // Inputs
         this.keys = {};
         this.kPressed = false; // For K key toggle
+        this.zPressed = false; // For Angel Ability
+        this.leftPressed = false; // Menu navigation
+        this.rightPressed = false; // Menu navigation
+        
         window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
         window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
         this.canvas.addEventListener('mousedown', e => this.onClick(e));
 
         // Game State
-        this.state = 'MENU'; // MENU, PLAY, GAMEOVER
+        this.state = 'MENU'; // MENU, CAR_SELECT, PLAY, GAMEOVER, SETTINGS
+        this.selectedCarIndex = 0; // Default car selection
+        
         this.score = 0;
+        this.highScore = 0;
+        this.achievements = []; // { name: '...', timer: 180 }
+        
+        // Buttons
         this.restartRect = new Rect(0,0,0,0);
         this.playRect = new Rect(0,0,0,0);
-        
-        // Traffic Light System
-        // States: NS_GREEN, NS_YELLOW, EW_GREEN, EW_YELLOW
-        this.trafficLightState = 'NS_GREEN'; 
-        this.trafficTimer = 0;
-        this.scanlineY = 0;
+        this.selectRect = new Rect(0,0,0,0); 
+        this.settingsRect = new Rect(0,0,0,0); 
+        this.resetProgressRect = new Rect(0,0,0,0); 
+        this.backRect = new Rect(0,0,0,0);
         
         // --- ACHIEVEMENT & SKILL MECHANISMS ---
         this.hasGhostlyRider = false;
         this.ghostlyRiderActive = false;
-        this.ghostlyRiderCooldown = 0; // Cooldown timer (in frames)
-        this.ghostlyRiderDuration = 0; // Active duration timer (in frames)
-        this.ghostlyRiderCooldownMax = 15 * FPS; // 15 seconds
-        this.ghostlyRiderDurationMax = 15 * FPS; // 15 seconds
+        this.ghostlyRiderCooldown = 0; 
+        this.ghostlyRiderDuration = 0; 
+        this.ghostlyRiderCooldownMax = 15 * FPS; 
+        this.ghostlyRiderDurationMax = 15 * FPS; 
 
         this.hasFireWheel = false;
         this.fireWheelActive = false;
         this.fireWheelCooldown = 0;
         this.fireWheelDuration = 0;
-        this.fireWheelCooldownMax = 15 * FPS; // 15 seconds
-        this.fireWheelDurationMax = 15 * FPS; // 15 seconds
+        this.fireWheelCooldownMax = 15 * FPS; 
+        this.fireWheelDurationMax = 15 * FPS; 
         
-        this.turnCount = 0; // For Ghostly Rider achievement
-        this.driftTime = 0; // For Fire Wheel achievement (in frames)
+        this.angelCooldown = 0;
+        this.angelCooldownMax = 30 * FPS; // 30s cooldown
         
-        this.achievements = []; // { name: '...', timer: 180 }
+        this.turnCount = 0; 
+        this.driftTime = 0; 
         
-        this.showProgress = false; // Toggle state for objective display
+        this.showProgress = false; 
 
         // Intersection turn tracking
         this.isInsideIntersection = false;
         this.playerInitialAngle = null;
+        
+        // Load Data
+        this.loadData();
 
         // Initialize game world so background renders in Menu
         this.initGame();
@@ -1580,9 +1753,53 @@ class Game {
         this.loop = this.loop.bind(this);
         requestAnimationFrame(this.loop);
     }
+    
+    // --- Persistence ---
+    saveData() {
+        const data = {
+            highScore: Math.max(this.score, this.highScore),
+            hasGhostlyRider: this.hasGhostlyRider,
+            hasFireWheel: this.hasFireWheel
+        };
+        localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
+        this.highScore = data.highScore;
+    }
+    
+    loadData() {
+        const saved = localStorage.getItem('tokyo_drift_chase_v2');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.highScore = data.highScore || 0;
+            this.hasGhostlyRider = data.hasGhostlyRider || false;
+            this.hasFireWheel = data.hasFireWheel || false;
+        }
+    }
+    
+    resetData() {
+        localStorage.removeItem('tokyo_drift_chase_v2');
+        this.highScore = 0;
+        this.hasGhostlyRider = false;
+        this.hasFireWheel = false;
+    }
 
     initGame() {
-        this.player = new Car(0, 0, COLORS.PLAYER);
+        // Init player based on Selection
+        let carSpec = PLAYER_ROSTER[this.selectedCarIndex];
+        
+        // Create car
+        this.player = new Car(0, 0, carSpec.color);
+        
+        // Apply stats & ID
+        this.player.type = carSpec.type;
+        this.player.id = carSpec.id; // Important for sprite gen
+        this.player.hasSpoiler = carSpec.hasSpoiler;
+        this.player.sprite = this.player.createCarSprite(); 
+        
+        this.player.customMaxSpeed = carSpec.stats.speed;
+        this.player.customTurnSpeed = carSpec.stats.turn;
+        this.player.customAccel = carSpec.stats.accel;
+        this.player.health = new CarHealth(carSpec.stats.hp); 
+
         this.camera = new Camera();
         this.buildings = [];
         this.people = [];
@@ -1591,6 +1808,8 @@ class Game {
         this.sakura = [];
         this.particles = [];
         this.skids = [];
+        this.floorEffects = []; // New layer for floor trails
+        this.shockwaves = []; // New list for Angel ability
         this.blood = [];
         this.loadedChunks = new Set();
         
@@ -1607,9 +1826,12 @@ class Game {
         this.fireWheelActive = false;
         this.fireWheelDuration = 0;
         this.fireWheelCooldown = 0;
+        
+        this.angelCooldown = 0;
+        
         this.turnCount = 0;
         this.driftTime = 0;
-        this.achievements = [];
+        // Keep achievements array for popups active
         
         this.isInsideIntersection = false;
         this.playerInitialAngle = null;
@@ -1627,17 +1849,34 @@ class Game {
 
         if (this.state === 'MENU') {
             if (this.playRect.collidePoint(mx, my)) {
-                this.initGame(); // Reset for fair start
+                this.state = 'CAR_SELECT'; 
+            }
+            if (this.settingsRect.collidePoint(mx, my)) {
+                this.state = 'SETTINGS';
+            }
+        } else if (this.state === 'SETTINGS') {
+            if (this.backRect.collidePoint(mx, my)) {
+                this.state = 'MENU';
+            }
+            if (this.resetProgressRect.collidePoint(mx, my)) {
+                this.resetData();
+                alert("Progress Reset!");
+            }
+        } else if (this.state === 'CAR_SELECT') {
+            // Check for drive button
+            if (this.selectRect.collidePoint(mx, my)) {
+                // Check lock
+                let spec = PLAYER_ROSTER[this.selectedCarIndex];
+                if (spec.unlockScore && this.highScore < spec.unlockScore) {
+                    // Locked sound or visual shake?
+                    return; 
+                }
+                this.initGame(); 
                 this.state = 'PLAY';
             }
         } else if (this.state === 'GAMEOVER') {
             if (this.restartRect.collidePoint(mx, my)) {
-                // Keep achievements!
-                let tempGhostlyRider = this.hasGhostlyRider;
-                let tempFireWheel = this.hasFireWheel;
                 this.initGame();
-                this.hasGhostlyRider = tempGhostlyRider; // Restore
-                this.hasFireWheel = tempFireWheel; // Restore
                 this.state = 'PLAY';
             }
         }
@@ -1649,6 +1888,7 @@ class Game {
         // Only show if not already showing the same one and not in the list
         if (!this.achievements.some(a => a.name === name)) {
             this.achievements.push({ name: name, timer: 180 }); // 3 seconds @ 60 FPS
+            this.saveData(); // Save unlock immediately
         }
     }
 
@@ -1660,46 +1900,34 @@ class Game {
             
             const playerX = player.pos.x;
             const playerY = player.pos.y;
-            // Get block coordinates
             const blockX = Math.floor(playerX / BLOCK_SIZE);
             const blockY = Math.floor(playerY / BLOCK_SIZE);
 
-            // Check if coordinates land in an intersection block (where both indices are multiples of 3)
-            // Using % 3 check for road cells: if index % 3 === 0 (middle of the road block), it's a road
             const isRoadX = (blockX % 3 === 0);
             const isRoadY = (blockY % 3 === 0);
             const inIntersectionBlock = isRoadX && isRoadY;
             
-            // Normalize angle to the nearest 90 degrees (cardinal direction)
             const getCardinalAngle = (angle) => Math.round(((angle % 360) + 360) % 360 / 90) * 90;
             const currentCardinalAngle = getCardinalAngle(player.angle);
 
             if (inIntersectionBlock) {
                 if (!this.isInsideIntersection) {
-                    // Player enters intersection block
                     this.isInsideIntersection = true;
                     this.playerInitialAngle = currentCardinalAngle;
                 }
             } else if (this.isInsideIntersection) {
-                // Player exited an intersection block
                 this.isInsideIntersection = false;
-                
-                // Check if they exited into a different cardinal direction AND didn't hit anything
                 const turnSuccess = (currentCardinalAngle !== this.playerInitialAngle);
 
                 if (turnSuccess && !player.isCollidingWithBuilding) {
                     this.turnCount++;
                 } else if (player.isCollidingWithBuilding) {
-                    // Reset counter if collision occurred during the whole turn maneuver
                     this.turnCount = 0; 
                 }
-                
-                // Reset flag for next entry
                 player.isCollidingWithBuilding = false;
                 this.playerInitialAngle = null;
             }
             
-            // Immediate reset if collision happens inside intersection
             if (player.isCollidingWithBuilding) {
                 this.turnCount = 0;
             }
@@ -1713,12 +1941,11 @@ class Game {
         // --- 2. Fire Wheel: 30 seconds of drifting without hitting a cop ---
         if (!this.hasFireWheel) {
             if (drift && player.vel.mag() > 4) {
-                // Check if player collided with a cop in this frame
                 let copCollision = this.cops.some(cop => cop.getHitbox().collideRect(player.getHitbox()));
                 if (!copCollision) {
                     this.driftTime++;
                 } else {
-                    this.driftTime = 0; // Reset on cop bump
+                    this.driftTime = 0; 
                     player.isCollidingWithCop = true;
                 }
             } else {
@@ -1741,11 +1968,9 @@ class Game {
             this.showProgress = !this.showProgress;
             this.kPressed = true;
         }
-        if (!this.keys['k']) {
-            this.kPressed = false;
-        }
+        if (!this.keys['k']) this.kPressed = false;
         
-        // --- Ghostly Rider (Invisibility) ---
+        // --- Ghostly Rider ---
         if (this.hasGhostlyRider) {
             if ((this.keys['x'] || this.keys['X']) && !this.ghostlyRiderActive && this.ghostlyRiderCooldown <= 0) {
                 this.ghostlyRiderActive = true;
@@ -1755,14 +1980,12 @@ class Game {
         }
         if (this.ghostlyRiderActive) {
             this.ghostlyRiderDuration--;
-            if (this.ghostlyRiderDuration <= 0) {
-                this.ghostlyRiderActive = false;
-            }
+            if (this.ghostlyRiderDuration <= 0) this.ghostlyRiderActive = false;
         } else if (this.ghostlyRiderCooldown > 0) {
             this.ghostlyRiderCooldown--;
         }
         
-        // --- Fire Wheel (Speed Boost) ---
+        // --- Fire Wheel ---
         if (this.hasFireWheel) {
              if ((this.keys['c'] || this.keys['C']) && !this.fireWheelActive && this.fireWheelCooldown <= 0) {
                  this.fireWheelActive = true;
@@ -1772,16 +1995,45 @@ class Game {
         }
         if (this.fireWheelActive) {
             this.fireWheelDuration--;
-            if (this.fireWheelDuration <= 0) {
-                this.fireWheelActive = false;
-            }
+            if (this.fireWheelDuration <= 0) this.fireWheelActive = false;
         } else if (this.fireWheelCooldown > 0) {
             this.fireWheelCooldown--;
         }
+        
+        // --- Angel Wing Ability (Smite) ---
+        if (this.player.id === 'angel') {
+            if ((this.keys['z'] || this.keys['Z']) && !this.zPressed && this.angelCooldown <= 0) {
+                this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y));
+                this.angelCooldown = this.angelCooldownMax;
+                this.zPressed = true;
+            }
+            if (!this.keys['z'] && !this.keys['Z']) this.zPressed = false;
+            
+            if (this.angelCooldown > 0) this.angelCooldown--;
+        }
+        
+        // Update Shockwaves
+        for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+            let sw = this.shockwaves[i];
+            sw.update();
+            if (!sw.active) {
+                this.shockwaves.splice(i, 1);
+                continue;
+            }
+            
+            // Check Collisions with Cops
+            this.cops.forEach(cop => {
+                if (cop.dead) return;
+                let d = cop.pos.distanceTo(sw.pos);
+                if (d < sw.r + 20 && d > sw.r - 40) { // Hit by the ring expanding edge
+                    cop.dead = true;
+                    this.score += 50;
+                    // Add some particles
+                    for(let k=0; k<10; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
+                }
+            });
+        }
     }
-
-    // --- End Achievement & Skill Logic ---
-
 
     generateChunk(gx, gy) {
         const isRoadX = (gx % 3 === 0);
@@ -1793,42 +2045,28 @@ class Game {
         let rng = new SeededRNG(seed);
 
         if (isRoadX || isRoadY) {
-            // Spawn People
             if (rng.next() < 0.1) {
                 this.people.push(new Person(cx + rng.randInt(-50,50), cy + rng.randInt(-50,50), null));
             }
-            // Spawn Civilians - HIGH DENSITY
-            // Spawn 0 to 3 cars per road chunk
             let density = rng.choice([0, 1, 1, 2, 2, 3]); 
             
             for(let i=0; i<density; i++) {
-                 // Determine heading based on road type
                  let heading = 0;
-                 if (isRoadX && !isRoadY) heading = rng.choice([90, 270]); // Vertical road
-                 else if (!isRoadX && isRoadY) heading = rng.choice([0, 180]); // Horizontal
-                 else heading = rng.choice([0, 90, 180, 270]); // Intersection
+                 if (isRoadX && !isRoadY) heading = rng.choice([90, 270]); 
+                 else if (!isRoadX && isRoadY) heading = rng.choice([0, 180]); 
+                 else heading = rng.choice([0, 90, 180, 270]); 
 
-                 // SPAWN IN CORRECT LANE (LEFT-HAND TRAFFIC - JAPAN STYLE)
                  let laneOffset = 80;
-                 let jitter = rng.randInt(-20, 20); // Minor lateral variation
-                 let longScatter = rng.randInt(-150, 150); // Spread along road
+                 let jitter = rng.randInt(-20, 20); 
+                 let longScatter = rng.randInt(-150, 150); 
 
                  let spawnX = cx;
                  let spawnY = cy;
 
-                 if (heading === 0) { // Right -> Top Lane (LHT)
-                    spawnY = cy - laneOffset + jitter;
-                    spawnX = cx + longScatter;
-                 } else if (heading === 180) { // Left -> Bottom Lane (LHT)
-                    spawnY = cy + laneOffset + jitter;
-                    spawnX = cx + longScatter;
-                 } else if (heading === 90) { // Down -> Right Lane (LHT - Right is Left relative to Down)
-                    spawnX = cx + laneOffset + jitter;
-                    spawnY = cy + longScatter;
-                 } else if (heading === 270) { // Up -> Left Lane (LHT - Left is Left relative to Up)
-                    spawnX = cx - laneOffset + jitter;
-                    spawnY = cy + longScatter;
-                 }
+                 if (heading === 0) { spawnY = cy - laneOffset + jitter; spawnX = cx + longScatter; } 
+                 else if (heading === 180) { spawnY = cy + laneOffset + jitter; spawnX = cx + longScatter; } 
+                 else if (heading === 90) { spawnX = cx + laneOffset + jitter; spawnY = cy + longScatter; } 
+                 else if (heading === 270) { spawnX = cx - laneOffset + jitter; spawnY = cy + longScatter; }
 
                  let type = rng.choice(Object.keys(CAR_TYPES));
                  let civCar = new Car(spawnX, spawnY, type, false, true);
@@ -1838,19 +2076,14 @@ class Game {
             }
         } else {
             const sidewalkRect = new Rect(gx * BLOCK_SIZE, gy * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE).inflate(-10, -10);
-            
             if (rng.next() < 0.08) {
-                // Park
                 this.buildings.push(new Building(gx, gy, true));
                 for(let i=0; i<rng.randInt(3,6); i++) {
                     this.sakura.push(new Sakura(cx + rng.randInt(-100,100), cy + rng.randInt(-100,100)));
                 }
             } else {
-                // Building
                 let b = new Building(gx, gy, false);
                 this.buildings.push(b);
-                
-                // People
                 if (rng.next() < 0.95) {
                     for(let i=0; i<rng.randInt(8,20); i++) {
                         let side = rng.choice(['n','s','e','w']);
@@ -1860,7 +2093,6 @@ class Game {
                         else if (side==='s') { px = cx + rng.randInt(-offset, offset); py = cy + offset; }
                         else if (side==='e') { px = cx + offset; py = cy + rng.randInt(-offset, offset); }
                         else { px = cx - offset; py = cy + rng.randInt(-offset, offset); }
-                        
                         this.people.push(new Person(px, py, sidewalkRect));
                     }
                 }
@@ -1906,9 +2138,10 @@ class Game {
         this.people = cull(this.people);
         this.sakura = cull(this.sakura);
         this.skids = cull(this.skids);
+        this.floorEffects = cull(this.floorEffects); // Cull fire trails
         this.blood = cull(this.blood);
         this.civilians = cull(this.civilians);
-        this.cops = cull(this.cops); // Also cull cops outside the view
+        this.cops = cull(this.cops); 
     }
 
     update() {
@@ -1918,7 +2151,7 @@ class Game {
         this.player.rotDirection = 0;
         this.player.accInput = 0;
         
-        if (this.state === 'MENU') {
+        if (this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') {
             // Auto-move camera for menu background
             this.menuCamPos.y -= 6;
             this.camera.update({ pos: this.menuCamPos }, this.canvas.width, this.canvas.height);
@@ -1941,87 +2174,87 @@ class Game {
                 }
             }
             
-            // Update other cars (civilians)
             this.civilians.forEach((civ, i) => {
-                // Pass null for player so they don't react to ghost player
                 civ.updateCivilian(this.buildings, this.civilians, null);
             });
             
-            // Remove cops that are too far away for the menu
             const keepRect = this.camera.viewRect.inflate(1200, 1200);
             this.cops = this.cops.filter(cop => keepRect.collideRect(cop.getRect()));
+            
+            // Handle Selection Input
+            if (this.state === 'CAR_SELECT') {
+                if ((this.keys['arrowleft'] || this.keys['a']) && !this.leftPressed) {
+                    this.selectedCarIndex--;
+                    if (this.selectedCarIndex < 0) this.selectedCarIndex = PLAYER_ROSTER.length - 1;
+                    this.leftPressed = true;
+                }
+                if (!this.keys['arrowleft'] && !this.keys['a']) this.leftPressed = false;
 
-            return; // Skip rest of update loop (player physics, collisions, etc)
+                if ((this.keys['arrowright'] || this.keys['d']) && !this.rightPressed) {
+                    this.selectedCarIndex++;
+                    if (this.selectedCarIndex >= PLAYER_ROSTER.length) this.selectedCarIndex = 0;
+                    this.rightPressed = true;
+                }
+                if (!this.keys['arrowright'] && !this.keys['d']) this.rightPressed = false;
+            }
+
+            return; // Skip rest of update loop
         }
 
         // --- PLAY STATE ---
         
-        // Skill Mechanics First (for active state check)
+        // Skill Mechanics
         this.updateSkillMechanics();
 
         // Player Control
         if (this.keys['arrowleft'] || this.keys['a']) this.player.rotDirection = -1;
         if (this.keys['arrowright'] || this.keys['d']) this.player.rotDirection = 1;
-        if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = ACCELERATION;
-        if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -ACCELERATION * 0.5;
+        if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = this.player.customAccel || ACCELERATION;
+        if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -(this.player.customAccel || ACCELERATION) * 0.5;
         
         if (this.keys['r']) {
              if (this.player.health && this.player.health.checkFullyDestroyed()) {
                  let tempGhostlyRider = this.hasGhostlyRider;
                  let tempFireWheel = this.hasFireWheel;
                  this.initGame();
-                 this.hasGhostlyRider = tempGhostlyRider; // Restore
-                 this.hasFireWheel = tempFireWheel; // Restore
+                 this.hasGhostlyRider = tempGhostlyRider; 
+                 this.hasFireWheel = tempFireWheel; 
                  return;
              }
         }
 
-        // Drift/Boost only on SPACE key
+        // Drift/Boost
         let drift = (this.keys[' ']) && this.state === 'PLAY';
 
-        // Physics First
+        // Physics
         this.player.physics(this.buildings, drift, this.fireWheelActive);
         
-        // Fire Wheel Trail Generation
+        // Fire Wheel Trail Generation (ON FLOOR)
         if (this.fireWheelActive) {
-            if (Math.random() < 0.8) { // High density trail
-                const angleRad = degToRad(this.player.angle);
-                // Vector pointing backwards (opposite of forward)
-                const backVec = new Vector2(Math.cos(angleRad + Math.PI), -Math.sin(angleRad + Math.PI)).normalize(); 
-                
-                // Spawn position slightly behind the center of the car
-                const offset = backVec.mult(this.player.width / 2);
-                const spawnX = this.player.pos.x + offset.x + randInt(-6, 6); // Wider spawn area
-                const spawnY = this.player.pos.y + offset.y + randInt(-3, 3);
-                
-                // Create fire particle (minimal world velocity to appear 'stuck' to road)
-                let p = new Particle(spawnX, spawnY, 'spark');
-                p.vel = new Vector2(randFloat(-0.2, 0.2), randFloat(-0.2, 0.2)); 
-                p.color = randChoice(['#ffeb3b', '#ff6400', '#dc3232']); // Yellow, Orange, Red
-                p.life = randInt(15, 30); // Longer life for trail persistence
-                p.size = randInt(5, 8);
-                this.particles.push(p);
+            // Add visual floor effect instead of particle
+            if (Math.random() < 0.8) { 
+                this.floorEffects.push(new FireTrail(this.player.pos.x, this.player.pos.y, this.player.angle));
             }
         }
+        this.floorEffects.forEach((f, i) => { f.update(); if(f.life<=0) this.floorEffects.splice(i, 1); });
         
-        // Achievement Logic Second (uses post-physics state)
+        // Achievement Logic
         this.updateAchievementLogic(drift);
 
-        // Camera Third
+        // Camera
         this.camera.update(this.player, this.canvas.width, this.canvas.height);
         
-        // World Generation Fourth
+        // World Generation
         this.updateChunks();
 
-        // Spawn Cops (Fifth)
+        // Spawn Cops
         this.spawnTimer++;
-        if (this.spawnTimer > 120) { // Every 2 seconds
+        if (this.spawnTimer > 120) { 
             this.spawnTimer = 0;
             let angle = randFloat(0, Math.PI*2);
             let dist = 800;
             let cx = this.player.pos.x + Math.cos(angle)*dist;
             let cy = this.player.pos.y + Math.sin(angle)*dist;
-            // Only spawn on roads
             let gx = Math.floor(cx / BLOCK_SIZE);
             let gy = Math.floor(cy / BLOCK_SIZE);
             if ((gx % 3 === 0) || (gy % 3 === 0)) {
@@ -2037,21 +2270,18 @@ class Game {
 
         // Cops
         this.cops.forEach((cop, i) => {
-            // Pass Ghostly Rider state to cop AI
             cop.updateCop(this.player, this.buildings, this.ghostlyRiderActive); 
             
             // Cop collision
             if (cop.getHitbox().collideRect(this.player.getHitbox())) {
-                // If Ghostly Rider is active, collision does less damage and has no bounce
                 if (!this.ghostlyRiderActive) {
-                    this.player.health.takeDamage(30); // Increased Police Damage
+                    this.player.health.takeDamage(30); 
                     // Bounce
                     let bounce = this.player.pos.sub(cop.pos).normalize().mult(5);
                     this.player.vel = this.player.vel.add(bounce);
                     cop.vel = cop.vel.sub(bounce);
                     for(let k=0; k<5; k++) this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'spark'));
                 } else {
-                    // Slight penalty for trying to hit cop while ghosting
                     this.player.health.takeDamage(5); 
                 }
             }
@@ -2060,7 +2290,6 @@ class Game {
             for (let j=i+1; j<this.cops.length; j++) {
                 let other = this.cops[j];
                 if (cop.pos.distanceTo(other.pos) < 45) {
-                    // Crash
                     cop.dead = true; other.dead = true;
                     this.score += 100;
                     for(let k=0; k<15; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
@@ -2071,28 +2300,15 @@ class Game {
 
         // Civilians
         this.civilians.forEach((civ, i) => {
-            // Pass the whole list of cars so they can see each other
             civ.updateCivilian(this.buildings, this.civilians, this.player);
-
-            // Civilian vs Player Collision (Bounce Only)
             if (civ.getHitbox().collideRect(this.player.getHitbox())) {
-                // Minor damage
                 this.player.health.takeDamage(5);
-                
-                // Calculate Bounce
                 let pCenter = this.player.pos;
                 let cCenter = civ.pos;
                 let bounceVec = pCenter.sub(cCenter).normalize();
-                
-                // Push player away
                 this.player.vel = this.player.vel.add(bounceVec.mult(4));
-                // Push civilian away
                 civ.vel = civ.vel.sub(bounceVec.mult(4));
-                
-                // Sparks
                 for(let k=0; k<3; k++) this.particles.push(new Particle(this.player.pos.x + randInt(-10,10), this.player.pos.y + randInt(-10,10), 'spark'));
-                
-                // Add score for causing chaos
                 if (!civ.hitOnce) {
                     this.score += 10;
                     civ.hitOnce = true;
@@ -2113,6 +2329,7 @@ class Game {
 
         // Game Over Check
         if (this.player.health.checkFullyDestroyed()) {
+            this.saveData(); // Save score
             this.state = 'GAMEOVER';
         }
     }
@@ -2134,7 +2351,6 @@ class Game {
 
                 if (isRoadX || isRoadY) {
                     this.ctx.drawImage(roadPatternCanvas, sx, sy);
-                    
                     this.ctx.fillStyle = COLORS.PAINT_WHITE;
                     if (isRoadY) {
                         this.ctx.fillRect(sx, sy+10, bs, 3);
@@ -2144,7 +2360,6 @@ class Game {
                         this.ctx.fillRect(sx+10, sy, 3, bs);
                         this.ctx.fillRect(sx+bs-10, sy, 3, bs);
                     }
-                    
                     this.ctx.fillStyle = COLORS.PAINT_YELLOW;
                     if (isRoadY && !isRoadX) {
                         for(let i=0; i<bs; i+=40) this.ctx.fillRect(sx+i+10, sy+bs/2, 20, 3);
@@ -2152,19 +2367,14 @@ class Game {
                     if (isRoadX && !isRoadY) {
                         for(let i=0; i<bs; i+=40) this.ctx.fillRect(sx+bs/2, sy+i+10, 3, 20);
                     }
-
                     if (isRoadX && isRoadY) {
                         this.ctx.fillStyle = '#fff';
                         const stripeW = 8;
                         const stripeGap = 8;
-                        const crossW = 80;
-                        const crossH = 20;
-                        
                         for (let i = 20; i < bs - 20; i += stripeW + stripeGap) {
                             this.ctx.fillRect(sx + i, sy + 20, stripeW, 40);
                             this.ctx.fillRect(sx + i, sy + bs - 60, stripeW, 40);
                         }
-                        
                         for (let i = 20; i < bs - 20; i += stripeW + stripeGap) {
                             this.ctx.fillRect(sx + 20, sy + i, 40, stripeW);
                             this.ctx.fillRect(sx + bs - 60, sy + i, 40, stripeW);
@@ -2233,6 +2443,43 @@ class Game {
         }
     }
 
+    drawSettings(ctx, w, h) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(20, 20, 30, 0.95)';
+        ctx.fillRect(0, 0, w, h);
+        
+        ctx.textAlign = 'center';
+        const cx = w / 2;
+        const cy = h / 2;
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = '30px "Press Start 2P", cursive';
+        ctx.fillText("SETTINGS", cx, cy - 100);
+        
+        // Reset Progress Button
+        let btnW = 350;
+        let btnH = 60;
+        this.resetProgressRect = new Rect(cx - btnW/2, cy - 20, btnW, btnH);
+        
+        drawRect(ctx, '#000', this.resetProgressRect.x, this.resetProgressRect.y, btnW, btnH, 5);
+        drawRect(ctx, '#c83232', this.resetProgressRect.x+4, this.resetProgressRect.y+4, btnW-8, btnH-8, 5);
+        
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px "Press Start 2P", cursive';
+        ctx.fillText("RESET PROGRESS", cx, cy + 15);
+        
+        // Back Button
+        this.backRect = new Rect(cx - btnW/2, cy + 80, btnW, btnH);
+        drawRect(ctx, '#000', this.backRect.x, this.backRect.y, btnW, btnH, 5);
+        drawRect(ctx, '#505050', this.backRect.x+4, this.backRect.y+4, btnW-8, btnH-8, 5);
+        
+        ctx.fillStyle = '#fff';
+        ctx.fillText("BACK", cx, cy + 115);
+        
+        this.drawCRT(ctx, w, h);
+        ctx.restore();
+    }
+
     drawMenu(ctx, w, h) {
         ctx.save();
         
@@ -2270,7 +2517,7 @@ class Game {
         ctx.fillStyle = '#ffeb3b'; // Yellow
         ctx.fillText("- CHASE -", cx, cy + 10);
 
-        // Button: START ENGINE
+        // Button: SELECT RIDE
         let btnW = 320;
         let btnH = 60;
         this.playRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
@@ -2278,19 +2525,29 @@ class Game {
         // Button Shadow 
         ctx.fillStyle = '#000';
         ctx.fillRect(this.playRect.x + 8, this.playRect.y + 8, btnW, btnH);
-
         // Button Border 
         ctx.fillStyle = '#000';
         ctx.fillRect(this.playRect.x - 4, this.playRect.y - 4, btnW + 8, btnH + 8);
-
         // Button Fill (Red)
         ctx.fillStyle = '#d32f2f';
         ctx.fillRect(this.playRect.x, this.playRect.y, btnW, btnH);
-
         // Button Text
         ctx.fillStyle = '#fff';
         ctx.font = '24px "Press Start 2P", cursive';
-        ctx.fillText("START ENGINE", cx, this.playRect.y + 40);
+        ctx.fillText("SELECT RIDE", cx, this.playRect.y + 40);
+        
+        // Button: SETTINGS
+        this.settingsRect = new Rect(cx - btnW/2, cy + 140, btnW, btnH);
+        
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.settingsRect.x + 8, this.settingsRect.y + 8, btnW, btnH);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(this.settingsRect.x - 4, this.settingsRect.y - 4, btnW + 8, btnH + 8);
+        ctx.fillStyle = '#505050';
+        ctx.fillRect(this.settingsRect.x, this.settingsRect.y, btnW, btnH);
+        
+        ctx.fillStyle = '#fff';
+        ctx.fillText("SETTINGS", cx, this.settingsRect.y + 40);
 
         // Instruction Text
         ctx.font = '14px "Press Start 2P", cursive';
@@ -2300,6 +2557,119 @@ class Game {
         // Scanlines Overlay
         this.drawCRT(ctx, w, h);
 
+        ctx.restore();
+    }
+    
+    drawCarSelection(ctx, w, h) {
+        ctx.save();
+        const cx = w / 2;
+        const cy = h / 2;
+        
+        // Background overlay
+        ctx.fillStyle = 'rgba(20, 20, 30, 0.9)';
+        ctx.fillRect(0, 0, w, h);
+
+        // Title
+        ctx.font = '30px "Press Start 2P", cursive';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        ctx.fillText("SELECT YOUR VEHICLE", cx, cy - 200);
+        
+        const carSpec = PLAYER_ROSTER[this.selectedCarIndex];
+        
+        // Check Locked
+        let isLocked = false;
+        if (carSpec.unlockScore && this.highScore < carSpec.unlockScore) {
+            isLocked = true;
+        }
+        
+        // --- DRAW PREVIEW CAR (SCALED UP) ---
+        let previewCar = new Car(0, 0, isLocked ? '#222' : carSpec.color, false, false);
+        previewCar.type = carSpec.type;
+        previewCar.id = carSpec.id; // Important for preview
+        previewCar.hasSpoiler = carSpec.hasSpoiler;
+        previewCar.sprite = previewCar.createCarSprite(); 
+        
+        const scale = 4;
+        const pW = previewCar.width * scale;
+        const pH = previewCar.height * scale;
+        
+        // Draw Car Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.beginPath(); ctx.ellipse(cx, cy - 50 + pH/2, pW/2 + 20, 20, 0, 0, Math.PI*2); ctx.fill();
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(previewCar.sprite, cx - pW/2, cy - 50 - pH/2, pW, pH);
+        
+        if (isLocked) {
+            ctx.font = '40px "Press Start 2P", cursive';
+            ctx.fillStyle = '#f00';
+            ctx.fillText("LOCKED", cx, cy - 50);
+            ctx.font = '14px "Press Start 2P", cursive';
+            ctx.fillText(`NEED ${carSpec.unlockScore} HIGH SCORE`, cx, cy - 20);
+        }
+        
+        // --- CAR INFO ---
+        // Arrows
+        ctx.font = '40px "Press Start 2P", cursive';
+        ctx.fillStyle = '#ffeb3b';
+        ctx.fillText("<", cx - 200, cy - 50);
+        ctx.fillText(">", cx + 200, cy - 50);
+        
+        // Name
+        ctx.font = '24px "Press Start 2P", cursive';
+        ctx.fillStyle = isLocked ? '#555' : COLORS.NEON_CYAN;
+        ctx.fillText(carSpec.name, cx, cy + 60);
+        
+        // Desc
+        ctx.font = '14px "Press Start 2P", cursive';
+        ctx.fillStyle = '#aaa';
+        ctx.fillText(carSpec.desc, cx, cy + 90);
+        
+        // --- STATS BARS ---
+        const drawStat = (label, value, max, yPos) => {
+            const barW = 200;
+            const barH = 15;
+            const xPos = cx - barW/2;
+            
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px "Press Start 2P", cursive';
+            ctx.fillText(label, xPos - 10, yPos + 12);
+            
+            // BG
+            ctx.fillStyle = '#333';
+            ctx.fillRect(xPos, yPos, barW, barH);
+            
+            // Fill
+            const fillW = (value / max) * barW;
+            ctx.fillStyle = value > max * 0.7 ? COLORS.HP_GREEN : (value > max * 0.4 ? COLORS.HP_YELLOW : COLORS.HP_RED);
+            ctx.fillRect(xPos, yPos, fillW, barH);
+        };
+        
+        drawStat("SPEED", carSpec.stats.speed, 12.0, cy + 130);
+        drawStat("HANDLING", carSpec.stats.turn, 6.0, cy + 155);
+        drawStat("ARMOR", carSpec.stats.hp, 200, cy + 180);
+        
+        // --- DRIVE BUTTON ---
+        let btnW = 200;
+        let btnH = 50;
+        this.selectRect = new Rect(cx - btnW/2, h - 100, btnW, btnH);
+        
+        drawRect(ctx, '#fff', this.selectRect.x, this.selectRect.y, btnW, btnH, 5);
+        drawRect(ctx, isLocked ? '#333' : COLORS.NEON_PINK, this.selectRect.x+2, this.selectRect.y+2, btnW-4, btnH-4, 5);
+        
+        ctx.textAlign = 'center';
+        ctx.fillStyle = isLocked ? '#888' : '#fff';
+        ctx.font = '20px "Press Start 2P", cursive';
+        ctx.fillText(isLocked ? "LOCKED" : "DRIVE!", cx, h - 68);
+        
+        // Show High Score
+        ctx.font = '12px "Press Start 2P", cursive';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(`HIGH SCORE: ${this.highScore}`, cx, h - 20);
+        
+        this.drawCRT(ctx, w, h);
         ctx.restore();
     }
     
@@ -2320,22 +2690,14 @@ class Game {
             ctx.globalAlpha = alpha;
             
             // --- Custom Styling: Cooler Box ---
-            
-            // 1. Shadow/Outer Border
             drawRect(ctx, 'rgba(0, 0, 0, 0.9)', x + 5, y + 5, popupW, popupH, 5);
-            drawRect(ctx, 'rgba(255, 255, 255, 0.2)', x - 2, y - 2, popupW + 4, popupH + 4, 7); // Neon glow edge
-            
-            // 2. Background
+            drawRect(ctx, 'rgba(255, 255, 255, 0.2)', x - 2, y - 2, popupW + 4, popupH + 4, 7); 
             drawRect(ctx, 'rgba(10, 10, 10, 0.95)', x, y, popupW, popupH, 5);
-            
-            // 3. Header Bar (Neon Cyan)
             drawRect(ctx, COLORS.NEON_CYAN, x, y, popupW, 8);
             
-            // 4. Icon (Customized) - Simple Star
             ctx.fillStyle = COLORS.NEON_PINK;
             drawRect(ctx, ctx.fillStyle, x + 12, y + 15, 30, 30);
             
-            // 5. Text
             ctx.font = '10px "Press Start 2P", cursive';
             ctx.fillStyle = '#fff';
             ctx.textAlign = 'left';
@@ -2374,13 +2736,24 @@ class Game {
             color: '#ff6432' // Orange/Red
         });
         
+        // Show Angel Ability if Angel Car
+        if (this.player.id === 'angel') {
+            inventory.push({
+                name: "Smite",
+                key: "[Z]",
+                active: this.zPressed, // Visual feedback for key press
+                cooldown: this.angelCooldown,
+                cooldownMax: this.angelCooldownMax,
+                color: '#ffd700' // Gold
+            });
+        }
+        
         x -= (inventory.length * boxSize + (inventory.length - 1) * pad) / 2;
 
         inventory.forEach((skill, index) => {
             let boxX = x + index * (boxSize + pad);
             
             ctx.save();
-            
             // Outer Border
             drawRect(ctx, '#000', boxX - 2, baseY - 2, boxSize + 4, boxSize + 4);
             // Inner Background
@@ -2424,62 +2797,50 @@ class Game {
     drawSkillIcon(ctx, skill, boxX, baseY, boxSize) {
         const cx = boxX + boxSize / 2;
         const cy = baseY + boxSize / 2;
-        const s = 1.0; // Base scale (don't adjust much, use raw pixels)
 
         if (skill.name === "Ghostly Rider") {
             ctx.save();
-            
-            // Draw Fading Car / Mask (Cyan/White)
-            
-            // 1. Ghostly effect (Car shape base)
             ctx.globalAlpha = 0.6;
-            ctx.fillStyle = skill.color; // Cyan
+            ctx.fillStyle = skill.color; 
             ctx.fillRect(cx - 15, cy - 5, 20, 10); 
-            
-            // 2. Head/Mask shape (slightly elevated)
             ctx.globalAlpha = 1.0;
             ctx.fillStyle = '#fff';
             ctx.fillRect(cx - 5, cy - 15, 10, 10);
-            
-            // 3. Fading effect (Cyan stripes)
             ctx.fillStyle = skill.color;
             ctx.fillRect(cx - 4, cy - 14, 8, 2);
             ctx.fillRect(cx - 4, cy - 10, 8, 2);
-            
-            // 4. Eyes (Dark)
             ctx.fillStyle = '#000';
             ctx.fillRect(cx - 2, cy - 12, 1, 1);
             ctx.fillRect(cx + 1, cy - 12, 1, 1);
-
             ctx.restore();
 
         } else if (skill.name === "Fire Wheel") {
             ctx.save();
-            
-            // Skull on Fire Icon (Orange/Red/Yellow)
-            
-            // 1. Fire flames (Yellow/Orange)
             ctx.fillStyle = '#ffeb3b';
             ctx.beginPath();
             ctx.moveTo(cx - 5, cy - 10);
             ctx.lineTo(cx + 5, cy - 10);
             ctx.lineTo(cx, cy - 2);
             ctx.fill();
-            
             ctx.fillStyle = '#ff6432';
             ctx.fillRect(cx - 3, cy - 7, 6, 5);
-
-            // 2. Skull Base (White/Grey)
             ctx.fillStyle = '#e0e0e0';
-            ctx.fillRect(cx - 6, cy - 1, 12, 6); // Head
-            ctx.fillRect(cx - 4, cy + 5, 8, 3);  // Jaw
-
-            // 3. Eyes & Nose (Black)
+            ctx.fillRect(cx - 6, cy - 1, 12, 6); 
+            ctx.fillRect(cx - 4, cy + 5, 8, 3);  
             ctx.fillStyle = '#000';
             ctx.fillRect(cx - 4, cy + 1, 2, 2);
             ctx.fillRect(cx + 2, cy + 1, 2, 2);
-            ctx.fillRect(cx - 1, cy + 4, 2, 1); // Nose
-
+            ctx.fillRect(cx - 1, cy + 4, 2, 1); 
+            ctx.restore();
+        } else if (skill.name === "Smite") {
+            ctx.save();
+            ctx.fillStyle = '#ffd700'; // Gold ring
+            ctx.beginPath();
+            ctx.arc(cx, cy, 10, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#fff';
+            ctx.stroke();
             ctx.restore();
         }
     }
@@ -2546,7 +2907,6 @@ class Game {
                  ctx.font = '10px "Press Start 2P", cursive';
                  ctx.fillStyle = COLORS.HP_RED;
                  ctx.fillText("RESET! HIT COP", cx, baseY + 68);
-                 // Acknowledge reset visual is handled by the immediate reset of driftTime
             }
 
             ctx.font = '16px "Press Start 2P", cursive'; // Restore font size
@@ -2567,9 +2927,10 @@ class Game {
         let renderList = [
             ...this.blood.map(o => ({obj:o, type:'blood', y:o.pos.y})),
             ...this.skids.map(o => ({obj:o, type:'skid', y:o.pos.y})),
+            ...this.floorEffects.map(o => ({obj:o, type:'floor', y:o.pos.y})), // Add fire trail here
             ...this.buildings.map(o => ({obj:o, type:'building', y:o.rect.bottom})),
             ...this.people.map(o => ({obj:o, type:'person', y:o.rect.bottom})),
-            ...this.sakura.map(o => ({obj:o, type:'sakura', y:o.pos.y})), // Sakura positioning is simpler
+            ...this.sakura.map(o => ({obj:o, type:'sakura', y:o.pos.y})),
             ...this.cops.map(o => ({obj:o, type:'car', y:o.pos.y})),
             ...this.civilians.map(o => ({obj:o, type:'car', y:o.pos.y})),
             {obj: this.player, type:'car', y:this.player.pos.y}
@@ -2579,7 +2940,11 @@ class Game {
 
         renderList.forEach(item => {
              let screenRect;
-             if (item.type === 'car' || item.type === 'sakura') screenRect = this.camera.apply(item.obj.getRect ? item.obj.getRect() : item.obj.rect);
+             if (item.type === 'car' || item.type === 'sakura' || item.type === 'floor') {
+                 // For floor effects we need a faux rect or just use pos
+                 if(item.obj.getRect) screenRect = this.camera.apply(item.obj.getRect());
+                 else screenRect = this.camera.apply(new Rect(item.obj.pos.x, item.obj.pos.y, 20, 20));
+             }
              else screenRect = this.camera.apply(item.obj.rect);
 
              if (screenRect.right < -50 || screenRect.left > w + 50 || screenRect.bottom < -50 || screenRect.top > h + 50) return;
@@ -2588,27 +2953,32 @@ class Game {
         ctx.save();
         ctx.translate(this.camera.offset.x, this.camera.offset.y);
         
-        // --- Ghostly Rider Visual Effect ---
-        if (this.ghostlyRiderActive) {
-            ctx.globalAlpha = 0.5;
-        }
+        // Ghostly Rider visual
+        if (this.ghostlyRiderActive) ctx.globalAlpha = 0.5;
 
+        // Draw Layer 1: Floor
         this.blood.forEach(b => b.draw(ctx));
         this.skids.forEach(s => s.draw(ctx));
         
-        renderList.filter(i => i.type !== 'blood' && i.type !== 'skid').forEach(item => {
+        // Draw Shockwaves
+        this.shockwaves.forEach(sw => sw.draw(ctx));
+        
+        // Draw Layer 2: Sorted Objects (includes Fire Trails now if sorted)
+        renderList.forEach(item => {
              // Don't draw player in menu
-             if (this.state === 'MENU' && item.obj === this.player) return;
+             if ((this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') && item.obj === this.player) return;
+             if (item.type === 'blood' || item.type === 'skid') return; // already drawn
              
-             // Restore opacity for other objects
-             if (this.ghostlyRiderActive && item.obj !== this.player) {
+             // Handle Ghostly Rider transparency
+             if (this.ghostlyRiderActive && item.obj !== this.player && item.type === 'car') {
                  ctx.globalAlpha = 1.0; 
                  item.obj.draw(ctx);
-                 ctx.globalAlpha = 0.5; // Re-apply for player and remaining objects
+                 ctx.globalAlpha = 0.5; 
              } else {
                  item.obj.draw(ctx);
              }
              
+             // Anger bubble
              if (item.type === 'person' && item.obj.isAngry && !item.obj.isDead) {
                  let bx = item.obj.pos.x, by = item.obj.rect.top - 15;
                  ctx.fillStyle = '#fff';
@@ -2616,23 +2986,18 @@ class Game {
                  ctx.font = 'bold 12px Arial';
                  let tm = ctx.measureText(txt);
                  let bw = tm.width + 10, bh = 20;
-                 
                  drawRect(ctx, '#fff', bx - bw/2, by - bh/2, bw, bh, 5);
                  ctx.beginPath(); ctx.moveTo(bx, by+bh/2); ctx.lineTo(bx-3, by+bh/2+4); ctx.lineTo(bx+3, by+bh/2+4); ctx.fill();
-                 
                  ctx.fillStyle = '#000';
                  ctx.textAlign = 'center';
                  ctx.fillText(txt, bx, by + 4);
              }
         });
 
-        // Reset alpha for particles/effects that should be full brightness
         ctx.globalAlpha = 1.0;
         this.particles.forEach(p => p.draw(ctx));
 
         ctx.restore();
-        // --- End of World Drawing ---
-
 
         if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
             this.drawIndicators();
@@ -2656,6 +3021,16 @@ class Game {
 
         if (this.state === 'MENU') {
             this.drawMenu(ctx, w, h);
+            return;
+        }
+        
+        if (this.state === 'SETTINGS') {
+            this.drawSettings(ctx, w, h);
+            return;
+        }
+
+        if (this.state === 'CAR_SELECT') {
+            this.drawCarSelection(ctx, w, h);
             return;
         }
 
