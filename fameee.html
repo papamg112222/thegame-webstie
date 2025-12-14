@@ -2641,6 +2641,19 @@ handleTouch(e) {
     const h = this.canvas.height;
     const touches = e.changedTouches;
 
+    // Button Config
+    const cx = w - 100;
+    const cy = h - 100;
+    const btnDrift = { x: cx, y: cy, r: 55, key: ' ' };
+    const dist = 100;
+    const rSat = 32;
+    const satellites = [
+        { x: cx - dist, y: cy, r: rSat, key: 'f' },           // Left (F)
+        { x: cx - dist*0.707, y: cy - dist*0.707, r: rSat, key: 'z' }, // Top-Left (Z)
+        { x: cx, y: cy - dist, r: rSat, key: 'x' },           // Top (X)
+        { x: cx + dist*0.6, y: cy - dist*0.8, r: rSat, key: 'c' } // Top-Right (C)
+    ];
+
     for (let i = 0; i < touches.length; i++) {
         let t = touches[i];
         let tx = t.clientX;
@@ -2648,7 +2661,7 @@ handleTouch(e) {
 
         if (e.type === 'touchstart') {
             // LEFT SIDE: Virtual Joystick
-            if (tx < w / 2 && ty > h / 2) {
+            if (tx < w / 2) {
                 if (this.touchData.stickID === null) {
                     this.touchData.stickID = t.identifier;
                     this.touchData.stickOrigin = new Vector2(tx, ty);
@@ -2656,27 +2669,19 @@ handleTouch(e) {
                 }
             }
             // RIGHT SIDE: Buttons
-            else if (tx > w / 2) {
-                // Skill Z (Big button)
-                if (new Rect(w - 120, h - 140, 80, 80).collidePoint(tx, ty)) {
-                    this.touchData.buttons['z'] = t.identifier;
-                    this.keys['z'] = true;
+            else {
+                // Check Drift
+                if (Math.hypot(tx - btnDrift.x, ty - btnDrift.y) < btnDrift.r) {
+                    this.touchData.buttons['drift'] = t.identifier;
+                    this.keys[' '] = true;
                 }
-                // Skill X (Ghost)
-                else if (new Rect(w - 180, h - 90, 50, 50).collidePoint(tx, ty)) {
-                    this.touchData.buttons['x'] = t.identifier;
-                    this.keys['x'] = true;
-                }
-                // Skill C (Fire)
-                else if (new Rect(w - 60, h - 220, 50, 50).collidePoint(tx, ty)) {
-                    this.touchData.buttons['c'] = t.identifier;
-                    this.keys['c'] = true;
-                }
-                // Enter/Exit Car (F) - Center bottom right
-                else if (new Rect(w - 200, h - 200, 50, 50).collidePoint(tx, ty)) {
-                    this.touchData.buttons['f'] = t.identifier;
-                    this.keys['f'] = true;
-                }
+                // Check Satellites
+                satellites.forEach(btn => {
+                    if (Math.hypot(tx - btn.x, ty - btn.y) < btn.r) {
+                        this.touchData.buttons[btn.key] = t.identifier;
+                        this.keys[btn.key] = true;
+                    }
+                });
             }
         } else if (e.type === 'touchmove') {
             if (t.identifier === this.touchData.stickID) {
@@ -2702,12 +2707,16 @@ handleTouch(e) {
                 this.keys['arrowright'] = false;
             }
             // Release buttons
-            for (let k in this.touchData.buttons) {
-                if (this.touchData.buttons[k] === t.identifier) {
-                    this.keys[k] = false;
-                    delete this.touchData.buttons[k];
-                }
+            if (t.identifier === this.touchData.buttons['drift']) {
+                this.keys[' '] = false;
+                delete this.touchData.buttons['drift'];
             }
+            satellites.forEach(btn => {
+                if (t.identifier === this.touchData.buttons[btn.key]) {
+                    this.keys[btn.key] = false;
+                    delete this.touchData.buttons[btn.key];
+                }
+            });
         }
     }
 }
@@ -2735,33 +2744,40 @@ drawMobileControls(ctx, w, h) {
         ctx.fillText("STEER", 100, h - 100);
     }
 
-    // Right Buttons
-    const drawBtn = (label, rect, color, active) => {
-        ctx.fillStyle = active ? '#fff' : 'rgba(0,0,0,0.5)';
-        ctx.beginPath();
-        // Circle shape
-        ctx.arc(rect.x + rect.w/2, rect.y + rect.h/2, rect.w/2, 0, Math.PI*2);
-        ctx.fill();
-        
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
-        ctx.stroke();
+    // Right Buttons Layout
+    const cx = w - 100;
+    const cy = h - 100;
+    const btnDrift = { x: cx, y: cy, r: 55, label: "DRIFT", color: '#ffeb3b', active: this.keys[' '] };
+    
+    const dist = 100;
+    const rSat = 32;
+    const satellites = [
+        { x: cx - dist, y: cy, r: rSat, label: "F", color: '#ffffff', active: this.keys['f'] },
+        { x: cx - dist*0.707, y: cy - dist*0.707, r: rSat, label: "Z", color: '#32ffff', active: this.keys['z'] },
+        { x: cx, y: cy - dist, r: rSat, label: "X", color: '#32ff64', active: this.keys['x'] },
+        { x: cx + dist*0.6, y: cy - dist*0.8, r: rSat, label: "C", color: '#ff6432', active: this.keys['c'] }
+    ];
 
-        ctx.fillStyle = active ? '#000' : '#fff';
-        ctx.font = '14px "Press Start 2P"';
+    // Helper Draw
+    const drawBtn = (b) => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+        ctx.fillStyle = b.active ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0,0,0,0.5)';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = b.color;
+        ctx.stroke();
+        ctx.fillStyle = b.active ? '#000' : '#fff';
+        ctx.font = (b.r > 40 ? '16px' : '12px') + ' "Press Start 2P"';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(label, rect.x + rect.w/2, rect.y + rect.h/2);
+        ctx.fillText(b.label, b.x, b.y);
     };
 
-    // Z (Unique)
-    drawBtn("Z", new Rect(w - 120, h - 140, 80, 80), '#32ffff', this.keys['z']);
-    // X (Ghost)
-    drawBtn("X", new Rect(w - 180, h - 90, 50, 50), '#32ff64', this.keys['x']);
-    // C (Fire)
-    drawBtn("C", new Rect(w - 60, h - 220, 50, 50), '#ff6432', this.keys['c']);
-    // F (Car)
-    drawBtn("F", new Rect(w - 200, h - 200, 50, 50), '#fff', this.keys['f']);
+    // Draw Satellites first
+    satellites.forEach(drawBtn);
+    // Draw Main
+    drawBtn(btnDrift);
 }
 
 // --- New Achievement Logic ---
@@ -4422,4 +4438,3 @@ const game = new Game();
 </script>
 </body>
 </html>
-```
