@@ -16,6 +16,9 @@ overflow: hidden;
 background-color: #14141e; /* COLOR_BG_VOID */
 font-family: 'Press Start 2P', cursive; /* Updated Font */
 touch-action: none; /* Prevent mobile scrolling */
+-webkit-touch-callout: none;
+-webkit-user-select: none;
+user-select: none;
 }
 canvas {
 display: block;
@@ -149,7 +152,6 @@ pointer-events: none;
 <script>
 /**
 * TOKYO DRIFT CHASE - ONLINE MULTIPLAYER EDITION
-* Powered by MQTT over WebSockets (Public Broker)
 */
 // --- Constants & Configuration ---
 const FPS = 60;
@@ -198,7 +200,7 @@ const CAR_TYPES = {
 'taxi': { w: 48, h: 24, speed: 1.1, colors: ['#e6af2d'] }, // Japanese Taxi
 'truck': { w: 56, h: 26, speed: 0.7, colors: ['#ffffff', '#32465a'] }
 };
-// --- PLAYER ROSTER (Updated with Unique Powers) ---
+// --- PLAYER ROSTER ---
 const PLAYER_ROSTER = [
 {
 id: 'standard',
@@ -379,7 +381,7 @@ stats: { speed: 11.0, turn: 4.5, accel: 0.30, hp: 666 },
 hasSpoiler: true,
 unlockScore: 6666,
 powerData: { name: "Hellfire", color: "#ff0000", cooldown: 60 * 60 },
-pedData: { style: 'cultist', shirt: '#000', hair: '#f00', hairStyle: 'long', ability: 'drain', abilityColor: '#f00' }
+pedData: { style: 'cultist', shirt: '#000', hair: '#f0f', hairStyle: 'long', ability: 'drain', abilityColor: '#f00' }
 },
 // --- 10 NEW CARS (UNIQUE SKILLS) ---
 {
@@ -463,7 +465,7 @@ desc: "Anti-Grav. [Z]: Bunny Hop (Jump Obstacles)",
 stats: { speed: 11.5, turn: 7.0, accel: 0.30, hp: 70 },
 hasSpoiler: false,
 unlockScore: 10000,
-powerData: { name: "Bunny Hop", color: "#aa00ff", cooldown: 5 * 60 }, // Short cooldown
+powerData: { name: "Bunny Hop", color: "#aa00ff", cooldown: 5 * 60 },
 pedData: { style: 'pilot', shirt: '#80f', hair: '#fff', hairStyle: 'short', ability: 'blink', abilityColor: '#a0f' }
 },
 {
@@ -668,19 +670,25 @@ constructor() {
 this.offset = new Vector2(0, 0);
 this.viewRect = new Rect(0, 0, 0, 0); // Updates in update()
 }
-update(target, gameW, gameH) {
+update(target, gameW, gameH, zoom = 1.0) {
 // Target is typically the player car or ped
 // We want target to be in center.
 // Camera offset shifts the WORLD, so if player moves right (+x), offset moves left (-x)
-const targetX = -target.pos.x + gameW / 2;
-const targetY = -target.pos.y + gameH / 2;
+const targetX = -target.pos.x + (gameW / 2) / zoom;
+const targetY = -target.pos.y + (gameH / 2) / zoom;
 this.offset.x += (targetX - this.offset.x) * 0.1;
 this.offset.y += (targetY - this.offset.y) * 0.1;
 // View rect determines what chunks to load. Inflate slightly for smooth loading.
-this.viewRect = new Rect(-this.offset.x - 600, -this.offset.y - 600, gameW + 1200, gameH + 1200);
+// Adjust view rect for zoom
+this.viewRect = new Rect(
+    -this.offset.x - 600, 
+    -this.offset.y - 600, 
+    (gameW / zoom) + 1200, 
+    (gameH / zoom) + 1200
+);
 }
 apply(rect) {
-// Transforms a world rect to screen rect
+// Transforms a world rect to screen rect (used for culling/input mostly, rendering uses transform)
 if (!rect) return new Rect(0,0,0,0); // Safety check
 return new Rect(rect.x + this.offset.x, rect.y + this.offset.y, rect.w, rect.h);
 }
@@ -2359,12 +2367,26 @@ this.ePressed = false; // Repair
 window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
 this.canvas.addEventListener('mousedown', e => this.onClick(e));
+
+// Touch Input Handling
+this.touchData = {
+    stickID: null,
+    stickOrigin: new Vector2(0,0),
+    stickCurr: new Vector2(0,0),
+    buttons: {} // key -> touchID
+};
+this.canvas.addEventListener('touchstart', e => this.handleTouch(e), {passive: false});
+this.canvas.addEventListener('touchmove', e => this.handleTouch(e), {passive: false});
+this.canvas.addEventListener('touchend', e => this.handleTouch(e), {passive: false});
+
 // Game State
 this.state = 'MENU'; // MENU, CAR_SELECT, PLAY, GAMEOVER, SETTINGS
 this.selectedCarIndex = 0; // Default car selection
 this.score = 0;
 this.highScore = 0;
 this.achievements = []; // { name: '...', timer: 180 }
+this.deviceMode = 'PC'; // PC or MOBILE
+
 // Buttons
 this.restartRect = new Rect(0,0,0,0);
 this.playRect = new Rect(0,0,0,0);
@@ -2373,6 +2395,8 @@ this.settingsRect = new Rect(0,0,0,0);
 this.resetProgressRect = new Rect(0,0,0,0);
 this.backRect = new Rect(0,0,0,0);
 this.tvToggleRect = new Rect(0,0,0,0);
+this.deviceToggleRect = new Rect(0,0,0,0); // New Device Button
+
 // Confirm Dialog Buttons
 this.confirmYesRect = new Rect(0,0,0,0);
 this.confirmNoRect = new Rect(0,0,0,0);
@@ -2427,8 +2451,8 @@ requestAnimationFrame(this.loop);
 saveData() {
 const data = {
 highScore: Math.max(this.score, this.highScore),
-// Unlocks are reset on reload, so we DO NOT save them here as requested
-tvMode: this.tvMode
+tvMode: this.tvMode,
+deviceMode: this.deviceMode
 };
 localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
 this.highScore = data.highScore;
@@ -2442,6 +2466,7 @@ this.highScore = data.highScore || 0;
 this.hasGhostlyRider = false;
 this.hasFireWheel = false;
 if (data.tvMode !== undefined) this.tvMode = data.tvMode;
+if (data.deviceMode !== undefined) this.deviceMode = data.deviceMode;
 }
 }
 resetData() {
@@ -2450,6 +2475,7 @@ this.highScore = 0;
 this.hasGhostlyRider = false;
 this.hasFireWheel = false;
 this.tvMode = true; // Default back to true
+this.deviceMode = 'PC';
 }
 setupAdminInput() {
     // Detect 1090
@@ -2589,6 +2615,9 @@ this.showResetConfirm = true;
 if (this.tvToggleRect.collidePoint(mx, my)) {
 this.tvMode = !this.tvMode;
 }
+if (this.deviceToggleRect.collidePoint(mx, my)) {
+this.deviceMode = this.deviceMode === 'PC' ? 'MOBILE' : 'PC';
+}
 } else if (this.state === 'CAR_SELECT') {
 // Check for drive button
 if (this.selectRect.collidePoint(mx, my)) {
@@ -2608,6 +2637,228 @@ this.state = 'PLAY';
 }
 }
 }
+
+// --- TOUCH CONTROLS ---
+handleTouch(e) {
+    if (this.state !== 'PLAY' || this.deviceMode !== 'MOBILE') return;
+    e.preventDefault();
+
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    const touches = e.changedTouches;
+
+    // Button Config (Smaller Size)
+    const cx = w - 80;
+    const cy = h - 80;
+    const btnDrift = { x: cx, y: cy, r: 40, key: ' ' }; // Radius 55 -> 40
+    const dist = 90; // Slightly closer
+    const rSat = 24; // Radius 32 -> 24
+    const satellites = [
+        { x: cx - dist, y: cy, r: rSat, key: 'f' },           // Left (F)
+        { x: cx - dist*0.707, y: cy - dist*0.707, r: rSat, key: 'z' }, // Top-Left (Z)
+        { x: cx, y: cy - dist, r: rSat, key: 'x' },           // Top (X)
+        { x: cx + dist*0.6, y: cy - dist*0.8, r: rSat, key: 'c' } // Top-Right (C)
+    ];
+
+    for (let i = 0; i < touches.length; i++) {
+        let t = touches[i];
+        let tx = t.clientX;
+        let ty = t.clientY;
+
+        if (e.type === 'touchstart') {
+            // LEFT SIDE: Virtual Joystick
+            if (tx < w / 2) {
+                if (this.touchData.stickID === null) {
+                    this.touchData.stickID = t.identifier;
+                    this.touchData.stickOrigin = new Vector2(tx, ty);
+                    this.touchData.stickCurr = new Vector2(tx, ty);
+                }
+            }
+            // RIGHT SIDE: Buttons
+            else {
+                // Check Drift
+                if (Math.hypot(tx - btnDrift.x, ty - btnDrift.y) < btnDrift.r + 10) { // +10 padding for touch
+                    this.touchData.buttons['drift'] = t.identifier;
+                    this.keys[' '] = true;
+                }
+                // Check Satellites
+                satellites.forEach(btn => {
+                    if (Math.hypot(tx - btn.x, ty - btn.y) < btn.r + 10) {
+                        this.touchData.buttons[btn.key] = t.identifier;
+                        this.keys[btn.key] = true;
+                    }
+                });
+            }
+        } else if (e.type === 'touchmove') {
+            if (t.identifier === this.touchData.stickID) {
+                this.touchData.stickCurr = new Vector2(tx, ty);
+                // Update Keys based on vector
+                let diff = this.touchData.stickCurr.sub(this.touchData.stickOrigin);
+                // Clamp
+                if (diff.mag() > 50) diff = diff.normalize().mult(50);
+                this.touchData.stickCurr = this.touchData.stickOrigin.add(diff);
+
+                // Map to Keys
+                this.keys['arrowup'] = diff.y < -20;
+                this.keys['arrowdown'] = diff.y > 20;
+                this.keys['arrowleft'] = diff.x < -20;
+                this.keys['arrowright'] = diff.x > 20;
+            }
+        } else if (e.type === 'touchend' || e.type === 'touchcancel') {
+            if (t.identifier === this.touchData.stickID) {
+                this.touchData.stickID = null;
+                this.keys['arrowup'] = false;
+                this.keys['arrowdown'] = false;
+                this.keys['arrowleft'] = false;
+                this.keys['arrowright'] = false;
+            }
+            // Release buttons
+            if (t.identifier === this.touchData.buttons['drift']) {
+                this.keys[' '] = false;
+                delete this.touchData.buttons['drift'];
+            }
+            satellites.forEach(btn => {
+                if (t.identifier === this.touchData.buttons[btn.key]) {
+                    this.keys[btn.key] = false;
+                    delete this.touchData.buttons[btn.key];
+                }
+            });
+        }
+    }
+}
+
+drawMobileControls(ctx, w, h) {
+    // Left Joystick
+    if (this.touchData.stickID !== null) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.beginPath();
+        ctx.arc(this.touchData.stickOrigin.x, this.touchData.stickOrigin.y, 50, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(this.touchData.stickCurr.x, this.touchData.stickCurr.y, 25, 0, Math.PI*2);
+        ctx.fill();
+    } else {
+        // Idle hint
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.beginPath();
+        ctx.arc(100, h - 100, 50, 0, Math.PI*2);
+        ctx.fill();
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#aaa';
+        ctx.font = '10px "Press Start 2P"';
+        ctx.fillText("STEER", 100, h - 100);
+    }
+
+    // Right Buttons Layout (Smaller)
+    const cx = w - 80;
+    const cy = h - 80;
+    const btnDrift = { x: cx, y: cy, r: 40, label: "DRIFT", color: '#ffeb3b', active: this.keys[' '] };
+    
+    const dist = 90;
+    const rSat = 24;
+    const satellites = [
+        { x: cx - dist, y: cy, r: rSat, label: "F", color: '#ffffff', active: this.keys['f'] },
+        { x: cx - dist*0.707, y: cy - dist*0.707, r: rSat, label: "Z", color: '#32ffff', active: this.keys['z'] },
+        { x: cx, y: cy - dist, r: rSat, label: "X", color: '#32ff64', active: this.keys['x'] },
+        { x: cx + dist*0.6, y: cy - dist*0.8, r: rSat, label: "C", color: '#ff6432', active: this.keys['c'] }
+    ];
+
+    // Helper Draw
+    const drawBtn = (b) => {
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+        ctx.fillStyle = b.active ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0,0,0,0.5)';
+        ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = b.color;
+        ctx.stroke();
+        ctx.fillStyle = b.active ? '#000' : '#fff';
+        ctx.font = (b.r > 30 ? '12px' : '10px') + ' "Press Start 2P"';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(b.label, b.x, b.y);
+    };
+
+    // Draw Satellites first
+    satellites.forEach(drawBtn);
+    // Draw Main
+    drawBtn(btnDrift);
+}
+
+drawMinimap(ctx, w, h) {
+    if (this.deviceMode !== 'MOBILE') return;
+    
+    // Config
+    const mapSize = 120;
+    const mapX = w - mapSize - 20;
+    const mapY = 20;
+    const range = 1500; // World units radius to show
+    
+    ctx.save();
+    
+    // Background
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.fillRect(mapX, mapY, mapSize, mapSize);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(mapX, mapY, mapSize, mapSize);
+    
+    // Clip
+    ctx.beginPath();
+    ctx.rect(mapX, mapY, mapSize, mapSize);
+    ctx.clip();
+    
+    const centerObj = this.isWalking ? this.playerPed : this.player;
+    const cx = centerObj.pos.x;
+    const cy = centerObj.pos.y;
+    
+    // Draw Buildings
+    ctx.fillStyle = "#555";
+    for(let b of this.buildings) {
+        let dx = b.pos.x - cx;
+        let dy = b.pos.y - cy;
+        // Optimization: simple box check
+        if (Math.abs(dx) > range || Math.abs(dy) > range) continue;
+        
+        // Map to minimap coords
+        let mx = mapX + mapSize/2 + (dx / range) * (mapSize/2);
+        let my = mapY + mapSize/2 + (dy / range) * (mapSize/2);
+        
+        let mw = (b.w / range) * (mapSize/2);
+        let mh = (b.h / range) * (mapSize/2);
+        
+        ctx.fillRect(mx - mw/2, my - mh/2, mw, mh);
+    }
+    
+    // Draw Remote Players
+    for(let id in this.multiplayer.remotePlayers) {
+        let p = this.multiplayer.remotePlayers[id].car;
+        let dx = p.pos.x - cx;
+        let dy = p.pos.y - cy;
+        if (Math.abs(dx) > range || Math.abs(dy) > range) continue;
+        
+        let mx = mapX + mapSize/2 + (dx / range) * (mapSize/2);
+        let my = mapY + mapSize/2 + (dy / range) * (mapSize/2);
+        
+        ctx.fillStyle = "#32ff64"; // Green Dot
+        ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI*2); ctx.fill();
+    }
+    
+    // Draw Self
+    ctx.fillStyle = "#fff"; // White Arrow
+    ctx.translate(mapX + mapSize/2, mapY + mapSize/2);
+    ctx.rotate(centerObj.angle * Math.PI / 180);
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(3, 4);
+    ctx.lineTo(0, 2);
+    ctx.lineTo(-3, 4);
+    ctx.fill();
+    
+    ctx.restore();
+}
+
 // --- New Achievement Logic ---
 showAchievement(name) {
 // Only show if not already showing the same one and not in the list
@@ -3061,6 +3312,17 @@ let dt = this.timeScale;
 // Input
 this.player.rotDirection = 0;
 this.player.accInput = 0;
+
+// HANDLE ONLINE UI VISIBILITY
+const onlineUI = document.getElementById('online-ui');
+if (onlineUI) {
+    if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+        onlineUI.style.display = 'none';
+    } else {
+        onlineUI.style.display = 'flex';
+    }
+}
+
 if (this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') {
 // Auto-move camera for menu background
 this.menuCamPos.y -= 6;
@@ -3339,7 +3601,9 @@ if (f instanceof Mine && !f.triggered) {
 });
 // Camera tracks player OR car
 let targetObj = this.isWalking ? this.playerPed : this.player;
-this.camera.update(targetObj, this.canvas.width, this.canvas.height);
+// --- MOBILE ZOOM OUT ---
+let zoom = this.deviceMode === 'MOBILE' ? 0.6 : 1.0;
+this.camera.update(targetObj, this.canvas.width, this.canvas.height, zoom);
 // World Generation
 this.updateChunks();
 // Spawn Cops
@@ -3588,33 +3852,41 @@ const cx = w / 2;
 const cy = h / 2;
 // Container Block
 let contW = 500;
-let contH = 400;
+let contH = 450;
 drawRect(ctx, '#444', cx - contW/2, cy - contH/2, contW, contH, 10);
 drawRect(ctx, '#222', cx - contW/2 + 5, cy - contH/2 + 5, contW - 10, contH - 10, 8);
 ctx.fillStyle = '#fff';
 ctx.font = '30px "Press Start 2P", cursive';
-ctx.fillText("SETTINGS", cx, cy - 130);
+ctx.fillText("SETTINGS", cx, cy - 160);
 // Reset Progress Button
 let btnW = 350;
-let btnH = 60;
-this.resetProgressRect = new Rect(cx - btnW/2, cy - 40, btnW, btnH);
+let btnH = 50;
+this.resetProgressRect = new Rect(cx - btnW/2, cy - 80, btnW, btnH);
 drawRect(ctx, '#000', this.resetProgressRect.x, this.resetProgressRect.y, btnW, btnH, 5);
 drawRect(ctx, '#c83232', this.resetProgressRect.x+4, this.resetProgressRect.y+4, btnW-8, btnH-8, 5);
 ctx.fillStyle = '#fff';
 ctx.font = '20px "Press Start 2P", cursive';
-ctx.fillText("RESET PROGRESS", cx, cy - 5);
+ctx.fillText("RESET PROGRESS", cx, cy - 50);
 // TV Toggle Button
-this.tvToggleRect = new Rect(cx - btnW/2, cy + 40, btnW, btnH);
+this.tvToggleRect = new Rect(cx - btnW/2, cy - 10, btnW, btnH);
 drawRect(ctx, '#000', this.tvToggleRect.x, this.tvToggleRect.y, btnW, btnH, 5);
 drawRect(ctx, this.tvMode ? COLORS.NEON_GREEN : '#555', this.tvToggleRect.x+4, this.tvToggleRect.y+4, btnW-8, btnH-8, 5);
 ctx.fillStyle = '#fff';
-ctx.fillText(`TV EFFECTS: ${this.tvMode ? "ON" : "OFF"}`, cx, cy + 75);
+ctx.fillText(`TV EFFECTS: ${this.tvMode ? "ON" : "OFF"}`, cx, cy + 20);
+
+// DEVICE TOGGLE
+this.deviceToggleRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
+drawRect(ctx, '#000', this.deviceToggleRect.x, this.deviceToggleRect.y, btnW, btnH, 5);
+drawRect(ctx, this.deviceMode === 'MOBILE' ? COLORS.NEON_CYAN : '#555', this.deviceToggleRect.x+4, this.deviceToggleRect.y+4, btnW-8, btnH-8, 5);
+ctx.fillStyle = '#fff';
+ctx.fillText(`DEVICE: ${this.deviceMode}`, cx, cy + 90);
+
 // Back Button
-this.backRect = new Rect(cx - btnW/2, cy + 120, btnW, btnH);
+this.backRect = new Rect(cx - btnW/2, cy + 130, btnW, btnH);
 drawRect(ctx, '#000', this.backRect.x, this.backRect.y, btnW, btnH, 5);
 drawRect(ctx, '#505050', this.backRect.x+4, this.backRect.y+4, btnW-8, btnH-8, 5);
 ctx.fillStyle = '#fff';
-ctx.fillText("BACK", cx, cy + 155);
+ctx.fillText("BACK", cx, cy + 160);
 // Confirmation Modal Overlay
 if (this.showResetConfirm) {
 ctx.fillStyle = 'rgba(0,0,0,0.8)';
@@ -4118,6 +4390,13 @@ else screenRect = this.camera.apply(item.obj.rect);
 if (screenRect.right < -50 || screenRect.left > w + 50 || screenRect.bottom < -50 || screenRect.top > h + 50) return;
 });
 ctx.save();
+// --- MOBILE ZOOM OUT ---
+// Scale around the center of the screen
+let zoom = this.deviceMode === 'MOBILE' ? 0.6 : 1.0;
+ctx.translate(w/2, h/2);
+ctx.scale(zoom, zoom);
+ctx.translate(-w/2, -h/2);
+
 ctx.translate(this.camera.offset.x, this.camera.offset.y);
 // Ghostly Rider visual
 if (this.ghostlyRiderActive || this.player.isPhasing) ctx.globalAlpha = 0.5;
@@ -4205,6 +4484,14 @@ ctx.fillText("RETURN TO CAR", w/2, h - 100);
 if (this.showProgress) {
 this.drawAchievementProgress(ctx, w, h);
 }
+
+// DRAW MOBILE CONTROLS IF ENABLED
+if (this.deviceMode === 'MOBILE') {
+    this.drawMobileControls(ctx, w, h);
+    // Draw Minimap for Mobile
+    this.drawMinimap(ctx, w, h);
+}
+
 }
 this.drawAchievementPopUp(ctx, w, h);
 this.drawSkillInventory(ctx, w, h);
