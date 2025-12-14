@@ -41,6 +41,7 @@ image-rendering: crisp-edges;
     box-shadow: 0 4px 0 rgba(0,0,0,0.5);
     pointer-events: none; /* Let clicks pass through */
     z-index: 100;
+    transition: opacity 0.3s;
 }
 
 .status-dot {
@@ -157,6 +158,9 @@ pointer-events: none;
 const FPS = 60;
 const BLOCK_SIZE = 380;
 const BUILDING_GAP = 20;
+// Sprite Cache to prevent lag
+const SPRITE_CACHE = {};
+
 // Colors
 const COLORS = {
 BG_VOID: '#14141e',
@@ -844,6 +848,10 @@ this.brakingVisual = false;
 this.fearActive = false; // For Ambulance fear effect
 }
 createCarSprite() {
+// SPRITE CACHING OPTIMIZATION
+let cacheKey = this.id + '-' + this.color + '-' + this.isCop + '-' + this.isCivilian + '-' + (this.hasSpoiler?'s':'n');
+if (SPRITE_CACHE[cacheKey]) return SPRITE_CACHE[cacheKey];
+
 const cvs = document.createElement('canvas');
 // Increase canvas size for Angel Wings or other large features
 let padding = 0;
@@ -883,7 +891,7 @@ let ly = h/2 + Math.sin(ang) * (h/2 - 4);
 ctx.fillStyle = i%2===0 ? '#ff0000' : '#ffff00';
 ctx.fillRect(lx-1, ly-1, 3, 3);
 }
-return cvs;
+SPRITE_CACHE[cacheKey] = cvs; return cvs;
 }
 // Special Rendering for F1 & Neon Rider (Bike like)
 if (this.id === 'f1' || this.id === 'neon') {
@@ -912,7 +920,7 @@ if (this.id === 'neon') {
     ctx.fillStyle = '#000';
     ctx.fillRect(w/2 - 12, h-4, 24, 4);
 }
-return cvs;
+SPRITE_CACHE[cacheKey] = cvs; return cvs;
 }
 // Special Rendering for Hover
 if (this.id === 'hover') {
@@ -922,7 +930,7 @@ if (this.id === 'hover') {
     ctx.beginPath(); ctx.moveTo(w, h/2); ctx.lineTo(w/2, 0); ctx.lineTo(0, h/2); ctx.lineTo(w/2, h); ctx.fill();
     ctx.fillStyle = '#00ffff'; // Engine glow
     ctx.beginPath(); ctx.arc(w/2, h-5, 5, 0, Math.PI*2); ctx.fill();
-    return cvs;
+    SPRITE_CACHE[cacheKey] = cvs; return cvs;
 }
 // Standard Car Rendering
 // Wheels with more detail
@@ -1151,6 +1159,7 @@ ctx.beginPath(); ctx.moveTo(w-5, bodyY); ctx.lineTo(w+5, bodyY-10); ctx.lineTo(w
 ctx.beginPath(); ctx.moveTo(w-5, bodyY+bodyH); ctx.lineTo(w+5, bodyY+bodyH+10); ctx.lineTo(w-15, bodyY+bodyH-5); ctx.fill();
 }
 }
+SPRITE_CACHE[cacheKey] = cvs;
 return cvs;
 }
 getRect() {
@@ -2245,6 +2254,7 @@ class MultiplayerManager {
         this.myId = 'p_' + Math.random().toString(36).substr(2, 9);
         this.lastPublish = 0;
         this.publishInterval = 50; // ms (20 updates/sec)
+        this.lastCount = -1; // Optimization for DOM updates
         
         // Topic Prefix (unique enough to avoid collisions with other users of the broker)
         this.topicBase = 'tokyo_drift_chase_v1/global/'; 
@@ -2329,9 +2339,13 @@ class MultiplayerManager {
     }
 
     updateUI() {
-        const uiText = document.getElementById('online-text');
         const count = 1 + Object.keys(this.remotePlayers).length;
-        uiText.innerText = "online: " + count;
+        // Optimization: Only update DOM if count changes to prevent thrashing
+        if (this.lastCount !== count) {
+            this.lastCount = count;
+            const uiText = document.getElementById('online-text');
+            if(uiText) uiText.innerText = "online: " + count;
+        }
     }
 
     draw(ctx, camera) {
@@ -2800,14 +2814,8 @@ drawMinimap(ctx, w, h) {
     // Background
     ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     ctx.fillRect(mapX, mapY, mapSize, mapSize);
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(mapX, mapY, mapSize, mapSize);
     
-    // Clip
-    ctx.beginPath();
-    ctx.rect(mapX, mapY, mapSize, mapSize);
-    ctx.clip();
+    // Optimisation: Skip expensive clip() on mobile. Use simple rectangle bound checking in loop.
     
     const centerObj = this.isWalking ? this.playerPed : this.player;
     const cx = centerObj.pos.x;
@@ -2828,7 +2836,10 @@ drawMinimap(ctx, w, h) {
         let mw = (b.w / range) * (mapSize/2);
         let mh = (b.h / range) * (mapSize/2);
         
-        ctx.fillRect(mx - mw/2, my - mh/2, mw, mh);
+        // Simple bounds check drawing
+        if (mx > mapX && mx < mapX + mapSize && my > mapY && my < mapY + mapSize) {
+             ctx.fillRect(mx - mw/2, my - mh/2, mw, mh);
+        }
     }
     
     // Draw Remote Players
@@ -2857,6 +2868,11 @@ drawMinimap(ctx, w, h) {
     ctx.fill();
     
     ctx.restore();
+    
+    // Draw Border on top
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(mapX, mapY, mapSize, mapSize);
 }
 
 // --- New Achievement Logic ---
@@ -3316,9 +3332,12 @@ this.player.accInput = 0;
 // HANDLE ONLINE UI VISIBILITY
 const onlineUI = document.getElementById('online-ui');
 if (onlineUI) {
-    if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+    const shouldHide = (this.state === 'PLAY' || this.state === 'GAMEOVER');
+    // Optimization: assume 'flex' is default, checking style.display can cause reflow if we write it every frame
+    // We'll trust the state change logic.
+    if (shouldHide && onlineUI.style.display !== 'none') {
         onlineUI.style.display = 'none';
-    } else {
+    } else if (!shouldHide && onlineUI.style.display === 'none') {
         onlineUI.style.display = 'flex';
     }
 }
