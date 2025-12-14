@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Tokyo Drift</title>
+<title>Tokyo Drift - Mobile Fix</title>
 <!-- Imported Pixel Font -->
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <!-- MQTT.js Client Library for Serverless Multiplayer -->
@@ -2364,2194 +2365,1060 @@ class MultiplayerManager {
 
 // --- Main Game Class ---
 class Game {
-constructor() {
-this.canvas = document.getElementById('gameCanvas');
-this.ctx = this.canvas.getContext('2d');
-this.ctx.imageSmoothingEnabled = false;
-this.resize();
-window.addEventListener('resize', () => this.resize());
-// Inputs
-this.keys = {};
-this.kPressed = false; // For K key toggle
-this.zPressed = false; // For Power Ability
-this.leftPressed = false; // Menu navigation
-this.rightPressed = false; // Menu navigation
-this.fPressed = false; // Enter/Exit Car
-this.ePressed = false; // Repair
-window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
-window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
-this.canvas.addEventListener('mousedown', e => this.onClick(e));
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.ctx.imageSmoothingEnabled = false;
+        this.resize();
+        window.addEventListener('resize', () => this.resize());
 
-// Touch Input Handling
-this.touchData = {
-    stickID: null,
-    stickOrigin: new Vector2(0,0),
-    stickCurr: new Vector2(0,0),
-    buttons: {} // key -> touchID
-};
-this.canvas.addEventListener('touchstart', e => this.handleTouch(e), {passive: false});
-this.canvas.addEventListener('touchmove', e => this.handleTouch(e), {passive: false});
-this.canvas.addEventListener('touchend', e => this.handleTouch(e), {passive: false});
+        // Inputs
+        this.keys = {};
+        this.kPressed = false; 
+        this.zPressed = false; 
+        this.leftPressed = false; 
+        this.rightPressed = false; 
+        this.fPressed = false; 
+        this.ePressed = false; 
+        window.addEventListener('keydown', e => this.keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', e => this.keys[e.key.toLowerCase()] = false);
+        this.canvas.addEventListener('mousedown', e => this.onClick(e));
 
-// Game State
-this.state = 'MENU'; // MENU, CAR_SELECT, PLAY, GAMEOVER, SETTINGS
-this.selectedCarIndex = 0; // Default car selection
-this.score = 0;
-this.highScore = 0;
-this.achievements = []; // { name: '...', timer: 180 }
-this.deviceMode = 'PC'; // PC or MOBILE
-
-// Buttons
-this.restartRect = new Rect(0,0,0,0);
-this.playRect = new Rect(0,0,0,0);
-this.selectRect = new Rect(0,0,0,0);
-this.settingsRect = new Rect(0,0,0,0);
-this.resetProgressRect = new Rect(0,0,0,0);
-this.backRect = new Rect(0,0,0,0);
-this.tvToggleRect = new Rect(0,0,0,0);
-this.deviceToggleRect = new Rect(0,0,0,0); // New Device Button
-
-// Confirm Dialog Buttons
-this.confirmYesRect = new Rect(0,0,0,0);
-this.confirmNoRect = new Rect(0,0,0,0);
-this.showResetConfirm = false;
-// --- ACHIEVEMENT & SKILL MECHANISMS ---
-this.hasGhostlyRider = false;
-this.ghostlyRiderActive = false;
-this.ghostlyRiderCooldown = 0;
-this.ghostlyRiderDuration = 0;
-this.ghostlyRiderCooldownMax = 15 * FPS;
-this.ghostlyRiderDurationMax = 15 * FPS;
-this.hasFireWheel = false;
-this.fireWheelActive = false;
-this.fireWheelCooldown = 0;
-this.fireWheelDuration = 0;
-this.fireWheelCooldownMax = 15 * FPS;
-this.fireWheelDurationMax = 15 * FPS;
-// Z Power
-this.powerCooldown = 0;
-this.powerActive = false; // For duration based powers (Ramming)
-this.powerTimer = 0;
-this.timeScale = 1.0; // Global time scale for Time Slow ability
-this.turnCount = 0;
-this.driftTime = 0;
-this.showProgress = false;
-// TV Mode Settings
-this.tvMode = true; // Default ON
-// Intersection turn tracking
-this.isInsideIntersection = false;
-this.playerInitialAngle = null;
-// On-Foot Mechanics
-this.isWalking = false;
-this.playerPed = null; // Will be an instance of Person when walking
-this.playerPosHistory = []; // For Chronos Rewind
-
-// --- MULTIPLAYER SETUP ---
-this.multiplayer = new MultiplayerManager();
-
-// --- ADMIN PANEL SETUP ---
-this.adminOpen = false;
-this.keyBuffer = "";
-this.setupAdminInput();
-
-// Load Data
-this.loadData();
-// Initialize game world so background renders in Menu
-this.initGame();
-this.loop = this.loop.bind(this);
-requestAnimationFrame(this.loop);
-}
-// --- Persistence ---
-saveData() {
-const data = {
-highScore: Math.max(this.score, this.highScore),
-tvMode: this.tvMode,
-deviceMode: this.deviceMode
-};
-localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
-this.highScore = data.highScore;
-}
-loadData() {
-const saved = localStorage.getItem('tokyo_drift_chase_v2');
-if (saved) {
-const data = JSON.parse(saved);
-this.highScore = data.highScore || 0;
-// Unlocks reset to false
-this.hasGhostlyRider = false;
-this.hasFireWheel = false;
-if (data.tvMode !== undefined) this.tvMode = data.tvMode;
-if (data.deviceMode !== undefined) this.deviceMode = data.deviceMode;
-}
-}
-resetData() {
-localStorage.removeItem('tokyo_drift_chase_v2');
-this.highScore = 0;
-this.hasGhostlyRider = false;
-this.hasFireWheel = false;
-this.tvMode = true; // Default back to true
-this.deviceMode = 'PC';
-}
-setupAdminInput() {
-    // Detect 1090
-    window.addEventListener('keydown', (e) => {
-        this.keyBuffer += e.key;
-        if (this.keyBuffer.length > 10) this.keyBuffer = this.keyBuffer.slice(-10);
+        // --- NEW ROBUST TOUCH SETUP ---
+        this.activeTouches = new Map(); 
+        this.stickOrigin = null;
+        this.stickCurrent = null;
         
-        if (this.keyBuffer.endsWith('1090')) {
-            this.adminOpen = !this.adminOpen;
-            const panel = document.getElementById('admin-panel');
-            panel.style.display = this.adminOpen ? 'flex' : 'none';
-            if (this.adminOpen) {
-                // Populate values when opening
-                document.getElementById('adm-score').value = this.score;
-                document.getElementById('adm-speed').value = this.player.customMaxSpeed || 9.0;
-                document.getElementById('adm-armor').value = this.player.health ? this.player.health.maxHp : 100;
-                document.getElementById('adm-handling').value = this.player.customTurnSpeed || 4.0;
-            }
+        // Auto-Detect Mobile Device
+        this.deviceMode = ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? 'MOBILE' : 'PC';
+        
+        this.canvas.addEventListener('touchstart', e => this.handleTouch(e), {passive: false});
+        this.canvas.addEventListener('touchmove', e => this.handleTouch(e), {passive: false});
+        this.canvas.addEventListener('touchend', e => this.handleTouch(e), {passive: false});
+        this.canvas.addEventListener('touchcancel', e => this.handleTouch(e), {passive: false});
+
+        // Game State
+        this.state = 'MENU'; 
+        this.selectedCarIndex = 0; 
+        this.score = 0;
+        this.highScore = 0;
+        this.achievements = []; 
+
+        // Buttons
+        this.restartRect = new Rect(0,0,0,0);
+        this.playRect = new Rect(0,0,0,0);
+        this.selectRect = new Rect(0,0,0,0);
+        this.settingsRect = new Rect(0,0,0,0);
+        this.resetProgressRect = new Rect(0,0,0,0);
+        this.backRect = new Rect(0,0,0,0);
+        this.tvToggleRect = new Rect(0,0,0,0);
+        this.deviceToggleRect = new Rect(0,0,0,0); 
+        this.confirmYesRect = new Rect(0,0,0,0);
+        this.confirmNoRect = new Rect(0,0,0,0);
+        this.showResetConfirm = false;
+
+        // --- ACHIEVEMENT & SKILL MECHANISMS ---
+        this.hasGhostlyRider = false;
+        this.ghostlyRiderActive = false;
+        this.ghostlyRiderCooldown = 0;
+        this.ghostlyRiderDuration = 0;
+        this.ghostlyRiderCooldownMax = 15 * FPS;
+        this.ghostlyRiderDurationMax = 15 * FPS;
+        this.hasFireWheel = false;
+        this.fireWheelActive = false;
+        this.fireWheelCooldown = 0;
+        this.fireWheelDuration = 0;
+        this.fireWheelCooldownMax = 15 * FPS;
+        this.fireWheelDurationMax = 15 * FPS;
+        this.powerCooldown = 0;
+        this.powerActive = false; 
+        this.powerTimer = 0;
+        this.timeScale = 1.0; 
+        this.turnCount = 0;
+        this.driftTime = 0;
+        this.showProgress = false;
+        this.tvMode = true; 
+        this.isInsideIntersection = false;
+        this.playerInitialAngle = null;
+        this.isWalking = false;
+        this.playerPed = null; 
+        this.playerPosHistory = []; 
+
+        this.multiplayer = new MultiplayerManager();
+        this.adminOpen = false;
+        this.keyBuffer = "";
+        this.setupAdminInput();
+        this.loadData();
+        this.initGame();
+        this.loop = this.loop.bind(this);
+        requestAnimationFrame(this.loop);
+    }
+
+    saveData() {
+        const data = {
+            highScore: Math.max(this.score, this.highScore),
+            tvMode: this.tvMode,
+            deviceMode: this.deviceMode
+        };
+        localStorage.setItem('tokyo_drift_chase_v2', JSON.stringify(data));
+        this.highScore = data.highScore;
+    }
+    loadData() {
+        const saved = localStorage.getItem('tokyo_drift_chase_v2');
+        if (saved) {
+            const data = JSON.parse(saved);
+            this.highScore = data.highScore || 0;
+            this.hasGhostlyRider = false;
+            this.hasFireWheel = false;
+            if (data.tvMode !== undefined) this.tvMode = data.tvMode;
+            if (data.deviceMode !== undefined) this.deviceMode = data.deviceMode;
         }
-    });
-
-    // Inputs
-    const scoreInp = document.getElementById('adm-score');
-    const speedInp = document.getElementById('adm-speed');
-    const armorInp = document.getElementById('adm-armor');
-    const handInp = document.getElementById('adm-handling');
-
-    // Prevent game controls when typing in inputs
-    const stopProp = (e) => e.stopPropagation();
-    scoreInp.addEventListener('keydown', stopProp);
-    speedInp.addEventListener('keydown', stopProp);
-    armorInp.addEventListener('keydown', stopProp);
-    handInp.addEventListener('keydown', stopProp);
-
-    // Apply Changes
-    scoreInp.addEventListener('input', (e) => { this.score = parseInt(e.target.value) || 0; });
-    speedInp.addEventListener('input', (e) => { this.player.customMaxSpeed = parseFloat(e.target.value) || 9.0; });
-    handInp.addEventListener('input', (e) => { this.player.customTurnSpeed = parseFloat(e.target.value) || 4.0; });
-    armorInp.addEventListener('input', (e) => { 
-        let val = parseInt(e.target.value) || 100;
-        if (this.player.health) {
-            this.player.health.maxHp = val;
-            // Refill health to max to apply effect immediately
-            for(let k in this.player.health.parts) this.player.health.parts[k] = val;
-        }
-    });
-}
-initGame() {
-// Init player based on Selection
-let carSpec = PLAYER_ROSTER[this.selectedCarIndex];
-// Create car
-this.player = new Car(0, 0, carSpec.color);
-// Apply stats & ID
-this.player.type = carSpec.type;
-this.player.id = carSpec.id; // Important for sprite gen
-this.player.hasSpoiler = carSpec.hasSpoiler;
-this.player.sprite = this.player.createCarSprite();
-this.player.customMaxSpeed = carSpec.stats.speed;
-this.player.customTurnSpeed = carSpec.stats.turn;
-this.player.customAccel = carSpec.stats.accel;
-this.player.health = new CarHealth(carSpec.stats.hp);
-this.player.powerData = carSpec.powerData;
-this.player.selectedCarIndex = this.selectedCarIndex; // For networking
-
-this.camera = new Camera();
-this.buildings = [];
-this.people = [];
-this.cops = [];
-this.civilians = [];
-this.sakura = [];
-this.particles = [];
-this.skids = [];
-this.floorEffects = []; // New layer for floor trails & oil
-this.shockwaves = []; // New list for Angel ability
-this.blood = [];
-this.loadedChunks = new Set();
-// Setup menu camera pos
-this.menuCamPos = new Vector2(0, 0);
-this.spawnTimer = 0;
-this.score = 0;
-// Reset state
-this.ghostlyRiderActive = false;
-this.ghostlyRiderCooldown = 0;
-this.ghostlyRiderDuration = 0;
-this.fireWheelActive = false;
-this.fireWheelDuration = 0;
-this.fireWheelCooldown = 0;
-this.powerCooldown = 0;
-this.powerActive = false;
-this.powerTimer = 0;
-this.timeScale = 1.0;
-this.turnCount = 0;
-this.driftTime = 0;
-this.isInsideIntersection = false;
-this.playerInitialAngle = null;
-// Reset walking state
-this.isWalking = false;
-this.playerPed = null;
-this.playerPosHistory = [];
-
-// Connect Multiplayer
-this.multiplayer.connect();
-}
-resize() {
-this.canvas.width = window.innerWidth;
-this.canvas.height = window.innerHeight;
-this.ctx.imageSmoothingEnabled = false;
-}
-onClick(e) {
-const mx = e.clientX;
-const my = e.clientY;
-if (this.state === 'MENU') {
-if (this.playRect.collidePoint(mx, my)) {
-this.state = 'CAR_SELECT';
-}
-if (this.settingsRect.collidePoint(mx, my)) {
-this.state = 'SETTINGS';
-}
-} else if (this.state === 'SETTINGS') {
-if (this.showResetConfirm) {
-if (this.confirmYesRect.collidePoint(mx, my)) {
-this.resetData();
-this.showResetConfirm = false;
-}
-if (this.confirmNoRect.collidePoint(mx, my)) {
-this.showResetConfirm = false;
-}
-return; // Block other clicks
-}
-if (this.backRect.collidePoint(mx, my)) {
-this.state = 'MENU';
-this.saveData(); // Save settings when leaving
-}
-if (this.resetProgressRect.collidePoint(mx, my)) {
-this.showResetConfirm = true;
-}
-if (this.tvToggleRect.collidePoint(mx, my)) {
-this.tvMode = !this.tvMode;
-}
-if (this.deviceToggleRect.collidePoint(mx, my)) {
-this.deviceMode = this.deviceMode === 'PC' ? 'MOBILE' : 'PC';
-}
-} else if (this.state === 'CAR_SELECT') {
-// Check for drive button
-if (this.selectRect.collidePoint(mx, my)) {
-// Check lock
-let spec = PLAYER_ROSTER[this.selectedCarIndex];
-if (spec.unlockScore && this.highScore < spec.unlockScore) {
-// Locked sound or visual shake?
-return;
-}
-this.initGame();
-this.state = 'PLAY';
-}
-} else if (this.state === 'GAMEOVER') {
-if (this.restartRect.collidePoint(mx, my)) {
-this.initGame();
-this.state = 'PLAY';
-}
-}
-}
-
-// --- TOUCH CONTROLS ---
-handleTouch(e) {
-    if (this.state !== 'PLAY' || this.deviceMode !== 'MOBILE') return;
-    e.preventDefault();
-
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    const touches = e.changedTouches;
-
-    // Button Config (Smaller Size)
-    const cx = w - 80;
-    const cy = h - 80;
-    const btnDrift = { x: cx, y: cy, r: 40, key: ' ' }; // Radius 55 -> 40
-    const dist = 90; // Slightly closer
-    const rSat = 24; // Radius 32 -> 24
-    const satellites = [
-        { x: cx - dist, y: cy, r: rSat, key: 'f' },           // Left (F)
-        { x: cx - dist*0.707, y: cy - dist*0.707, r: rSat, key: 'z' }, // Top-Left (Z)
-        { x: cx, y: cy - dist, r: rSat, key: 'x' },           // Top (X)
-        { x: cx + dist*0.6, y: cy - dist*0.8, r: rSat, key: 'c' } // Top-Right (C)
-    ];
-
-    for (let i = 0; i < touches.length; i++) {
-        let t = touches[i];
-        let tx = t.clientX;
-        let ty = t.clientY;
-
-        if (e.type === 'touchstart') {
-            // LEFT SIDE: Virtual Joystick
-            if (tx < w / 2) {
-                if (this.touchData.stickID === null) {
-                    this.touchData.stickID = t.identifier;
-                    this.touchData.stickOrigin = new Vector2(tx, ty);
-                    this.touchData.stickCurr = new Vector2(tx, ty);
+    }
+    resetData() {
+        localStorage.removeItem('tokyo_drift_chase_v2');
+        this.highScore = 0;
+        this.hasGhostlyRider = false;
+        this.hasFireWheel = false;
+        this.tvMode = true; 
+        this.deviceMode = 'PC';
+    }
+    setupAdminInput() {
+        window.addEventListener('keydown', (e) => {
+            this.keyBuffer += e.key;
+            if (this.keyBuffer.length > 10) this.keyBuffer = this.keyBuffer.slice(-10);
+            if (this.keyBuffer.endsWith('1090')) {
+                this.adminOpen = !this.adminOpen;
+                const panel = document.getElementById('admin-panel');
+                panel.style.display = this.adminOpen ? 'flex' : 'none';
+                if (this.adminOpen) {
+                    document.getElementById('adm-score').value = this.score;
+                    document.getElementById('adm-speed').value = this.player.customMaxSpeed || 9.0;
+                    document.getElementById('adm-armor').value = this.player.health ? this.player.health.maxHp : 100;
+                    document.getElementById('adm-handling').value = this.player.customTurnSpeed || 4.0;
                 }
             }
-            // RIGHT SIDE: Buttons
-            else {
-                // Check Drift
-                if (Math.hypot(tx - btnDrift.x, ty - btnDrift.y) < btnDrift.r + 10) { // +10 padding for touch
-                    this.touchData.buttons['drift'] = t.identifier;
-                    this.keys[' '] = true;
+        });
+        const scoreInp = document.getElementById('adm-score');
+        const speedInp = document.getElementById('adm-speed');
+        const armorInp = document.getElementById('adm-armor');
+        const handInp = document.getElementById('adm-handling');
+        const stopProp = (e) => e.stopPropagation();
+        scoreInp.addEventListener('keydown', stopProp);
+        speedInp.addEventListener('keydown', stopProp);
+        armorInp.addEventListener('keydown', stopProp);
+        handInp.addEventListener('keydown', stopProp);
+        scoreInp.addEventListener('input', (e) => { this.score = parseInt(e.target.value) || 0; });
+        speedInp.addEventListener('input', (e) => { this.player.customMaxSpeed = parseFloat(e.target.value) || 9.0; });
+        handInp.addEventListener('input', (e) => { this.player.customTurnSpeed = parseFloat(e.target.value) || 4.0; });
+        armorInp.addEventListener('input', (e) => { 
+            let val = parseInt(e.target.value) || 100;
+            if (this.player.health) {
+                this.player.health.maxHp = val;
+                for(let k in this.player.health.parts) this.player.health.parts[k] = val;
+            }
+        });
+    }
+    initGame() {
+        let carSpec = PLAYER_ROSTER[this.selectedCarIndex];
+        this.player = new Car(0, 0, carSpec.color);
+        this.player.type = carSpec.type;
+        this.player.id = carSpec.id; 
+        this.player.hasSpoiler = carSpec.hasSpoiler;
+        this.player.sprite = this.player.createCarSprite();
+        this.player.customMaxSpeed = carSpec.stats.speed;
+        this.player.customTurnSpeed = carSpec.stats.turn;
+        this.player.customAccel = carSpec.stats.accel;
+        this.player.health = new CarHealth(carSpec.stats.hp);
+        this.player.powerData = carSpec.powerData;
+        this.player.selectedCarIndex = this.selectedCarIndex; 
+        this.camera = new Camera();
+        this.buildings = [];
+        this.people = [];
+        this.cops = [];
+        this.civilians = [];
+        this.sakura = [];
+        this.particles = [];
+        this.skids = [];
+        this.floorEffects = []; 
+        this.shockwaves = []; 
+        this.blood = [];
+        this.loadedChunks = new Set();
+        this.menuCamPos = new Vector2(0, 0);
+        this.spawnTimer = 0;
+        this.score = 0;
+        this.ghostlyRiderActive = false;
+        this.ghostlyRiderCooldown = 0;
+        this.ghostlyRiderDuration = 0;
+        this.fireWheelActive = false;
+        this.fireWheelDuration = 0;
+        this.fireWheelCooldown = 0;
+        this.powerCooldown = 0;
+        this.powerActive = false;
+        this.powerTimer = 0;
+        this.timeScale = 1.0;
+        this.turnCount = 0;
+        this.driftTime = 0;
+        this.isInsideIntersection = false;
+        this.playerInitialAngle = null;
+        this.isWalking = false;
+        this.playerPed = null;
+        this.playerPosHistory = [];
+        this.multiplayer.connect();
+    }
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.ctx.imageSmoothingEnabled = false;
+    }
+    onClick(e) {
+        const mx = e.clientX;
+        const my = e.clientY;
+        if (this.state === 'MENU') {
+            if (this.playRect.collidePoint(mx, my)) { this.state = 'CAR_SELECT'; }
+            if (this.settingsRect.collidePoint(mx, my)) { this.state = 'SETTINGS'; }
+        } else if (this.state === 'SETTINGS') {
+            if (this.showResetConfirm) {
+                if (this.confirmYesRect.collidePoint(mx, my)) { this.resetData(); this.showResetConfirm = false; }
+                if (this.confirmNoRect.collidePoint(mx, my)) { this.showResetConfirm = false; }
+                return; 
+            }
+            if (this.backRect.collidePoint(mx, my)) { this.state = 'MENU'; this.saveData(); }
+            if (this.resetProgressRect.collidePoint(mx, my)) { this.showResetConfirm = true; }
+            if (this.tvToggleRect.collidePoint(mx, my)) { this.tvMode = !this.tvMode; }
+            if (this.deviceToggleRect.collidePoint(mx, my)) { this.deviceMode = this.deviceMode === 'PC' ? 'MOBILE' : 'PC'; }
+        } else if (this.state === 'CAR_SELECT') {
+            if (this.selectRect.collidePoint(mx, my)) {
+                let spec = PLAYER_ROSTER[this.selectedCarIndex];
+                if (spec.unlockScore && this.highScore < spec.unlockScore) return;
+                this.initGame();
+                this.state = 'PLAY';
+            }
+        } else if (this.state === 'GAMEOVER') {
+            if (this.restartRect.collidePoint(mx, my)) { this.initGame(); this.state = 'PLAY'; }
+        }
+    }
+
+    // --- NEW ROBUST TOUCH HANDLING ---
+    handleTouch(e) {
+        if (this.deviceMode !== 'MOBILE') return;
+        
+        // Prevent default scrolling only in gameplay
+        if (this.state === 'PLAY') e.preventDefault();
+
+        const touches = e.changedTouches;
+        for (let i = 0; i < touches.length; i++) {
+            const t = touches[i];
+            if (e.type === 'touchstart' || e.type === 'touchmove') {
+                this.activeTouches.set(t.identifier, { x: t.clientX, y: t.clientY });
+                
+                // Set stick origin on first touch of left side
+                if (e.type === 'touchstart' && t.clientX < this.canvas.width / 2 && !this.stickOrigin) {
+                    this.stickOrigin = { x: t.clientX, y: t.clientY, id: t.identifier };
                 }
-                // Check Satellites
-                satellites.forEach(btn => {
-                    if (Math.hypot(tx - btn.x, ty - btn.y) < btn.r + 10) {
-                        this.touchData.buttons[btn.key] = t.identifier;
-                        this.keys[btn.key] = true;
+            } else {
+                // Touch ended/cancelled
+                this.activeTouches.delete(t.identifier);
+                if (this.stickOrigin && this.stickOrigin.id === t.identifier) {
+                    this.stickOrigin = null;
+                    this.stickCurrent = null;
+                }
+            }
+        }
+    }
+
+    processMobileInputs() {
+        if (this.deviceMode !== 'MOBILE' || this.state !== 'PLAY') return;
+
+        // 1. Reset Mobile Keys (PC keys remain untouched)
+        this.keys['arrowup'] = false;
+        this.keys['arrowdown'] = false;
+        this.keys['arrowleft'] = false;
+        this.keys['arrowright'] = false;
+        this.keys[' '] = false; // Drift
+        this.keys['f'] = false;
+        this.keys['z'] = false;
+        this.keys['x'] = false;
+        this.keys['c'] = false;
+
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        
+        // 2. Button Configurations
+        const cx = w - 80;
+        const cy = h - 80;
+        const dist = 90;
+        const btns = [
+            { key: ' ', x: cx, y: cy, r: 50 }, // Big Drift Button
+            { key: 'f', x: cx - dist, y: cy, r: 35 },
+            { key: 'z', x: cx - dist*0.707, y: cy - dist*0.707, r: 35 },
+            { key: 'x', x: cx, y: cy - dist, r: 35 },
+            { key: 'c', x: cx + dist*0.6, y: cy - dist*0.8, r: 35 }
+        ];
+
+        // 3. Check every active finger
+        this.activeTouches.forEach((pos, id) => {
+            // --- RIGHT SIDE (BUTTONS) ---
+            if (pos.x > w / 2) {
+                btns.forEach(b => {
+                    // Check distance
+                    if (Math.hypot(pos.x - b.x, pos.y - b.y) < b.r) {
+                        this.keys[b.key] = true;
                     }
                 });
             }
-        } else if (e.type === 'touchmove') {
-            if (t.identifier === this.touchData.stickID) {
-                this.touchData.stickCurr = new Vector2(tx, ty);
-                // Update Keys based on vector
-                let diff = this.touchData.stickCurr.sub(this.touchData.stickOrigin);
-                // Clamp
-                if (diff.mag() > 50) diff = diff.normalize().mult(50);
-                this.touchData.stickCurr = this.touchData.stickOrigin.add(diff);
+            
+            // --- LEFT SIDE (JOYSTICK) ---
+            if (this.stickOrigin && this.stickOrigin.id === id) {
+                this.stickCurrent = { x: pos.x, y: pos.y };
+                
+                const dx = pos.x - this.stickOrigin.x;
+                const dy = pos.y - this.stickOrigin.y;
+                
+                // Thresholds for movement
+                if (dy < -20) this.keys['arrowup'] = true;
+                if (dy > 20) this.keys['arrowdown'] = true;
+                if (dx < -20) this.keys['arrowleft'] = true;
+                if (dx > 20) this.keys['arrowright'] = true;
+            }
+        });
+    }
 
-                // Map to Keys
-                this.keys['arrowup'] = diff.y < -20;
-                this.keys['arrowdown'] = diff.y > 20;
-                this.keys['arrowleft'] = diff.x < -20;
-                this.keys['arrowright'] = diff.x > 20;
+    drawMobileControls(ctx, w, h) {
+        if (this.state !== 'PLAY') return;
+
+        // Draw Joystick
+        if (this.stickOrigin) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.beginPath(); ctx.arc(this.stickOrigin.x, this.stickOrigin.y, 50, 0, Math.PI*2); ctx.fill();
+            
+            let curr = this.stickCurrent || this.stickOrigin;
+            // Clamp visually
+            let dx = curr.x - this.stickOrigin.x;
+            let dy = curr.y - this.stickOrigin.y;
+            let dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > 50) {
+                let angle = Math.atan2(dy, dx);
+                curr = { 
+                    x: this.stickOrigin.x + Math.cos(angle) * 50, 
+                    y: this.stickOrigin.y + Math.sin(angle) * 50 
+                };
             }
-        } else if (e.type === 'touchend' || e.type === 'touchcancel') {
-            if (t.identifier === this.touchData.stickID) {
-                this.touchData.stickID = null;
-                this.keys['arrowup'] = false;
-                this.keys['arrowdown'] = false;
-                this.keys['arrowleft'] = false;
-                this.keys['arrowright'] = false;
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.beginPath(); ctx.arc(curr.x, curr.y, 25, 0, Math.PI*2); ctx.fill();
+        } else {
+            // Idle Hint
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.beginPath(); ctx.arc(100, h - 100, 50, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#aaa'; ctx.font='10px "Press Start 2P"'; ctx.textAlign='center';
+            ctx.fillText("STEER", 100, h - 100);
+        }
+
+        // Draw Buttons (Visual feedback matches processMobileInputs)
+        const cx = w - 80;
+        const cy = h - 80;
+        const dist = 90;
+        const btns = [
+            { key: ' ', label: 'DRIFT', x: cx, y: cy, r: 50, c: '#ffeb3b' },
+            { key: 'f', label: 'F', x: cx - dist, y: cy, r: 35, c: '#fff' },
+            { key: 'z', label: 'Z', x: cx - dist*0.707, y: cy - dist*0.707, r: 35, c: '#32ffff' },
+            { key: 'x', label: 'X', x: cx, y: cy - dist, r: 35, c: '#32ff64' },
+            { key: 'c', label: 'C', x: cx + dist*0.6, y: cy - dist*0.8, r: 35, c: '#ff6432' }
+        ];
+
+        btns.forEach(b => {
+            let active = this.keys[b.key];
+            ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
+            ctx.fillStyle = active ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0,0,0,0.5)';
+            ctx.fill();
+            ctx.lineWidth = 3; ctx.strokeStyle = b.c; ctx.stroke();
+            ctx.fillStyle = active ? '#000' : '#fff';
+            ctx.font = (b.r > 40 ? '12px' : '10px') + ' "Press Start 2P"';
+            ctx.textAlign = 'center'; ctx.textBaseline='middle';
+            ctx.fillText(b.label, b.x, b.y);
+        });
+    }
+
+    drawMinimap(ctx, w, h) {
+        if (this.deviceMode !== 'MOBILE') return;
+        
+        // Config
+        const mapSize = 120;
+        const mapX = w - mapSize - 20;
+        const mapY = 20;
+        const range = 1500; // World units radius to show
+        
+        ctx.save();
+        
+        // Background
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.fillRect(mapX, mapY, mapSize, mapSize);
+        
+        const centerObj = this.isWalking ? this.playerPed : this.player;
+        const cx = centerObj.pos.x;
+        const cy = centerObj.pos.y;
+        
+        // Use simple rect clipping via path if desired, or just bounds check
+        ctx.beginPath(); ctx.rect(mapX, mapY, mapSize, mapSize); ctx.clip();
+
+        // Draw Buildings
+        ctx.fillStyle = "#555";
+        for(let b of this.buildings) {
+            let dx = b.pos.x - cx;
+            let dy = b.pos.y - cy;
+            if (Math.abs(dx) > range || Math.abs(dy) > range) continue;
+            
+            let mx = mapX + mapSize/2 + (dx / range) * (mapSize/2);
+            let my = mapY + mapSize/2 + (dy / range) * (mapSize/2);
+            
+            let mw = (b.w / range) * (mapSize/2);
+            let mh = (b.h / range) * (mapSize/2);
+            ctx.fillRect(mx - mw/2, my - mh/2, mw, mh);
+        }
+        
+        // Draw Remote Players
+        for(let id in this.multiplayer.remotePlayers) {
+            let p = this.multiplayer.remotePlayers[id].car;
+            let dx = p.pos.x - cx;
+            let dy = p.pos.y - cy;
+            if (Math.abs(dx) > range || Math.abs(dy) > range) continue;
+            
+            let mx = mapX + mapSize/2 + (dx / range) * (mapSize/2);
+            let my = mapY + mapSize/2 + (dy / range) * (mapSize/2);
+            
+            ctx.fillStyle = "#32ff64"; // Green Dot
+            ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI*2); ctx.fill();
+        }
+        
+        // Draw Self
+        ctx.fillStyle = "#fff"; // White Arrow
+        ctx.translate(mapX + mapSize/2, mapY + mapSize/2);
+        ctx.rotate(centerObj.angle * Math.PI / 180);
+        ctx.beginPath();
+        ctx.moveTo(0, -4);
+        ctx.lineTo(3, 4);
+        ctx.lineTo(0, 2);
+        ctx.lineTo(-3, 4);
+        ctx.fill();
+        
+        ctx.restore();
+        
+        // Draw Border on top
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(mapX, mapY, mapSize, mapSize);
+    }
+
+    // --- REUSED GAME LOGIC ---
+    generateChunk(gx, gy) {
+        const isRoadX = (gx % 3 === 0);
+        const isRoadY = (gy % 3 === 0);
+        const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
+        const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
+        let seed = Math.abs(gx * 73856093 ^ gy * 19349663);
+        let rng = new SeededRNG(seed);
+        if (isRoadX || isRoadY) {
+            if (rng.next() < 0.1) {
+                this.people.push(new Person(cx + rng.randInt(-50,50), cy + rng.randInt(-50,50), null));
             }
-            // Release buttons
-            if (t.identifier === this.touchData.buttons['drift']) {
-                this.keys[' '] = false;
-                delete this.touchData.buttons['drift'];
+            let density = rng.choice([0, 1, 1, 2, 2, 3]);
+            for(let i=0; i<density; i++) {
+                let heading = 0;
+                if (isRoadX && !isRoadY) heading = rng.choice([90, 270]);
+                else if (!isRoadX && isRoadY) heading = rng.choice([0, 180]);
+                else heading = rng.choice([0, 90, 180, 270]);
+                let laneOffset = 80;
+                let jitter = rng.randInt(-20, 20);
+                let longScatter = rng.randInt(-150, 150);
+                let spawnX = cx;
+                let spawnY = cy;
+                if (heading === 0) { spawnY = cy - laneOffset + jitter; spawnX = cx + longScatter; }
+                else if (heading === 180) { spawnY = cy + laneOffset + jitter; spawnX = cx + longScatter; }
+                else if (heading === 90) { spawnX = cx + laneOffset + jitter; spawnY = cy + longScatter; }
+                else if (heading === 270) { spawnX = cx - laneOffset + jitter; spawnY = cy + longScatter; }
+                let type = rng.choice(Object.keys(CAR_TYPES));
+                let civCar = new Car(spawnX, spawnY, type, false, true);
+                civCar.angle = heading;
+                civCar.targetHeading = heading;
+                this.civilians.push(civCar);
             }
-            satellites.forEach(btn => {
-                if (t.identifier === this.touchData.buttons[btn.key]) {
-                    this.keys[btn.key] = false;
-                    delete this.touchData.buttons[btn.key];
+        } else {
+            if (rng.next() < 0.08) {
+                this.buildings.push(new Building(gx, gy, true));
+                for(let i=0; i<rng.randInt(3,6); i++) {
+                    this.sakura.push(new Sakura(cx + rng.randInt(-100,100), cy + rng.randInt(-100,100)));
                 }
-            });
-        }
-    }
-}
-
-drawMobileControls(ctx, w, h) {
-    // Left Joystick
-    if (this.touchData.stickID !== null) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-        ctx.beginPath();
-        ctx.arc(this.touchData.stickOrigin.x, this.touchData.stickOrigin.y, 50, 0, Math.PI*2);
-        ctx.fill();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.beginPath();
-        ctx.arc(this.touchData.stickCurr.x, this.touchData.stickCurr.y, 25, 0, Math.PI*2);
-        ctx.fill();
-    } else {
-        // Idle hint
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-        ctx.beginPath();
-        ctx.arc(100, h - 100, 50, 0, Math.PI*2);
-        ctx.fill();
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#aaa';
-        ctx.font = '10px "Press Start 2P"';
-        ctx.fillText("STEER", 100, h - 100);
-    }
-
-    // Right Buttons Layout (Smaller)
-    const cx = w - 80;
-    const cy = h - 80;
-    const btnDrift = { x: cx, y: cy, r: 40, label: "DRIFT", color: '#ffeb3b', active: this.keys[' '] };
-    
-    const dist = 90;
-    const rSat = 24;
-    const satellites = [
-        { x: cx - dist, y: cy, r: rSat, label: "F", color: '#ffffff', active: this.keys['f'] },
-        { x: cx - dist*0.707, y: cy - dist*0.707, r: rSat, label: "Z", color: '#32ffff', active: this.keys['z'] },
-        { x: cx, y: cy - dist, r: rSat, label: "X", color: '#32ff64', active: this.keys['x'] },
-        { x: cx + dist*0.6, y: cy - dist*0.8, r: rSat, label: "C", color: '#ff6432', active: this.keys['c'] }
-    ];
-
-    // Helper Draw
-    const drawBtn = (b) => {
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, b.r, 0, Math.PI*2);
-        ctx.fillStyle = b.active ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0,0,0,0.5)';
-        ctx.fill();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = b.color;
-        ctx.stroke();
-        ctx.fillStyle = b.active ? '#000' : '#fff';
-        ctx.font = (b.r > 30 ? '12px' : '10px') + ' "Press Start 2P"';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(b.label, b.x, b.y);
-    };
-
-    // Draw Satellites first
-    satellites.forEach(drawBtn);
-    // Draw Main
-    drawBtn(btnDrift);
-}
-
-drawMinimap(ctx, w, h) {
-    if (this.deviceMode !== 'MOBILE') return;
-    
-    // Config
-    const mapSize = 120;
-    const mapX = w - mapSize - 20;
-    const mapY = 20;
-    const range = 1500; // World units radius to show
-    
-    ctx.save();
-    
-    // Background
-    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-    ctx.fillRect(mapX, mapY, mapSize, mapSize);
-    
-    // Optimisation: Skip expensive clip() on mobile. Use simple rectangle bound checking in loop.
-    
-    const centerObj = this.isWalking ? this.playerPed : this.player;
-    const cx = centerObj.pos.x;
-    const cy = centerObj.pos.y;
-    
-    // Draw Buildings
-    ctx.fillStyle = "#555";
-    for(let b of this.buildings) {
-        let dx = b.pos.x - cx;
-        let dy = b.pos.y - cy;
-        // Optimization: simple box check
-        if (Math.abs(dx) > range || Math.abs(dy) > range) continue;
-        
-        // Map to minimap coords
-        let mx = mapX + mapSize/2 + (dx / range) * (mapSize/2);
-        let my = mapY + mapSize/2 + (dy / range) * (mapSize/2);
-        
-        let mw = (b.w / range) * (mapSize/2);
-        let mh = (b.h / range) * (mapSize/2);
-        
-        // Simple bounds check drawing
-        if (mx > mapX && mx < mapX + mapSize && my > mapY && my < mapY + mapSize) {
-             ctx.fillRect(mx - mw/2, my - mh/2, mw, mh);
-        }
-    }
-    
-    // Draw Remote Players
-    for(let id in this.multiplayer.remotePlayers) {
-        let p = this.multiplayer.remotePlayers[id].car;
-        let dx = p.pos.x - cx;
-        let dy = p.pos.y - cy;
-        if (Math.abs(dx) > range || Math.abs(dy) > range) continue;
-        
-        let mx = mapX + mapSize/2 + (dx / range) * (mapSize/2);
-        let my = mapY + mapSize/2 + (dy / range) * (mapSize/2);
-        
-        ctx.fillStyle = "#32ff64"; // Green Dot
-        ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI*2); ctx.fill();
-    }
-    
-    // Draw Self
-    ctx.fillStyle = "#fff"; // White Arrow
-    ctx.translate(mapX + mapSize/2, mapY + mapSize/2);
-    ctx.rotate(centerObj.angle * Math.PI / 180);
-    ctx.beginPath();
-    ctx.moveTo(0, -4);
-    ctx.lineTo(3, 4);
-    ctx.lineTo(0, 2);
-    ctx.lineTo(-3, 4);
-    ctx.fill();
-    
-    ctx.restore();
-    
-    // Draw Border on top
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(mapX, mapY, mapSize, mapSize);
-}
-
-// --- New Achievement Logic ---
-showAchievement(name) {
-// Only show if not already showing the same one and not in the list
-if (!this.achievements.some(a => a.name === name)) {
-this.achievements.push({ name: name, timer: 180 }); // 3 seconds @ 60 FPS
-// Don't save achievement unlock to persistence, but track for session
-}
-}
-updateAchievementLogic(drift) {
-const player = this.player;
-// --- 1. Ghostly Rider: 10 non-bumping intersection turns ---
-if (!this.hasGhostlyRider) {
-const playerX = player.pos.x;
-const playerY = player.pos.y;
-const blockX = Math.floor(playerX / BLOCK_SIZE);
-const blockY = Math.floor(playerY / BLOCK_SIZE);
-const isRoadX = (blockX % 3 === 0);
-const isRoadY = (blockY % 3 === 0);
-const inIntersectionBlock = isRoadX && isRoadY;
-const getCardinalAngle = (angle) => Math.round(((angle % 360) + 360) % 360 / 90) * 90;
-const currentCardinalAngle = getCardinalAngle(player.angle);
-if (inIntersectionBlock) {
-if (!this.isInsideIntersection) {
-this.isInsideIntersection = true;
-this.playerInitialAngle = currentCardinalAngle;
-}
-} else if (this.isInsideIntersection) {
-this.isInsideIntersection = false;
-const turnSuccess = (currentCardinalAngle !== this.playerInitialAngle);
-if (turnSuccess && !player.isCollidingWithBuilding) {
-this.turnCount++;
-} else if (player.isCollidingWithBuilding) {
-this.turnCount = 0;
-}
-player.isCollidingWithBuilding = false;
-this.playerInitialAngle = null;
-}
-if (player.isCollidingWithBuilding) {
-this.turnCount = 0;
-}
-if (this.turnCount >= 10) {
-this.hasGhostlyRider = true;
-this.showAchievement("Ghostly Rider Unlocked!");
-}
-}
-// --- 2. Fire Wheel: 30 seconds of drifting without hitting a cop ---
-if (!this.hasFireWheel) {
-if (drift && player.vel.mag() > 4) {
-let copCollision = this.cops.some(cop => cop.getHitbox().collideRect(player.getHitbox()));
-if (!copCollision) {
-this.driftTime++;
-} else {
-this.driftTime = 0;
-player.isCollidingWithCop = true;
-}
-} else {
-this.driftTime = 0;
-}
-if (this.driftTime >= 30 * FPS) {
-this.hasFireWheel = true;
-this.showAchievement("Fire Wheel Unlocked!");
-}
-}
-// Update achievement pop-up timers
-this.achievements.forEach(a => a.timer--);
-this.achievements = this.achievements.filter(a => a.timer > 0);
-}
-updateSkillMechanics() {
-// K key toggle logic
-if (this.keys['k'] && !this.kPressed) {
-this.showProgress = !this.showProgress;
-this.kPressed = true;
-}
-if (!this.keys['k']) this.kPressed = false;
-// --- Ghostly Rider ---
-if (this.hasGhostlyRider) {
-if ((this.keys['x'] || this.keys['X']) && !this.ghostlyRiderActive && this.ghostlyRiderCooldown <= 0) {
-this.ghostlyRiderActive = true;
-this.ghostlyRiderDuration = this.ghostlyRiderDurationMax;
-this.ghostlyRiderCooldown = this.ghostlyRiderCooldownMax;
-}
-}
-if (this.ghostlyRiderActive) {
-this.ghostlyRiderDuration--;
-if (this.ghostlyRiderDuration <= 0) this.ghostlyRiderActive = false;
-} else if (this.ghostlyRiderCooldown > 0) {
-this.ghostlyRiderCooldown--;
-}
-// --- Fire Wheel ---
-if (this.hasFireWheel) {
-if ((this.keys['c'] || this.keys['C']) && !this.fireWheelActive && this.fireWheelCooldown <= 0) {
-this.fireWheelActive = true;
-this.fireWheelDuration = this.fireWheelDurationMax;
-this.fireWheelCooldown = this.fireWheelCooldownMax;
-}
-}
-if (this.fireWheelActive) {
-this.fireWheelDuration--;
-if (this.fireWheelDuration <= 0) this.fireWheelActive = false;
-} else if (this.fireWheelCooldown > 0) {
-this.fireWheelCooldown--;
-}
-// --- Z POWER (Unique per Car) ---
-if ((this.keys['z'] || this.keys['Z']) && !this.zPressed && this.powerCooldown <= 0) {
-this.zPressed = true;
-this.activatePower();
-}
-if (!this.keys['z'] && !this.keys['Z']) this.zPressed = false;
-if (this.powerCooldown > 0) this.powerCooldown--;
-if (this.powerActive) {
-this.powerTimer--;
-if (this.powerTimer <= 0) {
-this.powerActive = false;
-// Deactivate persistent effects
-this.player.isPhasing = false;
-this.player.isFlying = false;
-this.player.fearActive = false;
-this.timeScale = 1.0;
-}
-}
-// --- Process Active Powers ---
-// Update Shockwaves (Angel, Mecha, Cyber-X)
-for (let i = this.shockwaves.length - 1; i >= 0; i--) {
-let sw = this.shockwaves[i];
-sw.update();
-if (!sw.active) {
-this.shockwaves.splice(i, 1);
-continue;
-}
-// Collision
-this.cops.forEach(cop => {
-if (cop.dead) return;
-let d = cop.pos.distanceTo(sw.pos);
-if (d < sw.r + 20 && d > sw.r - 40) {
-if (this.player.id === 'angel' || this.player.id === 'demon') {
-// Kill
-cop.dead = true;
-this.score += 50;
-for(let k=0; k<10; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
-} else if (this.player.id === 'mecha' || this.player.id === 'interceptor') {
-// Stun
-cop.stunTimer = 300;
-cop.vel = new Vector2(0,0);
-} else if (this.player.id === 'cybertruck') {
-// Push
-let pushVec = cop.pos.sub(this.player.pos).normalize().mult(30);
-cop.vel = cop.vel.add(pushVec);
-}
-}
-});
-}
-}
-activatePower() {
-if (!this.player.powerData) return;
-const pid = this.player.id;
-if (pid === 'standard') {
-if (this.player.health) {
-for (let k in this.player.health.parts) {
-this.player.health.parts[k] = Math.min(this.player.health.maxHp, this.player.health.parts[k] + 50);
-}
-}
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'drifter') {
-this.floorEffects.push(new OilSlick(this.player.pos.x, this.player.pos.y));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'tank') {
-this.powerActive = true;
-this.powerTimer = 300;
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'mecha') {
-this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y, '#32ffff', 400));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'angel') {
-this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y, '#ffd700', 300));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'cybertruck') {
-this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y, '#00ffcc', 300));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'nightshade') {
-this.powerActive = true;
-this.player.isPhasing = true;
-this.powerTimer = 180; // 3 sec
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'hotrod') {
-// Flamethrower Logic
-let angle = this.player.angle;
-let rad = degToRad(angle);
-let dir = new Vector2(Math.cos(rad), -Math.sin(rad));
-let coneOrigin = this.player.pos.add(dir.mult(40));
-// Spawn fire
-for(let i=0; i<30; i++) {
-let spread = (Math.random() - 0.5) * 1.0;
-let pVel = dir.rotate(spread * 30).mult(randFloat(5, 10));
-this.particles.push(new Particle(coneOrigin.x, coneOrigin.y, 'spark'));
-}
-// Check cone collision
-this.cops.forEach(cop => {
-let toCop = cop.pos.sub(coneOrigin);
-if (toCop.mag() < 150 && toCop.normalize().dot(dir) > 0.7) {
-cop.dead = true;
-this.score += 50;
-}
-});
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'interceptor') {
-this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y, '#0032ff', 500));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'gold') {
-this.powerActive = true;
-this.powerTimer = 400;
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'f1') {
-let rad = degToRad(this.player.angle);
-let dir = new Vector2(Math.cos(rad), -Math.sin(rad));
-let jump = dir.mult(350);
-this.player.pos = this.player.pos.add(jump);
-// Safety: if inside building, nudge out (simple check)
-// Simplified: Phase momentarily
-this.player.isPhasing = true;
-setTimeout(() => this.player.isPhasing = false, 500);
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'ufo') {
-// Suck civs logic
-this.civilians.forEach(c => {
-if (c.pos.distanceTo(this.player.pos) < 200) {
-c.dead = true; // "Abducted"
-// Heal
-if (this.player.health) {
-for (let k in this.player.health.parts) this.player.health.parts[k] += 20;
-}
-this.score += 50;
-}
-});
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'monster') {
-this.powerActive = true;
-this.powerTimer = 100; // Jump duration
-// Visual jump handled by offset? Simplified: just crush logic enabled
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'time') {
-this.powerActive = true;
-this.powerTimer = 300;
-this.timeScale = 0.2; // Slow everything else
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'demon') {
-this.shockwaves.push(new Shockwave(this.player.pos.x, this.player.pos.y, '#ff0000', 800));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-// NEW SKILLS
-else if (pid === 'neon') {
-this.floorEffects.push(new LightWall(this.player.pos.x, this.player.pos.y));
-// This skill is continuous if active? No, just drop one long segment or series?
-// Let's make it a passive drop every few frames? No, instant wall drop for now to be simple
-for(let i=0; i<5; i++) {
-    let offset = this.player.vel.normalize().mult(-i*10);
-    this.floorEffects.push(new LightWall(this.player.pos.x + offset.x, this.player.pos.y + offset.y));
-}
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'icecream') {
-this.floorEffects.push(new StickyPuddle(this.player.pos.x, this.player.pos.y));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'dozer') {
-this.powerActive = true;
-this.powerTimer = 400; // Can break buildings
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'rocket') {
-this.powerActive = true;
-this.powerTimer = 180;
-this.player.isFlying = true;
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'ambulance') {
-this.powerActive = true;
-this.powerTimer = 300;
-this.player.fearActive = true; // Cops flee
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'wasteland') {
-this.floorEffects.push(new Mine(this.player.pos.x, this.player.pos.y));
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'hover') {
-this.powerActive = true;
-this.powerTimer = 60; // Short jump
-this.player.isFlying = true; // Reuse flying logic for collision avoidance
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'pirate') {
-// Broadside: Shoot left and right
-let rad = degToRad(this.player.angle);
-let right = new Vector2(Math.cos(rad + Math.PI/2), -Math.sin(rad + Math.PI/2));
-let left = new Vector2(Math.cos(rad - Math.PI/2), -Math.sin(rad - Math.PI/2));
-// Simplified: Instant hit check along ray
-[right, left].forEach(dir => {
-    for(let cop of this.cops) {
-        let toCop = cop.pos.sub(this.player.pos);
-        if (toCop.mag() < 200 && toCop.normalize().dot(dir) > 0.8) {
-            cop.dead = true;
-            this.score += 50;
-            for(let k=0; k<10; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'smoke'));
-        }
-    }
-    // Visual
-    for(let i=0; i<10; i++) {
-        let p = this.player.pos.add(dir.mult(i*20));
-        this.particles.push(new Particle(p.x, p.y, 'smoke'));
-    }
-});
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'nano') {
-this.cops.forEach(c => {
-    if (c.pos.distanceTo(this.player.pos) < 300) {
-        c.scale = 0.5;
-        c.speedTrait *= 0.5;
-    }
-});
-this.powerCooldown = this.player.powerData.cooldown;
-}
-else if (pid === 'chronos') {
-// Rewind 3 seconds (180 frames)
-if (this.playerPosHistory.length > 180) {
-    let old = this.playerPosHistory[this.playerPosHistory.length - 180];
-    this.player.pos = new Vector2(old.x, old.y);
-    this.player.angle = old.a;
-    // Heal
-    if (this.player.health) {
-        for (let k in this.player.health.parts) this.player.health.parts[k] = Math.min(100, this.player.health.parts[k] + 30);
-    }
-    this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'repair'));
-}
-this.powerCooldown = this.player.powerData.cooldown;
-}
-}
-generateChunk(gx, gy) {
-const isRoadX = (gx % 3 === 0);
-const isRoadY = (gy % 3 === 0);
-const cx = gx * BLOCK_SIZE + BLOCK_SIZE/2;
-const cy = gy * BLOCK_SIZE + BLOCK_SIZE/2;
-let seed = Math.abs(gx * 73856093 ^ gy * 19349663);
-let rng = new SeededRNG(seed);
-if (isRoadX || isRoadY) {
-if (rng.next() < 0.1) {
-this.people.push(new Person(cx + rng.randInt(-50,50), cy + rng.randInt(-50,50), null));
-}
-let density = rng.choice([0, 1, 1, 2, 2, 3]);
-for(let i=0; i<density; i++) {
-let heading = 0;
-if (isRoadX && !isRoadY) heading = rng.choice([90, 270]);
-else if (!isRoadX && isRoadY) heading = rng.choice([0, 180]);
-else heading = rng.choice([0, 90, 180, 270]);
-let laneOffset = 80;
-let jitter = rng.randInt(-20, 20);
-let longScatter = rng.randInt(-150, 150);
-let spawnX = cx;
-let spawnY = cy;
-if (heading === 0) { spawnY = cy - laneOffset + jitter; spawnX = cx + longScatter; }
-else if (heading === 180) { spawnY = cy + laneOffset + jitter; spawnX = cx + longScatter; }
-else if (heading === 90) { spawnX = cx + laneOffset + jitter; spawnY = cy + longScatter; }
-else if (heading === 270) { spawnX = cx - laneOffset + jitter; spawnY = cy + longScatter; }
-let type = rng.choice(Object.keys(CAR_TYPES));
-let civCar = new Car(spawnX, spawnY, type, false, true);
-civCar.angle = heading;
-civCar.targetHeading = heading;
-this.civilians.push(civCar);
-}
-} else {
-const sidewalkRect = new Rect(gx * BLOCK_SIZE, gy * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE).inflate(-10, -10);
-if (rng.next() < 0.08) {
-this.buildings.push(new Building(gx, gy, true));
-for(let i=0; i<rng.randInt(3,6); i++) {
-this.sakura.push(new Sakura(cx + rng.randInt(-100,100), cy + rng.randInt(-100,100)));
-}
-} else {
-let b = new Building(gx, gy, false);
-this.buildings.push(b);
-if (rng.next() < 0.95) {
-for(let i=0; i<rng.randInt(8,20); i++) {
-let side = rng.choice(['n','s','e','w']);
-let offset = BLOCK_SIZE/2 - 30;
-let px, py;
-if (side==='n') { px = cx + rng.randInt(-offset, offset); py = cy - offset; }
-else if (side==='s') { px = cx + rng.randInt(-offset, offset); py = cy + offset; }
-else if (side==='e') { px = cx + offset; py = cy + rng.randInt(-offset, offset); }
-else { px = cx - offset; py = cy + rng.randInt(-offset, offset); }
-this.people.push(new Person(px, py, sidewalkRect));
-}
-}
-}
-}
-}
-updateChunks() {
-const view = this.camera.viewRect;
-const startGx = Math.floor(view.left / BLOCK_SIZE) - 1;
-const endGx = Math.floor(view.right / BLOCK_SIZE) + 1;
-const startGy = Math.floor(view.top / BLOCK_SIZE) - 1;
-const endGy = Math.floor(view.bottom / BLOCK_SIZE) + 1;
-for(let gx = startGx; gx < endGx; gx++) {
-for(let gy = startGy; gy < endGy; gy++) {
-let key = `${gx},${gy}`;
-if (!this.loadedChunks.has(key)) {
-this.generateChunk(gx, gy);
-this.loadedChunks.add(key);
-}
-}
-}
-const margin = 1200;
-const keepRect = view.inflate(margin, margin);
-for (let i = this.buildings.length - 1; i >= 0; i--) {
-let b = this.buildings[i];
-if (!keepRect.collideRect(b.rect)) {
-this.loadedChunks.delete(`${b.gx},${b.gy}`);
-this.buildings.splice(i, 1);
-}
-}
-const cull = (arr) => {
-return arr.filter(obj => {
-if (obj.rect) return keepRect.collideRect(obj.rect);
-return keepRect.collidePoint(obj.pos.x, obj.pos.y);
-});
-};
-this.people = cull(this.people);
-this.sakura = cull(this.sakura);
-this.skids = cull(this.skids);
-this.floorEffects = cull(this.floorEffects);
-this.blood = cull(this.blood);
-this.civilians = cull(this.civilians);
-this.cops = cull(this.cops);
-}
-update() {
-if (this.state === 'GAMEOVER') return;
-// Apply Time Scale
-let dt = this.timeScale;
-// Input
-this.player.rotDirection = 0;
-this.player.accInput = 0;
-
-// HANDLE ONLINE UI VISIBILITY
-const onlineUI = document.getElementById('online-ui');
-if (onlineUI) {
-    const shouldHide = (this.state === 'PLAY' || this.state === 'GAMEOVER');
-    // Optimization: assume 'flex' is default, checking style.display can cause reflow if we write it every frame
-    // We'll trust the state change logic.
-    if (shouldHide && onlineUI.style.display !== 'none') {
-        onlineUI.style.display = 'none';
-    } else if (!shouldHide && onlineUI.style.display === 'none') {
-        onlineUI.style.display = 'flex';
-    }
-}
-
-if (this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') {
-// Auto-move camera for menu background
-this.menuCamPos.y -= 6;
-this.camera.update({ pos: this.menuCamPos }, this.canvas.width, this.canvas.height);
-this.updateChunks();
-// Spawn Cops around Camera in Menu
-this.spawnTimer++;
-if (this.spawnTimer > 120) {
-this.spawnTimer = 0;
-let angle = randFloat(0, Math.PI*2);
-let dist = 800;
-let cx = this.menuCamPos.x + Math.cos(angle)*dist;
-let cy = this.menuCamPos.y + Math.sin(angle)*dist;
-let gx = Math.floor(cx / BLOCK_SIZE);
-let gy = Math.floor(cy / BLOCK_SIZE);
-if ((gx % 3 === 0) || (gy % 3 === 0)) {
-this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
-}
-}
-this.civilians.forEach((civ, i) => {
-civ.updateCivilian(this.buildings, this.civilians, null);
-});
-const keepRect = this.camera.viewRect.inflate(1200, 1200);
-this.cops = this.cops.filter(cop => keepRect.collideRect(cop.getRect()));
-// Handle Selection Input
-if (this.state === 'CAR_SELECT') {
-if ((this.keys['arrowleft'] || this.keys['a']) && !this.leftPressed) {
-this.selectedCarIndex--;
-if (this.selectedCarIndex < 0) this.selectedCarIndex = PLAYER_ROSTER.length - 1;
-this.leftPressed = true;
-}
-if (!this.keys['arrowleft'] && !this.keys['a']) this.leftPressed = false;
-if ((this.keys['arrowright'] || this.keys['d']) && !this.rightPressed) {
-this.selectedCarIndex++;
-if (this.selectedCarIndex >= PLAYER_ROSTER.length) this.selectedCarIndex = 0;
-this.rightPressed = true;
-}
-if (!this.keys['arrowright'] && !this.keys['d']) this.rightPressed = false;
-}
-return; // Skip rest of update loop
-}
-// --- PLAY STATE ---
-
-// Update Multiplayer
-this.multiplayer.update(this.player, this.buildings);
-
-// Skill Mechanics
-this.updateSkillMechanics();
-// History for Rewind
-this.playerPosHistory.push({x: this.player.pos.x, y: this.player.pos.y, a: this.player.angle});
-if (this.playerPosHistory.length > 300) this.playerPosHistory.shift();
-
-// 1. Toggle Walking Logic (Key: F)
-if (this.keys['f'] && !this.fPressed) {
-this.fPressed = true;
-if (!this.isWalking) {
-// Try to exit car if stopped
-if (this.player.vel.mag() < 0.5) {
-this.isWalking = true;
-// Calculate spawn offset (driver side / left side)
-let rad = degToRad(this.player.angle);
-// Left side vector relative to car
-let sideX = Math.cos(rad + Math.PI/2);
-let sideY = -Math.sin(rad + Math.PI/2);
-let dist = 50; // Increased slightly for safety
-let spawnPos = new Vector2(this.player.pos.x + sideX * dist, this.player.pos.y + sideY * dist);
-// Simple check against buildings
-let inBuilding = false;
-for(let b of this.buildings) {
-if (b.rect.collidePoint(spawnPos.x, spawnPos.y)) {
-inBuilding = true;
-break;
-}
-}
-if (inBuilding) {
-// Try right side
-sideX = -sideX;
-sideY = -sideY;
-spawnPos = new Vector2(this.player.pos.x + sideX * dist, this.player.pos.y + sideY * dist);
-// If still in building, fallback to car center (risky but better than wall)
-inBuilding = false;
-for(let b of this.buildings) {
-if (b.rect.collidePoint(spawnPos.x, spawnPos.y)) {
-inBuilding = true;
-break;
-}
-}
-if (inBuilding) {
-spawnPos = new Vector2(this.player.pos.x, this.player.pos.y);
-}
-}
-let pedData = PLAYER_ROSTER.find(c => c.id === this.player.id).pedData;
-this.playerPed = new Person(spawnPos.x, spawnPos.y, null, true, pedData);
-}
-} else {
-// Try to enter car if close
-let dist = this.playerPed.pos.distanceTo(this.player.pos);
-if (dist < 60) {
-this.isWalking = false;
-this.playerPed = null;
-// Reset any ped ability effects (like time slow)
-this.timeScale = 1.0;
-}
-}
-}
-if (!this.keys['f']) this.fPressed = false;
-// 2. Repair Logic (Key: E)
-if (this.keys['e'] && !this.ePressed && this.isWalking) {
-this.ePressed = true;
-let dist = this.playerPed.pos.distanceTo(this.player.pos);
-if (dist < 60) {
-// Repair mechanic
-if (this.player.health) {
-for (let k in this.player.health.parts) {
-this.player.health.parts[k] = Math.min(this.player.health.maxHp, this.player.health.parts[k] + 10);
-}
-// Visual feedback
-for(let k=0; k<5; k++) {
-this.particles.push(new Particle(this.player.pos.x + randInt(-20,20), this.player.pos.y + randInt(-20,20), 'repair'));
-}
-}
-}
-}
-if (!this.keys['e']) this.ePressed = false;
-// 3. Movement Logic
-if (this.isWalking && this.playerPed) {
-// Control Pedestrian
-let moveSpeed = this.playerPed.moveSpeed; // Default 3.5
-let mx = 0, my = 0;
-if (this.keys['arrowleft'] || this.keys['a']) mx = -1;
-if (this.keys['arrowright'] || this.keys['d']) mx = 1;
-if (this.keys['arrowup'] || this.keys['w']) my = -1;
-if (this.keys['arrowdown'] || this.keys['s']) my = 1;
-// --- PEDESTRIAN ABILITIES (Spacebar) ---
-if (this.playerPed.abilityCooldown > 0) this.playerPed.abilityCooldown--;
-if (this.keys[' ']) {
-// Ability Logic
-const ability = this.playerPed.ability;
-// FLASH RUN (Time)
-if (ability === 'flash_run') {
-// Hold to activate
-this.playerPed.abilityActive = true;
-this.timeScale = 0.2; // Slow world
-this.playerPed.moveSpeed = 12.0; // Fast player (relative to slow world)
-if (Math.random() < 0.5) {
-this.particles.push(new Particle(this.playerPed.pos.x, this.playerPed.pos.y, 'lightning'));
-}
-}
-// BLINK (F1)
-else if (ability === 'blink' && this.playerPed.abilityCooldown <= 0) {
-this.playerPed.abilityCooldown = 3 * FPS; // 3 sec cooldown
-let moveVec = new Vector2(mx, my);
-if (moveVec.mag() === 0) {
-// Default forward based on angle
-let rad = degToRad(this.playerPed.angle + 90); // Angle correction
-moveVec = new Vector2(Math.cos(rad), Math.sin(rad));
-}
-let blinkPos = this.playerPed.pos.add(moveVec.normalize().mult(150));
-// Check bounds
-let inWall = false;
-for(let b of this.buildings) if(b.rect.collidePoint(blinkPos.x, blinkPos.y)) inWall=true;
-if (!inWall) {
-// Visual trail
-for(let i=0; i<5; i++) {
-this.particles.push(new Particle(this.playerPed.pos.x + randInt(-10,10), this.playerPed.pos.y + randInt(-10,10), 'spark'));
-}
-this.playerPed.pos = blinkPos;
-}
-}
-// SHIELD (Tank/Midas)
-else if ((ability === 'shield' || ability === 'money_shield') && this.playerPed.abilityCooldown <= 0) {
-this.shockwaves.push(new Shockwave(this.playerPed.pos.x, this.playerPed.pos.y, this.playerPed.abilityColor, 100));
-this.playerPed.abilityCooldown = 2 * FPS; // Short cooldown visual
-}
-// SHOCK (Mecha/Interceptor)
-else if ((ability === 'shock' || ability === 'taser') && this.playerPed.abilityCooldown <= 0) {
-this.shockwaves.push(new Shockwave(this.playerPed.pos.x, this.playerPed.pos.y, '#32ffff', 150));
-this.playerPed.abilityCooldown = 60;
-}
-} else {
-// Key Released
-if (this.playerPed.ability === 'flash_run') {
-this.playerPed.abilityActive = false;
-this.timeScale = 1.0;
-this.playerPed.moveSpeed = 3.5;
-}
-}
-// Logic for passive/movement updates
-let moveVec = new Vector2(mx, my);
-if (moveVec.mag() > 0) moveVec = moveVec.normalize().mult(moveSpeed);
-this.playerPed.vel = moveVec;
-// Collision for pedestrian vs buildings
-let nextPos = this.playerPed.pos.add(this.playerPed.vel);
-let collided = false;
-for(let b of this.buildings) {
-if (b.rect.collidePoint(nextPos.x, nextPos.y)) collided = true;
-}
-if (!collided) {
-this.playerPed.pos = nextPos; // Apply movement
-this.playerPed.update(null, null); // Manual update call for player
-} else {
-// Allow animation but no pos update
-this.playerPed.vel = new Vector2(0,0);
-this.playerPed.update(null, null);
-}
-// Apply friction to car so it stops eventually if left rolling
-this.player.vel = this.player.vel.mult(0.95);
-this.player.pos = this.player.pos.add(this.player.vel.mult(dt));
-} else {
-// Control Car
-if (this.keys['arrowleft'] || this.keys['a']) this.player.rotDirection = -1;
-if (this.keys['arrowright'] || this.keys['d']) this.player.rotDirection = 1;
-if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = this.player.customAccel || ACCELERATION;
-if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -(this.player.customAccel || ACCELERATION) * 0.5;
-let drift = (this.keys[' ']) && this.state === 'PLAY';
-this.player.physics(this.buildings, drift, this.fireWheelActive);
-if (this.fireWheelActive) {
-if (Math.random() < 0.8) {
-this.floorEffects.push(new FireTrail(this.player.pos.x, this.player.pos.y, this.player.angle));
-}
-}
-// Neon Wall Passive
-if (this.player.id === 'neon' && this.player.vel.mag() > 5) {
-    if (Math.random() < 0.3) {
-        this.floorEffects.push(new LightWall(this.player.pos.x, this.player.pos.y));
-    }
-}
-this.updateAchievementLogic(drift);
-}
-if (this.keys['r']) {
-if (this.player.health && this.player.health.checkFullyDestroyed()) {
-let tempGhostlyRider = this.hasGhostlyRider;
-let tempFireWheel = this.hasFireWheel;
-this.initGame();
-this.hasGhostlyRider = tempGhostlyRider;
-this.hasFireWheel = tempFireWheel;
-return;
-}
-}
-// Update Floor Effects (Fire & Oil)
-this.floorEffects.forEach((f, i) => {
-if (f.update) f.update(); // Some might not have update
-else if (f.life !== undefined) f.life--;
-if(f.life<=0) this.floorEffects.splice(i, 1);
-// Cop interaction
-if (f instanceof OilSlick) {
-    this.cops.forEach(cop => {
-        if (cop.pos.distanceTo(f.pos) < f.radius + 10) cop.spinTimer = 60;
-    });
-}
-if (f instanceof StickyPuddle) {
-    this.cops.forEach(cop => {
-        if (cop.pos.distanceTo(f.pos) < f.radius + 10) cop.vel = cop.vel.mult(0.2); // Slow
-    });
-}
-if (f instanceof LightWall) {
-    this.cops.forEach(cop => {
-        if (cop.pos.distanceTo(f.pos) < f.radius + 15) {
-            cop.dead = true;
-            this.score += 50;
-            for(let k=0; k<10; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
-        }
-    });
-}
-if (f instanceof Mine && !f.triggered) {
-    this.cops.forEach(cop => {
-        if (cop.pos.distanceTo(f.pos) < f.radius + 15) {
-            f.triggered = true;
-            cop.dead = true;
-            this.score += 100;
-            for(let k=0; k<20; k++) this.particles.push(new Particle(f.pos.x, f.pos.y, 'spark'));
-        }
-    });
-    if (f.triggered) this.floorEffects.splice(i, 1);
-}
-});
-// Camera tracks player OR car
-let targetObj = this.isWalking ? this.playerPed : this.player;
-// --- MOBILE ZOOM OUT ---
-let zoom = this.deviceMode === 'MOBILE' ? 0.6 : 1.0;
-this.camera.update(targetObj, this.canvas.width, this.canvas.height, zoom);
-// World Generation
-this.updateChunks();
-// Spawn Cops
-this.spawnTimer++;
-if (this.spawnTimer > 120 / dt) {
-this.spawnTimer = 0;
-let angle = randFloat(0, Math.PI*2);
-let dist = 800;
-let cx = (-this.camera.offset.x + this.canvas.width/2) + Math.cos(angle)*dist;
-let cy = (-this.camera.offset.y + this.canvas.height/2) + Math.sin(angle)*dist;
-let gx = Math.floor(cx / BLOCK_SIZE);
-let gy = Math.floor(cy / BLOCK_SIZE);
-if ((gx % 3 === 0) || (gy % 3 === 0)) {
-this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
-}
-}
-// Skids
-if (Math.abs(this.player.rotDirection) > 0 && this.player.vel.mag() > 4 && !this.isWalking && !this.player.isFlying) {
-this.skids.push(new Skid(this.player.pos.x, this.player.pos.y, this.player.angle));
-}
-this.skids.forEach((s,i) => { s.update(); if(s.life<=0) this.skids.splice(i,1); });
-// Cops
-this.cops.forEach((cop, i) => {
-// Apply slow mo to cops
-let originalVel = cop.vel;
-cop.vel = cop.vel.mult(dt);
-
-// --- MODIFIED: Police Target Logic ---
-// Cops chase the person if walking, or the car if driving
-let chaseTarget = (this.isWalking && this.playerPed) ? this.playerPed : this.player;
-cop.updateCop(chaseTarget, this.buildings, this.ghostlyRiderActive);
-
-cop.vel = cop.vel.mult(1/dt); // Restore velocity magnitude for physics calc
-if (dt < 1.0) cop.pos = cop.pos.sub(cop.vel.mult(1 - dt));
-// Cop collision
-if (cop.getHitbox().collideRect(this.player.getHitbox())) {
-if ((this.player.id === 'tank' && this.powerActive) || (this.player.id === 'monster' && this.powerActive) || (this.player.id === 'dozer' && this.powerActive)) {
-// Juggernaut/Crush: Destroy cop
-cop.dead = true;
-this.score += 50;
-for(let k=0; k<15; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
-} else if (this.player.id === 'gold' && this.powerActive) {
-// Midas: Turn to gold
-cop.dead = true;
-this.score += 500;
-for(let k=0; k<20; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'gold'));
-} else if (!this.ghostlyRiderActive && !this.player.isPhasing && !this.player.isFlying) {
-// ONLY DAMAGE CAR IF PLAYER IS INSIDE
-if (!this.isWalking) {
-    this.player.health.takeDamage(30);
-    let bounce = this.player.pos.sub(cop.pos).normalize().mult(5);
-    this.player.vel = this.player.vel.add(bounce);
-    cop.vel = cop.vel.sub(bounce);
-    for(let k=0; k<5; k++) this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'spark'));
-}
-} else {
-// Phase shift or ghostly rider
-if (!this.player.isPhasing && !this.isWalking && !this.player.isFlying) this.player.health.takeDamage(5);
-}
-}
-
-// --- NEW: Cop vs Player Pedestrian Collision ---
-if (this.isWalking && this.playerPed && !cop.dead) {
-    // Check if cop hits player ped
-    // Cop hitbox vs Ped rect
-    if (cop.getHitbox().collideRect(this.playerPed.rect)) {
-        // Instant Death
-        for(let k=0; k<5; k++) {
-            this.blood.push(new Blood(this.playerPed.pos.x + randInt(-10,10), this.playerPed.pos.y + randInt(-10,10)));
-        }
-        this.state = 'GAMEOVER';
-    }
-}
-
-// Cop vs Cop
-for (let j=i+1; j<this.cops.length; j++) {
-let other = this.cops[j];
-if (cop.pos.distanceTo(other.pos) < 45) {
-cop.dead = true; other.dead = true;
-this.score += 100;
-for(let k=0; k<15; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
-}
-}
-});
-this.cops = this.cops.filter(c => !c.dead);
-// Civilians
-this.civilians.forEach((civ, i) => {
-if (dt < 1.0) civ.pos = civ.pos.sub(civ.vel.mult(1 - dt)); // Slow mo
-civ.updateCivilian(this.buildings, this.civilians, this.player);
-
-// --- MODIFIED: Civ vs Player Logic ---
-if (civ.getHitbox().collideRect(this.player.getHitbox())) {
-    if (this.player.id === 'gold' && this.powerActive) {
-        civ.dead = true; // technically cars dont have dead flag logic in update but we filter below
-        this.score += 200;
-        for(let k=0; k<10; k++) this.particles.push(new Particle(civ.pos.x, civ.pos.y, 'gold'));
-        // Hack to remove civ
-        this.civilians.splice(i, 1);
-        return;
-    }
-    if (!this.player.isPhasing && !this.isWalking && !this.player.isFlying) { // Only damage car if player inside
-        this.player.health.takeDamage(5);
-        let pCenter = this.player.pos;
-        let cCenter = civ.pos;
-        let bounceVec = pCenter.sub(cCenter).normalize();
-        this.player.vel = this.player.vel.add(bounceVec.mult(4));
-        civ.vel = civ.vel.sub(bounceVec.mult(4));
-        for(let k=0; k<3; k++) this.particles.push(new Particle(this.player.pos.x + randInt(-10,10), this.player.pos.y + randInt(-10,10), 'spark'));
-        if (!civ.hitOnce) {
-        this.score += 10;
-        civ.hitOnce = true;
-        }
-    }
-}
-
-// --- NEW: Civilian vs Player Pedestrian Collision ---
-if (this.isWalking && this.playerPed) {
-    if (civ.getHitbox().collideRect(this.playerPed.rect)) {
-        // If moving fast enough to kill
-        if (civ.vel.mag() > 1.0) {
-            for(let k=0; k<5; k++) {
-                this.blood.push(new Blood(this.playerPed.pos.x + randInt(-10,10), this.playerPed.pos.y + randInt(-10,10)));
+            } else {
+                let b = new Building(gx, gy, false);
+                this.buildings.push(b);
+                if (rng.next() < 0.95) {
+                    const sidewalkRect = new Rect(gx * BLOCK_SIZE, gy * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE).inflate(-10, -10);
+                    for(let i=0; i<rng.randInt(8,20); i++) {
+                        let side = rng.choice(['n','s','e','w']);
+                        let offset = BLOCK_SIZE/2 - 30;
+                        let px, py;
+                        if (side==='n') { px = cx + rng.randInt(-offset, offset); py = cy - offset; }
+                        else if (side==='s') { px = cx + rng.randInt(-offset, offset); py = cy + offset; }
+                        else if (side==='e') { px = cx + offset; py = cy + rng.randInt(-offset, offset); }
+                        else { px = cx - offset; py = cy + rng.randInt(-offset, offset); }
+                        this.people.push(new Person(px, py, sidewalkRect));
+                    }
+                }
             }
+        }
+    }
+    updateChunks() {
+        const view = this.camera.viewRect;
+        const startGx = Math.floor(view.left / BLOCK_SIZE) - 1;
+        const endGx = Math.floor(view.right / BLOCK_SIZE) + 1;
+        const startGy = Math.floor(view.top / BLOCK_SIZE) - 1;
+        const endGy = Math.floor(view.bottom / BLOCK_SIZE) + 1;
+        for(let gx = startGx; gx < endGx; gx++) {
+            for(let gy = startGy; gy < endGy; gy++) {
+                let key = `${gx},${gy}`;
+                if (!this.loadedChunks.has(key)) {
+                    this.generateChunk(gx, gy);
+                    this.loadedChunks.add(key);
+                }
+            }
+        }
+        const margin = 1200;
+        const keepRect = view.inflate(margin, margin);
+        for (let i = this.buildings.length - 1; i >= 0; i--) {
+            let b = this.buildings[i];
+            if (!keepRect.collideRect(b.rect)) {
+                this.loadedChunks.delete(`${b.gx},${b.gy}`);
+                this.buildings.splice(i, 1);
+            }
+        }
+        const cull = (arr) => {
+            return arr.filter(obj => {
+                if (obj.rect) return keepRect.collideRect(obj.rect);
+                return keepRect.collidePoint(obj.pos.x, obj.pos.y);
+            });
+        };
+        this.people = cull(this.people);
+        this.sakura = cull(this.sakura);
+        this.skids = cull(this.skids);
+        this.floorEffects = cull(this.floorEffects);
+        this.blood = cull(this.blood);
+        this.civilians = cull(this.civilians);
+        this.cops = cull(this.cops);
+    }
+    update() {
+        if (this.state === 'GAMEOVER') return;
+        
+        // --- ADDED: Process Mobile Inputs Frame-by-Frame ---
+        this.processMobileInputs();
+        
+        let dt = this.timeScale;
+        this.player.rotDirection = 0;
+        this.player.accInput = 0;
+
+        const onlineUI = document.getElementById('online-ui');
+        if (onlineUI) {
+            const shouldHide = (this.state === 'PLAY' || this.state === 'GAMEOVER');
+            if (shouldHide && onlineUI.style.display !== 'none') {
+                onlineUI.style.display = 'none';
+            } else if (!shouldHide && onlineUI.style.display === 'none') {
+                onlineUI.style.display = 'flex';
+            }
+        }
+
+        if (this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') {
+            this.menuCamPos.y -= 6;
+            this.camera.update({ pos: this.menuCamPos }, this.canvas.width, this.canvas.height);
+            this.updateChunks();
+            this.spawnTimer++;
+            if (this.spawnTimer > 120) {
+                this.spawnTimer = 0;
+                let angle = randFloat(0, Math.PI*2);
+                let dist = 800;
+                let cx = this.menuCamPos.x + Math.cos(angle)*dist;
+                let cy = this.menuCamPos.y + Math.sin(angle)*dist;
+                let gx = Math.floor(cx / BLOCK_SIZE);
+                let gy = Math.floor(cy / BLOCK_SIZE);
+                if ((gx % 3 === 0) || (gy % 3 === 0)) {
+                    this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
+                }
+            }
+            this.civilians.forEach((civ, i) => {
+                civ.updateCivilian(this.buildings, this.civilians, null);
+            });
+            const keepRect = this.camera.viewRect.inflate(1200, 1200);
+            this.cops = this.cops.filter(cop => keepRect.collideRect(cop.getRect()));
+            if (this.state === 'CAR_SELECT') {
+                if ((this.keys['arrowleft'] || this.keys['a']) && !this.leftPressed) {
+                    this.selectedCarIndex--;
+                    if (this.selectedCarIndex < 0) this.selectedCarIndex = PLAYER_ROSTER.length - 1;
+                    this.leftPressed = true;
+                }
+                if (!this.keys['arrowleft'] && !this.keys['a']) this.leftPressed = false;
+                if ((this.keys['arrowright'] || this.keys['d']) && !this.rightPressed) {
+                    this.selectedCarIndex++;
+                    if (this.selectedCarIndex >= PLAYER_ROSTER.length) this.selectedCarIndex = 0;
+                    this.rightPressed = true;
+                }
+                if (!this.keys['arrowright'] && !this.keys['d']) this.rightPressed = false;
+            }
+            return;
+        }
+
+        this.multiplayer.update(this.player, this.buildings);
+        this.updateSkillMechanics();
+        this.playerPosHistory.push({x: this.player.pos.x, y: this.player.pos.y, a: this.player.angle});
+        if (this.playerPosHistory.length > 300) this.playerPosHistory.shift();
+
+        if (this.keys['f'] && !this.fPressed) {
+            this.fPressed = true;
+            if (!this.isWalking) {
+                if (this.player.vel.mag() < 0.5) {
+                    this.isWalking = true;
+                    let rad = degToRad(this.player.angle);
+                    let sideX = Math.cos(rad + Math.PI/2);
+                    let sideY = -Math.sin(rad + Math.PI/2);
+                    let dist = 50; 
+                    let spawnPos = new Vector2(this.player.pos.x + sideX * dist, this.player.pos.y + sideY * dist);
+                    let inBuilding = false;
+                    for(let b of this.buildings) { if (b.rect.collidePoint(spawnPos.x, spawnPos.y)) { inBuilding = true; break; } }
+                    if (inBuilding) {
+                        sideX = -sideX; sideY = -sideY;
+                        spawnPos = new Vector2(this.player.pos.x + sideX * dist, this.player.pos.y + sideY * dist);
+                        inBuilding = false;
+                        for(let b of this.buildings) { if (b.rect.collidePoint(spawnPos.x, spawnPos.y)) { inBuilding = true; break; } }
+                        if (inBuilding) spawnPos = new Vector2(this.player.pos.x, this.player.pos.y);
+                    }
+                    let pedData = PLAYER_ROSTER.find(c => c.id === this.player.id).pedData;
+                    this.playerPed = new Person(spawnPos.x, spawnPos.y, null, true, pedData);
+                }
+            } else {
+                let dist = this.playerPed.pos.distanceTo(this.player.pos);
+                if (dist < 60) {
+                    this.isWalking = false;
+                    this.playerPed = null;
+                    this.timeScale = 1.0;
+                }
+            }
+        }
+        if (!this.keys['f']) this.fPressed = false;
+
+        if (this.keys['e'] && !this.ePressed && this.isWalking) {
+            this.ePressed = true;
+            let dist = this.playerPed.pos.distanceTo(this.player.pos);
+            if (dist < 60) {
+                if (this.player.health) {
+                    for (let k in this.player.health.parts) {
+                        this.player.health.parts[k] = Math.min(this.player.health.maxHp, this.player.health.parts[k] + 10);
+                    }
+                    for(let k=0; k<5; k++) {
+                        this.particles.push(new Particle(this.player.pos.x + randInt(-20,20), this.player.pos.y + randInt(-20,20), 'repair'));
+                    }
+                }
+            }
+        }
+        if (!this.keys['e']) this.ePressed = false;
+
+        if (this.isWalking && this.playerPed) {
+            let moveSpeed = this.playerPed.moveSpeed; 
+            let mx = 0, my = 0;
+            if (this.keys['arrowleft'] || this.keys['a']) mx = -1;
+            if (this.keys['arrowright'] || this.keys['d']) mx = 1;
+            if (this.keys['arrowup'] || this.keys['w']) my = -1;
+            if (this.keys['arrowdown'] || this.keys['s']) my = 1;
+            
+            if (this.playerPed.abilityCooldown > 0) this.playerPed.abilityCooldown--;
+            if (this.keys[' ']) {
+                const ability = this.playerPed.ability;
+                if (ability === 'flash_run') {
+                    this.playerPed.abilityActive = true;
+                    this.timeScale = 0.2; 
+                    this.playerPed.moveSpeed = 12.0; 
+                    if (Math.random() < 0.5) this.particles.push(new Particle(this.playerPed.pos.x, this.playerPed.pos.y, 'lightning'));
+                }
+                else if (ability === 'blink' && this.playerPed.abilityCooldown <= 0) {
+                    this.playerPed.abilityCooldown = 3 * FPS; 
+                    let moveVec = new Vector2(mx, my);
+                    if (moveVec.mag() === 0) {
+                        let rad = degToRad(this.playerPed.angle + 90); 
+                        moveVec = new Vector2(Math.cos(rad), Math.sin(rad));
+                    }
+                    let blinkPos = this.playerPed.pos.add(moveVec.normalize().mult(150));
+                    let inWall = false;
+                    for(let b of this.buildings) if(b.rect.collidePoint(blinkPos.x, blinkPos.y)) inWall=true;
+                    if (!inWall) {
+                        for(let i=0; i<5; i++) this.particles.push(new Particle(this.playerPed.pos.x + randInt(-10,10), this.playerPed.pos.y + randInt(-10,10), 'spark'));
+                        this.playerPed.pos = blinkPos;
+                    }
+                }
+                else if ((ability === 'shield' || ability === 'money_shield') && this.playerPed.abilityCooldown <= 0) {
+                    this.shockwaves.push(new Shockwave(this.playerPed.pos.x, this.playerPed.pos.y, this.playerPed.abilityColor, 100));
+                    this.playerPed.abilityCooldown = 2 * FPS; 
+                }
+                else if ((ability === 'shock' || ability === 'taser') && this.playerPed.abilityCooldown <= 0) {
+                    this.shockwaves.push(new Shockwave(this.playerPed.pos.x, this.playerPed.pos.y, '#32ffff', 150));
+                    this.playerPed.abilityCooldown = 60;
+                }
+            } else {
+                if (this.playerPed.ability === 'flash_run') {
+                    this.playerPed.abilityActive = false;
+                    this.timeScale = 1.0;
+                    this.playerPed.moveSpeed = 3.5;
+                }
+            }
+            let moveVec = new Vector2(mx, my);
+            if (moveVec.mag() > 0) moveVec = moveVec.normalize().mult(moveSpeed);
+            this.playerPed.vel = moveVec;
+            let nextPos = this.playerPed.pos.add(this.playerPed.vel);
+            let collided = false;
+            for(let b of this.buildings) {
+                if (b.rect.collidePoint(nextPos.x, nextPos.y)) collided = true;
+            }
+            if (!collided) {
+                this.playerPed.pos = nextPos; 
+                this.playerPed.update(null, null); 
+            } else {
+                this.playerPed.vel = new Vector2(0,0);
+                this.playerPed.update(null, null);
+            }
+            this.player.vel = this.player.vel.mult(0.95);
+            this.player.pos = this.player.pos.add(this.player.vel.mult(dt));
+        } else {
+            if (this.keys['arrowleft'] || this.keys['a']) this.player.rotDirection = -1;
+            if (this.keys['arrowright'] || this.keys['d']) this.player.rotDirection = 1;
+            if (this.keys['arrowup'] || this.keys['w']) this.player.accInput = this.player.customAccel || ACCELERATION;
+            if (this.keys['arrowdown'] || this.keys['s']) this.player.accInput = -(this.player.customAccel || ACCELERATION) * 0.5;
+            let drift = (this.keys[' ']) && this.state === 'PLAY';
+            this.player.physics(this.buildings, drift, this.fireWheelActive);
+            if (this.fireWheelActive) {
+                if (Math.random() < 0.8) {
+                    this.floorEffects.push(new FireTrail(this.player.pos.x, this.player.pos.y, this.player.angle));
+                }
+            }
+            if (this.player.id === 'neon' && this.player.vel.mag() > 5) {
+                if (Math.random() < 0.3) {
+                    this.floorEffects.push(new LightWall(this.player.pos.x, this.player.pos.y));
+                }
+            }
+            this.updateAchievementLogic(drift);
+        }
+        if (this.keys['r']) {
+            if (this.player.health && this.player.health.checkFullyDestroyed()) {
+                let tempGhostlyRider = this.hasGhostlyRider;
+                let tempFireWheel = this.hasFireWheel;
+                this.initGame();
+                this.hasGhostlyRider = tempGhostlyRider;
+                this.hasFireWheel = tempFireWheel;
+                return;
+            }
+        }
+        this.floorEffects.forEach((f, i) => {
+            if (f.update) f.update(); 
+            else if (f.life !== undefined) f.life--;
+            if(f.life<=0) this.floorEffects.splice(i, 1);
+            if (f instanceof OilSlick) {
+                this.cops.forEach(cop => {
+                    if (cop.pos.distanceTo(f.pos) < f.radius + 10) cop.spinTimer = 60;
+                });
+            }
+            if (f instanceof StickyPuddle) {
+                this.cops.forEach(cop => {
+                    if (cop.pos.distanceTo(f.pos) < f.radius + 10) cop.vel = cop.vel.mult(0.2); 
+                });
+            }
+            if (f instanceof LightWall) {
+                this.cops.forEach(cop => {
+                    if (cop.pos.distanceTo(f.pos) < f.radius + 15) {
+                        cop.dead = true;
+                        this.score += 50;
+                        for(let k=0; k<10; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
+                    }
+                });
+            }
+            if (f instanceof Mine && !f.triggered) {
+                this.cops.forEach(cop => {
+                    if (cop.pos.distanceTo(f.pos) < f.radius + 15) {
+                        f.triggered = true;
+                        cop.dead = true;
+                        this.score += 100;
+                        for(let k=0; k<20; k++) this.particles.push(new Particle(f.pos.x, f.pos.y, 'spark'));
+                    }
+                });
+                if (f.triggered) this.floorEffects.splice(i, 1);
+            }
+        });
+        
+        let targetObj = this.isWalking ? this.playerPed : this.player;
+        let zoom = this.deviceMode === 'MOBILE' ? 0.6 : 1.0;
+        this.camera.update(targetObj, this.canvas.width, this.canvas.height, zoom);
+        this.updateChunks();
+        this.spawnTimer++;
+        if (this.spawnTimer > 120 / dt) {
+            this.spawnTimer = 0;
+            let angle = randFloat(0, Math.PI*2);
+            let dist = 800;
+            let cx = (-this.camera.offset.x + this.canvas.width/2) + Math.cos(angle)*dist;
+            let cy = (-this.camera.offset.y + this.canvas.height/2) + Math.sin(angle)*dist;
+            let gx = Math.floor(cx / BLOCK_SIZE);
+            let gy = Math.floor(cy / BLOCK_SIZE);
+            if ((gx % 3 === 0) || (gy % 3 === 0)) {
+                this.cops.push(new Car(cx, cy, COLORS.COP_BODY, true));
+            }
+        }
+        if (Math.abs(this.player.rotDirection) > 0 && this.player.vel.mag() > 4 && !this.isWalking && !this.player.isFlying) {
+            this.skids.push(new Skid(this.player.pos.x, this.player.pos.y, this.player.angle));
+        }
+        this.skids.forEach((s,i) => { s.update(); if(s.life<=0) this.skids.splice(i,1); });
+        this.cops.forEach((cop, i) => {
+            let originalVel = cop.vel;
+            cop.vel = cop.vel.mult(dt);
+            let chaseTarget = (this.isWalking && this.playerPed) ? this.playerPed : this.player;
+            cop.updateCop(chaseTarget, this.buildings, this.ghostlyRiderActive);
+            cop.vel = cop.vel.mult(1/dt); 
+            if (dt < 1.0) cop.pos = cop.pos.sub(cop.vel.mult(1 - dt));
+            if (cop.getHitbox().collideRect(this.player.getHitbox())) {
+                if ((this.player.id === 'tank' && this.powerActive) || (this.player.id === 'monster' && this.powerActive) || (this.player.id === 'dozer' && this.powerActive)) {
+                    cop.dead = true;
+                    this.score += 50;
+                    for(let k=0; k<15; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
+                } else if (this.player.id === 'gold' && this.powerActive) {
+                    cop.dead = true;
+                    this.score += 500;
+                    for(let k=0; k<20; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'gold'));
+                } else if (!this.ghostlyRiderActive && !this.player.isPhasing && !this.player.isFlying) {
+                    if (!this.isWalking) {
+                        this.player.health.takeDamage(30);
+                        let bounce = this.player.pos.sub(cop.pos).normalize().mult(5);
+                        this.player.vel = this.player.vel.add(bounce);
+                        cop.vel = cop.vel.sub(bounce);
+                        for(let k=0; k<5; k++) this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'spark'));
+                    }
+                } else {
+                    if (!this.player.isPhasing && !this.isWalking && !this.player.isFlying) this.player.health.takeDamage(5);
+                }
+            }
+            if (this.isWalking && this.playerPed && !cop.dead) {
+                if (cop.getHitbox().collideRect(this.playerPed.rect)) {
+                    for(let k=0; k<5; k++) {
+                        this.blood.push(new Blood(this.playerPed.pos.x + randInt(-10,10), this.playerPed.pos.y + randInt(-10,10)));
+                    }
+                    this.state = 'GAMEOVER';
+                }
+            }
+            for (let j=i+1; j<this.cops.length; j++) {
+                let other = this.cops[j];
+                if (cop.pos.distanceTo(other.pos) < 45) {
+                    cop.dead = true; other.dead = true;
+                    this.score += 100;
+                    for(let k=0; k<15; k++) this.particles.push(new Particle(cop.pos.x, cop.pos.y, 'spark'));
+                }
+            }
+        });
+        this.cops = this.cops.filter(c => !c.dead);
+        this.civilians.forEach((civ, i) => {
+            if (dt < 1.0) civ.pos = civ.pos.sub(civ.vel.mult(1 - dt)); 
+            civ.updateCivilian(this.buildings, this.civilians, this.player);
+            if (civ.getHitbox().collideRect(this.player.getHitbox())) {
+                if (this.player.id === 'gold' && this.powerActive) {
+                    civ.dead = true; 
+                    this.score += 200;
+                    for(let k=0; k<10; k++) this.particles.push(new Particle(civ.pos.x, civ.pos.y, 'gold'));
+                    this.civilians.splice(i, 1);
+                    return;
+                }
+                if (!this.player.isPhasing && !this.isWalking && !this.player.isFlying) { 
+                    this.player.health.takeDamage(5);
+                    let pCenter = this.player.pos;
+                    let cCenter = civ.pos;
+                    let bounceVec = pCenter.sub(cCenter).normalize();
+                    this.player.vel = this.player.vel.add(bounceVec.mult(4));
+                    civ.vel = civ.vel.sub(bounceVec.mult(4));
+                    for(let k=0; k<3; k++) this.particles.push(new Particle(this.player.pos.x + randInt(-10,10), this.player.pos.y + randInt(-10,10), 'spark'));
+                    if (!civ.hitOnce) {
+                    this.score += 10;
+                    civ.hitOnce = true;
+                    }
+                }
+            }
+            if (this.isWalking && this.playerPed) {
+                if (civ.getHitbox().collideRect(this.playerPed.rect)) {
+                    if (civ.vel.mag() > 1.0) {
+                        for(let k=0; k<5; k++) {
+                            this.blood.push(new Blood(this.playerPed.pos.x + randInt(-10,10), this.playerPed.pos.y + randInt(-10,10)));
+                        }
+                        this.state = 'GAMEOVER';
+                    }
+                }
+            }
+        });
+        this.people.forEach(p => p.update(this.player, this.blood));
+        this.particles.forEach((p,i) => { p.update(); if(p.life<=0) this.particles.splice(i,1); });
+        if (this.player.health.parts['front_torso'] <= 0 && Math.random() < 0.3) {
+            this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'smoke'));
+        }
+        if (this.player.health.checkFullyDestroyed()) {
+            this.saveData(); 
             this.state = 'GAMEOVER';
         }
     }
-}
+    draw(ctx) {
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        ctx.fillStyle = COLORS.BG_VOID;
+        ctx.fillRect(0, 0, w, h);
+        this.drawFloor();
+        let renderList = [
+            ...this.blood.map(o => ({obj:o, type:'blood', y:o.pos.y})),
+            ...this.skids.map(o => ({obj:o, type:'skid', y:o.pos.y})),
+            ...this.floorEffects.map(o => ({obj:o, type:'floor', y:o.pos.y})), 
+            ...this.buildings.map(o => ({obj:o, type:'building', y:o.rect.bottom})),
+            ...this.people.map(o => ({obj:o, type:'person', y:o.rect.bottom})),
+            ...this.sakura.map(o => ({obj:o, type:'sakura', y:o.pos.y})),
+            ...this.cops.map(o => ({obj:o, type:'car', y:o.pos.y})),
+            ...this.civilians.map(o => ({obj:o, type:'car', y:o.pos.y})),
+            {obj: this.player, type:'car', y:this.player.pos.y}
+        ];
+        if (this.isWalking && this.playerPed) {
+            renderList.push({obj: this.playerPed, type:'person', y:this.playerPed.rect.bottom});
+        }
+        renderList.sort((a,b) => a.y - b.y);
+        renderList.forEach(item => {
+            let screenRect;
+            if (item.type === 'car' || item.type === 'sakura' || item.type === 'floor') {
+                if(item.obj.getRect) screenRect = this.camera.apply(item.obj.getRect());
+                else screenRect = this.camera.apply(new Rect(item.obj.pos.x, item.obj.pos.y, 20, 20));
+            }
+            else screenRect = this.camera.apply(item.obj.rect);
+            if (screenRect.right < -50 || screenRect.left > w + 50 || screenRect.bottom < -50 || screenRect.top > h + 50) return;
+        });
+        ctx.save();
+        
+        let zoom = this.deviceMode === 'MOBILE' ? 0.6 : 1.0;
+        ctx.translate(w/2, h/2);
+        ctx.scale(zoom, zoom);
+        ctx.translate(-w/2, -h/2);
 
-});
-// People
-this.people.forEach(p => p.update(this.player, this.blood));
-// Particles
-this.particles.forEach((p,i) => { p.update(); if(p.life<=0) this.particles.splice(i,1); });
-// Smoke
-if (this.player.health.parts['front_torso'] <= 0 && Math.random() < 0.3) {
-this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'smoke'));
-}
-// Game Over Check
-if (this.player.health.checkFullyDestroyed()) {
-this.saveData(); // Save score
-this.state = 'GAMEOVER';
-}
-}
-drawFloor() {
-const bs = BLOCK_SIZE;
-const view = this.camera.viewRect;
-const startGx = Math.floor(view.left / bs) - 1;
-const endGx = Math.floor(view.right / bs) + 1;
-const startGy = Math.floor(view.top / bs) - 1;
-const endGy = Math.floor(view.bottom / bs) + 1;
-for (let gx = startGx; gx < endGx; gx++) {
-for (let gy = startGy; gy < endGy; gy++) {
-let isRoadX = (gx % 3 === 0);
-let isRoadY = (gy % 3 === 0);
-let sx = gx * bs + this.camera.offset.x;
-let sy = gy * bs + this.camera.offset.y;
-if (isRoadX || isRoadY) {
-this.ctx.drawImage(roadPatternCanvas, sx, sy);
-this.ctx.fillStyle = COLORS.PAINT_WHITE;
-if (isRoadY) {
-this.ctx.fillRect(sx, sy+10, bs, 3);
-this.ctx.fillRect(sx, sy+bs-10, bs, 3);
-}
-if (isRoadX) {
-this.ctx.fillRect(sx+10, sy, 3, bs);
-this.ctx.fillRect(sx+bs-10, sy, 3, bs);
-}
-this.ctx.fillStyle = COLORS.PAINT_YELLOW;
-if (isRoadY && !isRoadX) {
-for(let i=0; i<bs; i+=40) this.ctx.fillRect(sx+i+10, sy+bs/2, 20, 3);
-}
-if (isRoadX && !isRoadY) {
-for(let i=0; i<bs; i+=40) this.ctx.fillRect(sx+bs/2, sy+i+10, 3, 20);
-}
-if (isRoadX && isRoadY) {
-this.ctx.fillStyle = '#fff';
-const stripeW = 8;
-const stripeGap = 8;
-for (let i = 20; i < bs - 20; i += stripeW + stripeGap) {
-this.ctx.fillRect(sx + i, sy + 20, stripeW, 40);
-this.ctx.fillRect(sx + i, sy + bs - 60, stripeW, 40);
-}
-for (let i = 20; i < bs - 20; i += stripeW + stripeGap) {
-this.ctx.fillRect(sx + 20, sy + i, 40, stripeW);
-this.ctx.fillRect(sx + bs - 60, sy + i, 40, stripeW);
-}
-}
-}
-}
-}
-}
-drawIndicators() {
-const cx = this.canvas.width/2;
-const cy = this.canvas.height/2;
-const pad = 20;
-// Skip drawing if ghostly rider is active
-if (this.ghostlyRiderActive) return;
-this.cops.forEach(cop => {
-let dist = this.player.pos.distanceTo(cop.pos);
-if (dist > 1500) return;
-let screenPos = this.camera.apply(cop.getRect());
-if (screenPos.x > 0 && screenPos.x < this.canvas.width && screenPos.y > 0 && screenPos.y < this.canvas.height) return;
-let dx = cop.pos.x - this.player.pos.x;
-let dy = cop.pos.y - this.player.pos.y;
-if (dx===0) dx=0.1; if (dy===0) dy=0.1;
-let scale = Math.min(Math.abs((cx-pad)/dx), Math.abs((cy-pad)/dy));
-let dxDraw = cx + dx * scale;
-let dyDraw = cy + dy * scale;
-this.ctx.fillStyle = '#ff3232';
-this.ctx.beginPath(); this.ctx.arc(dxDraw, dyDraw, 14, 0, Math.PI*2); this.ctx.fill();
-this.ctx.strokeStyle = '#fff'; this.ctx.lineWidth=2; this.ctx.stroke();
-this.ctx.fillStyle = '#fff'; this.ctx.font = 'bold 16px Arial'; this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
-this.ctx.fillText("!", dxDraw, dyDraw);
-});
-}
-drawCRT(ctx, w, h, intensity = 1.0) {
-// 1. Scanlines (Stripes)
-ctx.fillStyle = `rgba(0, 0, 0, ${0.3 * intensity})`; // Darker
-for (let i = 0; i < h; i += 3) {
-ctx.fillRect(0, i, w, 1);
-}
-// 2. Moving Scan Bar (Rolling shutter effect)
-this.scanlineY = (this.scanlineY || 0) + 1.5;
-if (this.scanlineY > h) this.scanlineY = 0;
-ctx.fillStyle = `rgba(255, 255, 255, ${0.07 * intensity})`;
-ctx.fillRect(0, this.scanlineY, w, 50);
-// 3. Vignette (Dark corners)
-let grad = ctx.createRadialGradient(w/2, h/2, h/3, w/2, h/2, h);
-grad.addColorStop(0, "rgba(0,0,0,0)");
-grad.addColorStop(1, `rgba(0,0,0,${0.6 * intensity})`);
-ctx.fillStyle = grad;
-ctx.fillRect(0, 0, w, h);
-// 4. Noise (Static)
-// For performance, let's just do a flickering overlay.
-if (Math.random() > 0.8) {
-ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05 * intensity})`;
-ctx.fillRect(0, 0, w, h);
-}
-}
-drawSettings(ctx, w, h) {
-ctx.save();
-ctx.fillStyle = 'rgba(20, 20, 30, 0.95)';
-ctx.fillRect(0, 0, w, h);
-ctx.textAlign = 'center';
-const cx = w / 2;
-const cy = h / 2;
-// Container Block
-let contW = 500;
-let contH = 450;
-drawRect(ctx, '#444', cx - contW/2, cy - contH/2, contW, contH, 10);
-drawRect(ctx, '#222', cx - contW/2 + 5, cy - contH/2 + 5, contW - 10, contH - 10, 8);
-ctx.fillStyle = '#fff';
-ctx.font = '30px "Press Start 2P", cursive';
-ctx.fillText("SETTINGS", cx, cy - 160);
-// Reset Progress Button
-let btnW = 350;
-let btnH = 50;
-this.resetProgressRect = new Rect(cx - btnW/2, cy - 80, btnW, btnH);
-drawRect(ctx, '#000', this.resetProgressRect.x, this.resetProgressRect.y, btnW, btnH, 5);
-drawRect(ctx, '#c83232', this.resetProgressRect.x+4, this.resetProgressRect.y+4, btnW-8, btnH-8, 5);
-ctx.fillStyle = '#fff';
-ctx.font = '20px "Press Start 2P", cursive';
-ctx.fillText("RESET PROGRESS", cx, cy - 50);
-// TV Toggle Button
-this.tvToggleRect = new Rect(cx - btnW/2, cy - 10, btnW, btnH);
-drawRect(ctx, '#000', this.tvToggleRect.x, this.tvToggleRect.y, btnW, btnH, 5);
-drawRect(ctx, this.tvMode ? COLORS.NEON_GREEN : '#555', this.tvToggleRect.x+4, this.tvToggleRect.y+4, btnW-8, btnH-8, 5);
-ctx.fillStyle = '#fff';
-ctx.fillText(`TV EFFECTS: ${this.tvMode ? "ON" : "OFF"}`, cx, cy + 20);
+        ctx.translate(this.camera.offset.x, this.camera.offset.y);
+        if (this.ghostlyRiderActive || this.player.isPhasing) ctx.globalAlpha = 0.5;
+        this.blood.forEach(b => b.draw(ctx));
+        this.skids.forEach(s => s.draw(ctx));
+        this.shockwaves.forEach(sw => sw.draw(ctx));
+        renderList.forEach(item => {
+            if ((this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') && item.obj === this.player) return;
+            if (item.type === 'blood' || item.type === 'skid') return; 
+            if ((this.ghostlyRiderActive || this.player.isPhasing) && item.obj !== this.player && item.type === 'car') {
+                ctx.globalAlpha = 1.0;
+                item.obj.draw(ctx);
+                ctx.globalAlpha = 0.5;
+            } else {
+                item.obj.draw(ctx);
+            }
+            if (item.obj === this.player && this.powerActive && (this.player.id === 'tank' || this.player.id === 'monster' || this.player.id === 'dozer')) {
+                ctx.save();
+                ctx.globalAlpha = 0.3;
+                ctx.fillStyle = '#ff0000';
+                ctx.beginPath();
+                ctx.arc(this.player.pos.x, this.player.pos.y, 40, 0, Math.PI*2);
+                ctx.fill();
+                ctx.restore();
+            }
+            if (item.type === 'person' && item.obj.isAngry && !item.obj.isDead) {
+                let bx = item.obj.pos.x, by = item.obj.rect.top - 15;
+                ctx.fillStyle = '#fff';
+                let txt = item.obj.curseWord;
+                ctx.font = 'bold 12px Arial';
+                let tm = ctx.measureText(txt);
+                let bw = tm.width + 10, bh = 20;
+                drawRect(ctx, '#fff', bx - bw/2, by - bh/2, bw, bh, 5);
+                ctx.beginPath(); ctx.moveTo(bx, by+bh/2); ctx.lineTo(bx-3, by+bh/2+4); ctx.lineTo(bx+3, by+bh/2+4); ctx.fill();
+                ctx.fillStyle = '#000';
+                ctx.textAlign = 'center';
+                ctx.fillText(txt, bx, by + 4);
+            }
+        });
 
-// DEVICE TOGGLE
-this.deviceToggleRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
-drawRect(ctx, '#000', this.deviceToggleRect.x, this.deviceToggleRect.y, btnW, btnH, 5);
-drawRect(ctx, this.deviceMode === 'MOBILE' ? COLORS.NEON_CYAN : '#555', this.deviceToggleRect.x+4, this.deviceToggleRect.y+4, btnW-8, btnH-8, 5);
-ctx.fillStyle = '#fff';
-ctx.fillText(`DEVICE: ${this.deviceMode}`, cx, cy + 90);
+        if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+            this.multiplayer.draw(ctx, this.camera);
+        }
 
-// Back Button
-this.backRect = new Rect(cx - btnW/2, cy + 130, btnW, btnH);
-drawRect(ctx, '#000', this.backRect.x, this.backRect.y, btnW, btnH, 5);
-drawRect(ctx, '#505050', this.backRect.x+4, this.backRect.y+4, btnW-8, btnH-8, 5);
-ctx.fillStyle = '#fff';
-ctx.fillText("BACK", cx, cy + 160);
-// Confirmation Modal Overlay
-if (this.showResetConfirm) {
-ctx.fillStyle = 'rgba(0,0,0,0.8)';
-ctx.fillRect(0,0,w,h);
-let mw = 400, mh = 250;
-drawRect(ctx, '#222', cx - mw/2, cy - mh/2 , mw, mh, 10);
-drawRect(ctx, '#f00', cx - mw/2, cy - mh/2 , mw, 5);
-ctx.fillStyle = '#fff';
-ctx.font = '18px "Press Start 2P", cursive';
-ctx.fillText("ARE YOU SURE?", cx, cy - 40);
-ctx.font = '12px "Press Start 2P", cursive';
-ctx.fillStyle = '#aaa';
-ctx.fillText("This cannot be undone.", cx, cy - 10);
-let bw = 120, bh = 50;
-this.confirmYesRect = new Rect(cx - bw - 20, cy + 40, bw, bh);
-this.confirmNoRect = new Rect(cx + 20, cy + 40, bw, bh);
-drawRect(ctx, '#fff', this.confirmYesRect.x, this.confirmYesRect.y, bw, bh, 5);
-drawRect(ctx, '#900', this.confirmYesRect.x+2, this.confirmYesRect.y+2, bw-4, bh-4, 5);
-ctx.fillStyle = '#fff'; ctx.fillText("YES", cx - bw/2 - 20, cy + 72);
-drawRect(ctx, '#fff', this.confirmNoRect.x, this.confirmNoRect.y, bw, bh, 5);
-drawRect(ctx, '#333', this.confirmNoRect.x+2, this.confirmNoRect.y+2, bw-4, bh-4, 5);
-ctx.fillStyle = '#fff'; ctx.fillText("NO", cx + bw/2 + 20, cy + 72);
-}
-this.drawCRT(ctx, w, h);
-ctx.restore();
-}
-drawMenu(ctx, w, h) {
-ctx.save();
-// Title: TOKYO
-ctx.textAlign = 'center';
-const cx = w / 2;
-const cy = h / 2;
-// Glitch Offset
-let jx = randInt(-2, 2);
-let jy = randInt(-2, 2);
-// "TOKYO"
-ctx.font = '40px "Press Start 2P", cursive';
-let grad = ctx.createLinearGradient(0, cy - 180, 0, cy - 140);
-grad.addColorStop(0, '#ffffff');
-grad.addColorStop(1, '#ffcccc');
-ctx.fillStyle = '#000';
-ctx.fillText("TOKYO", cx + 4 + jx, cy - 120 + 4 + jy);
-ctx.fillStyle = grad;
-ctx.fillText("TOKYO", cx + jx, cy - 120 + jy);
-// "DRIFT"
-ctx.font = '60px "Press Start 2P", cursive';
-ctx.fillStyle = '#000';
-ctx.fillText("DRIFT", cx + 5 - jx, cy - 50 + 5 - jy);
-ctx.fillStyle = '#d32f2f'; // Red
-ctx.fillText("DRIFT", cx - jx, cy - 50 - jy);
-// "- CHASE -"
-ctx.font = '25px "Press Start 2P", cursive';
-ctx.fillStyle = '#000';
-ctx.fillText("- CHASE -", cx + 3, cy + 10 + 3);
-ctx.fillStyle = '#ffeb3b'; // Yellow
-ctx.fillText("- CHASE -", cx, cy + 10);
-// High Score
-ctx.font = '20px "Press Start 2P", cursive';
-ctx.textAlign = 'left';
-ctx.fillStyle = '#fff';
-ctx.fillText(`HIGH SCORE: ${this.highScore}`, 20, 40);
-ctx.textAlign = 'center';
-// Button: SELECT RIDE
-let btnW = 320;
-let btnH = 60;
-this.playRect = new Rect(cx - btnW/2, cy + 60, btnW, btnH);
-// Button Shadow
-ctx.fillStyle = '#000';
-ctx.fillRect(this.playRect.x + 8, this.playRect.y + 8, btnW, btnH);
-// Button Border
-ctx.fillStyle = '#000';
-ctx.fillRect(this.playRect.x - 4, this.playRect.y - 4, btnW + 8, btnH + 8);
-// Button Fill (Red)
-ctx.fillStyle = '#d32f2f';
-ctx.fillRect(this.playRect.x, this.playRect.y, btnW, btnH);
-// Button Text
-ctx.fillStyle = '#fff';
-ctx.font = '24px "Press Start 2P", cursive';
-ctx.fillText("SELECT RIDE", cx, this.playRect.y + 40);
-// Button: SETTINGS
-this.settingsRect = new Rect(cx - btnW/2, cy + 140, btnW, btnH);
-ctx.fillStyle = '#000';
-ctx.fillRect(this.settingsRect.x + 8, this.settingsRect.y + 8, btnW, btnH);
-ctx.fillStyle = '#000';
-ctx.fillRect(this.settingsRect.x - 4, this.settingsRect.y - 4, btnW + 8, btnH + 8);
-ctx.fillStyle = '#505050';
-ctx.fillRect(this.settingsRect.x, this.settingsRect.y, btnW, btnH);
-ctx.fillStyle = '#fff';
-ctx.fillText("SETTINGS", cx, this.settingsRect.y + 40);
-// Instruction Text
-ctx.font = '14px "Press Start 2P", cursive';
-ctx.fillStyle = '#fff';
-ctx.fillText("PRESS [WASD] TO DRIVE", cx, h - 40);
-// Scanlines Overlay
-this.drawCRT(ctx, w, h);
-ctx.restore();
-}
-drawCarSelection(ctx, w, h) {
-ctx.save();
-const cx = w / 2;
-const cy = h / 2;
-// Background overlay
-ctx.fillStyle = 'rgba(20, 20, 30, 0.9)';
-ctx.fillRect(0, 0, w, h);
-// Title
-ctx.font = '30px "Press Start 2P", cursive';
-ctx.textAlign = 'center';
-ctx.fillStyle = '#fff';
-ctx.fillText("SELECT YOUR VEHICLE", cx, cy - 200);
-const carSpec = PLAYER_ROSTER[this.selectedCarIndex];
-// Check Locked
-let isLocked = false;
-if (carSpec.unlockScore && this.highScore < carSpec.unlockScore) {
-isLocked = true;
-}
-// --- DRAW PREVIEW CAR (SCALED UP) ---
-let previewCar = new Car(0, 0, isLocked ? '#222' : carSpec.color, false, false);
-previewCar.type = carSpec.type;
-previewCar.id = carSpec.id; // Important for preview
-previewCar.hasSpoiler = carSpec.hasSpoiler;
-previewCar.sprite = previewCar.createCarSprite();
-const scale = 4;
-const pW = previewCar.width * scale;
-const pH = previewCar.height * scale;
-// Draw Car Shadow
-ctx.fillStyle = 'rgba(0,0,0,0.5)';
-ctx.beginPath(); ctx.ellipse(cx, cy - 50 + pH/2, pW/2 + 20, 20, 0, 0, Math.PI*2); ctx.fill();
-ctx.imageSmoothingEnabled = false;
-ctx.drawImage(previewCar.sprite, cx - pW/2, cy - 50 - pH/2, pW, pH);
-if (isLocked) {
-ctx.font = '40px "Press Start 2P", cursive';
-ctx.fillStyle = '#f00';
-ctx.fillText("LOCKED", cx, cy - 50);
-ctx.font = '14px "Press Start 2P", cursive';
-ctx.fillText(`NEED ${carSpec.unlockScore} HIGH SCORE`, cx, cy - 20);
-}
-// --- CAR INFO ---
-// Arrows
-ctx.font = '40px "Press Start 2P", cursive';
-ctx.fillStyle = '#ffeb3b';
-ctx.fillText("<", cx - 200, cy - 50);
-ctx.fillText(">", cx + 200, cy - 50);
-// Name
-ctx.font = '24px "Press Start 2P", cursive';
-ctx.fillStyle = isLocked ? '#555' : COLORS.NEON_CYAN;
-ctx.fillText(carSpec.name, cx, cy + 60);
-// Desc
-ctx.font = '14px "Press Start 2P", cursive';
-ctx.fillStyle = '#aaa';
-ctx.fillText(carSpec.desc, cx, cy + 90);
-// --- STATS BARS ---
-const drawStat = (label, value, max, yPos) => {
-const barW = 200;
-const barH = 15;
-const xPos = cx - barW/2;
-ctx.textAlign = 'right';
-ctx.fillStyle = '#fff';
-ctx.font = '12px "Press Start 2P", cursive';
-ctx.fillText(label, xPos - 10, yPos + 12);
-// BG
-ctx.fillStyle = '#333';
-ctx.fillRect(xPos, yPos, barW, barH);
-// Fill
-const fillW = (value / max) * barW;
-ctx.fillStyle = value > max * 0.7 ? COLORS.HP_GREEN : (value > max * 0.4 ? COLORS.HP_YELLOW : COLORS.HP_RED);
-ctx.fillRect(xPos, yPos, fillW, barH);
-};
-drawStat("SPEED", carSpec.stats.speed, 12.0, cy + 130);
-drawStat("HANDLING", carSpec.stats.turn, 6.0, cy + 155);
-drawStat("ARMOR", carSpec.stats.hp, 200, cy + 180);
-// --- DRIVE BUTTON ---
-let btnW = 200;
-let btnH = 50;
-this.selectRect = new Rect(cx - btnW/2, h - 100, btnW, btnH);
-drawRect(ctx, '#fff', this.selectRect.x, this.selectRect.y, btnW, btnH, 5);
-drawRect(ctx, isLocked ? '#333' : COLORS.NEON_PINK, this.selectRect.x+2, this.selectRect.y+2, btnW-4, btnH-4, 5);
-ctx.textAlign = 'center';
-ctx.fillStyle = isLocked ? '#888' : '#fff';
-ctx.font = '20px "Press Start 2P", cursive';
-ctx.fillText(isLocked ? "LOCKED" : "DRIVE!", cx, h - 68);
-// Show High Score
-ctx.font = '12px "Press Start 2P", cursive';
-ctx.fillStyle = '#fff';
-ctx.fillText(`HIGH SCORE: ${this.highScore}`, cx, h - 20);
-this.drawCRT(ctx, w, h);
-ctx.restore();
-}
-drawAchievementPopUp(ctx, w, h) {
-const popupH = 60;
-const popupW = 380;
-const cornerPad = 20;
-this.achievements.forEach((ach, index) => {
-// New Sliding Animation Logic
-// Timer starts at 180 (3s)
-// 180 -> 150: Slide In (0.5s)
-// 150 -> 30: Hold (2s)
-// 30 -> 0: Slide Out (0.5s)
-let xOffset = 0;
-if (ach.timer > 150) {
-// Slide In (lerp from width to 0 offset)
-let t = (180 - ach.timer) / 30; // 0 to 1
-// Ease out cubic
-t = 1 - Math.pow(1 - t, 3);
-xOffset = (1 - t) * (popupW + cornerPad);
-} else if (ach.timer < 30) {
-// Slide Out
-let t = (30 - ach.timer) / 30; // 0 to 1
-// Ease in cubic
-t = t * t * t;
-xOffset = t * (popupW + cornerPad);
-} else {
-xOffset = 0;
-}
-let x = w - popupW - cornerPad + xOffset;
-let y = h - popupH - (cornerPad + index * (popupH + 10));
-ctx.save();
-// --- Custom Styling: Cooler Box ---
-drawRect(ctx, 'rgba(0, 0, 0, 0.9)', x + 5, y + 5, popupW, popupH, 5);
-drawRect(ctx, 'rgba(255, 255, 255, 0.2)', x - 2, y - 2, popupW + 4, popupH + 4, 7);
-drawRect(ctx, 'rgba(10, 10, 10, 0.95)', x, y, popupW, popupH, 5);
-drawRect(ctx, COLORS.NEON_CYAN, x, y, popupW, 8);
-ctx.fillStyle = COLORS.NEON_PINK;
-drawRect(ctx, ctx.fillStyle, x + 12, y + 15, 30, 30);
-ctx.font = '10px "Press Start 2P", cursive';
-ctx.fillStyle = '#fff';
-ctx.textAlign = 'left';
-ctx.fillText("ACHIEVEMENT UNLOCKED", x + 50, y + 23);
-ctx.font = '14px "Press Start 2P", cursive';
-ctx.fillStyle = COLORS.NEON_CYAN;
-ctx.fillText(ach.name, x + 50, y + 45);
-ctx.restore();
-});
-}
-drawSkillInventory(ctx, w, h) {
-const boxSize = 60;
-const pad = 10;
-const baseY = h - boxSize - 10;
-const centerX = w / 2;
-let x = centerX;
-let inventory = [];
-if (this.hasGhostlyRider) inventory.push({
-name: "Ghostly Rider",
-key: "[X]",
-active: this.ghostlyRiderActive,
-cooldown: this.ghostlyRiderCooldown,
-cooldownMax: this.ghostlyRiderCooldownMax,
-color: '#32ffff' // Cyan/Blue
-});
-if (this.hasFireWheel) inventory.push({
-name: "Fire Wheel",
-key: "[C]",
-active: this.fireWheelActive,
-cooldown: this.fireWheelCooldown,
-cooldownMax: this.fireWheelCooldownMax,
-color: '#ff6432' // Orange/Red
-});
-// Show Unique Z Power
-if (this.player.powerData) {
-inventory.push({
-name: this.player.powerData.name,
-key: "[Z]",
-active: this.zPressed || this.powerActive,
-cooldown: this.powerCooldown,
-cooldownMax: this.player.powerData.cooldown,
-color: this.player.powerData.color
-});
-}
-x -= (inventory.length * boxSize + (inventory.length - 1) * pad) / 2;
-inventory.forEach((skill, index) => {
-let boxX = x + index * (boxSize + pad);
-ctx.save();
-// Outer Border
-drawRect(ctx, '#000', boxX - 2, baseY - 2, boxSize + 4, boxSize + 4);
-// Inner Background
-drawRect(ctx, 'rgba(30, 30, 30, 0.9)', boxX, baseY, boxSize, boxSize);
-// Draw Pixel Art Icon
-this.drawSkillIcon(ctx, skill, boxX, baseY, boxSize);
-// Cooldown Overlay
-if (skill.cooldown > 0) {
-let cooldownPercent = skill.cooldown / skill.cooldownMax;
-let cooldownH = boxSize * cooldownPercent;
-ctx.globalAlpha = 0.7;
-drawRect(ctx, 'rgba(0, 0, 0, 0.9)', boxX, baseY + boxSize - cooldownH, boxSize, cooldownH);
-ctx.globalAlpha = 1.0;
-// Cooldown timer text
-ctx.font = '14px "Press Start 2P", cursive';
-ctx.fillStyle = '#fff';
-ctx.fillText(Math.ceil(skill.cooldown / FPS), boxX + boxSize/2, baseY + boxSize/2 + 5);
-}
-// Active Indicator
-if (skill.active) {
-ctx.strokeStyle = skill.color;
-ctx.lineWidth = 4;
-ctx.strokeRect(boxX, baseY, boxSize, boxSize);
-}
-// Keybind Text
-ctx.font = '10px "Press Start 2P", cursive';
-ctx.fillStyle = '#fff';
-ctx.textAlign = 'center';
-ctx.fillText(skill.key, boxX + boxSize/2, baseY + boxSize - 5);
-ctx.restore();
-});
-}
-// Helper function to draw the pixel art icons inside the skill box
-drawSkillIcon(ctx, skill, boxX, baseY, boxSize) {
-const cx = boxX + boxSize / 2;
-const cy = baseY + boxSize / 2;
-if (skill.name === "Ghostly Rider" || skill.name === "Phase Shift" || skill.name === "Warp Speed") {
-ctx.save();
-ctx.globalAlpha = 0.6;
-ctx.fillStyle = skill.color;
-ctx.fillRect(cx - 15, cy - 5, 20, 10);
-ctx.globalAlpha = 1.0;
-ctx.fillStyle = '#fff';
-ctx.fillRect(cx - 5, cy - 15, 10, 10);
-ctx.fillStyle = skill.color;
-ctx.fillRect(cx - 4, cy - 14, 8, 2);
-ctx.fillRect(cx - 4, cy - 10, 8, 2);
-ctx.fillStyle = '#000';
-ctx.fillRect(cx - 2, cy - 12, 1, 1);
-ctx.fillRect(cx + 1, cy - 12, 1, 1);
-ctx.restore();
-} else if (skill.name === "Fire Wheel" || skill.name === "Flamethrower") {
-ctx.save();
-ctx.fillStyle = '#ffeb3b';
-ctx.beginPath();
-ctx.moveTo(cx - 5, cy - 10);
-ctx.lineTo(cx + 5, cy - 10);
-ctx.lineTo(cx, cy - 2);
-ctx.fill();
-ctx.fillStyle = '#ff6432';
-ctx.fillRect(cx - 3, cy - 7, 6, 5);
-ctx.fillStyle = '#e0e0e0';
-ctx.fillRect(cx - 6, cy - 1, 12, 6);
-ctx.fillRect(cx - 4, cy + 5, 8, 3);
-ctx.fillStyle = '#000';
-ctx.fillRect(cx - 4, cy + 1, 2, 2);
-ctx.fillRect(cx + 2, cy + 1, 2, 2);
-ctx.fillRect(cx - 1, cy + 4, 2, 1);
-ctx.restore();
-} else if (skill.name === "Smite" || skill.name === "EMP Blast" || skill.name === "Pulse Ram" || skill.name === "Hellfire" || skill.name === "Siren Wail") {
-ctx.save();
-ctx.fillStyle = skill.color;
-ctx.beginPath();
-ctx.arc(cx, cy, 10, 0, Math.PI*2);
-ctx.stroke();
-ctx.lineWidth = 3;
-ctx.strokeStyle = '#fff';
-ctx.stroke();
-ctx.restore();
-} else if (skill.name === "Repair") {
-ctx.save();
-ctx.fillStyle = '#fff';
-ctx.fillRect(cx - 3, cy - 8, 6, 16);
-ctx.fillRect(cx - 8, cy - 3, 16, 6);
-ctx.restore();
-} else if (skill.name === "Oil Slick") {
-ctx.save();
-ctx.fillStyle = '#111';
-ctx.beginPath(); ctx.ellipse(cx, cy, 12, 6, 0, 0, Math.PI*2); ctx.fill();
-ctx.fillStyle = '#555';
-ctx.beginPath(); ctx.ellipse(cx - 2, cy - 2, 4, 2, 0, 0, Math.PI*2); ctx.fill();
-ctx.restore();
-} else if (skill.name === "Juggernaut" || skill.name === "Smash" || skill.name === "Demolition") {
-ctx.save();
-ctx.fillStyle = skill.color;
-ctx.fillRect(cx - 10, cy - 10, 20, 20);
-ctx.strokeStyle = '#fff'; ctx.lineWidth=2;
-ctx.strokeRect(cx-10, cy-10, 20, 20);
-ctx.restore();
-} else if (skill.name === "Midas Touch") {
-ctx.save();
-ctx.fillStyle = '#ffd700';
-ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2); ctx.fill();
-ctx.fillStyle = '#fff';
-ctx.font = '10px "Press Start 2P"'; ctx.fillText("$", cx-3, cy+3);
-ctx.restore();
-} else if (skill.name === "Bullet Time" || skill.name === "Rewind") {
-ctx.save();
-ctx.strokeStyle = '#fff'; ctx.lineWidth=2;
-ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI*2); ctx.stroke();
-ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, cy-6); ctx.stroke();
-ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+4, cy+2); ctx.stroke();
-ctx.restore();
-} else if (skill.name === "Abduct") {
-ctx.save();
-ctx.fillStyle = '#39ff14';
-ctx.beginPath(); ctx.moveTo(cx, cy-10); ctx.lineTo(cx-8, cy+10); ctx.lineTo(cx+8, cy+10); ctx.fill();
-ctx.restore();
-} else if (skill.name === "Light Wall" || skill.name === "Sticky Goo" || skill.name === "Landmines") {
-ctx.save();
-ctx.fillStyle = skill.color;
-ctx.fillRect(cx - 8, cy + 2, 16, 4);
-ctx.fillRect(cx - 4, cy - 6, 8, 8);
-ctx.restore();
-} else if (skill.name === "Takeoff" || skill.name === "Bunny Hop") {
-ctx.save();
-ctx.fillStyle = skill.color;
-ctx.beginPath(); ctx.moveTo(cx, cy-10); ctx.lineTo(cx-10, cy+5); ctx.lineTo(cx+10, cy+5); ctx.fill();
-ctx.restore();
-} else if (skill.name === "Panic Siren" || skill.name === "Broadside") {
-ctx.save();
-ctx.fillStyle = skill.color;
-ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI*2); ctx.fill();
-ctx.strokeStyle = '#fff'; ctx.lineWidth=1;
-ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+15, cy-5); ctx.stroke();
-ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx+15, cy+5); ctx.stroke();
-ctx.restore();
-} else if (skill.name === "Shrink Ray") {
-ctx.save();
-ctx.fillStyle = '#0f0';
-ctx.fillRect(cx-10, cy-2, 20, 4);
-ctx.fillRect(cx+5, cy-6, 4, 12);
-ctx.restore();
-}
-}
-drawAchievementProgress(ctx, w, h) {
-const cx = w / 2;
-const baseY = 80;
-ctx.save();
-ctx.textAlign = 'center';
-ctx.font = '16px "Press Start 2P", cursive';
-// --- 1. Ghostly Rider Progress ---
-if (!this.hasGhostlyRider) {
-const turnResetting = this.player.isCollidingWithBuilding;
-// Use cyan/white for normal progress, red/orange if failed
-const turnColor = (this.turnCount > 0 && !turnResetting) ? COLORS.NEON_CYAN : COLORS.PAINT_WHITE;
-if (turnResetting) {
-ctx.fillStyle = COLORS.HP_RED;
-} else {
-ctx.fillStyle = turnColor;
-}
-const turnStatus = `GHOSTLY RIDER: ${Math.min(this.turnCount, 10)}/10 TURNS`;
-ctx.fillText(turnStatus, cx, baseY);
-if (turnResetting && this.turnCount < 10) {
-ctx.font = '10px "Press Start 2P", cursive';
-ctx.fillStyle = COLORS.HP_RED;
-ctx.fillText("RESET! HIT BUILDING", cx, baseY + 18);
-}
-ctx.font = '16px "Press Start 2P", cursive'; // Restore font size
-}
-// --- 2. Fire Wheel Progress ---
-if (!this.hasFireWheel) {
-const maxFrames = 30 * FPS;
-const driftSeconds = (this.driftTime / FPS);
-const maxSeconds = 30.0;
-let driftColor = COLORS.TEXT_WHITE;
-let copHit = this.player.isCollidingWithCop;
-if (this.driftTime > 0) {
-// Active drift: use neon green
-driftColor = COLORS.NEON_GREEN;
-// But override if a cop hit occurred in the process
-if (copHit) {
-driftColor = COLORS.HP_RED;
-}
-}
-const displayDrift = Math.min(driftSeconds, maxSeconds).toFixed(1);
-const driftStatus = `FIRE WHEEL: ${displayDrift}/${maxSeconds.toFixed(1)} SECS DRIFTED`;
-ctx.fillStyle = driftColor;
-ctx.fillText(driftStatus, cx, baseY + 50);
-// Add reset message if relevant
-if (this.driftTime > 0 && copHit) {
-ctx.font = '10px "Press Start 2P", cursive';
-ctx.fillStyle = COLORS.HP_RED;
-ctx.fillText("RESET! HIT COP", cx, baseY + 68);
-}
-ctx.font = '16px "Press Start 2P", cursive'; // Restore font size
-}
-ctx.restore();
-}
-draw(ctx) {
-const w = this.canvas.width;
-const h = this.canvas.height;
-ctx.fillStyle = COLORS.BG_VOID;
-ctx.fillRect(0, 0, w, h);
-this.drawFloor();
-let renderList = [
-...this.blood.map(o => ({obj:o, type:'blood', y:o.pos.y})),
-...this.skids.map(o => ({obj:o, type:'skid', y:o.pos.y})),
-...this.floorEffects.map(o => ({obj:o, type:'floor', y:o.pos.y})), // Add fire trail here
-...this.buildings.map(o => ({obj:o, type:'building', y:o.rect.bottom})),
-...this.people.map(o => ({obj:o, type:'person', y:o.rect.bottom})),
-...this.sakura.map(o => ({obj:o, type:'sakura', y:o.pos.y})),
-...this.cops.map(o => ({obj:o, type:'car', y:o.pos.y})),
-...this.civilians.map(o => ({obj:o, type:'car', y:o.pos.y})),
-{obj: this.player, type:'car', y:this.player.pos.y}
-];
-// Add player character to render list if walking
-if (this.isWalking && this.playerPed) {
-renderList.push({obj: this.playerPed, type:'person', y:this.playerPed.rect.bottom});
-}
-renderList.sort((a,b) => a.y - b.y);
-renderList.forEach(item => {
-let screenRect;
-if (item.type === 'car' || item.type === 'sakura' || item.type === 'floor') {
-// For floor effects we need a faux rect or just use pos
-if(item.obj.getRect) screenRect = this.camera.apply(item.obj.getRect());
-else screenRect = this.camera.apply(new Rect(item.obj.pos.x, item.obj.pos.y, 20, 20));
-}
-else screenRect = this.camera.apply(item.obj.rect);
-if (screenRect.right < -50 || screenRect.left > w + 50 || screenRect.bottom < -50 || screenRect.top > h + 50) return;
-});
-ctx.save();
-// --- MOBILE ZOOM OUT ---
-// Scale around the center of the screen
-let zoom = this.deviceMode === 'MOBILE' ? 0.6 : 1.0;
-ctx.translate(w/2, h/2);
-ctx.scale(zoom, zoom);
-ctx.translate(-w/2, -h/2);
+        ctx.globalAlpha = 1.0;
+        this.particles.forEach(p => p.draw(ctx));
+        ctx.restore();
+        if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
+            this.drawIndicators();
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px "Press Start 2P", cursive';
+            ctx.textAlign = 'left';
+            ctx.fillText(`SCORE: ${this.score}`, 20, 40);
+            this.player.health.drawUI(ctx, w - 60, 10);
+            if (this.state === 'PLAY') {
+                if (!this.isWalking && this.player.vel.mag() < 0.5) {
+                    ctx.font = '12px "Press Start 2P", cursive';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#fff';
+                    ctx.fillText("[F] EXIT CAR", w/2, h - 100);
+                } else if (this.isWalking) {
+                    let dist = this.playerPed.pos.distanceTo(this.player.pos);
+                    ctx.font = '12px "Press Start 2P", cursive';
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = '#fff';
+                    if (dist < 60) {
+                        ctx.fillText("[F] ENTER CAR", w/2, h - 120);
+                        if (this.player.health.checkFullyDestroyed() === false) {
+                            ctx.fillStyle = '#32ff64';
+                            ctx.fillText("[E] REPAIR", w/2, h - 100);
+                        }
+                    } else {
+                        ctx.fillText("RETURN TO CAR", w/2, h - 100);
+                    }
+                }
+                if (this.showProgress) {
+                    this.drawAchievementProgress(ctx, w, h);
+                }
 
-ctx.translate(this.camera.offset.x, this.camera.offset.y);
-// Ghostly Rider visual
-if (this.ghostlyRiderActive || this.player.isPhasing) ctx.globalAlpha = 0.5;
-// Draw Layer 1: Floor
-this.blood.forEach(b => b.draw(ctx));
-this.skids.forEach(s => s.draw(ctx));
-// Draw Shockwaves
-this.shockwaves.forEach(sw => sw.draw(ctx));
-// Draw Layer 2: Sorted Objects (includes Fire Trails now if sorted)
-renderList.forEach(item => {
-// Don't draw player in menu
-if ((this.state === 'MENU' || this.state === 'CAR_SELECT' || this.state === 'SETTINGS') && item.obj === this.player) return;
-if (item.type === 'blood' || item.type === 'skid') return; // already drawn
-// Handle Ghostly Rider transparency
-if ((this.ghostlyRiderActive || this.player.isPhasing) && item.obj !== this.player && item.type === 'car') {
-ctx.globalAlpha = 1.0;
-item.obj.draw(ctx);
-ctx.globalAlpha = 0.5;
-} else {
-item.obj.draw(ctx);
-}
-// Juggernaut Visual
-if (item.obj === this.player && this.powerActive && (this.player.id === 'tank' || this.player.id === 'monster' || this.player.id === 'dozer')) {
-ctx.save();
-ctx.globalAlpha = 0.3;
-ctx.fillStyle = '#ff0000';
-ctx.beginPath();
-ctx.arc(this.player.pos.x, this.player.pos.y, 40, 0, Math.PI*2);
-ctx.fill();
-ctx.restore();
-}
-// Anger bubble
-if (item.type === 'person' && item.obj.isAngry && !item.obj.isDead) {
-let bx = item.obj.pos.x, by = item.obj.rect.top - 15;
-ctx.fillStyle = '#fff';
-let txt = item.obj.curseWord;
-ctx.font = 'bold 12px Arial';
-let tm = ctx.measureText(txt);
-let bw = tm.width + 10, bh = 20;
-drawRect(ctx, '#fff', bx - bw/2, by - bh/2, bw, bh, 5);
-ctx.beginPath(); ctx.moveTo(bx, by+bh/2); ctx.lineTo(bx-3, by+bh/2+4); ctx.lineTo(bx+3, by+bh/2+4); ctx.fill();
-ctx.fillStyle = '#000';
-ctx.textAlign = 'center';
-ctx.fillText(txt, bx, by + 4);
-}
-});
-
-// Draw Multiplayer Remote Players
-if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
-    this.multiplayer.draw(ctx, this.camera);
-}
-
-ctx.globalAlpha = 1.0;
-this.particles.forEach(p => p.draw(ctx));
-ctx.restore();
-if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
-this.drawIndicators();
-ctx.fillStyle = '#fff';
-ctx.font = '20px "Press Start 2P", cursive';
-ctx.textAlign = 'left';
-ctx.fillText(`SCORE: ${this.score}`, 20, 40);
-this.player.health.drawUI(ctx, w - 60, 10);
-// Draw hints for walking mechanics
-if (this.state === 'PLAY') {
-if (!this.isWalking && this.player.vel.mag() < 0.5) {
-ctx.font = '12px "Press Start 2P", cursive';
-ctx.textAlign = 'center';
-ctx.fillStyle = '#fff';
-ctx.fillText("[F] EXIT CAR", w/2, h - 100);
-} else if (this.isWalking) {
-let dist = this.playerPed.pos.distanceTo(this.player.pos);
-ctx.font = '12px "Press Start 2P", cursive';
-ctx.textAlign = 'center';
-ctx.fillStyle = '#fff';
-if (dist < 60) {
-ctx.fillText("[F] ENTER CAR", w/2, h - 120);
-if (this.player.health.checkFullyDestroyed() === false) {
-ctx.fillStyle = '#32ff64';
-ctx.fillText("[E] REPAIR", w/2, h - 100);
-}
-} else {
-ctx.fillText("RETURN TO CAR", w/2, h - 100);
-}
-}
-if (this.showProgress) {
-this.drawAchievementProgress(ctx, w, h);
-}
-
-// DRAW MOBILE CONTROLS IF ENABLED
-if (this.deviceMode === 'MOBILE') {
-    this.drawMobileControls(ctx, w, h);
-    // Draw Minimap for Mobile
-    this.drawMinimap(ctx, w, h);
-}
-
-}
-this.drawAchievementPopUp(ctx, w, h);
-this.drawSkillInventory(ctx, w, h);
-// Draw TV Mode if enabled during gameplay (lower intensity)
-if (this.tvMode) {
-this.drawCRT(ctx, w, h, 0.4);
-}
-}
-if (this.state === 'MENU') {
-this.drawMenu(ctx, w, h);
-return;
-}
-if (this.state === 'SETTINGS') {
-this.drawSettings(ctx, w, h);
-return;
-}
-if (this.state === 'CAR_SELECT') {
-this.drawCarSelection(ctx, w, h);
-return;
-}
-if (this.state === 'GAMEOVER') {
-ctx.fillStyle = 'rgba(0,0,0,0.6)';
-ctx.fillRect(0, 0, w, h);
-ctx.fillStyle = '#ff3232';
-ctx.font = '50px "Press Start 2P", cursive';
-ctx.textAlign = 'center';
-ctx.fillText("WASTED", w/2, h/2 - 20);
-let btnW = 220, btnH = 60;
-this.restartRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
-drawRect(ctx, '#fff', this.restartRect.x, this.restartRect.y, btnW, btnH, 5);
-drawRect(ctx, '#c83232', this.restartRect.x+2, this.restartRect.y+2, btnW-4, btnH-4, 5);
-ctx.fillStyle = '#fff';
-ctx.font = '20px "Press Start 2P", cursive';
-ctx.fillText("RESTART", w/2, h/2 + 57);
-}
-}
-loop() {
-this.update();
-this.draw(this.ctx);
-requestAnimationFrame(this.loop);
-}
+                if (this.deviceMode === 'MOBILE') {
+                    this.drawMobileControls(ctx, w, h);
+                    this.drawMinimap(ctx, w, h);
+                }
+            }
+            this.drawAchievementPopUp(ctx, w, h);
+            this.drawSkillInventory(ctx, w, h);
+            if (this.tvMode) {
+                this.drawCRT(ctx, w, h, 0.4);
+            }
+        }
+        if (this.state === 'MENU') {
+            this.drawMenu(ctx, w, h);
+            return;
+        }
+        if (this.state === 'SETTINGS') {
+            this.drawSettings(ctx, w, h);
+            return;
+        }
+        if (this.state === 'CAR_SELECT') {
+            this.drawCarSelection(ctx, w, h);
+            return;
+        }
+        if (this.state === 'GAMEOVER') {
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(0, 0, w, h);
+            ctx.fillStyle = '#ff3232';
+            ctx.font = '50px "Press Start 2P", cursive';
+            ctx.textAlign = 'center';
+            ctx.fillText("WASTED", w/2, h/2 - 20);
+            let btnW = 220, btnH = 60;
+            this.restartRect = new Rect(w/2 - btnW/2, h/2 + 20, btnW, btnH);
+            drawRect(ctx, '#fff', this.restartRect.x, this.restartRect.y, btnW, btnH, 5);
+            drawRect(ctx, '#c83232', this.restartRect.x+2, this.restartRect.y+2, btnW-4, btnH-4, 5);
+            ctx.fillStyle = '#fff';
+            ctx.font = '20px "Press Start 2P", cursive';
+            ctx.fillText("RESTART", w/2, h/2 + 57);
+        }
+    }
+    loop() {
+        this.update();
+        this.draw(this.ctx);
+        requestAnimationFrame(this.loop);
+    }
 }
 // Start Game
 const game = new Game();
