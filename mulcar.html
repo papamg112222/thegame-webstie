@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Tokyo Drift</title>
+<title>Tokyo Drift: Bomb Pass</title>
 <!-- Imported Pixel Font -->
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <!-- MQTT.js Client Library for Serverless Multiplayer -->
@@ -811,6 +811,8 @@ this.spinTimer = 0; // For Oil Slick
 this.scale = 1.0; // For shrinkage
 this.dead = false;
 this.isPhasing = false; // For Night Shade
+// BOMB PROPERTY
+this.hasBomb = false; // Visual flag for remote players primarily
 if (isCivilian) {
 this.type = typeOrColor || 'sedan'; // Pass type string for civilians
 const stats = CAR_TYPES[this.type];
@@ -2254,6 +2256,7 @@ this.id = config.id;
 this.hasSpoiler = config.hasSpoiler;
 this.sprite = this.createCarSprite(); // Re-gen sprite
 this.health = null; // No local health tracking for remote
+this.hasBomb = false; // Visual flag for remote
 }
 interpolate() {
 // Simple Lerp
@@ -2280,6 +2283,10 @@ ctx.textAlign = "center";
 ctx.font = "10px 'Press Start 2P'";
 ctx.fillText(this.playerName, 0, -28);
 ctx.restore();
+// Draw Bomb on Remote Player if active
+if (this.hasBomb) {
+drawBomb(ctx, this.pos.x, this.pos.y);
+}
 }
 }
 // Manages Real-Time Multiplayer via MQTT over WebSockets
@@ -2332,8 +2339,14 @@ p.lastSeen = Date.now();
 p.mode = data.m;
 p.car.targetPos = new Vector2(data.x, data.y);
 p.car.targetAngle = data.a;
+p.car.hasBomb = data.hb; // Update visual bomb state
 // Update name/type if changed (rare)
 if (p.car.playerName !== data.n) p.car.playerName = data.n;
+}
+// Check for Bomb Transfer
+if (data.bt && data.bt === this.myId) {
+// Bomb passed to me!
+window.game.receiveBomb();
 }
 }
 update(player, buildings, gameMode) {
@@ -2346,10 +2359,14 @@ y: Math.round(player.pos.y),
 a: Math.round(player.angle),
 t: player.selectedCarIndex,
 n: "Racer " + this.myId.substr(0,4).toUpperCase(),
-m: gameMode
+m: gameMode,
+hb: player.hasBomb, // Broadcast if I have the bomb
+bt: window.game.bombTransferTarget // Broadcast transfer target if any
 };
 this.client.publish(this.topicBase + this.myId, JSON.stringify(payload));
 this.lastPublish = now;
+// Reset one-time triggers
+if (window.game.bombTransferTarget) window.game.bombTransferTarget = null;
 }
 // 2. Prune disconnected players (timeout > 5 sec)
 for (const id in this.remotePlayers) {
@@ -2383,9 +2400,39 @@ p.car.draw(ctx);
 }
 }
 }
+// --- Helper for Bomb Drawing ---
+function drawBomb(ctx, x, y) {
+ctx.save();
+ctx.translate(x, y);
+// Shadow
+ctx.fillStyle = 'rgba(0,0,0,0.5)';
+ctx.beginPath(); ctx.ellipse(0, 0, 10, 5, 0, 0, Math.PI*2); ctx.fill();
+// Bomb Body
+ctx.fillStyle = '#111';
+ctx.beginPath(); ctx.arc(0, -20, 12, 0, Math.PI*2); ctx.fill();
+// Shine
+ctx.fillStyle = '#555';
+ctx.beginPath(); ctx.arc(-4, -24, 3, 0, Math.PI*2); ctx.fill();
+// Fuse
+ctx.strokeStyle = '#d2b48c';
+ctx.lineWidth = 3;
+ctx.beginPath();
+ctx.moveTo(0, -32);
+ctx.quadraticCurveTo(5, -40, 10, -35);
+ctx.stroke();
+// Fire Effect
+ctx.fillStyle = '#ffeb3b';
+let flicker = randInt(-2, 2);
+ctx.fillRect(9 + flicker, -36 + flicker, 4, 4);
+ctx.fillStyle = '#ff5722';
+ctx.fillRect(8 + flicker, -37 + flicker, 2, 2);
+ctx.restore();
+}
 // --- Main Game Class ---
 class Game {
 constructor() {
+// Expose game instance globally for callbacks
+window.game = this;
 this.canvas = document.getElementById('gameCanvas');
 this.ctx = this.canvas.getContext('2d');
 this.ctx.imageSmoothingEnabled = false;
@@ -2465,6 +2512,9 @@ this.playerInitialAngle = null;
 this.isWalking = false;
 this.playerPed = null; // Will be an instance of Person when walking
 this.playerPosHistory = []; // For Chronos Rewind
+// --- BOMB PASS VARIABLES ---
+this.bombTimer = 10; // 10 seconds
+this.bombTransferTarget = null; // ID of player to pass bomb to
 // --- MULTIPLAYER SETUP ---
 this.multiplayer = new MultiplayerManager();
 // --- ADMIN PANEL SETUP ---
@@ -2601,13 +2651,18 @@ this.playerInitialAngle = null;
 this.isWalking = false;
 this.playerPed = null;
 this.playerPosHistory = [];
+// Reset Bomb Logic
+this.player.hasBomb = false;
+this.bombTimer = 10;
+this.bombTransferTarget = null;
 // Connect Multiplayer
 this.multiplayer.connect();
 // MAP GENERATION LOGIC
 if (this.gameMode === 'BOMB_PASS') {
+// Give bomb to player on start (Random spawn logic per request)
+this.player.hasBomb = true;
+this.bombTimer = 10;
 // Static Arena Map (Square Box)
-// Clear chunk system logic mostly
-// Map Size: 4000x4000 centered at 0,0
 const mapSize = 4000;
 const halfSize = mapSize / 2;
 // Generate Walls using Wall class
@@ -2628,6 +2683,15 @@ let y = randInt(-halfSize + 200, halfSize - 200);
 if (Math.abs(x) < 300 && Math.abs(y) < 300) continue;
 this.buildings.push(new Tree(x, y));
 }
+}
+}
+// Called via Multiplayer when I receive the bomb
+receiveBomb() {
+if (!this.player.hasBomb) {
+this.player.hasBomb = true;
+this.bombTimer = 10;
+// Visual Effect
+for(let k=0; k<10; k++) this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'spark'));
 }
 }
 resize() {
@@ -3632,7 +3696,7 @@ if (Math.abs(this.player.rotDirection) > 0 && this.player.vel.mag() > 4 && !this
 this.skids.push(new Skid(this.player.pos.x, this.player.pos.y, this.player.angle));
 }
 this.skids.forEach((s,i) => { s.update(); if(s.life<=0) this.skids.splice(i,1); });
-// --- NEW: Player-to-Player Collision (Bumping) ---
+// --- NEW: Player-to-Player Collision (Bumping) & Bomb Passing ---
 Object.values(this.multiplayer.remotePlayers).forEach(rp => {
 let other = rp.car;
 // Filter check handled in drawing, but for physics we also need to check mode
@@ -3648,8 +3712,31 @@ if (bounceVec.mag() === 0) bounceVec = new Vector2(1, 0); // Prevent NaN
 this.player.vel = this.player.vel.add(bounceVec.mult(2.0)); // Bounce intensity
 // Visuals
 for(let k=0; k<5; k++) this.particles.push(new Particle((pCenter.x+oCenter.x)/2, (pCenter.y+oCenter.y)/2, 'spark'));
+// --- BOMB PASSING ---
+if (this.player.hasBomb && !other.hasBomb) {
+// Pass bomb to other player
+this.player.hasBomb = false;
+this.bombTransferTarget = rp.remoteId; // Tell network to give bomb to this ID
+}
 }
 });
+// --- BOMB LOGIC ---
+if (this.player.hasBomb && this.state === 'PLAY') {
+this.bombTimer -= (1/60) * dt;
+// Fuse spark visuals
+if (Math.random() < 0.3) {
+this.particles.push(new Particle(this.player.pos.x + randInt(-5,5), this.player.pos.y - 30 + randInt(-5,5), 'spark'));
+}
+if (this.bombTimer <= 0) {
+// EXPLODE
+this.player.hasBomb = false;
+this.state = 'GAMEOVER';
+for(let k=0; k<50; k++) {
+this.particles.push(new Particle(this.player.pos.x, this.player.pos.y, 'spark'));
+}
+this.score = 0; // Reset score
+}
+}
 // Cops
 this.cops.forEach((cop, i) => {
 // Apply slow mo to cops
@@ -4430,6 +4517,13 @@ ctx.fillText("RESET! HIT COP", cx, baseY + 68);
 }
 ctx.font = '16px "Press Start 2P", cursive'; // Restore font size
 }
+// --- 3. Bomb Timer (If in Bomb Pass Mode) ---
+if (this.gameMode === 'BOMB_PASS' && this.player.hasBomb) {
+const timeLeft = Math.max(0, this.bombTimer).toFixed(1);
+ctx.fillStyle = '#ff0000';
+ctx.font = '24px "Press Start 2P", cursive';
+ctx.fillText(`EXPLOSION IN: ${timeLeft}`, cx, 120);
+}
 ctx.restore();
 }
 draw(ctx) {
@@ -4510,6 +4604,10 @@ ctx.fillStyle = '#000';
 ctx.textAlign = 'center';
 ctx.fillText(txt, bx, by + 4);
 }
+// BOMB DRAWING
+if (item.obj === this.player && this.player.hasBomb) {
+drawBomb(ctx, this.player.pos.x, this.player.pos.y);
+}
 });
 // Draw Multiplayer Remote Players
 if (this.state === 'PLAY' || this.state === 'GAMEOVER') {
@@ -4548,7 +4646,7 @@ ctx.fillText("[E] REPAIR", w/2, h - 100);
 ctx.fillText("RETURN TO CAR", w/2, h - 100);
 }
 }
-if (this.showProgress) {
+if (this.showProgress || (this.gameMode === 'BOMB_PASS' && this.player.hasBomb)) {
 this.drawAchievementProgress(ctx, w, h);
 }
 // DRAW MOBILE CONTROLS IF ENABLED
@@ -4605,4 +4703,4 @@ requestAnimationFrame(this.loop);
 const game = new Game();
 </script>
 </body>
-  </html>
+</html>
