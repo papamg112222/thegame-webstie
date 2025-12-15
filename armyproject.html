@@ -468,59 +468,49 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- VISITOR COUNT LOGIC (UPDATED TO FIX) ---
+            // --- VISITOR COUNT LOGIC (FIXED & SIMPLIFIED) ---
             useEffect(() => {
-                // Scenario 1: Firebase is Active (Standard Mode)
-                if (user && fb) {
-                    const { db, appId, doc, onSnapshot, updateDoc, setDoc, getDoc, collection, increment } = fb;
-                    
+                // If Firebase is available, try to use it
+                if (fb && user) {
+                    const { db, appId, doc, onSnapshot, updateDoc, setDoc, increment } = fb;
                     const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
                     
-                    // Listen for real-time updates
                     const unsubscribe = onSnapshot(statsRef, (docSnap) => {
-                        if (docSnap.exists()) {
-                            setVisitorCount(docSnap.data().count || 0);
-                        } else {
-                            setDoc(statsRef, { count: 0 }).catch(err => console.error("Init stats failed", err));
-                        }
-                    }, (error) => {
-                        console.error("Error listening to stats:", error);
-                    });
-
-                    // Increment Logic
-                    const hasVisited = sessionStorage.getItem('visited_army_site');
-                    if (!hasVisited) {
-                        const incrementStats = async () => {
-                            try {
-                                await updateDoc(statsRef, { count: increment(1) });
-                                sessionStorage.setItem('visited_army_site', 'true');
-                            } catch (e) {
-                                if (e.code === 'not-found') {
-                                    await setDoc(statsRef, { count: 1 });
-                                    sessionStorage.setItem('visited_army_site', 'true');
-                                }
-                            }
-                        };
-                        incrementStats();
+                        if (docSnap.exists()) setVisitorCount(docSnap.data().count || 0);
+                    }, (err) => console.error(err));
+                    
+                    // Increment safely
+                    const key = 'firebase_visit_' + (new Date()).toDateString(); 
+                    if (!sessionStorage.getItem(key)) {
+                         updateDoc(statsRef, { count: increment(1) }).catch(async (e) => {
+                             if (e.code === 'not-found') await setDoc(statsRef, { count: 1 });
+                         });
+                         sessionStorage.setItem(key, 'true');
                     }
                     return () => unsubscribe();
                 } 
-                // Scenario 2: Firebase is Missing (Local Fallback Mode - FIX for "Not Working")
+                
+                // Scenario 2: Firebase is Missing (Local Fallback Mode)
                 else if (!fb) {
-                    // Try to get count from localStorage
-                    const localSavedCount = localStorage.getItem('local_visitor_count');
-                    let currentCount = localSavedCount ? parseInt(localSavedCount) : 100; // Start at 100 if new
+                    try {
+                        // Get current count from storage (use a new key to reset any corruption)
+                        const saved = localStorage.getItem('site_visits_offline');
+                        let count = 100; // Start at 100 to look popular
 
-                    const hasVisited = sessionStorage.getItem('visited_army_site');
-                    
-                    if (!hasVisited) {
-                        // Increment
-                        currentCount = currentCount + 1;
-                        localStorage.setItem('local_visitor_count', currentCount.toString());
-                        sessionStorage.setItem('visited_army_site', 'true');
+                        if (saved) {
+                            const parsed = parseInt(saved, 10);
+                            if (!isNaN(parsed)) count = parsed;
+                        }
+
+                        // Always increment on load (Page View behavior)
+                        count++;
+                        
+                        localStorage.setItem('site_visits_offline', count.toString());
+                        setVisitorCount(count);
+                    } catch (e) {
+                        console.warn("Counter error:", e);
+                        setVisitorCount(100);
                     }
-                    
-                    setVisitorCount(currentCount);
                 }
             }, [user]);
 
