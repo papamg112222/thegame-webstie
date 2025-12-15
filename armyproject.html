@@ -8,6 +8,28 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, increment } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        window.Firebase = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            doc,
+            onSnapshot,
+            setDoc,
+            updateDoc,
+            getDoc,
+            collection,
+            increment
+        };
+    </script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
       body { font-family: 'Inter', sans-serif; }
@@ -53,6 +75,19 @@
         display: flex;
         will-change: transform;
       }
+
+      /* Counter Animations */
+      @keyframes slideDownEnter {
+          from { transform: translateY(-100%); }
+          to { transform: translateY(0); }
+      }
+      @keyframes slideDownExit {
+          from { transform: translateY(0); }
+          to { transform: translateY(100%); }
+      }
+
+      .counter-enter { animation: slideDownEnter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+      .counter-exit { animation: slideDownExit 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
 
       /* --- FUN HOVER ANIMATIONS --- */
       
@@ -106,7 +141,20 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
+
+        // Initialize Firebase services from window object (loaded in module script)
+        const initFirebase = () => {
+            if (!window.Firebase) return null;
+            const firebaseConfig = JSON.parse(__firebase_config);
+            const app = window.Firebase.initializeApp(firebaseConfig);
+            const auth = window.Firebase.getAuth(app);
+            const db = window.Firebase.getFirestore(app);
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            return { auth, db, appId, ...window.Firebase };
+        };
+
+        const fb = initFirebase();
 
         // --- ICONS ---
         const HomeIcon = ({ size = 24, className = "" }) => (
@@ -185,6 +233,48 @@
 
         // --- COMPONENTS ---
 
+        // A single digit that slides down when it changes
+        const SlidingDigit = ({ digit }) => {
+            const [display, setDisplay] = useState({ current: digit, prev: null });
+            
+            useEffect(() => {
+                if (digit !== display.current) {
+                    setDisplay({ current: digit, prev: display.current });
+                    const timer = setTimeout(() => {
+                        setDisplay({ current: digit, prev: null });
+                    }, 500); // Sync with CSS animation duration
+                    return () => clearTimeout(timer);
+                }
+            }, [digit]);
+
+            return (
+                <div className="relative h-6 w-3 overflow-hidden inline-block align-middle mx-[1px]">
+                    {/* Previous Number (Slides down out of view) */}
+                    {display.prev !== null && (
+                        <div className="absolute inset-0 flex items-center justify-center font-mono font-bold text-zinc-600 counter-exit">
+                            {display.prev}
+                        </div>
+                    )}
+                    {/* Current Number (Slides down into view) */}
+                    <div className={`absolute inset-0 flex items-center justify-center font-mono font-bold text-zinc-600 ${display.prev !== null ? 'counter-enter' : ''}`}>
+                        {display.current}
+                    </div>
+                </div>
+            );
+        };
+
+        const SlidingCounter = ({ count }) => {
+            // Convert count to string and pad with zeros if needed (optional, keeping it simple here)
+            const digits = count.toString().split('');
+            return (
+                <div className="flex items-center">
+                    {digits.map((d, i) => (
+                        <SlidingDigit key={i} digit={d} />
+                    ))}
+                </div>
+            );
+        };
+
         const Navigation = ({ activeTab, onTabChange, isVisible }) => {
             const navItems = [
                 { id: 'HOME', label: 'Home', icon: HomeIcon },
@@ -248,7 +338,7 @@
             );
         };
 
-        const HeaderSection = ({ introPhase, activeTab, onTabChange, headerImages, onRequestEdit }) => {
+        const HeaderSection = ({ introPhase, activeTab, onTabChange, headerImages, onRequestEdit, visitorCount }) => {
             const isStarted = introPhase !== 'start';
             const validHeaderImages = headerImages.filter(img => img && img.trim().length > 0);
             
@@ -292,6 +382,8 @@
         const App = () => {
             const [introPhase, setIntroPhase] = useState('start');
             const [activeTab, setActiveTab] = useState('HOME');
+            const [user, setUser] = useState(null);
+            const [visitorCount, setVisitorCount] = useState(0);
 
             // Data States
             const [base64Input, setBase64Input] = useState('');
@@ -324,6 +416,67 @@
             const [passwordInput, setPasswordInput] = useState('');
             const [passwordError, setPasswordError] = useState(false);
             const [pendingAction, setPendingAction] = useState(null);
+
+            // --- FIREBASE INIT ---
+            useEffect(() => {
+                if (!fb) return;
+                const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = fb;
+                
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        try { await signInWithCustomToken(auth, __initial_auth_token); } catch(e) { console.error("Token Auth Failed", e); await signInAnonymously(auth); }
+                    } else {
+                        try { await signInAnonymously(auth); } catch(e) { console.error("Anon Auth Failed", e); }
+                    }
+                };
+                initAuth();
+                const unsubscribe = onAuthStateChanged(auth, setUser);
+                return () => unsubscribe();
+            }, []);
+
+            // --- VISITOR COUNT LOGIC ---
+            useEffect(() => {
+                if (!user || !fb) return;
+                const { db, appId, doc, onSnapshot, updateDoc, setDoc, getDoc, collection, increment } = fb;
+                
+                // 1. Listen for real-time updates
+                const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
+                
+                const unsubscribe = onSnapshot(statsRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        setVisitorCount(docSnap.data().count || 0);
+                    } else {
+                        // Initialize if doesn't exist
+                        setDoc(statsRef, { count: 0 }).catch(err => console.error("Init stats failed", err));
+                    }
+                }, (error) => {
+                    console.error("Error listening to stats:", error);
+                });
+
+                // 2. Increment count (Ensure only once per browser session)
+                const hasVisited = sessionStorage.getItem('visited_army_site');
+                if (!hasVisited) {
+                    // Using a simple transaction-like update via increment
+                    // We need to check if doc exists first inside a safe block or just try update
+                    // Simplest safe way: try update, if fail (not exist), set.
+                    const incrementStats = async () => {
+                        try {
+                            await updateDoc(statsRef, { count: increment(1) });
+                            sessionStorage.setItem('visited_army_site', 'true');
+                        } catch (e) {
+                            // If update fails (likely doc doesn't exist), set it to 1
+                            if (e.code === 'not-found') {
+                                await setDoc(statsRef, { count: 1 });
+                                sessionStorage.setItem('visited_army_site', 'true');
+                            }
+                        }
+                    };
+                    incrementStats();
+                }
+
+                return () => unsubscribe();
+            }, [user]);
+
 
             useEffect(() => {
                 const savedImage = localStorage.getItem('army_profile_pic');
@@ -563,8 +716,8 @@
                             <div className="w-full mb-16">
                                 <div className="max-w-2xl mx-auto text-center space-y-4 mb-8">
                                     <div className="inline-flex items-center justify-center p-3 bg-white rounded-full shadow-sm ring-1 ring-zinc-200">
-                                        <SparklesIcon className="text-amber-500 mr-2" size={20} />
-                                        <span className="text-zinc-600 text-sm font-medium">Featured Highlights</span>
+                                        <div className="text-zinc-600 text-sm font-medium mr-2 flex items-center gap-1"><SparklesIcon size={16} className="text-amber-500" /> Visitors:</div>
+                                        <SlidingCounter count={visitorCount} />
                                     </div>
                                 </div>
                                 <div className="relative w-full max-w-[320px] md:max-w-[360px] mx-auto h-[500px] bg-zinc-900 rounded-3xl overflow-hidden shadow-2xl ring-8 ring-white border border-zinc-200 flex items-center justify-center">
@@ -767,7 +920,7 @@
                         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
                             <div className={`bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm ${passwordError ? 'animate-shake' : ''}`}>
                                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><LockIcon size={20} className="text-red-500"/> Security</h3>
-                                <p className="text-sm text-zinc-500 mb-4">Enter password to continue.</p>
+                                <p className="text-sm text-zinc-500 mb-4">Enter password (1090) to continue.</p>
                                 <form onSubmit={confirmPassword}>
                                     <input type="password" autoFocus value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="w-full p-3 rounded-lg border bg-zinc-50 mb-4 text-center tracking-widest" />
                                     <div className="flex gap-2">
@@ -791,6 +944,7 @@
                             onTabChange={setActiveTab} 
                             headerImages={headerImages}
                             onRequestEdit={() => requestAction('EDIT_HEADER')}
+                            visitorCount={visitorCount}
                         />
                         <main className={`w-full max-w-6xl transition-opacity duration-1000 delay-200 px-4 ${introPhase !== 'start' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                             {renderContent()}
