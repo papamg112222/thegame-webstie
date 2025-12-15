@@ -41,6 +41,17 @@
         75% { transform: translateX(5px); }
       }
       .animate-shake { animation: shake 0.4s ease-in-out; }
+
+      /* Sliding Background Animation (Left to Right) */
+      @keyframes slideRightInfinite {
+        0% { transform: translateX(-50%); }
+        100% { transform: translateX(0%); }
+      }
+      .animate-slide-right-infinite {
+        animation: slideRightInfinite 60s linear infinite;
+        width: 200%; /* Double width to hold two sets of images */
+        display: flex;
+      }
     </style>
 <script type="importmap">
 {
@@ -223,19 +234,59 @@
             );
         };
 
-        const HeaderSection = ({ introPhase, activeTab, onTabChange }) => {
+        const HeaderSection = ({ introPhase, activeTab, onTabChange, headerImages, onRequestEdit }) => {
             const isStarted = introPhase !== 'start';
+            const validHeaderImages = headerImages.filter(img => img && img.trim().length > 0);
+            
             return (
                 <div className={`relative w-full overflow-hidden transition-all duration-[2000ms] cubic-bezier(0.16, 1, 0.3, 1) rounded-b-[40px] shadow-sm ${isStarted ? 'h-auto py-12 bg-indigo-50/80 border-b border-indigo-100/50' : 'h-screen flex flex-col justify-center items-center bg-transparent'}`}>
-                    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+                    
+                    {/* Background Sliding Layer */}
+                    {isStarted && validHeaderImages.length > 0 && (
+                         <div className="absolute inset-0 flex items-center h-full opacity-30 pointer-events-none z-0">
+                            <div className="animate-slide-right-infinite">
+                                {/* First Set */}
+                                {validHeaderImages.map((src, i) => (
+                                    <div key={'a'+i} className="flex-shrink-0 w-1/4 h-full">
+                                        <img src={src.startsWith('data:') ? src : `data:image/png;base64,${src}`} className="w-full h-full object-cover" />
+                                    </div>
+                                ))}
+                                {/* Duplicate Set for infinite Loop */}
+                                {validHeaderImages.map((src, i) => (
+                                    <div key={'b'+i} className="flex-shrink-0 w-1/4 h-full">
+                                        <img src={src.startsWith('data:') ? src : `data:image/png;base64,${src}`} className="w-full h-full object-cover" />
+                                    </div>
+                                ))}
+                                {/* If user has fewer than 4 images, fill the space with repeats */}
+                                {validHeaderImages.length < 4 && validHeaderImages.map((src, i) => (
+                                     <div key={'c'+i} className="flex-shrink-0 w-1/4 h-full">
+                                        <img src={src.startsWith('data:') ? src : `data:image/png;base64,${src}`} className="w-full h-full object-cover" />
+                                    </div>
+                                ))}
+                            </div>
+                             {/* White overlay to ensure text readability */}
+                             <div className="absolute inset-0 bg-white/60 backdrop-blur-sm"></div>
+                         </div>
+                    )}
+                    
+                    {/* Floating Blobs (Preserved but pushed back) */}
+                    <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
                         <div className={`absolute top-0 left-1/4 w-64 h-64 bg-yellow-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob ${!isStarted ? 'scale-150' : ''}`} />
                         <div className={`absolute top-0 right-1/4 w-64 h-64 bg-pink-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-2000 ${!isStarted ? 'scale-150' : ''}`} />
                         <div className={`absolute -bottom-8 left-1/2 -translate-x-1/2 w-64 h-64 bg-purple-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob animation-delay-4000 ${!isStarted ? 'scale-150' : ''}`} />
                     </div>
+
                     <div className={`relative z-10 w-full flex flex-col items-center justify-center transition-all duration-[2000ms] ${isStarted ? 'translate-y-0' : 'translate-y-[10vh]'}`}>
-                        <h1 className={`font-bold text-zinc-900 text-center transition-all duration-[2000ms] cubic-bezier(0.16, 1, 0.3, 1) ${isStarted ? 'text-4xl md:text-5xl tracking-tight' : 'text-5xl md:text-8xl tracking-tighter'}`}>
-                        Welcome, to Army Website
-                        </h1>
+                        <div className="flex items-center gap-3">
+                            <h1 className={`font-bold text-zinc-900 text-center transition-all duration-[2000ms] cubic-bezier(0.16, 1, 0.3, 1) ${isStarted ? 'text-4xl md:text-5xl tracking-tight' : 'text-5xl md:text-8xl tracking-tighter'}`}>
+                            Welcome, to Army Website
+                            </h1>
+                            {isStarted && (
+                                <button onClick={onRequestEdit} className="text-zinc-300 hover:text-zinc-600 transition-colors" title="Edit Background">
+                                    <SettingsIcon size={20} />
+                                </button>
+                            )}
+                        </div>
                         <Navigation activeTab={activeTab} onTabChange={onTabChange} isVisible={isStarted} />
                     </div>
                 </div>
@@ -251,6 +302,10 @@
             const [renderedImage, setRenderedImage] = useState(null);
             const [bioText, setBioText] = useState("Welcome to my profile.");
             
+            // Header Background State
+            const [headerImages, setHeaderImages] = useState(Array(4).fill(''));
+            const [isEditingHeader, setIsEditingHeader] = useState(false);
+
             // UI States
             const [showReset, setShowReset] = useState(false);
             const [showStyleSelector, setShowStyleSelector] = useState(false);
@@ -275,6 +330,8 @@
                 else setIsEditingHome(true);
                 const savedBio = localStorage.getItem('army_bio_text');
                 if (savedBio) setBioText(savedBio);
+                const savedHeader = localStorage.getItem('army_header_bg');
+                if (savedHeader) setHeaderImages(JSON.parse(savedHeader));
             }, []);
 
             useEffect(() => {
@@ -345,6 +402,8 @@
                         setIsEditingHome(true);
                     } else if (pendingAction === 'EDIT_BIO') {
                         setIsEditingBio(true);
+                    } else if (pendingAction === 'EDIT_HEADER') {
+                        setIsEditingHeader(true);
                     }
                     setShowPasswordModal(false);
                     setPasswordInput('');
@@ -365,8 +424,40 @@
                 setIsEditingHome(false);
                 setVirtualIndex(0);
             };
+            const saveHeaderImages = () => {
+                localStorage.setItem('army_header_bg', JSON.stringify(headerImages));
+                setIsEditingHeader(false);
+            }
 
             const renderContent = () => {
+                // Header Editor View
+                if (isEditingHeader) {
+                    return (
+                        <div className="animate-slide-up max-w-4xl mx-auto space-y-6 mt-8">
+                            <div className="text-center mb-8">
+                                <h3 className="text-xl font-bold text-zinc-900">Header Background</h3>
+                                <p className="text-zinc-500 text-sm">Paste 4 Base64 strings for the sliding background animation.</p>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {headerImages.map((img, index) => (
+                                <div key={index} className="space-y-2">
+                                    <label className="text-xs font-bold text-zinc-400">BG Image {index + 1}</label>
+                                    <textarea value={img} onChange={(e) => {
+                                        const newImages = [...headerImages];
+                                        newImages[index] = e.target.value;
+                                        setHeaderImages(newImages);
+                                    }} className="w-full h-20 p-2 text-[10px] font-mono border rounded-lg bg-white resize-none outline-none" />
+                                </div>
+                                ))}
+                            </div>
+                            <div className="flex justify-center pt-4 gap-2">
+                                <button onClick={() => setIsEditingHeader(false)} className="px-8 py-3 bg-zinc-100 text-zinc-600 rounded-full font-bold">Cancel</button>
+                                <button onClick={saveHeaderImages} className="px-8 py-3 bg-zinc-900 text-white rounded-full font-bold shadow-lg">Save Background</button>
+                            </div>
+                        </div>
+                    );
+                }
+
                 if (activeTab === 'HOME') {
                     if (isEditingHome) {
                         return (
@@ -571,7 +662,13 @@
                     </div>
 
                     <div className="relative z-10 flex flex-col items-center w-full min-h-screen pb-12">
-                        <HeaderSection introPhase={introPhase} activeTab={activeTab} onTabChange={setActiveTab} />
+                        <HeaderSection 
+                            introPhase={introPhase} 
+                            activeTab={activeTab} 
+                            onTabChange={setActiveTab} 
+                            headerImages={headerImages}
+                            onRequestEdit={() => requestAction('EDIT_HEADER')}
+                        />
                         <main className={`w-full max-w-4xl transition-opacity duration-1000 delay-200 px-4 ${introPhase !== 'start' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                             {renderContent()}
                         </main>
