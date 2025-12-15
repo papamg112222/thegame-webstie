@@ -85,8 +85,9 @@
           to { transform: translateY(100%); }
       }
 
-      .counter-enter { animation: slideDownEnter 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
-      .counter-exit { animation: slideDownExit 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+      /* The duration is now dynamic via inline styles */
+      .counter-enter { animation-name: slideDownEnter; animation-fill-mode: forwards; animation-timing-function: linear; }
+      .counter-exit { animation-name: slideDownExit; animation-fill-mode: forwards; animation-timing-function: linear; }
 
       /* --- FUN HOVER ANIMATIONS --- */
       
@@ -222,7 +223,7 @@
              <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
         );
         const BackpackIcon = ({ size = 32, className = "" }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 18h8"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M8 21v-5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v5"/><path d="M8 10h8"/><path d="M8 18h8"/></svg>
         );
 
         // --- UTILS ---
@@ -267,8 +268,8 @@
 
         // --- COMPONENTS ---
 
-        // A single digit that slides down when it changes
-        const SlidingDigit = ({ digit }) => {
+        // A single digit that slides down. Speed is dynamic.
+        const SlidingDigit = ({ digit, speed = 500 }) => {
             const [display, setDisplay] = useState({ current: digit, prev: null });
             
             useEffect(() => {
@@ -276,34 +277,125 @@
                     setDisplay({ current: digit, prev: display.current });
                     const timer = setTimeout(() => {
                         setDisplay({ current: digit, prev: null });
-                    }, 500); // Sync with CSS animation duration
+                    }, speed); 
                     return () => clearTimeout(timer);
                 }
-            }, [digit]);
+            }, [digit, speed]);
 
             return (
                 <div className="relative h-6 w-3 overflow-hidden inline-block align-middle mx-[1px]">
                     {/* Previous Number (Slides down out of view) */}
                     {display.prev !== null && (
-                        <div className="absolute inset-0 flex items-center justify-center font-mono font-bold text-zinc-600 counter-exit">
+                        <div 
+                            className="absolute inset-0 flex items-center justify-center font-mono font-bold text-zinc-600 counter-exit"
+                            style={{ animationDuration: `${speed}ms` }}
+                        >
                             {display.prev}
                         </div>
                     )}
                     {/* Current Number (Slides down into view) */}
-                    <div className={`absolute inset-0 flex items-center justify-center font-mono font-bold text-zinc-600 ${display.prev !== null ? 'counter-enter' : ''}`}>
+                    <div 
+                        className={`absolute inset-0 flex items-center justify-center font-mono font-bold text-zinc-600 ${display.prev !== null ? 'counter-enter' : ''}`}
+                        style={{ animationDuration: `${speed}ms` }}
+                    >
                         {display.current}
                     </div>
                 </div>
             );
         };
 
+        // Counter that orchestrates the "Falling" effect (Slow -> Fast -> Slow)
         const SlidingCounter = ({ count }) => {
-            // Convert count to string and pad with zeros if needed (optional, keeping it simple here)
-            const digits = count.toString().split('');
+            const [displayValue, setDisplayValue] = useState(0);
+            const [speed, setSpeed] = useState(500);
+            
+            const timerRef = useRef(null);
+            const currentValRef = useRef(0);
+
+            useEffect(() => {
+                const target = count;
+                
+                // If we are already there, stop
+                if (currentValRef.current === target) return;
+
+                const startValue = currentValRef.current;
+                const diff = target - startValue;
+
+                // Stop any previous loop
+                if (timerRef.current) clearTimeout(timerRef.current);
+
+                const loop = () => {
+                    const current = currentValRef.current;
+                    const remaining = target - current;
+
+                    if (remaining <= 0) {
+                        // Done
+                        setDisplayValue(target);
+                        currentValRef.current = target;
+                        setSpeed(500);
+                        return;
+                    }
+
+                    // Logic:
+                    // 1. First 10 steps: Normal speed (100ms), Step 1
+                    // 2. Middle (Far from target): Very Fast speed (20ms), Step depends on distance
+                    // 3. Last 15 steps: Slowing down (50ms -> 300ms), Step 1
+
+                    let nextSpeed = 100;
+                    let nextStep = 1;
+
+                    const distanceTraveled = current - startValue;
+                    
+                    // START PHASE (First 10 counts)
+                    if (distanceTraveled < 10) {
+                        nextSpeed = 100; 
+                        nextStep = 1;
+                    } 
+                    // END PHASE (Last 15 counts)
+                    else if (remaining <= 15) {
+                        // Linearly slow down
+                        // 15 left -> 50ms ... 1 left -> 400ms
+                        // We map remaining (15..1) to speed (50..400)
+                        const progress = (16 - remaining) / 15; // 0 to 1
+                        nextSpeed = 50 + (progress * 350); 
+                        nextStep = 1;
+                    } 
+                    // MIDDLE PHASE (Fast Falling)
+                    else {
+                        // Maximize churning. 
+                        // To make numbers "fall fast", we want to update frequently (e.g. 20ms)
+                        // But we also need to cover the distance.
+                        // Calculate step to finish in reasonable time, but maintain visual falling.
+                        nextSpeed = 20; 
+                        // Step size: proportional to remaining distance to ensure we get there, 
+                        // but not too huge to skip entire decades instantly.
+                        // Cap step at 9 to encourage more digit flipping if possible, or higher if diff is huge.
+                        nextStep = Math.max(1, Math.ceil(remaining / 40)); 
+                    }
+
+                    setSpeed(nextSpeed);
+                    
+                    const nextVal = current + nextStep;
+                    // Don't overshoot
+                    const finalVal = nextVal > target ? target : nextVal;
+                    
+                    setDisplayValue(finalVal);
+                    currentValRef.current = finalVal;
+
+                    timerRef.current = setTimeout(loop, nextSpeed);
+                };
+
+                loop();
+
+                return () => clearTimeout(timerRef.current);
+            }, [count]);
+
+            const digits = displayValue.toString().split('');
+
             return (
                 <div className="flex items-center">
                     {digits.map((d, i) => (
-                        <SlidingDigit key={i} digit={d} />
+                        <SlidingDigit key={i} digit={d} speed={speed} />
                     ))}
                 </div>
             );
