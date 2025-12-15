@@ -112,6 +112,9 @@
       const LockIcon = ({ size = 24, className = "" }) => (
         <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       );
+      const SettingsIcon = ({ size = 24, className = "" }) => (
+        <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+      );
 
       // --- Types ---
       const Tab = {
@@ -232,16 +235,29 @@
         const [renderedImage, setRenderedImage] = useState(null);
         const [showReset, setShowReset] = useState(false);
 
+        // Home Slider State
+        const [homeImages, setHomeImages] = useState(Array(5).fill(''));
+        const [isEditingHome, setIsEditingHome] = useState(false);
+        const [currentSlide, setCurrentSlide] = useState(0);
+
         // Password Modal State
         const [showPasswordModal, setShowPasswordModal] = useState(false);
         const [passwordInput, setPasswordInput] = useState('');
         const [passwordError, setPasswordError] = useState(false);
+        
+        // Track what action requires the password
+        const [pendingAction, setPendingAction] = useState(null); // 'RESET_PROFILE' | 'EDIT_HOME'
 
-        // Load saved image on startup
+        // Load saved data on startup
         useEffect(() => {
           const savedImage = localStorage.getItem('army_profile_pic');
-          if (savedImage) {
-            setRenderedImage(savedImage);
+          if (savedImage) setRenderedImage(savedImage);
+
+          const savedHome = localStorage.getItem('army_home_images');
+          if (savedHome) {
+            setHomeImages(JSON.parse(savedHome));
+          } else {
+            setIsEditingHome(true);
           }
         }, []);
 
@@ -254,14 +270,22 @@
           };
         }, []);
 
+        // Slider Timer
+        useEffect(() => {
+          const validImages = homeImages.filter(img => img && img.trim().length > 0);
+          if (activeTab === Tab.HOME && !isEditingHome && validImages.length > 1) {
+             const timer = setInterval(() => {
+                setCurrentSlide(prev => (prev + 1) % validImages.length);
+             }, 3000); // 3 seconds stay
+             return () => clearInterval(timer);
+          }
+        }, [activeTab, isEditingHome, homeImages]);
+
+        // --- About Logic ---
         const handleImageRender = () => {
           if (!base64Input.trim()) return;
-
           let finalSrc = base64Input.trim();
-          if (!finalSrc.startsWith('data:')) {
-            finalSrc = `data:image/png;base64,${finalSrc}`;
-          }
-          
+          if (!finalSrc.startsWith('data:')) finalSrc = `data:image/png;base64,${finalSrc}`;
           setRenderedImage(finalSrc);
           localStorage.setItem('army_profile_pic', finalSrc);
           setShowReset(false);
@@ -269,21 +293,48 @@
         };
 
         const handleResetRequest = () => {
+          setPendingAction('RESET_PROFILE');
           setShowPasswordModal(true);
         };
 
+        // --- Home Logic ---
+        const handleHomeImageChange = (index, value) => {
+          const newImages = [...homeImages];
+          newImages[index] = value;
+          setHomeImages(newImages);
+        };
+
+        const saveHomeImages = () => {
+          localStorage.setItem('army_home_images', JSON.stringify(homeImages));
+          setIsEditingHome(false);
+          setCurrentSlide(0);
+        };
+
+        const requestEditHome = () => {
+          setPendingAction('EDIT_HOME');
+          setShowPasswordModal(true);
+        };
+
+        // --- Password Logic ---
         const confirmReset = (e) => {
           e.preventDefault();
           if (passwordInput === '1090') {
-            setRenderedImage(null);
-            localStorage.removeItem('army_profile_pic');
-            setShowReset(false);
+            if (pendingAction === 'RESET_PROFILE') {
+              setRenderedImage(null);
+              localStorage.removeItem('army_profile_pic');
+              setShowReset(false);
+            } else if (pendingAction === 'EDIT_HOME') {
+              setIsEditingHome(true);
+            }
+            
+            // Clean up modal
             setShowPasswordModal(false);
             setPasswordInput('');
             setPasswordError(false);
+            setPendingAction(null);
           } else {
             setPasswordError(true);
-            setTimeout(() => setPasswordError(false), 500); // Remove shake animation class reset
+            setTimeout(() => setPasswordError(false), 500); 
           }
         };
 
@@ -291,6 +342,7 @@
           setShowPasswordModal(false);
           setPasswordInput('');
           setPasswordError(false);
+          setPendingAction(null);
         };
 
         const handleTabChange = (tab) => {
@@ -301,18 +353,116 @@
         const renderContent = () => {
           switch (activeTab) {
             case Tab.HOME:
-              return (
-                <div className="animate-slide-up max-w-2xl mx-auto text-center space-y-6">
-                  <div className="inline-flex items-center justify-center p-3 bg-white rounded-full mb-4 shadow-sm ring-1 ring-zinc-200">
-                    <SparklesIcon className="text-amber-500 mr-2" size={20} />
-                    <span className="text-zinc-600 text-sm font-medium">Welcome to my professional portfolio</span>
+              if (isEditingHome) {
+                 return (
+                  <div className="animate-slide-up max-w-4xl mx-auto space-y-6">
+                    <div className="text-center mb-8">
+                       <h3 className="text-xl font-bold text-zinc-900">Setup Home Slider</h3>
+                       <p className="text-zinc-500 text-sm">Paste Base64 strings for the 5 sliding images.</p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {homeImages.map((img, index) => (
+                        <div key={index} className="space-y-2">
+                           <label className="text-xs font-bold text-zinc-400">Image {index + 1}</label>
+                           <textarea 
+                             value={img}
+                             onChange={(e) => handleHomeImageChange(index, e.target.value)}
+                             className="w-full h-20 p-2 text-[10px] font-mono border rounded-lg bg-white resize-none focus:ring-2 focus:ring-zinc-900 outline-none"
+                             placeholder={`Base64 for Image ${index+1}`}
+                           />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-center pt-4">
+                       <button 
+                         onClick={saveHomeImages}
+                         className="px-8 py-3 bg-zinc-900 text-white rounded-full font-bold shadow-lg hover:scale-105 transition-transform"
+                       >
+                         Save & Launch Slider
+                       </button>
+                    </div>
                   </div>
-                  <p className="text-zinc-600 text-lg leading-relaxed font-light">
-                    Experience a modern, minimalistic approach to digital presence. 
-                    Navigate through the sections to learn more about my work and how to connect.
-                  </p>
+                 );
+              }
+
+              // The Frame/Slider View
+              const validImages = homeImages.filter(src => src && src.trim() !== '');
+              const hasImages = validImages.length > 0;
+
+              return (
+                <div className="animate-slide-up w-full space-y-8">
+                  <div className="max-w-2xl mx-auto text-center space-y-4">
+                     <div className="inline-flex items-center justify-center p-3 bg-white rounded-full shadow-sm ring-1 ring-zinc-200">
+                        <SparklesIcon className="text-amber-500 mr-2" size={20} />
+                        <span className="text-zinc-600 text-sm font-medium">Welcome to my professional portfolio</span>
+                     </div>
+                  </div>
+
+                  {/* Vertical Slider Container Frame */}
+                  <div className="relative w-full max-w-5xl mx-auto h-[65vh] bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl ring-4 ring-white border border-zinc-200">
+                    {hasImages ? (
+                      <div 
+                        className="absolute inset-0 flex flex-col transition-transform duration-700 ease-in-out w-full"
+                        style={{ 
+                          height: `${validImages.length * 100}%`,
+                          transform: `translateY(-${(currentSlide / validImages.length) * 100}%)` 
+                        }}
+                      >
+                        {validImages.map((src, index) => {
+                           let finalSrc = src.trim();
+                           if (!finalSrc.startsWith('data:')) finalSrc = `data:image/png;base64,${finalSrc}`;
+                           
+                           return (
+                              <div key={index} className="w-full h-full relative flex-shrink-0 overflow-hidden" style={{ height: `${100 / validImages.length}%` }}>
+                                {/* Blurred Background for fit adjustment */}
+                                <div 
+                                  className="absolute inset-0 bg-cover bg-center opacity-40 blur-2xl scale-125"
+                                  style={{ backgroundImage: `url(${finalSrc})` }}
+                                ></div>
+                                {/* Main Image - Object Contain to fit screen */}
+                                <div className="absolute inset-0 flex items-center justify-center p-4">
+                                   <img src={finalSrc} alt="" className="max-w-full max-h-full object-contain shadow-xl rounded-sm" />
+                                </div>
+                              </div>
+                           );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-zinc-400 bg-zinc-50">
+                        <span className="mb-2">No images configured</span>
+                        <span className="text-xs">Click settings to add content</span>
+                      </div>
+                    )}
+                    
+                    {/* Frame Glare/Shadow Effect */}
+                    <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_100px_rgba(0,0,0,0.2)] z-20"></div>
+                    
+                    {/* Vertical Indicators (Right Side) */}
+                    {hasImages && validImages.length > 1 && (
+                       <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-2 z-30">
+                          {validImages.map((_, idx) => (
+                             <div 
+                               key={idx} 
+                               className={`w-1.5 rounded-full transition-all duration-300 shadow-sm ${currentSlide === idx ? 'h-6 bg-white' : 'h-1.5 bg-white/50'}`}
+                             ></div>
+                          ))}
+                       </div>
+                    )}
+                  </div>
+
+                  {/* Edit Button */}
+                  <div className="flex justify-center mt-4">
+                    <button 
+                      onClick={requestEditHome}
+                      className="flex items-center gap-2 text-zinc-400 hover:text-zinc-900 text-xs font-semibold uppercase tracking-wider transition-colors px-4 py-2 rounded-full hover:bg-white/50"
+                    >
+                      <SettingsIcon size={14} />
+                      Manage Slider
+                    </button>
+                  </div>
                 </div>
               );
+
             case Tab.ABOUT:
               if (renderedImage) {
                 return (
@@ -373,7 +523,9 @@
                     <LockIcon size={20} className="text-red-500"/>
                     Security Verification
                   </h3>
-                  <p className="text-sm text-zinc-500 mb-4">Enter passcode to delete this image.</p>
+                  <p className="text-sm text-zinc-500 mb-4">
+                    {pendingAction === 'RESET_PROFILE' ? 'Enter code to delete profile image.' : 'Enter code to edit slider.'}
+                  </p>
                   
                   <form onSubmit={confirmReset}>
                     <input
@@ -404,7 +556,7 @@
               </div>
             )}
 
-            {/* Reset Button */}
+            {/* Reset Button (Only for Profile) */}
             {showReset && activeTab === Tab.ABOUT && renderedImage && !showPasswordModal && (
               <button
                 onClick={handleResetRequest}
