@@ -8,6 +8,7 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Firebase Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -161,17 +162,17 @@
             // If the above automatic config failed (which happens on GitHub), use this:
             if (!firebaseConfig) {
                 // firebaseConfig = {
-                //    apiKey: "YOUR_API_KEY",
-                //    authDomain: "YOUR_PROJECT.firebaseapp.com",
-                //    projectId: "YOUR_PROJECT_ID",
-                //    storageBucket: "YOUR_PROJECT.appspot.com",
-                //    messagingSenderId: "...",
-                //    appId: "..."
+                //   apiKey: "YOUR_API_KEY",
+                //   authDomain: "YOUR_PROJECT.firebaseapp.com",
+                //   projectId: "YOUR_PROJECT_ID",
+                //   storageBucket: "YOUR_PROJECT.appspot.com",
+                //   messagingSenderId: "...",
+                //   appId: "..."
                 // };
                 
                 // If still no config, return null (App runs in offline/demo mode)
                 if (!firebaseConfig) {
-                    console.warn("Firebase configuration missing. Running in Offline Mode.");
+                    console.warn("Firebase configuration missing. Visitor counter will be disabled.");
                     return null;
                 }
             }
@@ -393,7 +394,7 @@
                             </div>
                             {/* --- THIS LINE IS EDITED FOR BLUR --- */}
                              <div className="absolute inset-0 bg-white/20 backdrop-blur"></div>
-                          </div>
+                         </div>
                     )}
                     <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
                         <div className={`absolute top-0 left-1/4 w-64 h-64 bg-yellow-200/40 rounded-full mix-blend-multiply filter blur-3xl opacity-70 animate-blob ${!isStarted ? 'scale-150' : ''}`} />
@@ -468,60 +469,47 @@
                 return () => unsubscribe();
             }, []);
 
-            // --- VISITOR COUNT LOGIC (UPDATED TO FIX) ---
+            // --- VISITOR COUNT LOGIC ---
             useEffect(() => {
-                // Scenario 1: Firebase is Active (Standard Mode)
-                if (user && fb) {
-                    const { db, appId, doc, onSnapshot, updateDoc, setDoc, getDoc, collection, increment } = fb;
-                    
-                    const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
-                    
-                    // Listen for real-time updates
-                    const unsubscribe = onSnapshot(statsRef, (docSnap) => {
-                        if (docSnap.exists()) {
-                            setVisitorCount(docSnap.data().count || 0);
-                        } else {
-                            setDoc(statsRef, { count: 0 }).catch(err => console.error("Init stats failed", err));
-                        }
-                    }, (error) => {
-                        console.error("Error listening to stats:", error);
-                    });
+                if (!user || !fb) return;
+                const { db, appId, doc, onSnapshot, updateDoc, setDoc, getDoc, collection, increment } = fb;
+                
+                // 1. Listen for real-time updates
+                const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
+                
+                const unsubscribe = onSnapshot(statsRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        setVisitorCount(docSnap.data().count || 0);
+                    } else {
+                        // Initialize if doesn't exist
+                        setDoc(statsRef, { count: 0 }).catch(err => console.error("Init stats failed", err));
+                    }
+                }, (error) => {
+                    console.error("Error listening to stats:", error);
+                });
 
-                    // Increment Logic
-                    const hasVisited = sessionStorage.getItem('visited_army_site');
-                    if (!hasVisited) {
-                        const incrementStats = async () => {
-                            try {
-                                await updateDoc(statsRef, { count: increment(1) });
+                // 2. Increment count (Ensure only once per browser session)
+                const hasVisited = sessionStorage.getItem('visited_army_site');
+                if (!hasVisited) {
+                    // Using a simple transaction-like update via increment
+                    // We need to check if doc exists first inside a safe block or just try update
+                    // Simplest safe way: try update, if fail (not exist), set.
+                    const incrementStats = async () => {
+                        try {
+                            await updateDoc(statsRef, { count: increment(1) });
+                            sessionStorage.setItem('visited_army_site', 'true');
+                        } catch (e) {
+                            // If update fails (likely doc doesn't exist), set it to 1
+                            if (e.code === 'not-found') {
+                                await setDoc(statsRef, { count: 1 });
                                 sessionStorage.setItem('visited_army_site', 'true');
-                            } catch (e) {
-                                if (e.code === 'not-found') {
-                                    await setDoc(statsRef, { count: 1 });
-                                    sessionStorage.setItem('visited_army_site', 'true');
-                                }
                             }
-                        };
-                        incrementStats();
-                    }
-                    return () => unsubscribe();
-                } 
-                // Scenario 2: Firebase is Missing (Local Fallback Mode - FIX for "Not Working")
-                else if (!fb) {
-                    // Try to get count from localStorage
-                    const localSavedCount = localStorage.getItem('local_visitor_count');
-                    let currentCount = localSavedCount ? parseInt(localSavedCount) : 100; // Start at 100 if new
-
-                    const hasVisited = sessionStorage.getItem('visited_army_site');
-                    
-                    if (!hasVisited) {
-                        // Increment
-                        currentCount = currentCount + 1;
-                        localStorage.setItem('local_visitor_count', currentCount.toString());
-                        sessionStorage.setItem('visited_army_site', 'true');
-                    }
-                    
-                    setVisitorCount(currentCount);
+                        }
+                    };
+                    incrementStats();
                 }
+
+                return () => unsubscribe();
             }, [user]);
 
 
