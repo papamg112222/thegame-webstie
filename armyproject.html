@@ -513,6 +513,9 @@
             const [displayVisitorCount, setDisplayVisitorCount] = useState(0); // Shown in UI
             const [isTestModeUnlocked, setIsTestModeUnlocked] = useState(false);
             const testIntervalRef = useRef(null);
+            
+            // REQ CHANGE: Save on every visit, reset capabilities
+            const hasIncrementedRef = useRef(false);
 
             // Data States
             const [base64Input, setBase64Input] = useState('');
@@ -569,6 +572,7 @@
                     const { db, appId, doc, onSnapshot, updateDoc, setDoc, increment } = fb;
                     const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
                     
+                    // 1. Listen for real-time updates from DB
                     const unsubscribe = onSnapshot(statsRef, (docSnap) => {
                         if (docSnap.exists()) {
                             const val = docSnap.data().count || 0;
@@ -576,15 +580,19 @@
                         }
                     }, (err) => console.error(err));
                     
-                    const key = 'firebase_visit_' + (new Date()).toDateString(); 
-                    if (!sessionStorage.getItem(key)) {
+                    // 2. Increment logic: "Save everytime someone come in"
+                    // We use hasIncrementedRef to ensure we don't double count during strict mode re-renders,
+                    // but we REMOVED the localStorage check so it counts every page load/refresh.
+                    if (!hasIncrementedRef.current) {
+                         hasIncrementedRef.current = true;
                          updateDoc(statsRef, { count: increment(1) }).catch(async (e) => {
+                             // If doc doesn't exist, start at 1
                              if (e.code === 'not-found') await setDoc(statsRef, { count: 1 });
                          });
-                         sessionStorage.setItem(key, 'true');
                     }
                     return () => unsubscribe();
                 } else if (!fb) {
+                    // Offline fallback
                     try {
                         const saved = localStorage.getItem('site_visits_offline');
                         let count = 100; 
@@ -592,9 +600,13 @@
                             const parsed = parseInt(saved, 10);
                             if (!isNaN(parsed)) count = parsed;
                         }
-                        count++;
-                        localStorage.setItem('site_visits_offline', count.toString());
-                        setRealVisitorCount(count);
+                        // Increment every load in offline mode too
+                        if (!hasIncrementedRef.current) {
+                            hasIncrementedRef.current = true;
+                            count++;
+                            localStorage.setItem('site_visits_offline', count.toString());
+                            setRealVisitorCount(count);
+                        }
                     } catch (e) {
                         setRealVisitorCount(100);
                     }
@@ -729,6 +741,17 @@
                         setIsEditingHeader(true);
                     } else if (pendingAction === 'UNLOCK_TEST') {
                         setIsTestModeUnlocked(true);
+                    } else if (pendingAction === 'RESET_VISITORS') {
+                        // NEW LOGIC: Reset visitor count to 0 in Firebase
+                        if (fb) {
+                            const { db, appId, doc, setDoc } = fb;
+                            const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
+                            setDoc(statsRef, { count: 0 }).catch(err => console.error("Reset failed", err));
+                            setRealVisitorCount(0); // Update local state immediately
+                        } else {
+                            localStorage.setItem('site_visits_offline', '0');
+                            setRealVisitorCount(0);
+                        }
                     }
                     setShowPasswordModal(false);
                     setPasswordInput('');
@@ -869,6 +892,14 @@
                                 <div className="flex justify-center pt-4 gap-2">
                                      <button onClick={() => setIsEditingHome(false)} className="px-8 py-3 bg-zinc-100 text-zinc-600 rounded-full font-bold">Cancel</button>
                                      <button onClick={saveHomeContent} className="px-8 py-3 bg-zinc-900 text-white rounded-full font-bold shadow-lg">Save All Content</button>
+                                </div>
+
+                                {/* NEW: Reset Visitor Count Button */}
+                                <div className="mt-8 pt-8 border-t border-zinc-100 flex flex-col items-center">
+                                     <h4 className="font-bold text-zinc-900 mb-2">Danger Zone</h4>
+                                     <button onClick={() => requestAction('RESET_VISITORS')} className="px-6 py-2 bg-red-100 text-red-600 rounded-full font-bold text-xs hover:bg-red-200 transition-colors">
+                                          Reset Visitor Count to 0
+                                     </button>
                                 </div>
                             </div>
                         );
