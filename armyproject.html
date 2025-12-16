@@ -583,6 +583,53 @@
                 return () => unsubscribe();
             }, []);
 
+            // --- SHARED DATA LISTENER ---
+            useEffect(() => {
+                if (fb && user) {
+                    const { db, appId, doc, onSnapshot } = fb;
+                    const contentRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_content', 'main');
+
+                    const unsubscribe = onSnapshot(contentRef, (docSnap) => {
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            if (data.profilePic !== undefined) setRenderedImage(data.profilePic);
+                            if (data.bioText !== undefined) setBioText(data.bioText);
+                            if (data.homeCards !== undefined) setHomeCards(data.homeCards);
+                            if (data.homeImages !== undefined) setHomeImages(data.homeImages);
+                            if (data.headerImages !== undefined) setHeaderImages(data.headerImages);
+                        }
+                    }, (err) => console.error("Sync error", err));
+                    
+                    return () => unsubscribe();
+                } else {
+                    // Fallback to local storage if offline
+                    const savedImage = localStorage.getItem('army_profile_pic');
+                    if (savedImage) setRenderedImage(savedImage);
+                    const savedCards = localStorage.getItem('army_home_cards');
+                    if (savedCards) setHomeCards(JSON.parse(savedCards));
+                    const savedSlider = localStorage.getItem('army_home_images');
+                    if (savedSlider) setHomeImages(JSON.parse(savedSlider));
+                    const savedBio = localStorage.getItem('army_bio_text');
+                    if (savedBio) setBioText(savedBio);
+                    const savedHeader = localStorage.getItem('army_header_bg');
+                    if (savedHeader) setHeaderImages(JSON.parse(savedHeader));
+                }
+            }, [user]);
+
+            // Helper to save shared data
+            const saveSharedData = async (dataToUpdate) => {
+                if (fb && user) {
+                    const { db, appId, doc, setDoc } = fb;
+                    const contentRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_content', 'main');
+                    try {
+                        await setDoc(contentRef, dataToUpdate, { merge: true });
+                    } catch (e) {
+                        console.error("Error saving to shared storage", e);
+                        alert("Failed to save changes globally.");
+                    }
+                }
+            }
+
             // --- VISITOR COUNT LOGIC ---
             useEffect(() => {
                 if (fb && user) {
@@ -598,8 +645,6 @@
                     }, (err) => console.error(err));
                     
                     // 2. Increment logic: "Save everytime someone come in"
-                    // We use hasIncrementedRef to ensure we don't double count during strict mode re-renders,
-                    // but we REMOVED the localStorage check so it counts every page load/refresh.
                     if (!hasIncrementedRef.current) {
                          hasIncrementedRef.current = true;
                          updateDoc(statsRef, { count: increment(1) }).catch(async (e) => {
@@ -617,7 +662,6 @@
                             const parsed = parseInt(saved, 10);
                             if (!isNaN(parsed)) count = parsed;
                         }
-                        // Increment every load in offline mode too
                         if (!hasIncrementedRef.current) {
                             hasIncrementedRef.current = true;
                             count++;
@@ -636,20 +680,6 @@
                     setDisplayVisitorCount(realVisitorCount);
                 }
             }, [realVisitorCount]);
-
-
-            useEffect(() => {
-                const savedImage = localStorage.getItem('army_profile_pic');
-                if (savedImage) setRenderedImage(savedImage);
-                const savedCards = localStorage.getItem('army_home_cards');
-                if (savedCards) setHomeCards(JSON.parse(savedCards));
-                const savedSlider = localStorage.getItem('army_home_images');
-                if (savedSlider) setHomeImages(JSON.parse(savedSlider));
-                const savedBio = localStorage.getItem('army_bio_text');
-                if (savedBio) setBioText(savedBio);
-                const savedHeader = localStorage.getItem('army_header_bg');
-                if (savedHeader) setHeaderImages(JSON.parse(savedHeader));
-            }, []);
 
             useEffect(() => {
                 const timer1 = setTimeout(() => setIntroPhase('transition'), 100); 
@@ -710,25 +740,27 @@
 
             const processImage = async (mode) => {
                 if (!pendingImage) return;
+                let finalImage = pendingImage;
+                
                 if (mode === 'NORMAL') {
-                    setRenderedImage(pendingImage);
-                    localStorage.setItem('army_profile_pic', pendingImage);
-                    finalizeImageProcess();
+                    // Use as is
                 } else {
                     setIsProcessing(true);
                     try {
                         const processed = await removeBackgroundSmart(pendingImage);
-                        setRenderedImage(processed);
-                        localStorage.setItem('army_profile_pic', processed);
+                        finalImage = processed;
                     } catch (e) {
                         alert("Error processing image");
-                        setRenderedImage(pendingImage);
-                        localStorage.setItem('army_profile_pic', pendingImage);
                     } finally {
                         setIsProcessing(false);
-                        finalizeImageProcess();
                     }
                 }
+                
+                setRenderedImage(finalImage);
+                if (fb) saveSharedData({ profilePic: finalImage });
+                else localStorage.setItem('army_profile_pic', finalImage);
+                
+                finalizeImageProcess();
             };
 
             const finalizeImageProcess = () => {
@@ -748,7 +780,8 @@
                 if (passwordInput === '1090') {
                     if (pendingAction === 'RESET_PROFILE') {
                         setRenderedImage(null);
-                        localStorage.removeItem('army_profile_pic');
+                        if (fb) saveSharedData({ profilePic: '' });
+                        else localStorage.removeItem('army_profile_pic');
                         setShowReset(false);
                     } else if (pendingAction === 'EDIT_HOME') {
                         setIsEditingHome(true);
@@ -781,13 +814,17 @@
             };
 
             const saveBio = () => {
-                localStorage.setItem('army_bio_text', bioText);
+                if (fb) saveSharedData({ bioText });
+                else localStorage.setItem('army_bio_text', bioText);
                 setIsEditingBio(false);
             };
             
             const saveHomeContent = () => {
-                localStorage.setItem('army_home_cards', JSON.stringify(homeCards));
-                localStorage.setItem('army_home_images', JSON.stringify(homeImages));
+                if (fb) saveSharedData({ homeCards, homeImages });
+                else {
+                    localStorage.setItem('army_home_cards', JSON.stringify(homeCards));
+                    localStorage.setItem('army_home_images', JSON.stringify(homeImages));
+                }
                 setIsEditingHome(false);
                 setVirtualIndex(0);
             };
@@ -802,12 +839,18 @@
                         return await removeBackgroundSmart(src);
                     }));
                     setHeaderImages(processedImages);
-                    localStorage.setItem('army_header_bg', JSON.stringify(processedImages));
+                    
+                    if (fb) saveSharedData({ headerImages: processedImages });
+                    else localStorage.setItem('army_header_bg', JSON.stringify(processedImages));
+                    
                     setIsEditingHeader(false);
                 } catch (err) {
                     console.error("Error processing header images", err);
                     alert("There was an error processing the backgrounds. Saving originals.");
-                    localStorage.setItem('army_header_bg', JSON.stringify(headerImages));
+                    
+                    if (fb) saveSharedData({ headerImages });
+                    else localStorage.setItem('army_header_bg', JSON.stringify(headerImages));
+                    
                     setIsEditingHeader(false);
                 } finally {
                     setIsProcessing(false);
