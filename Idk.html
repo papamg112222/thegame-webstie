@@ -1,536 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>PixelGather - FX Update</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM (UMD) -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+      body, html {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #0f172a;
+        font-family: 'Inter', system-ui, sans-serif;
+        touch-action: none;
+      }
+      
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+      ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
-import React, { useState, useEffect, useRef } from 'react';
-import { joinRoom } from 'https://esm.sh/trystero@0.22.0/torrent';
-import { SHAPES, COLORS, ITEMS, getPixelDef, MAP_SIZE, MOVE_SPEED, THROW_FORCE, THROW_DECAY, GAME_STATE } from './constants';
-import { Player, WorldItem, Vector2 } from './types';
+      .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
 
-// --- COMPONENTS ---
+      .animate-bounce-small { animation: bounceSmall 2s infinite; }
+      @keyframes bounceSmall { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+      
+      .item-float { animation: itemFloat 3s ease-in-out infinite; }
+      @keyframes itemFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 
-// 1. Detailed Pixel Art Component
-const PixelItem = ({ index, size = 10 }: { index: number, size?: number }) => {
-  if (index === -1 || !ITEMS[index]) return null;
-  const itemDef = ITEMS[index];
-  const pixelDef = getPixelDef(itemDef.type);
-  
-  return (
-    <svg 
-      viewBox={`0 0 ${pixelDef.w} ${pixelDef.h}`} 
-      width={size * 4} 
-      height={size * 4} 
-      style={{ imageRendering: 'pixelated', overflow: 'visible' }}
-    >
-      <filter id="pixel-drop-shadow">
-        <feDropShadow dx="0.5" dy="0.5" stdDeviation="0" floodColor="rgba(0,0,0,0.3)"/>
-      </filter>
-      <g filter="url(#pixel-drop-shadow)">
-        {pixelDef.paths.map((p: any, i: number) => (
-          <path 
-            key={i} 
-            d={p.d} 
-            fill={p.color === 'var(--item-color)' ? itemDef.color : p.color} 
-            stroke="none"
-          />
-        ))}
-      </g>
-    </svg>
-  );
-};
+      .swing-action { animation: swing 0.2s ease-out forwards; }
+      @keyframes swing { 
+        0% { transform: rotate(0deg) translateX(0); } 
+        50% { transform: rotate(-45deg) translateX(-10px) scale(1.1); } 
+        100% { transform: rotate(0deg) translateX(0); } 
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
 
-// 2. World Item (Dropped on ground)
-const WorldItemComponent = ({ item }: { item: WorldItem }) => {
-  return (
-    <div 
-      className="absolute flex items-center justify-center item-float z-10"
-      style={{
-        transform: `translate(${item.position.x}px, ${item.position.y}px)`,
-      }}
-    >
-      <PixelItem index={item.itemIndex} size={6} />
-    </div>
-  );
-};
+    <script type="text/babel" data-type="module">
+      import { joinRoom } from 'https://esm.sh/trystero@0.22.0/torrent';
+      
+      const { useState, useEffect, useRef } = React;
 
-// 3. Player Avatar
-const PlayerAvatar = ({ player }: { player: Player }) => {
-  const shapeStyle = SHAPES[player.shapeIndex]?.style || {};
-  const isSwinging = player.lastActionTime && (Date.now() - player.lastActionTime < 300);
+      // --- CONSTANTS ---
+      const MAP_SIZE = 3000;
+      const MOVE_SPEED = 10;
+      const PROJECTILE_SPEED = 25;
+      const GAME_STATE = { LOBBY: 'LOBBY', CONNECTED: 'CONNECTED' };
 
-  return (
-    <div
-      className="absolute flex flex-col items-center justify-center transition-transform duration-100 ease-linear will-change-transform"
-      style={{
-        transform: `translate(${player.position.x}px, ${player.position.y}px)`,
-        zIndex: player.isMe ? 50 : 10,
-      }}
-    >
-      {/* Name Tag */}
-      <div 
-        className="absolute -top-10 px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded-md text-white text-[10px] font-bold whitespace-nowrap shadow-sm border border-white/10"
-      >
-        {player.name}
-      </div>
+      // Colors
+      const COLORS = Array.from({ length: 60 }, (_, i) => {
+        const hue = Math.floor((i / 60) * 360);
+        return `hsl(${hue}, 70%, 50%)`;
+      });
 
-      {/* Avatar Body */}
-      <div className="relative">
-        <div
-          className="w-12 h-12 shadow-lg flex items-center justify-center transition-all"
-          style={{ 
-            backgroundColor: player.color,
-            boxShadow: `inset 0 2px 5px rgba(255,255,255,0.3), 0 5px 15px rgba(0,0,0,0.3)`,
-            ...shapeStyle
-          }}
-        >
-          {/* Eyes */}
-          <div className="flex gap-2 pointer-events-none">
-             <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
-             <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
-          </div>
-        </div>
+      // Shapes
+      const SHAPES = [
+        { name: 'Circle', style: { borderRadius: '50%' } },
+        { name: 'Square', style: { borderRadius: '4px' } },
+        { name: 'Round', style: { borderRadius: '16px' } },
+        { name: 'Diamond', style: { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' } },
+        { name: 'Triangle', style: { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' } },
+        { name: 'Inv. Tri', style: { clipPath: 'polygon(50% 100%, 0% 0%, 100% 0%)' } },
+        { name: 'Pentagon', style: { clipPath: 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)' } },
+        { name: 'Hexagon', style: { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' } },
+        { name: 'Octagon', style: { clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)' } },
+        { name: 'Star 5', style: { clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' } },
+        { name: 'Ghost', style: { borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%', clipPath: 'polygon(0 0, 100% 0, 100% 100%, 83% 85%, 66% 100%, 50% 85%, 33% 100%, 16% 85%, 0 100%)' } },
+        { name: 'Egg', style: { borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%' } },
+        { name: 'Shard', style: { clipPath: 'polygon(50% 0%, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0% 50%, 40% 40%)' } },
+        { name: 'Pill', style: { borderRadius: '50px' } },
+        { name: 'Pac', style: { clipPath: 'polygon(100% 74%, 44% 48%, 100% 21%, 100% 0, 0 0, 0 100%, 100% 100%)', borderRadius: '50%' } },
+      ];
 
-        {/* Held Item */}
-        {player.heldItemIndex !== -1 && (
+      // Pixel Art Definitions (10x10 grid conceptual)
+      const PIXEL_DEFS = {
+        sword: { w: 10, h: 10, paths: [{ color: '#94a3b8', d: 'M7 1h2v1h1v2h-1v1h-1v1h-1v1H6v1H4V7h1V6h1V5h1V4h1V2H7V1z' }, { color: '#334155', d: 'M3 8h1v1h1v1H2v-1h1V8z' }, { color: '#78350f', d: 'M1 9h1v1H1V9z' }] },
+        axe: { w: 10, h: 10, paths: [{ color: '#94a3b8', d: 'M6 1h3v1h1v4H9v1H6V5h1V2H6V1z' }, { color: '#78350f', d: 'M4 2h2v8H4V2z' }] },
+        bow: { w: 10, h: 10, paths: [{ color: '#78350f', d: 'M2 1h1v1h1v1h1v4H4v1H3v1H2V1z' }, { color: '#e2e8f0', d: 'M2 1v8' }] },
+        potion: { w: 10, h: 10, paths: [{ color: '#e2e8f0', d: 'M4 1h2v2H4V1z' }, { color: 'var(--item-color)', d: 'M2 3h6v6H2V3z' }, { color: 'rgba(255,255,255,0.5)', d: 'M3 4h1v1H3V4z' }] },
+        burger: { w: 10, h: 10, paths: [{ color: '#d97706', d: 'M2 2h6v2H2V2z M2 8h6v1H2V8z' }, { color: '#166534', d: 'M1 4h8v1H1V4z' }, { color: '#7f1d1d', d: 'M2 5h6v2H2V5z' }, { color: '#fbbf24', d: 'M2 7h6v1H2V7z' }] },
+        gun: { w: 10, h: 10, paths: [{ color: '#334155', d: 'M1 2h6v2H1V2z M1 4h2v4H1V4z' }, { color: '#0f172a', d: 'M2 8h2v1H2V8z' }] },
+        wand: { w: 10, h: 10, paths: [{ color: '#78350f', d: 'M1 9h2v-1h1v-1h1v-1h1V5h1V4h1V3h1V1h-2v1h-1v1h-1v1h-1v1h-1v1H3v1H2v1H1v1z' }, { color: 'var(--item-color)', d: 'M7 0h2v2H7V0z' }] },
+        shield: { w: 10, h: 10, paths: [{ color: '#cbd5e1', d: 'M1 1h8v5l-4 3l-4-3V1z' }, { color: 'var(--item-color)', d: 'M4 2h2v4H4V2z' }] },
+        book: { w: 10, h: 10, paths: [{ color: '#475569', d: 'M2 1h6v8H2V1z' }, { color: '#f8fafc', d: 'M3 2h4v6H3V2z' }] },
+        bomb: { w: 10, h: 10, paths: [{ color: '#1e293b', d: 'M3 3h4v4H3V3z' }, { color: '#ef4444', d: 'M4 4h1v1H4V4z' }, { color: '#fbbf24', d: 'M5 1v2' }] },
+        cake: { w: 10, h: 10, paths: [{ color: '#fbcfe8', d: 'M2 5h6v3H2V5z' }, { color: '#be185d', d: 'M2 4h6v1H2V4z' }, { color: '#fbbf24', d: 'M4 2h2v2H4V2z' }] },
+        key: { w: 10, h: 10, paths: [{ color: '#fbbf24', d: 'M2 2h3v3H2V2z M4 5v3h2v-1h-1v-1h1V5H4z' }] },
+        coffee: { w: 10, h: 10, paths: [{ color: '#fff', d: 'M2 3h5v5H2V3z M7 4h1v2H7V4z' }, { color: '#451a03', d: 'M3 3h3v1H3V3z' }, { color: '#cbd5e1', d: 'M3 1v1 M5 0v2' }] }
+      };
+
+      // Items with Action Definitions
+      const ITEMS = [
+        // Slashers
+        { name: 'Iron Sword', type: 'sword', color: '#94a3b8', action: 'slash', actionColor: '#cbd5e1' },
+        { name: 'Gold Sword', type: 'sword', color: '#fbbf24', action: 'slash', actionColor: '#fcd34d' },
+        { name: 'Ruby Sword', type: 'sword', color: '#ef4444', action: 'slash', actionColor: '#fca5a5' },
+        { name: 'Void Blade', type: 'sword', color: '#8b5cf6', action: 'slash', actionColor: '#c4b5fd' },
+        { name: 'Battle Axe', type: 'axe', color: '#475569', action: 'slash', actionColor: '#94a3b8' },
+        { name: 'Blood Axe', type: 'axe', color: '#991b1b', action: 'slash', actionColor: '#ef4444' },
+        
+        // Shooters
+        { name: 'Short Bow', type: 'bow', color: '#a8a29e', action: 'shoot', actionColor: '#57534e', particle: 'dot' },
+        { name: 'Elven Bow', type: 'bow', color: '#22c55e', action: 'shoot', actionColor: '#4ade80', particle: 'leaf' },
+        { name: 'Pistol', type: 'gun', color: '#475569', action: 'shoot', actionColor: '#94a3b8', particle: 'dot' },
+        { name: 'Blaster', type: 'gun', color: '#3b82f6', action: 'shoot', actionColor: '#60a5fa', particle: 'orb' },
+        { name: 'Ray Gun', type: 'gun', color: '#10b981', action: 'shoot', actionColor: '#34d399', particle: 'beam' },
+        
+        // Magic
+        { name: 'Fire Wand', type: 'wand', color: '#ef4444', action: 'magic', actionColor: '#f87171' },
+        { name: 'Ice Wand', type: 'wand', color: '#0ea5e9', action: 'magic', actionColor: '#7dd3fc' },
+        { name: 'Spellbook', type: 'book', color: '#8b5cf6', action: 'magic', actionColor: '#ddd6fe' },
+        
+        // Explosive
+        { name: 'Bomb', type: 'bomb', color: '#000000', action: 'explode', actionColor: '#ef4444' },
+        { name: 'Holy Bomb', type: 'bomb', color: '#fbbf24', action: 'explode', actionColor: '#f59e0b' },
+
+        // Defense
+        { name: 'Iron Shield', type: 'shield', color: '#94a3b8', action: 'guard', actionColor: '#cbd5e1' },
+        { name: 'Gold Shield', type: 'shield', color: '#fbbf24', action: 'guard', actionColor: '#fcd34d' },
+
+        // Consumables
+        { name: 'Health Pot', type: 'potion', color: '#ef4444', action: 'heal', actionColor: '#fca5a5' },
+        { name: 'Mana Pot', type: 'potion', color: '#3b82f6', action: 'heal', actionColor: '#93c5fd' },
+        { name: 'Love Pot', type: 'potion', color: '#ec4899', action: 'heal', actionColor: '#f9a8d4' },
+        { name: 'Venom Pot', type: 'potion', color: '#3f6212', action: 'heal', actionColor: '#84cc16' },
+
+        // Food
+        { name: 'Burger', type: 'burger', color: '#d97706', action: 'eat', actionColor: '#fbbf24' },
+        { name: 'Cake', type: 'cake', color: '#f472b6', action: 'eat', actionColor: '#f9a8d4' },
+        { name: 'Coffee', type: 'coffee', color: '#78350f', action: 'eat', actionColor: '#fff' },
+        
+        // Misc
+        { name: 'Gold Key', type: 'key', color: '#fbbf24', action: 'sparkle', actionColor: '#fcd34d' },
+      ];
+
+      const getPixelDef = (type) => PIXEL_DEFS[type] || PIXEL_DEFS.sword;
+
+      // --- COMPONENTS ---
+
+      // 1. Pixel Art Component
+      const PixelItem = ({ index, size = 10 }) => {
+        if (index === -1 || !ITEMS[index]) return null;
+        const itemDef = ITEMS[index];
+        const pixelDef = getPixelDef(itemDef.type);
+        
+        return (
+          <svg viewBox={`0 0 ${pixelDef.w} ${pixelDef.h}`} width={size * 4} height={size * 4} style={{ imageRendering: 'pixelated', overflow: 'visible' }}>
+            <filter id="shadow"><feDropShadow dx="0.5" dy="0.5" stdDeviation="0" floodColor="rgba(0,0,0,0.3)"/></filter>
+            <g filter="url(#shadow)">
+              {pixelDef.paths.map((p, i) => (
+                <path key={i} d={p.d} fill={p.color === 'var(--item-color)' ? itemDef.color : p.color} stroke="none" />
+              ))}
+            </g>
+          </svg>
+        );
+      };
+
+      // 2. Effect Renderer
+      const EffectRenderer = ({ effect }) => {
+         const { type, color, size } = effect;
+         
+         if (type === 'slash') {
+            return (
+               <div className="absolute top-1/2 left-1/2 pointer-events-none" 
+                    style={{ 
+                       transform: `translate(-50%, -50%) rotate(${effect.rotation}deg)`,
+                       width: size*2, height: size*2 
+                    }}>
+                  <svg viewBox="0 0 100 100" className="w-full h-full">
+                     <path d="M 80 20 Q 50 50 20 80" stroke={color} strokeWidth="15" fill="none" strokeLinecap="round" opacity="0.8">
+                        <animate attributeName="d" from="M 90 10 Q 90 10 90 10" to="M 80 20 Q 50 50 20 80" dur="0.2s" fill="freeze" />
+                        <animate attributeName="opacity" from="1" to="0" dur="0.2s" fill="freeze" />
+                     </path>
+                  </svg>
+               </div>
+            );
+         }
+         
+         if (type === 'projectile' || type === 'magic') {
+            const isMagic = type === 'magic';
+            return (
+               <div className="absolute top-0 left-0 pointer-events-none" 
+                  style={{ 
+                     transform: `translate(${effect.x}px, ${effect.y}px) rotate(${effect.rotation}deg)`,
+                     width: size, height: size
+                  }}>
+                  {isMagic ? (
+                     <div className="w-full h-full rounded-full animate-pulse" style={{ background: `radial-gradient(circle, #fff, ${color})`, boxShadow: `0 0 10px ${color}` }} />
+                  ) : (
+                     <div className="w-full h-1/2 bg-white rounded-full mt-[25%]" style={{ boxShadow: '0 0 2px black' }} />
+                  )}
+               </div>
+            );
+         }
+
+         if (type === 'explosion') {
+            return (
+               <div className="absolute top-0 left-0 pointer-events-none flex items-center justify-center" 
+                    style={{ transform: `translate(${effect.x}px, ${effect.y}px)` }}>
+                  <div className="rounded-full animate-[ping_0.5s_ease-out_forwards]" 
+                       style={{ width: size, height: size, backgroundColor: color, opacity: 0.5 }} />
+                  <div className="absolute rounded-full animate-[ping_0.3s_ease-out_forwards]" 
+                       style={{ width: size/1.5, height: size/1.5, backgroundColor: '#fff', opacity: 0.8 }} />
+               </div>
+            );
+         }
+
+         if (type === 'particle') {
+            return (
+               <div className="absolute top-0 left-0 pointer-events-none flex items-center justify-center animate-[itemFloat_1s_ease-out_forwards]" 
+                    style={{ 
+                       transform: `translate(${effect.x}px, ${effect.y}px)`, 
+                       opacity: 0.8,
+                       animation: 'floatUp 1s ease-out forwards'
+                    }}>
+                  <span style={{ fontSize: size, color: color, textShadow: '0 1px 2px black' }}>
+                     {effect.emoji || '✨'}
+                  </span>
+                  <style>{`@keyframes floatUp { 0% { transform: translate(${effect.x}px, ${effect.y}px); opacity: 1;} 100% { transform: translate(${effect.x}px, ${effect.y - 50}px); opacity: 0; } }`}</style>
+               </div>
+            );
+         }
+
+         if (type === 'guard') {
+            return (
+               <div className="absolute top-1/2 left-1/2 pointer-events-none border-4 rounded-full animate-[ping_0.4s_ease-out_forwards]" 
+                    style={{ 
+                       transform: `translate(-50%, -50%)`,
+                       width: size, height: size, borderColor: color
+                    }} />
+            );
+         }
+
+         return null;
+      };
+
+      // 3. World Item
+      const WorldItemComponent = ({ item }) => {
+        return (
           <div 
-            className={`absolute -right-4 top-2 origin-bottom-left ${isSwinging ? 'swing-action' : ''}`}
-            key={player.lastActionTime} 
+            className="absolute flex items-center justify-center item-float z-10"
+            style={{ transform: `translate(${item.position.x}px, ${item.position.y}px)` }}
           >
-            <PixelItem index={player.heldItemIndex} size={5} />
+            <PixelItem index={item.itemIndex} size={6} />
           </div>
-        )}
-      </div>
-    </div>
-  );
-};
+        );
+      };
 
-// 4. Chat Overlay
-const ChatOverlay = ({ messages, onSend }: { messages: any[], onSend: (msg: string) => void }) => {
-  const [inputValue, setInputValue] = useState('');
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+      // 4. Player Avatar
+      const PlayerAvatar = ({ player }) => {
+        const shapeStyle = SHAPES[player.shapeIndex]?.style || {};
+        const isSwinging = player.lastActionTime && (Date.now() - player.lastActionTime < 200);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+        return (
+          <div
+            className="absolute flex flex-col items-center justify-center transition-transform duration-100 ease-linear will-change-transform"
+            style={{
+              transform: `translate(${player.position.x}px, ${player.position.y}px)`,
+              zIndex: player.isMe ? 50 : 10,
+            }}
+          >
+            <div className="absolute -top-10 px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded-md text-white text-[10px] font-bold whitespace-nowrap shadow-sm border border-white/10">
+              {player.name}
+            </div>
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (inputValue.trim()) {
-      onSend(inputValue);
-      setInputValue('');
-    }
-  };
+            <div className="relative">
+              <div
+                className="w-12 h-12 shadow-lg flex items-center justify-center transition-all"
+                style={{ backgroundColor: player.color, boxShadow: `inset 0 2px 5px rgba(255,255,255,0.3), 0 5px 15px rgba(0,0,0,0.3)`, ...shapeStyle }}
+              >
+                <div className="flex gap-2 pointer-events-none">
+                   <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
+                   <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
+                </div>
+              </div>
 
-  return (
-    <div className="fixed bottom-6 left-6 w-80 max-w-[calc(100vw-3rem)] flex flex-col gap-2 z-[100]">
-      <div className="bg-slate-900/80 backdrop-blur-md rounded-lg p-4 h-48 overflow-y-auto shadow-xl border border-slate-700/50 flex flex-col">
-        <div className="flex-1" />
-        {messages.map((msg) => (
-          <div key={msg.id} className="mb-1.5 last:mb-0 text-sm animate-fade-in leading-snug">
-            <span style={{ color: msg.color }} className="font-bold mr-2 text-xs uppercase tracking-wide">
-              {msg.playerName}
-            </span>
-            <span className="text-slate-200 break-words">{msg.text}</span>
+              {player.heldItemIndex !== -1 && (
+                <div 
+                  className={`absolute -right-4 top-2 origin-bottom-left ${isSwinging ? 'swing-action' : ''}`}
+                  key={player.lastActionTime} 
+                >
+                  <PixelItem index={player.heldItemIndex} size={5} />
+                </div>
+              )}
+            </div>
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
-      <form onSubmit={handleSubmit} className="relative group">
-        <input
-          type="text"
-          value={inputValue}
-          onChange={(e) => setInputValue(e.target.value)}
-          placeholder="Chat here..."
-          className="w-full bg-slate-800/90 text-white rounded-lg pl-4 pr-12 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg border border-slate-700 placeholder:text-slate-500"
-        />
-        <button
-          type="submit"
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
-          disabled={!inputValue.trim()}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-        </button>
-      </form>
-    </div>
-  );
-};
+        );
+      };
 
-// --- MAIN APP ---
+      // 5. Chat Overlay
+      const ChatOverlay = ({ messages, onSend }) => {
+        const [inputValue, setInputValue] = useState('');
+        const messagesEndRef = useRef(null);
+        useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+        const handleSubmit = (e) => { e.preventDefault(); if (inputValue.trim()) { onSend(inputValue); setInputValue(''); } };
 
-const App = () => {
-  const [gameState, setGameState] = useState(GAME_STATE.LOBBY);
-  const [me, setMe] = useState<Player | null>(null);
-  const [peers, setPeers] = useState<Record<string, Player>>({});
-  const [messages, setMessages] = useState<any[]>([]);
-  const [worldItems, setWorldItems] = useState<WorldItem[]>([]);
-  
-  // Lobby State
-  const [name, setName] = useState('');
-  const [selectedColor, setSelectedColor] = useState(COLORS[0]);
-  const [selectedShape, setSelectedShape] = useState(0); 
-  const [selectedItemIndex, setSelectedItemIndex] = useState<number>(0);
-  const [lobbyTab, setLobbyTab] = useState<'shape' | 'color' | 'item'>('shape');
+        return (
+          <div className="fixed bottom-6 left-6 w-80 max-w-[calc(100vw-3rem)] flex flex-col gap-2 z-[100]">
+            <div className="bg-slate-900/80 backdrop-blur-md rounded-lg p-4 h-48 overflow-y-auto shadow-xl border border-slate-700/50 flex flex-col">
+              <div className="flex-1" />
+              {messages.map((msg) => (
+                <div key={msg.id} className="mb-1.5 last:mb-0 text-sm animate-fade-in leading-snug">
+                  <span style={{ color: msg.color }} className="font-bold mr-2 text-xs uppercase tracking-wide">{msg.playerName}</span>
+                  <span className="text-slate-200 break-words">{msg.text}</span>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+            <form onSubmit={handleSubmit} className="relative group">
+              <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Chat here..." className="w-full bg-slate-800/90 text-white rounded-lg pl-4 pr-12 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg border border-slate-700" />
+              <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors" disabled={!inputValue.trim()}>SEND</button>
+            </form>
+          </div>
+        );
+      };
 
-  // Networking Refs
-  const roomRef = useRef<any>(null);
-  const actionsRef = useRef<any>(null);
-  const keysPressed = useRef(new Set<string>());
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const meRef = useRef<Player | null>(null);
-  const worldItemsRef = useRef<WorldItem[]>([]);
+      // --- MAIN APP ---
 
-  useEffect(() => { meRef.current = me; }, [me]);
-  useEffect(() => { worldItemsRef.current = worldItems; }, [worldItems]);
+      const App = () => {
+        const [gameState, setGameState] = useState(GAME_STATE.LOBBY);
+        const [me, setMe] = useState(null);
+        const [peers, setPeers] = useState({});
+        const [messages, setMessages] = useState([]);
+        const [worldItems, setWorldItems] = useState([]);
+        const [effects, setEffects] = useState([]);
+        
+        // Lobby State
+        const [name, setName] = useState('');
+        const [selectedColor, setSelectedColor] = useState(COLORS[0]);
+        const [selectedShape, setSelectedShape] = useState(0); 
+        const [selectedItemIndex, setSelectedItemIndex] = useState(0);
+        const [lobbyTab, setLobbyTab] = useState('shape');
 
-  const joinGame = async () => {
-    if (!name.trim()) return;
-    
-    // Setup Room
-    const room = joinRoom({ appId: 'pixelgather-v3-pixelart' }, 'main-hall-v4');
-    roomRef.current = room;
+        const roomRef = useRef(null);
+        const actionsRef = useRef(null);
+        const keysPressed = useRef(new Set());
+        const viewportRef = useRef(null);
+        const meRef = useRef(null);
+        const effectsRef = useRef([]);
 
-    const [sendMove, getMove] = room.makeAction('move');
-    const [sendChat, getChat] = room.makeAction('chat');
-    const [sendIdentity, getIdentity] = room.makeAction('identity');
-    const [sendAction, getAction] = room.makeAction('action');
-    const [sendDrop, getDrop] = room.makeAction('drop');
-    const [sendPickup, getPickup] = room.makeAction('pickup');
+        useEffect(() => { meRef.current = me; }, [me]);
+        useEffect(() => { effectsRef.current = effects; }, [effects]);
 
-    actionsRef.current = { sendMove, sendChat, sendIdentity, sendAction, sendDrop, sendPickup };
+        const joinGame = async () => {
+          if (!name.trim()) return;
+          const room = joinRoom({ appId: 'pixelgather-v4-fx' }, 'main-hall-v5');
+          roomRef.current = room;
 
-    // Init Player
-    const myId = `p-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-    const initialMe: Player = {
-      id: myId,
-      name: name.trim(),
-      color: selectedColor,
-      shapeIndex: selectedShape,
-      heldItemIndex: selectedItemIndex,
-      position: { x: MAP_SIZE / 2 + (Math.random()*200 - 100), y: MAP_SIZE / 2 + (Math.random()*200 - 100) },
-      isMe: true
-    };
-    setMe(initialMe);
-    setGameState(GAME_STATE.CONNECTED);
+          const [sendMove, getMove] = room.makeAction('move');
+          const [sendChat, getChat] = room.makeAction('chat');
+          const [sendIdentity, getIdentity] = room.makeAction('identity');
+          const [sendDrop, getDrop] = room.makeAction('drop');
+          const [sendPickup, getPickup] = room.makeAction('pickup');
+          const [sendEffect, getEffect] = room.makeAction('effect');
 
-    // Networking Handlers
-    getIdentity((data: any, peerId: string) => {
-      setPeers(prev => ({ ...prev, [peerId]: { ...data, isMe: false, peerId } }));
-    });
+          actionsRef.current = { sendMove, sendChat, sendIdentity, sendDrop, sendPickup, sendEffect };
 
-    getMove((position: Vector2, peerId: string) => {
-      setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], position } } : prev);
-    });
-
-    getChat((msg: any) => setMessages(prev => [...prev.slice(-49), msg]));
-
-    getAction((_: any, peerId: string) => {
-      setPeers(prev => {
-        if(!prev[peerId]) return prev;
-        return { ...prev, [peerId]: { ...prev[peerId], lastActionTime: Date.now() } };
-      });
-    });
-
-    getDrop((item: WorldItem) => {
-       setWorldItems(prev => [...prev, item]);
-    });
-
-    getPickup((itemId: string, peerId: string) => {
-       setWorldItems(prev => prev.filter(i => i.id !== itemId));
-    });
-
-    room.onPeerJoin((peerId: string) => {
-      if (meRef.current) sendIdentity(meRef.current, peerId);
-    });
-
-    room.onPeerLeave((peerId: string) => {
-      setPeers(prev => {
-        const next = { ...prev };
-        delete next[peerId];
-        return next;
-      });
-    });
-
-    setTimeout(() => sendIdentity(initialMe), 500);
-  };
-
-  // Game Loop
-  useEffect(() => {
-    if (gameState !== GAME_STATE.CONNECTED) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-       if ((e.target as HTMLElement).tagName === 'INPUT') return;
-       keysPressed.current.add(e.code);
-
-       // Action: Swing
-       if (e.code === 'Space' && meRef.current?.heldItemIndex !== -1) {
-         setMe(prev => {
-           if(!prev) return null;
-           const updated = { ...prev, lastActionTime: Date.now() };
-           actionsRef.current.sendAction(null);
-           actionsRef.current.sendIdentity(updated);
-           return updated;
-         });
-       }
-
-       // Action: Throw/Drop
-       if (e.code === 'KeyQ' && meRef.current?.heldItemIndex !== -1 && meRef.current) {
-          const itemToDrop: WorldItem = {
-             id: `item-${Date.now()}-${Math.random()}`,
-             itemIndex: meRef.current.heldItemIndex,
-             position: { ...meRef.current.position },
-             droppedAt: Date.now()
+          const myId = `p-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          const initialMe = {
+            id: myId, name: name.trim(), color: selectedColor, shapeIndex: selectedShape, heldItemIndex: selectedItemIndex,
+            position: { x: MAP_SIZE/2, y: MAP_SIZE/2 },
+            facing: { x: 0, y: 1 }, // Default facing down
+            isMe: true
           };
-          
-          setMe(prev => {
-             if(!prev) return null;
-             const updated = { ...prev, heldItemIndex: -1 };
-             actionsRef.current.sendIdentity(updated);
-             return updated;
-          });
+          setMe(initialMe);
+          setGameState(GAME_STATE.CONNECTED);
 
-          setWorldItems(prev => [...prev, itemToDrop]);
-          actionsRef.current.sendDrop(itemToDrop);
-       }
-    };
-    
-    const handleKeyUp = (e: KeyboardEvent) => keysPressed.current.delete(e.code);
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
+          // Network Handlers
+          getIdentity((data, peerId) => setPeers(prev => ({ ...prev, [peerId]: { ...data, isMe: false, peerId } })));
+          getMove((position, peerId) => setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], position } } : prev));
+          getChat((msg) => setMessages(prev => [...prev.slice(-49), msg]));
+          getDrop((item) => setWorldItems(prev => [...prev, item]));
+          getPickup((itemId) => setWorldItems(prev => prev.filter(i => i.id !== itemId)));
+          getEffect((fx) => setEffects(prev => [...prev, fx]));
 
-    let rafId: number;
-    const loop = () => {
-      if (meRef.current) {
-        let dx = 0, dy = 0;
-        const keys = keysPressed.current;
-        if (keys.has('ArrowUp') || keys.has('KeyW')) dy -= 1;
-        if (keys.has('ArrowDown') || keys.has('KeyS')) dy += 1;
-        if (keys.has('ArrowLeft') || keys.has('KeyA')) dx -= 1;
-        if (keys.has('ArrowRight') || keys.has('KeyD')) dx += 1;
+          room.onPeerJoin((peerId) => actionsRef.current?.sendIdentity(meRef.current, peerId));
+          room.onPeerLeave((peerId) => setPeers(prev => { const next = { ...prev }; delete next[peerId]; return next; }));
 
-        if (dx !== 0 || dy !== 0) {
-          const len = Math.sqrt(dx*dx + dy*dy);
-          dx = (dx / len) * MOVE_SPEED;
-          dy = (dy / len) * MOVE_SPEED;
+          setTimeout(() => actionsRef.current?.sendIdentity(initialMe), 500);
+        };
 
-          const newPos = {
-            x: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.x + dx)),
-            y: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.y + dy))
-          };
+        const createLocalEffect = (effectData) => {
+           const fx = { ...effectData, id: Math.random().toString(36) };
+           setEffects(prev => [...prev, fx]);
+           actionsRef.current?.sendEffect(fx);
+        };
 
-          setMe(prev => prev ? ({ ...prev, position: newPos }) : null);
-          actionsRef.current.sendMove(newPos);
+        useEffect(() => {
+          if (gameState !== GAME_STATE.CONNECTED) return;
+          const handleKeyDown = (e) => {
+             if (e.target.tagName === 'INPUT') return;
+             keysPressed.current.add(e.code);
 
-          // Auto Pickup
-          if (meRef.current.heldItemIndex === -1) {
-             const pickupRange = 30;
-             const item = worldItemsRef.current.find(i => {
-                const dist = Math.sqrt(Math.pow(i.position.x - newPos.x, 2) + Math.pow(i.position.y - newPos.y, 2));
-                return dist < pickupRange;
-             });
-
-             if (item) {
+             // ACTIONS (SPACE)
+             if (e.code === 'Space' && meRef.current) {
+                const { heldItemIndex, position, facing } = meRef.current;
+                
+                // Swing Animation Update
                 setMe(prev => {
-                   if(!prev) return null;
-                   const updated = { ...prev, heldItemIndex: item.itemIndex };
-                   actionsRef.current.sendIdentity(updated);
+                   const updated = { ...prev, lastActionTime: Date.now() };
+                   actionsRef.current?.sendIdentity(updated);
                    return updated;
                 });
-                setWorldItems(prev => prev.filter(i => i.id !== item.id));
-                actionsRef.current.sendPickup(item.id);
+
+                if (heldItemIndex !== -1) {
+                   const item = ITEMS[heldItemIndex];
+                   const angle = Math.atan2(facing.y, facing.x) * (180/Math.PI);
+
+                   if (item.action === 'slash') {
+                      createLocalEffect({
+                         type: 'slash',
+                         position: { x: position.x + facing.x * 20, y: position.y + facing.y * 20 },
+                         rotation: angle + 90,
+                         color: item.actionColor,
+                         size: 60,
+                         createdAt: Date.now(),
+                         duration: 200
+                      });
+                   } else if (item.action === 'shoot' || item.action === 'magic') {
+                      createLocalEffect({
+                         type: item.action, // projectile or magic
+                         x: position.x + facing.x * 20,
+                         y: position.y + facing.y * 20,
+                         vx: facing.x * PROJECTILE_SPEED,
+                         vy: facing.y * PROJECTILE_SPEED,
+                         rotation: angle,
+                         color: item.actionColor,
+                         size: 20,
+                         createdAt: Date.now(),
+                         duration: 1000 // 1 sec lifetime
+                      });
+                   } else if (item.action === 'explode') {
+                      createLocalEffect({
+                         type: 'explosion',
+                         x: position.x, y: position.y,
+                         color: item.actionColor,
+                         size: 150,
+                         createdAt: Date.now(),
+                         duration: 500
+                      });
+                   } else if (item.action === 'heal' || item.action === 'eat' || item.action === 'sparkle') {
+                      // Spawn multiple particles
+                      for(let i=0; i<5; i++) {
+                         setTimeout(() => {
+                            createLocalEffect({
+                               type: 'particle',
+                               x: position.x + (Math.random()*40-20), 
+                               y: position.y + (Math.random()*40-20),
+                               color: item.actionColor,
+                               emoji: item.action === 'heal' ? '❤️' : item.action === 'eat' ? '😋' : '✨',
+                               size: 20,
+                               createdAt: Date.now(),
+                               duration: 1000
+                            });
+                         }, i * 100);
+                      }
+                   } else if (item.action === 'guard') {
+                      createLocalEffect({
+                         type: 'guard',
+                         position: { x: position.x, y: position.y },
+                         color: item.actionColor,
+                         size: 80,
+                         createdAt: Date.now(),
+                         duration: 400
+                      });
+                   }
+                }
              }
-          }
-        }
-      }
-      rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
 
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-      cancelAnimationFrame(rafId);
-    };
-  }, [gameState]);
-
-  useEffect(() => {
-    if (gameState === GAME_STATE.CONNECTED && me && viewportRef.current) {
-      const halfW = window.innerWidth / 2;
-      const halfH = window.innerHeight / 2;
-      viewportRef.current.scrollTo(me.position.x - halfW, me.position.y - halfH);
-    }
-  }, [me?.position, gameState]);
-
-  const handleSendChat = (text: string) => {
-    if (!me) return;
-    const msg = {
-      id: `msg-${Date.now()}`,
-      playerId: me.id,
-      playerName: me.name,
-      color: me.color,
-      text,
-      timestamp: Date.now()
-    };
-    setMessages(prev => [...prev.slice(-49), msg]);
-    actionsRef.current.sendChat(msg);
-  };
-
-  // --- RENDER LOBBY ---
-  if (gameState === GAME_STATE.LOBBY) {
-    return (
-      <div className="w-full h-[100dvh] flex flex-col items-center justify-center bg-slate-900 text-white p-4 relative overflow-hidden">
-        {/* Animated Background */}
-        <div className="absolute inset-0 opacity-10 pointer-events-none">
-           {SHAPES.slice(0,20).map((s, i) => (
-             <div key={i} className="absolute animate-bounce-small" 
-                  style={{ 
-                    ...s.style, 
-                    backgroundColor: COLORS[i], 
-                    width: '60px', height: '60px', 
-                    left: `${Math.random()*100}%`, top: `${Math.random()*100}%`,
-                    animationDuration: `${3 + Math.random()*5}s`
-                  }} />
-           ))}
-        </div>
-
-        {/* Lobby Container - Flex col for mobile layout safety */}
-        <div className="w-full max-w-2xl h-full max-h-[90dvh] bg-slate-800/95 backdrop-blur-lg rounded-2xl shadow-2xl border border-slate-700 flex flex-col md:flex-row overflow-hidden relative z-10">
+             // DROP (Q)
+             if (e.code === 'KeyQ' && meRef.current?.heldItemIndex !== -1) {
+                const itemToDrop = {
+                   id: `item-${Date.now()}-${Math.random()}`,
+                   itemIndex: meRef.current.heldItemIndex,
+                   position: { ...meRef.current.position },
+                   droppedAt: Date.now()
+                };
+                setMe(prev => {
+                   const updated = { ...prev, heldItemIndex: -1 };
+                   actionsRef.current?.sendIdentity(updated);
+                   return updated;
+                });
+                setWorldItems(prev => [...prev, itemToDrop]);
+                actionsRef.current?.sendDrop(itemToDrop);
+             }
+          };
           
-          {/* Left: Preview (Sticky on desktop, top on mobile) */}
-          <div className="w-full md:w-1/3 bg-slate-900/50 p-6 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-700 shrink-0">
-             <h2 className="text-sm font-bold text-slate-400 mb-6 uppercase tracking-widest hidden md:block">Preview</h2>
-             <div className="relative mb-6 transform scale-150">
-                <div 
-                  className="w-20 h-20 shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all duration-300 relative"
-                  style={{ 
-                    backgroundColor: selectedColor,
-                    ...SHAPES[selectedShape].style
-                  }}
-                >
-                  <div className="w-full h-full flex items-center justify-center gap-2">
-                     <div className="w-1.5 h-1.5 bg-black/50 rounded-full" />
-                     <div className="w-1.5 h-1.5 bg-black/50 rounded-full" />
-                  </div>
-                </div>
-                {selectedItemIndex !== -1 && (
-                   <div className="absolute -right-6 -top-2 animate-bounce-small">
-                     <PixelItem index={selectedItemIndex} size={8} />
-                   </div>
-                )}
-             </div>
-             <p className="font-bold text-lg md:text-xl">{name || 'Player'}</p>
-          </div>
+          const handleKeyUp = (e) => keysPressed.current.delete(e.code);
+          window.addEventListener('keydown', handleKeyDown);
+          window.addEventListener('keyup', handleKeyUp);
 
-          {/* Right: Controls (Scrollable) */}
-          <div className="w-full md:w-2/3 flex flex-col h-full overflow-hidden">
-             
-             {/* Sticky Header inside Right Panel */}
-             <div className="p-6 pb-2 shrink-0 bg-slate-800 z-10">
-               <div className="mb-4">
-                  <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Display Name</label>
-                  <input
-                     type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={12}
-                     className="w-full bg-slate-950 border border-slate-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white font-medium"
-                     placeholder="Enter nickname..."
-                  />
-               </div>
+          let rafId;
+          const loop = () => {
+            // Update Player Move
+            if (meRef.current) {
+               let dx = 0, dy = 0;
+               const keys = keysPressed.current;
+               if (keys.has('ArrowUp') || keys.has('KeyW')) dy -= 1;
+               if (keys.has('ArrowDown') || keys.has('KeyS')) dy += 1;
+               if (keys.has('ArrowLeft') || keys.has('KeyA')) dx -= 1;
+               if (keys.has('ArrowRight') || keys.has('KeyD')) dx += 1;
 
-               <div className="flex border-b border-slate-700">
-                 {['shape', 'color', 'item'].map(tab => (
-                   <button 
-                     key={tab}
-                     onClick={() => setLobbyTab(tab as any)}
-                     className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${lobbyTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
-                   >
-                     {tab}
-                   </button>
+               if (dx !== 0 || dy !== 0) {
+                  const len = Math.sqrt(dx*dx + dy*dy);
+                  dx = (dx / len) * MOVE_SPEED;
+                  dy = (dy / len) * MOVE_SPEED;
+
+                  const newPos = {
+                     x: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.x + dx)),
+                     y: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.y + dy))
+                  };
+
+                  // Update Facing only if moving
+                  const newFacing = { x: dx/MOVE_SPEED, y: dy/MOVE_SPEED };
+
+                  setMe(prev => prev ? ({ ...prev, position: newPos, facing: newFacing }) : null);
+                  actionsRef.current?.sendMove(newPos);
+
+                  // Auto Pickup
+                  if (meRef.current.heldItemIndex === -1) {
+                     const pickupRange = 30;
+                     const item = worldItems.find(i => {
+                        const dist = Math.sqrt(Math.pow(i.position.x - newPos.x, 2) + Math.pow(i.position.y - newPos.y, 2));
+                        return dist < pickupRange;
+                     });
+                     if (item) {
+                        setMe(prev => {
+                           const updated = { ...prev, heldItemIndex: item.itemIndex };
+                           actionsRef.current?.sendIdentity(updated);
+                           return updated;
+                        });
+                        setWorldItems(prev => prev.filter(i => i.id !== item.id));
+                        actionsRef.current?.sendPickup(item.id);
+                     }
+                  }
+               }
+            }
+
+            // Update Effects (Projectiles Move, Timeouts)
+            setEffects(prev => {
+               const now = Date.now();
+               const nextEffects = [];
+               for(const fx of prev) {
+                  const age = now - fx.createdAt;
+                  if (age < fx.duration) {
+                     // Move projectiles
+                     if ((fx.type === 'projectile' || fx.type === 'magic') && fx.vx) {
+                        fx.x += fx.vx * 0.5; // simple time step
+                        fx.y += fx.vy * 0.5;
+                     }
+                     nextEffects.push(fx);
+                  }
+               }
+               return nextEffects;
+            });
+
+            rafId = requestAnimationFrame(loop);
+          };
+          rafId = requestAnimationFrame(loop);
+
+          return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            cancelAnimationFrame(rafId);
+          };
+        }, [gameState, worldItems]); // Dependencies updated
+
+        // Camera
+        useEffect(() => {
+          if (gameState === GAME_STATE.CONNECTED && me && viewportRef.current) {
+            const halfW = window.innerWidth / 2;
+            const halfH = window.innerHeight / 2;
+            viewportRef.current.scrollTo(me.position.x - halfW, me.position.y - halfH);
+          }
+        }, [me?.position, gameState]);
+
+        const handleSendChat = (text) => {
+          if (!me) return;
+          const msg = { id: `msg-${Date.now()}`, playerId: me.id, playerName: me.name, color: me.color, text, timestamp: Date.now() };
+          setMessages(prev => [...prev.slice(-49), msg]);
+          actionsRef.current?.sendChat(msg);
+        };
+
+        // RENDER LOBBY
+        if (gameState === GAME_STATE.LOBBY) {
+          return (
+            <div className="w-full h-[100dvh] flex flex-col items-center justify-center bg-slate-900 text-white p-4 relative overflow-hidden">
+              <div className="absolute inset-0 opacity-10 pointer-events-none">
+                 {SHAPES.slice(0,20).map((s, i) => (
+                   <div key={i} className="absolute animate-bounce-small" 
+                        style={{ ...s.style, backgroundColor: COLORS[i], width: '60px', height: '60px', left: `${Math.random()*100}%`, top: `${Math.random()*100}%`, animationDuration: `${3+Math.random()*5}s` }} />
                  ))}
+              </div>
+              <div className="w-full max-w-2xl h-full max-h-[90dvh] bg-slate-800/95 backdrop-blur-lg rounded-2xl shadow-2xl border border-slate-700 flex flex-col md:flex-row overflow-hidden relative z-10">
+                <div className="w-full md:w-1/3 bg-slate-900/50 p-6 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-700 shrink-0">
+                   <div className="relative mb-6 transform scale-150">
+                      <div className="w-20 h-20 shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all duration-300 relative" style={{ backgroundColor: selectedColor, ...SHAPES[selectedShape].style }}>
+                        <div className="w-full h-full flex items-center justify-center gap-2">
+                           <div className="w-1.5 h-1.5 bg-black/50 rounded-full" />
+                           <div className="w-1.5 h-1.5 bg-black/50 rounded-full" />
+                        </div>
+                      </div>
+                      {selectedItemIndex !== -1 && <div className="absolute -right-6 -top-2 animate-bounce-small"><PixelItem index={selectedItemIndex} size={8} /></div>}
+                   </div>
+                   <p className="font-bold text-lg">{name || 'Player'}</p>
+                </div>
+                <div className="w-full md:w-2/3 flex flex-col h-full overflow-hidden">
+                   <div className="p-6 pb-2 shrink-0 bg-slate-800 z-10">
+                     <div className="mb-4">
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Display Name</label>
+                        <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={12} className="w-full bg-slate-950 border border-slate-600 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none text-white font-medium" placeholder="Nickname..." />
+                     </div>
+                     <div className="flex border-b border-slate-700">
+                       {['shape', 'color', 'item'].map(tab => (
+                         <button key={tab} onClick={() => setLobbyTab(tab)} className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${lobbyTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{tab}</button>
+                       ))}
+                     </div>
+                   </div>
+                   <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 pt-2 min-h-0 touch-pan-y">
+                     {lobbyTab === 'shape' && (
+                       <div className="grid grid-cols-4 gap-3">
+                         {SHAPES.map((s, i) => (
+                           <button key={i} onClick={() => setSelectedShape(i)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center hover:bg-slate-600 transition-all ${selectedShape === i ? 'ring-2 ring-blue-500 bg-slate-600' : ''}`}>
+                             <div style={{...s.style, width: '50%', height: '50%', backgroundColor: '#cbd5e1'}} />
+                           </button>
+                         ))}
+                       </div>
+                     )}
+                     {lobbyTab === 'color' && (
+                       <div className="grid grid-cols-6 gap-3">
+                         {COLORS.map((c, i) => (
+                           <button key={i} onClick={() => setSelectedColor(c)} className={`aspect-square rounded-full transition-transform active:scale-95 ${selectedColor === c ? 'ring-2 ring-white scale-110' : ''}`} style={{ backgroundColor: c }} />
+                         ))}
+                       </div>
+                     )}
+                     {lobbyTab === 'item' && (
+                       <div className="grid grid-cols-4 gap-2 pb-12">
+                         <button onClick={() => setSelectedItemIndex(-1)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-400 hover:bg-slate-600 ${selectedItemIndex === -1 ? 'ring-2 ring-blue-500' : ''}`}>None</button>
+                         {ITEMS.map((item, i) => (
+                           <button key={i} onClick={() => setSelectedItemIndex(i)} className={`aspect-square bg-slate-700 rounded-lg flex flex-col items-center justify-center hover:bg-slate-600 transition-all ${selectedItemIndex === i ? 'ring-2 ring-blue-500 bg-slate-600' : ''}`}>
+                             <PixelItem index={i} size={5} />
+                             <span className="text-[8px] text-slate-400 mt-1 truncate w-full text-center px-1">{item.name}</span>
+                           </button>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+                   <div className="p-4 border-t border-slate-700 bg-slate-800 shrink-0">
+                     <button onClick={joinGame} disabled={!name.trim()} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg shadow-lg">Enter World</button>
+                   </div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
+        // RENDER WORLD
+        const allPlayers = [me, ...Object.values(peers)].filter(Boolean);
+
+        return (
+          <div className="relative w-full h-full bg-slate-950">
+             <div ref={viewportRef} className="w-full h-full overflow-hidden relative cursor-crosshair">
+                <div style={{ width: MAP_SIZE, height: MAP_SIZE }} className="relative bg-[#0f172a]">
+                   <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
+                   
+                   {worldItems.map(item => <WorldItemComponent key={item.id} item={item} />)}
+                   {allPlayers.map(p => <PlayerAvatar key={p.id || p.peerId} player={p} />)}
+                   {/* Effects Overlay */}
+                   {effects.map(fx => <EffectRenderer key={fx.id} effect={fx} />)}
+                </div>
+             </div>
+             <div className="fixed top-4 left-4 z-[90] flex gap-2">
+               <div className="bg-black/40 backdrop-blur px-3 py-1.5 rounded-full text-slate-300 text-xs font-mono border border-white/10 flex items-center gap-2">
+                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                 {Object.keys(peers).length + 1} Online
                </div>
              </div>
-
-             {/* Scrollable Grid Content */}
-             <div className="flex-1 overflow-y-auto overflow-x-hidden p-6 pt-2 min-h-0 touch-pan-y">
-               {lobbyTab === 'shape' && (
-                 <div className="grid grid-cols-4 gap-3">
-                   {SHAPES.map((s, i) => (
-                     <button key={i} onClick={() => setSelectedShape(i)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center hover:bg-slate-600 transition-all ${selectedShape === i ? 'ring-2 ring-blue-500 bg-slate-600' : ''}`}>
-                       <div style={{...s.style, width: '50%', height: '50%', backgroundColor: '#cbd5e1'}} />
-                     </button>
-                   ))}
-                 </div>
-               )}
-
-               {lobbyTab === 'color' && (
-                 <div className="grid grid-cols-6 gap-3">
-                   {COLORS.map((c, i) => (
-                     <button key={i} onClick={() => setSelectedColor(c)} className={`aspect-square rounded-full transition-transform active:scale-95 ${selectedColor === c ? 'ring-2 ring-white scale-110' : ''}`} style={{ backgroundColor: c }} />
-                   ))}
-                 </div>
-               )}
-
-               {lobbyTab === 'item' && (
-                 <div className="grid grid-cols-4 gap-2 pb-12">
-                   <button onClick={() => setSelectedItemIndex(-1)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-400 hover:bg-slate-600 ${selectedItemIndex === -1 ? 'ring-2 ring-blue-500' : ''}`}>None</button>
-                   {ITEMS.map((item, i) => (
-                     <button key={i} onClick={() => setSelectedItemIndex(i)} className={`aspect-square bg-slate-700 rounded-lg flex flex-col items-center justify-center hover:bg-slate-600 transition-all ${selectedItemIndex === i ? 'ring-2 ring-blue-500 bg-slate-600' : ''}`}>
-                       <PixelItem index={i} size={5} />
-                       <span className="text-[8px] text-slate-400 mt-1 truncate w-full text-center px-1">{item.name}</span>
-                     </button>
-                   ))}
-                 </div>
-               )}
+             <div className="fixed bottom-6 right-6 z-[90] text-right pointer-events-none text-[10px] text-white/40 font-mono">
+                [WASD] Move <br/> [SPACE] Use <br/> [Q] Drop
              </div>
-
-             {/* Sticky Footer */}
-             <div className="p-4 border-t border-slate-700 bg-slate-800 shrink-0">
-               <button
-                  onClick={joinGame} disabled={!name.trim()}
-                  className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg shadow-lg transform active:scale-[0.98] transition-all"
-               >
-                  Enter World
-               </button>
-             </div>
+             <ChatOverlay messages={messages} onSend={handleSendChat} />
           </div>
-        </div>
-      </div>
-    );
-  }
+        );
+      };
 
-  // --- RENDER WORLD ---
-  const allPlayers = [me, ...Object.values(peers)].filter((p): p is Player => !!p);
-
-  return (
-    <div className="relative w-full h-full bg-slate-950">
-       <div ref={viewportRef} className="w-full h-full overflow-hidden relative cursor-crosshair">
-          <div style={{ width: MAP_SIZE, height: MAP_SIZE }} className="relative bg-[#0f172a]">
-             {/* Grid Pattern */}
-             <div className="absolute inset-0 opacity-20 pointer-events-none" 
-                  style={{ backgroundImage: 'linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
-             
-             {/* World Items */}
-             {worldItems.map(item => <WorldItemComponent key={item.id} item={item} />)}
-
-             {/* Players */}
-             {allPlayers.map(p => <PlayerAvatar key={p.id || p.peerId} player={p} />)}
-          </div>
-       </div>
-
-       {/* HUD */}
-       <div className="fixed top-4 left-4 z-[90] flex gap-2">
-         <div className="bg-black/40 backdrop-blur px-3 py-1.5 rounded-full text-slate-300 text-xs font-mono border border-white/10 flex items-center gap-2">
-           <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-           {Object.keys(peers).length + 1} Online
-         </div>
-       </div>
-
-       {/* Controls Guide */}
-       <div className="fixed bottom-6 right-6 z-[90] text-right pointer-events-none">
-          <div className="flex flex-col gap-1 text-[10px] text-white/40 font-mono">
-            <span>[WASD] Move</span>
-            <span>[SPACE] Swing</span>
-            <span>[Q] Drop</span>
-          </div>
-       </div>
-
-       <ChatOverlay messages={messages} onSend={handleSendChat} />
-    </div>
-  );
-};
-
-export default App;
+      const root = ReactDOM.createRoot(document.getElementById('root'));
+      root.render(<App />);
+    </script>
+  </body>
+</html>
