@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>PixelGather - FX Update</title>
+    <title>PixelGather - Combat Update</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -47,6 +47,23 @@
         50% { transform: rotate(-45deg) translateX(-10px) scale(1.1); } 
         100% { transform: rotate(0deg) translateX(0); } 
       }
+
+      @keyframes damagePop {
+        0% { transform: translateY(0) scale(0.5); opacity: 0; }
+        20% { transform: translateY(-20px) scale(1.2); opacity: 1; }
+        100% { transform: translateY(-60px) scale(1); opacity: 0; }
+      }
+      .damage-text {
+        animation: damagePop 0.8s ease-out forwards;
+      }
+
+      @keyframes hitFlash {
+        0% { background-color: rgba(239, 68, 68, 0.8); }
+        100% { background-color: transparent; }
+      }
+      .hit-flash-active {
+        animation: hitFlash 0.3s ease-out forwards;
+      }
     </style>
   <script type="importmap">
 {
@@ -71,6 +88,7 @@
       const MOVE_SPEED = 10;
       const PROJECTILE_SPEED = 25;
       const GAME_STATE = { LOBBY: 'LOBBY', CONNECTED: 'CONNECTED' };
+      const HP_BAR_FADE_MS = 5000;
 
       // Colors
       const COLORS = Array.from({ length: 60 }, (_, i) => {
@@ -117,46 +135,46 @@
       // Items with Action Definitions
       const ITEMS = [
         // Slashers
-        { name: 'Iron Sword', type: 'sword', color: '#94a3b8', action: 'slash', actionColor: '#cbd5e1' },
-        { name: 'Gold Sword', type: 'sword', color: '#fbbf24', action: 'slash', actionColor: '#fcd34d' },
-        { name: 'Ruby Sword', type: 'sword', color: '#ef4444', action: 'slash', actionColor: '#fca5a5' },
-        { name: 'Void Blade', type: 'sword', color: '#8b5cf6', action: 'slash', actionColor: '#c4b5fd' },
-        { name: 'Battle Axe', type: 'axe', color: '#475569', action: 'slash', actionColor: '#94a3b8' },
-        { name: 'Blood Axe', type: 'axe', color: '#991b1b', action: 'slash', actionColor: '#ef4444' },
+        { name: 'Iron Sword', type: 'sword', color: '#94a3b8', action: 'slash', actionColor: '#cbd5e1', damage: 15 },
+        { name: 'Gold Sword', type: 'sword', color: '#fbbf24', action: 'slash', actionColor: '#fcd34d', damage: 22 },
+        { name: 'Ruby Sword', type: 'sword', color: '#ef4444', action: 'slash', actionColor: '#fca5a5', damage: 28 },
+        { name: 'Void Blade', type: 'sword', color: '#8b5cf6', action: 'slash', actionColor: '#c4b5fd', damage: 35 },
+        { name: 'Battle Axe', type: 'axe', color: '#475569', action: 'slash', actionColor: '#94a3b8', damage: 30 },
+        { name: 'Blood Axe', type: 'axe', color: '#991b1b', action: 'slash', actionColor: '#ef4444', damage: 45 },
         
         // Shooters
-        { name: 'Short Bow', type: 'bow', color: '#a8a29e', action: 'shoot', actionColor: '#57534e', particle: 'dot' },
-        { name: 'Elven Bow', type: 'bow', color: '#22c55e', action: 'shoot', actionColor: '#4ade80', particle: 'leaf' },
-        { name: 'Pistol', type: 'gun', color: '#475569', action: 'shoot', actionColor: '#94a3b8', particle: 'dot' },
-        { name: 'Blaster', type: 'gun', color: '#3b82f6', action: 'shoot', actionColor: '#60a5fa', particle: 'orb' },
-        { name: 'Ray Gun', type: 'gun', color: '#10b981', action: 'shoot', actionColor: '#34d399', particle: 'beam' },
+        { name: 'Short Bow', type: 'bow', color: '#a8a29e', action: 'shoot', actionColor: '#57534e', particle: 'dot', damage: 12 },
+        { name: 'Elven Bow', type: 'bow', color: '#22c55e', action: 'shoot', actionColor: '#4ade80', particle: 'leaf', damage: 18 },
+        { name: 'Pistol', type: 'gun', color: '#475569', action: 'shoot', actionColor: '#94a3b8', particle: 'dot', damage: 15 },
+        { name: 'Blaster', type: 'gun', color: '#3b82f6', action: 'shoot', actionColor: '#60a5fa', particle: 'orb', damage: 20 },
+        { name: 'Ray Gun', type: 'gun', color: '#10b981', action: 'shoot', actionColor: '#34d399', particle: 'beam', damage: 25 },
         
         // Magic
-        { name: 'Fire Wand', type: 'wand', color: '#ef4444', action: 'magic', actionColor: '#f87171' },
-        { name: 'Ice Wand', type: 'wand', color: '#0ea5e9', action: 'magic', actionColor: '#7dd3fc' },
-        { name: 'Spellbook', type: 'book', color: '#8b5cf6', action: 'magic', actionColor: '#ddd6fe' },
+        { name: 'Fire Wand', type: 'wand', color: '#ef4444', action: 'magic', actionColor: '#f87171', damage: 20 },
+        { name: 'Ice Wand', type: 'wand', color: '#0ea5e9', action: 'magic', actionColor: '#7dd3fc', damage: 20 },
+        { name: 'Spellbook', type: 'book', color: '#8b5cf6', action: 'magic', actionColor: '#ddd6fe', damage: 24 },
         
         // Explosive
-        { name: 'Bomb', type: 'bomb', color: '#000000', action: 'explode', actionColor: '#ef4444' },
-        { name: 'Holy Bomb', type: 'bomb', color: '#fbbf24', action: 'explode', actionColor: '#f59e0b' },
+        { name: 'Bomb', type: 'bomb', color: '#000000', action: 'explode', actionColor: '#ef4444', damage: 50 },
+        { name: 'Holy Bomb', type: 'bomb', color: '#fbbf24', action: 'explode', actionColor: '#f59e0b', damage: 60 },
 
         // Defense
-        { name: 'Iron Shield', type: 'shield', color: '#94a3b8', action: 'guard', actionColor: '#cbd5e1' },
-        { name: 'Gold Shield', type: 'shield', color: '#fbbf24', action: 'guard', actionColor: '#fcd34d' },
+        { name: 'Iron Shield', type: 'shield', color: '#94a3b8', action: 'guard', actionColor: '#cbd5e1', damage: 0 },
+        { name: 'Gold Shield', type: 'shield', color: '#fbbf24', action: 'guard', actionColor: '#fcd34d', damage: 0 },
 
         // Consumables
-        { name: 'Health Pot', type: 'potion', color: '#ef4444', action: 'heal', actionColor: '#fca5a5' },
-        { name: 'Mana Pot', type: 'potion', color: '#3b82f6', action: 'heal', actionColor: '#93c5fd' },
-        { name: 'Love Pot', type: 'potion', color: '#ec4899', action: 'heal', actionColor: '#f9a8d4' },
-        { name: 'Venom Pot', type: 'potion', color: '#3f6212', action: 'heal', actionColor: '#84cc16' },
+        { name: 'Health Pot', type: 'potion', color: '#ef4444', action: 'heal', actionColor: '#fca5a5', damage: -25 },
+        { name: 'Mana Pot', type: 'potion', color: '#3b82f6', action: 'heal', actionColor: '#93c5fd', damage: 0 },
+        { name: 'Love Pot', type: 'potion', color: '#ec4899', action: 'heal', actionColor: '#f9a8d4', damage: 0 },
+        { name: 'Venom Pot', type: 'potion', color: '#3f6212', action: 'heal', actionColor: '#84cc16', damage: 10 },
 
         // Food
-        { name: 'Burger', type: 'burger', color: '#d97706', action: 'eat', actionColor: '#fbbf24' },
-        { name: 'Cake', type: 'cake', color: '#f472b6', action: 'eat', actionColor: '#f9a8d4' },
-        { name: 'Coffee', type: 'coffee', color: '#78350f', action: 'eat', actionColor: '#fff' },
+        { name: 'Burger', type: 'burger', color: '#d97706', action: 'eat', actionColor: '#fbbf24', damage: -15 },
+        { name: 'Cake', type: 'cake', color: '#f472b6', action: 'eat', actionColor: '#f9a8d4', damage: -20 },
+        { name: 'Coffee', type: 'coffee', color: '#78350f', action: 'eat', actionColor: '#fff', damage: -5 },
         
         // Misc
-        { name: 'Gold Key', type: 'key', color: '#fbbf24', action: 'sparkle', actionColor: '#fcd34d' },
+        { name: 'Gold Key', type: 'key', color: '#fbbf24', action: 'sparkle', actionColor: '#fcd34d', damage: 0 },
       ];
 
       const getPixelDef = (type) => PIXEL_DEFS[type] || PIXEL_DEFS.sword;
@@ -276,6 +294,9 @@
       const PlayerAvatar = ({ player }) => {
         const shapeStyle = SHAPES[player.shapeIndex]?.style || {};
         const isSwinging = player.lastActionTime && (Date.now() - player.lastActionTime < 200);
+        const hpPercent = (player.hp / (player.maxHp || 100)) * 100;
+        const showHp = (Date.now() - (player.lastHitTime || 0)) < HP_BAR_FADE_MS;
+        const isHit = (Date.now() - (player.lastHitTime || 0)) < 300;
 
         return (
           <div
@@ -285,9 +306,19 @@
               zIndex: player.isMe ? 50 : 10,
             }}
           >
-            <div className={`absolute -top-10 px-2 py-0.5 backdrop-blur-sm rounded-md text-[10px] font-bold whitespace-nowrap shadow-sm border ${player.isPvp ? 'bg-red-900/80 border-red-500 text-red-100' : 'bg-black/60 border-white/10 text-white'}`}>
-              {player.isPvp && <span className="mr-1">⚔️</span>}
-              {player.name}
+            <div className={`absolute -top-10 px-2 py-0.5 backdrop-blur-sm rounded-md text-[10px] font-bold whitespace-nowrap shadow-sm border flex flex-col items-center gap-1 ${player.isPvp ? 'bg-red-900/80 border-red-500 text-red-100' : 'bg-black/60 border-white/10 text-white'}`}>
+              <div className="flex items-center gap-1">
+                {player.isPvp && <span>⚔️</span>}
+                {player.name}
+              </div>
+            </div>
+
+            {/* Health Bar - outside the box */}
+            <div 
+              className="absolute -top-3 w-12 h-1 bg-gray-900/80 rounded-full overflow-hidden border border-black/20 transition-opacity duration-500"
+              style={{ opacity: showHp ? 1 : 0 }}
+            >
+               <div className="h-full bg-red-600 transition-all duration-300" style={{ width: `${hpPercent}%` }} />
             </div>
 
             <div className="relative">
@@ -295,6 +326,9 @@
                 className={`w-12 h-12 shadow-lg flex items-center justify-center transition-all ${player.isPvp ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-black' : ''}`}
                 style={{ backgroundColor: player.color, boxShadow: `inset 0 2px 5px rgba(255,255,255,0.3), 0 5px 15px rgba(0,0,0,0.3)`, ...shapeStyle }}
               >
+                {/* Hit Flash Overlay */}
+                <div className={`absolute inset-0 z-10 ${isHit ? 'hit-flash-active' : ''} pointer-events-none`} style={{ ...shapeStyle }} />
+                
                 <div className="flex gap-2 pointer-events-none">
                    <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
                    <div className="w-1.5 h-1.5 bg-black/80 rounded-full" />
@@ -350,6 +384,7 @@
         const [messages, setMessages] = useState([]);
         const [worldItems, setWorldItems] = useState([]);
         const [effects, setEffects] = useState([]);
+        const [damageTexts, setDamageTexts] = useState([]);
         
         // Lobby State
         const [name, setName] = useState('');
@@ -363,10 +398,10 @@
         const keysPressed = useRef(new Set());
         const viewportRef = useRef(null);
         const meRef = useRef(null);
-        const effectsRef = useRef([]);
+        const peersRef = useRef({});
 
         useEffect(() => { meRef.current = me; }, [me]);
-        useEffect(() => { effectsRef.current = effects; }, [effects]);
+        useEffect(() => { peersRef.current = peers; }, [peers]);
 
         const joinGame = async () => {
           if (!name.trim()) return;
@@ -379,16 +414,20 @@
           const [sendDrop, getDrop] = room.makeAction('drop');
           const [sendPickup, getPickup] = room.makeAction('pickup');
           const [sendEffect, getEffect] = room.makeAction('effect');
+          const [sendHit, getHit] = room.makeAction('hit');
 
-          actionsRef.current = { sendMove, sendChat, sendIdentity, sendDrop, sendPickup, sendEffect };
+          actionsRef.current = { sendMove, sendChat, sendIdentity, sendDrop, sendPickup, sendEffect, sendHit };
 
           const myId = `p-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
           const initialMe = {
             id: myId, name: name.trim(), color: selectedColor, shapeIndex: selectedShape, heldItemIndex: selectedItemIndex,
             position: { x: MAP_SIZE/2, y: MAP_SIZE/2 },
-            facing: { x: 0, y: 1 }, // Default facing down
+            facing: { x: 0, y: 1 },
             isMe: true,
-            isPvp: false
+            isPvp: false,
+            hp: 100,
+            maxHp: 100,
+            lastHitTime: 0
           };
           setMe(initialMe);
           setGameState(GAME_STATE.CONNECTED);
@@ -400,6 +439,22 @@
           getDrop((item) => setWorldItems(prev => [...prev, item]));
           getPickup((itemId) => setWorldItems(prev => prev.filter(i => i.id !== itemId)));
           getEffect((fx) => setEffects(prev => [...prev, fx]));
+          getHit(({ victimId, damage, x, y }) => {
+            // Show Damage Text for everyone
+            const textId = Math.random().toString(36);
+            setDamageTexts(prev => [...prev, { id: textId, x, y, value: damage, createdAt: Date.now() }]);
+            setTimeout(() => setDamageTexts(prev => prev.filter(t => t.id !== textId)), 800);
+
+            // If I am the victim, update my HP
+            if (meRef.current && victimId === meRef.current.id) {
+              setMe(prev => {
+                const newHp = Math.max(0, Math.min(prev.maxHp, prev.hp - damage));
+                const updated = { ...prev, hp: newHp, lastHitTime: Date.now() };
+                actionsRef.current?.sendIdentity(updated);
+                return updated;
+              });
+            }
+          });
 
           room.onPeerJoin((peerId) => actionsRef.current?.sendIdentity(meRef.current, peerId));
           room.onPeerLeave((peerId) => setPeers(prev => { const next = { ...prev }; delete next[peerId]; return next; }));
@@ -411,8 +466,9 @@
            const fx = { ...effectData, id: Math.random().toString(36) };
            setEffects(prev => [...prev, fx]);
            actionsRef.current?.sendEffect(fx);
+           return fx;
         };
-        
+
         const togglePvp = () => {
           if (!me) return;
           const newPvpState = !me.isPvp;
@@ -431,7 +487,7 @@
 
              // ACTIONS (SPACE)
              if (e.code === 'Space' && meRef.current) {
-                const { heldItemIndex, position, facing } = meRef.current;
+                const { heldItemIndex, position, facing, isPvp } = meRef.current;
                 
                 // Swing Animation Update
                 setMe(prev => {
@@ -445,18 +501,30 @@
                    const angle = Math.atan2(facing.y, facing.x) * (180/Math.PI);
 
                    if (item.action === 'slash') {
+                      const fxPos = { x: position.x + facing.x * 20, y: position.y + facing.y * 20 };
                       createLocalEffect({
                          type: 'slash',
-                         position: { x: position.x + facing.x * 20, y: position.y + facing.y * 20 },
+                         position: fxPos,
                          rotation: angle + 90,
                          color: item.actionColor,
                          size: 60,
                          createdAt: Date.now(),
                          duration: 200
                       });
+
+                      // Combat Detection (Slashes)
+                      if (isPvp) {
+                        Object.values(peersRef.current).forEach(peer => {
+                          if (!peer.isPvp) return;
+                          const dist = Math.sqrt(Math.pow(peer.position.x - fxPos.x, 2) + Math.pow(peer.position.y - fxPos.y, 2));
+                          if (dist < 40) {
+                            actionsRef.current?.sendHit({ victimId: peer.id, damage: item.damage, x: peer.position.x, y: peer.position.y });
+                          }
+                        });
+                      }
                    } else if (item.action === 'shoot' || item.action === 'magic') {
                       createLocalEffect({
-                         type: item.action, // projectile or magic
+                         type: item.action,
                          x: position.x + facing.x * 20,
                          y: position.y + facing.y * 20,
                          vx: facing.x * PROJECTILE_SPEED,
@@ -464,11 +532,13 @@
                          rotation: angle,
                          color: item.actionColor,
                          size: 20,
+                         damage: item.damage, // Store damage in the effect for collision check
+                         attackerId: meRef.current.id,
                          createdAt: Date.now(),
-                         duration: 1000 // 1 sec lifetime
+                         duration: 1000
                       });
                    } else if (item.action === 'explode') {
-                      createLocalEffect({
+                      const fx = createLocalEffect({
                          type: 'explosion',
                          x: position.x, y: position.y,
                          color: item.actionColor,
@@ -476,8 +546,25 @@
                          createdAt: Date.now(),
                          duration: 500
                       });
+                      if (isPvp) {
+                        Object.values(peersRef.current).forEach(peer => {
+                          if (!peer.isPvp) return;
+                          const dist = Math.sqrt(Math.pow(peer.position.x - fx.x, 2) + Math.pow(peer.position.y - fx.y, 2));
+                          if (dist < 100) {
+                            actionsRef.current?.sendHit({ victimId: peer.id, damage: item.damage, x: peer.position.x, y: peer.position.y });
+                          }
+                        });
+                      }
                    } else if (item.action === 'heal' || item.action === 'eat' || item.action === 'sparkle') {
-                      // Spawn multiple particles
+                      // Internal Heal
+                      if (item.damage < 0) {
+                        setMe(prev => {
+                          const newHp = Math.min(prev.maxHp, prev.hp - item.damage);
+                          const updated = { ...prev, hp: newHp, lastHitTime: Date.now() };
+                          actionsRef.current?.sendIdentity(updated);
+                          return updated;
+                        });
+                      }
                       for(let i=0; i<5; i++) {
                          setTimeout(() => {
                             createLocalEffect({
@@ -547,10 +634,7 @@
                      x: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.x + dx)),
                      y: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.y + dy))
                   };
-
-                  // Update Facing only if moving
                   const newFacing = { x: dx/MOVE_SPEED, y: dy/MOVE_SPEED };
-
                   setMe(prev => prev ? ({ ...prev, position: newPos, facing: newFacing }) : null);
                   actionsRef.current?.sendMove(newPos);
 
@@ -581,10 +665,21 @@
                for(const fx of prev) {
                   const age = now - fx.createdAt;
                   if (age < fx.duration) {
-                     // Move projectiles
-                     if ((fx.type === 'projectile' || fx.type === 'magic') && fx.vx) {
-                        fx.x += fx.vx * 0.5; // simple time step
-                        fx.y += fx.vy * 0.5;
+                     if ((fx.type === 'shoot' || fx.type === 'magic') && fx.vx) {
+                        fx.x += fx.vx;
+                        fx.y += fx.vy;
+
+                        // Attacker detects projectile hits
+                        if (meRef.current && fx.attackerId === meRef.current.id && meRef.current.isPvp) {
+                          Object.values(peersRef.current).forEach(peer => {
+                            if (!peer.isPvp) return;
+                            const dist = Math.sqrt(Math.pow(peer.position.x - fx.x, 2) + Math.pow(peer.position.y - fx.y, 2));
+                            if (dist < 30) {
+                              actionsRef.current?.sendHit({ victimId: peer.id, damage: fx.damage, x: fx.x, y: fx.y });
+                              fx.createdAt = 0; // Destroy projectile
+                            }
+                          });
+                        }
                      }
                      nextEffects.push(fx);
                   }
@@ -601,7 +696,7 @@
             window.removeEventListener('keyup', handleKeyUp);
             cancelAnimationFrame(rafId);
           };
-        }, [gameState, worldItems]); // Dependencies updated
+        }, [gameState, worldItems]);
 
         // Camera
         useEffect(() => {
@@ -705,6 +800,22 @@
                    {allPlayers.map(p => <PlayerAvatar key={p.id || p.peerId} player={p} />)}
                    {/* Effects Overlay */}
                    {effects.map(fx => <EffectRenderer key={fx.id} effect={fx} />)}
+
+                   {/* Damage Popups */}
+                   {damageTexts.map(dt => (
+                     <div 
+                       key={dt.id} 
+                       className="absolute damage-text pointer-events-none select-none font-black text-xl"
+                       style={{ 
+                         left: dt.x + (Math.random() * 20 - 10), 
+                         top: dt.y, 
+                         color: dt.value > 0 ? '#ef4444' : '#22c55e',
+                         textShadow: '0 2px 4px rgba(0,0,0,0.5), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000'
+                       }}
+                     >
+                       {Math.abs(dt.value)}
+                     </div>
+                   ))}
                 </div>
              </div>
              <div className="fixed top-4 left-4 z-[90] flex gap-2">
