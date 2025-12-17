@@ -2,14 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="https://picsum.photos/32/32" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>PixelGather - Multiplayer</title>
+    <title>PixelGather - Extended</title>
     
-    <!-- Styles & Frameworks -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM (UMD) -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
@@ -21,16 +24,32 @@
         overflow: hidden;
         background-color: #0f172a;
         font-family: 'Inter', system-ui, sans-serif;
-        touch-action: none; /* Prevent scroll on mobile */
+        touch-action: none;
       }
+      
       /* Custom Scrollbar */
-      ::-webkit-scrollbar { width: 8px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: #475569; }
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+      ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
       .animate-fade-in { animation: fadeIn 0.3s ease-out; }
       @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+      .animate-bounce-small { animation: bounceSmall 2s infinite; }
+      @keyframes bounceSmall { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+      
+      /* Item Float Animation */
+      .item-float { animation: itemFloat 3s ease-in-out infinite; }
+      @keyframes itemFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+
+      /* Action Animation */
+      .swing-action { animation: swing 0.3s ease-out forwards; }
+      @keyframes swing { 
+        0% { transform: rotate(0deg) translateX(0); } 
+        50% { transform: rotate(-45deg) translateX(-10px); } 
+        100% { transform: rotate(0deg) translateX(0); } 
+      }
     </style>
   <script type="importmap">
 {
@@ -45,59 +64,165 @@
   <body>
     <div id="root"></div>
 
-    <!-- MAIN APPLICATION CODE -->
     <script type="text/babel" data-type="module">
       import { joinRoom } from 'https://esm.sh/trystero@0.22.0/torrent';
+      
+      const { useState, useEffect, useRef } = React;
 
       // --- CONSTANTS ---
       const MAP_SIZE = 3000;
       const MOVE_SPEED = 10;
-      const PLAYER_COLORS = [
-        '#ef4444', '#f97316', '#eab308', '#22c55e', 
-        '#06b6d4', '#3b82f6', '#a855f7', '#ec4899'
-      ];
       const GAME_STATE = { LOBBY: 'LOBBY', CONNECTED: 'CONNECTED' };
+
+      // 60+ Colors
+      const COLORS = Array.from({ length: 60 }, (_, i) => {
+        const hue = Math.floor((i / 60) * 360);
+        return `hsl(${hue}, 70%, 50%)`;
+      });
+
+      // 50+ Weird Shapes
+      const SHAPES = [
+        { name: 'Circle', style: { borderRadius: '50%' } },
+        { name: 'Square', style: { borderRadius: '4px' } },
+        { name: 'Round', style: { borderRadius: '16px' } },
+        { name: 'Diamond', style: { clipPath: 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)' } },
+        { name: 'Triangle', style: { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' } },
+        { name: 'Inv. Tri', style: { clipPath: 'polygon(50% 100%, 0% 0%, 100% 0%)' } },
+        { name: 'Pentagon', style: { clipPath: 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)' } },
+        { name: 'Hexagon', style: { clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)' } },
+        { name: 'Octagon', style: { clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 100% 70%, 70% 100%, 30% 100%, 0% 70%, 0% 30%)' } },
+        { name: 'Star 5', style: { clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' } },
+        { name: 'Star 6', style: { clipPath: 'polygon(50% 0%, 61% 25%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 25%)' } },
+        { name: 'Cross', style: { clipPath: 'polygon(20% 0%, 80% 0%, 80% 20%, 100% 20%, 100% 80%, 80% 80%, 80% 100%, 20% 100%, 20% 80%, 0% 80%, 0% 20%, 20% 20%)' } },
+        { name: 'Message', style: { clipPath: 'polygon(0% 0%, 100% 0%, 100% 75%, 75% 75%, 75% 100%, 50% 75%, 0% 75%)' } },
+        { name: 'Arrow Up', style: { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' } },
+        { name: 'Chevron', style: { clipPath: 'polygon(100% 0%, 75% 50%, 100% 100%, 25% 100%, 0% 50%, 25% 0%)' } },
+        { name: 'Trapezoid', style: { clipPath: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)' } },
+        { name: 'Parallelogram', style: { clipPath: 'polygon(25% 0%, 100% 0%, 75% 100%, 0% 100%)' } },
+        { name: 'Rabbet', style: { clipPath: 'polygon(0% 15%, 15% 15%, 15% 0%, 85% 0%, 85% 15%, 100% 15%, 100% 85%, 85% 85%, 85% 100%, 15% 100%, 15% 85%, 0% 85%)' } },
+        { name: 'Gem', style: { clipPath: 'polygon(30% 0%, 70% 0%, 100% 30%, 50% 100%, 0% 30%)' } },
+        { name: 'Shield', style: { clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' } },
+        { name: 'Blob 1', style: { borderRadius: '60% 40% 30% 70% / 60% 30% 70% 40%' } },
+        { name: 'Blob 2', style: { borderRadius: '30% 70% 70% 30% / 30% 30% 70% 70%' } },
+        { name: 'Blob 3', style: { borderRadius: '50% 50% 20% 80% / 25% 80% 20% 75%' } },
+        { name: 'Blob 4', style: { borderRadius: '73% 27% 26% 74% / 79% 19% 81% 21%' } },
+        { name: 'Ghost', style: { borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%', clipPath: 'polygon(0 0, 100% 0, 100% 100%, 83% 85%, 66% 100%, 50% 85%, 33% 100%, 16% 85%, 0 100%)' } },
+        { name: 'Egg', style: { borderRadius: '50% 50% 50% 50% / 60% 60% 40% 40%' } },
+        { name: 'Bean', style: { borderRadius: '45% 55% 44% 56% / 36% 56% 44% 64%' } },
+        { name: 'Drop', style: { borderRadius: '0% 50% 50% 50%' , transform: 'rotate(45deg)' } },
+        { name: 'Leaf', style: { borderRadius: '0% 100% 0% 100%' } },
+        { name: 'Ticket Alt', style: { clipPath: 'polygon(15% 0, 100% 0, 100% 100%, 15% 100%, 0 85%, 0 15%)' } },
+        { name: 'Sawtooth', style: { clipPath: 'polygon(0% 0%, 100% 0%, 100% 80%, 90% 100%, 80% 80%, 70% 100%, 60% 80%, 50% 100%, 40% 80%, 30% 100%, 20% 80%, 10% 100%, 0% 80%)' } },
+        { name: 'Burst', style: { clipPath: 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)' } },
+        { name: 'Shard', style: { clipPath: 'polygon(50% 0%, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0% 50%, 40% 40%)' } },
+        { name: 'Pill', style: { borderRadius: '50px' } },
+        { name: 'Cylinder', style: { borderRadius: '10px / 30px' } },
+        { name: 'Block', style: { borderRadius: '0px' } },
+        { name: 'Splat', style: { borderRadius: '44% 56% 41% 59% / 62% 37% 63% 38%' } },
+        { name: 'Wobble', style: { borderRadius: '33% 67% 29% 71% / 58% 30% 70% 42%' } },
+        { name: 'Tag', style: { clipPath: 'polygon(30% 0%, 100% 0%, 100% 100%, 30% 100%, 0% 50%)' } },
+        { name: 'Bevel', style: { clipPath: 'polygon(20% 0%, 80% 0%, 100% 20%, 100% 80%, 80% 100%, 20% 100%, 0% 80%, 0% 20%)' } },
+        { name: 'Rune', style: { clipPath: 'polygon(0 35%, 35% 35%, 35% 0, 65% 0, 65% 35%, 100% 35%, 100% 65%, 65% 65%, 65% 100%, 35% 100%, 35% 65%, 0 65%)' } },
+        { name: 'Cone', style: { clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)', transform: 'scaleY(1.5)' } },
+        { name: 'Vortex', style: { borderRadius: '40% 60% 70% 30% / 40% 50% 60% 50%', transform: 'rotate(120deg)' } },
+        { name: 'Puddle', style: { borderRadius: '30% 70% 70% 30% / 30% 30% 70% 70%', transform: 'scaleX(1.5)' } },
+        { name: 'Spike', style: { clipPath: 'polygon(50% 0%, 65% 80%, 100% 100%, 50% 90%, 0% 100%, 35% 80%)' } },
+        { name: 'Pac', style: { clipPath: 'polygon(100% 74%, 44% 48%, 100% 21%, 100% 0, 0 0, 0 100%, 100% 100%)', borderRadius: '50%' } },
+        { name: 'Half', style: { clipPath: 'polygon(0 0, 50% 0, 50% 100%, 0% 100%)' } },
+      ];
+
+      // 50+ Items
+      const ITEMS = [
+        '⚔️', '🛡️', '🪄', '🏹', '💣', 
+        '🍺', '🍷', '☕', '🥤', '🍼',
+        '🎂', '🍕', '🍔', '🌭', '🍎', 
+        '🎸', '🎺', '🎻', '🎤', '🎧',
+        '⚽', '🏀', '🏈', '🎾', '🎱',
+        '🧸', '📦', '💎', '🔑', '💰',
+        '🔫', '🧨', '🪓', '💉', '🩹',
+        '🕶️', '👑', '🎩', '🎒', '🌂',
+        '📱', '💻', '📷', '🔦', '🧭',
+        '🌷', '🌵', '🌲', '🔥', '❄️',
+        '🚗', '🚀', '🛸', '🗿', '👻',
+        '🍩', '🍪', '🥑', '🌮', '🍜',
+        '🚲', '🛴', '🪐', '⚓', '⚡'
+      ];
 
       // --- COMPONENTS ---
 
-      // 1. Player Avatar
+      // 1. World Item (Dropped on ground)
+      const WorldItemComponent = ({ item }) => {
+        return (
+          <div 
+            className="absolute flex items-center justify-center text-2xl item-float drop-shadow-lg"
+            style={{
+              transform: `translate(${item.position.x}px, ${item.position.y}px)`,
+              zIndex: 5
+            }}
+          >
+            {item.emoji}
+          </div>
+        );
+      };
+
+      // 2. Player Avatar
       const PlayerAvatar = ({ player }) => {
+        const shapeStyle = SHAPES[player.shapeIndex]?.style || {};
+        const isSwinging = player.lastActionTime && (Date.now() - player.lastActionTime < 300);
+
         return (
           <div
-            className="absolute flex flex-col items-center justify-center transition-transform duration-100 ease-linear pointer-events-none will-change-transform"
+            className="absolute flex flex-col items-center justify-center transition-transform duration-100 ease-linear will-change-transform"
             style={{
               transform: `translate(${player.position.x}px, ${player.position.y}px)`,
               zIndex: player.isMe ? 50 : 10,
             }}
           >
+            {/* Name Tag */}
             <div 
-              className="mb-2 px-2 py-0.5 bg-black/50 backdrop-blur-sm rounded-full text-white text-xs font-medium whitespace-nowrap shadow-sm"
+              className="absolute -top-8 px-2 py-0.5 bg-black/60 backdrop-blur-sm rounded-full text-white text-[10px] font-bold whitespace-nowrap shadow-sm"
               style={{ border: player.isMe ? `1px solid ${player.color}` : 'none' }}
             >
               {player.name}
             </div>
-            <div
-              className="w-8 h-8 rounded-full shadow-lg flex items-center justify-center relative"
-              style={{ 
-                backgroundColor: player.color,
-                boxShadow: `0 0 15px ${player.color}40`
-              }}
-            >
-              <div className="w-2 h-2 bg-white/80 rounded-full" />
-              {player.isMe && (
-                <div className="absolute w-full h-full rounded-full animate-ping opacity-20 bg-white" />
+
+            {/* Avatar Body */}
+            <div className="relative">
+              <div
+                className="w-10 h-10 shadow-lg flex items-center justify-center transition-all"
+                style={{ 
+                  backgroundColor: player.color,
+                  boxShadow: `0 0 15px ${player.color}60`,
+                  ...shapeStyle
+                }}
+              >
+                {/* Eyes */}
+                <div className="flex gap-1 pointer-events-none">
+                   <div className="w-1 h-1 bg-white rounded-full opacity-80" />
+                   <div className="w-1 h-1 bg-white rounded-full opacity-80" />
+                </div>
+              </div>
+
+              {/* Held Item */}
+              {player.heldItem && (
+                <div 
+                  className={`absolute -right-4 top-0 text-xl filter drop-shadow-md origin-bottom-left ${isSwinging ? 'swing-action' : ''}`}
+                  key={player.lastActionTime} 
+                >
+                  {player.heldItem}
+                </div>
               )}
             </div>
           </div>
         );
       };
 
-      // 2. Chat Overlay
+      // 3. Chat Overlay
       const ChatOverlay = ({ messages, onSend }) => {
-        const [inputValue, setInputValue] = React.useState('');
-        const messagesEndRef = React.useRef(null);
+        const [inputValue, setInputValue] = useState('');
+        const messagesEndRef = useRef(null);
 
-        React.useEffect(() => {
+        useEffect(() => {
           messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, [messages]);
 
@@ -110,13 +235,13 @@
         };
 
         return (
-          <div className="fixed bottom-6 left-6 w-80 max-w-[calc(100vw-3rem)] flex flex-col gap-2 z-50">
-            <div className="bg-slate-900/80 backdrop-blur-md rounded-lg p-4 h-64 overflow-y-auto shadow-xl border border-slate-700/50 flex flex-col">
+          <div className="fixed bottom-6 left-6 w-80 max-w-[calc(100vw-3rem)] flex flex-col gap-2 z-[100]">
+            <div className="bg-slate-900/80 backdrop-blur-md rounded-lg p-4 h-48 overflow-y-auto shadow-xl border border-slate-700/50 flex flex-col">
               <div className="flex-1" />
               {messages.map((msg) => (
-                <div key={msg.id} className="mb-2 last:mb-0 text-sm animate-fade-in">
-                  <span style={{ color: msg.color }} className="font-bold mr-2">
-                    {msg.playerName}:
+                <div key={msg.id} className="mb-1.5 last:mb-0 text-sm animate-fade-in leading-snug">
+                  <span style={{ color: msg.color }} className="font-bold mr-2 text-xs uppercase tracking-wide">
+                    {msg.playerName}
                   </span>
                   <span className="text-slate-200 break-words">{msg.text}</span>
                 </div>
@@ -128,8 +253,8 @@
                 type="text"
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
-                placeholder="Say something..."
-                className="w-full bg-slate-800/90 text-white rounded-lg pl-4 pr-10 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg border border-slate-700 transition-all placeholder:text-slate-500"
+                placeholder="Chat here..."
+                className="w-full bg-slate-800/90 text-white rounded-lg pl-4 pr-12 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-lg border border-slate-700 placeholder:text-slate-500"
               />
               <button
                 type="submit"
@@ -143,114 +268,114 @@
         );
       };
 
-      // --- MAIN APP LOGIC ---
+      // --- MAIN APP ---
 
       const App = () => {
-        const [gameState, setGameState] = React.useState(GAME_STATE.LOBBY);
-        const [me, setMe] = React.useState(null);
-        const [peers, setPeers] = React.useState({}); // Map of peerId -> Player
-        const [messages, setMessages] = React.useState([]);
-        const [connecting, setConnecting] = React.useState(false);
+        const [gameState, setGameState] = useState(GAME_STATE.LOBBY);
+        const [me, setMe] = useState(null);
+        const [peers, setPeers] = useState({});
+        const [messages, setMessages] = useState([]);
+        const [worldItems, setWorldItems] = useState([]);
+        
+        // Lobby State
+        const [name, setName] = useState('');
+        const [selectedColor, setSelectedColor] = useState(COLORS[0]);
+        const [selectedShape, setSelectedShape] = useState(0); 
+        const [selectedItem, setSelectedItem] = useState(ITEMS[0]);
+        const [lobbyTab, setLobbyTab] = useState('shape');
 
-        // Lobby inputs
-        const [name, setName] = React.useState('');
-        const [selectedColor, setSelectedColor] = React.useState(PLAYER_COLORS[0]);
+        // Refs
+        const roomRef = useRef(null);
+        const actionsRef = useRef(null);
+        const keysPressed = useRef(new Set());
+        const viewportRef = useRef(null);
+        const meRef = useRef(null);
+        const worldItemsRef = useRef([]);
 
-        // Refs for networking and loop
-        const roomRef = React.useRef(null);
-        const actionsRef = React.useRef(null);
-        const keysPressed = React.useRef(new Set());
-        const viewportRef = React.useRef(null);
-        const meRef = React.useRef(null); // Latest 'me' state for networking
+        useEffect(() => { meRef.current = me; }, [me]);
+        useEffect(() => { worldItemsRef.current = worldItems; }, [worldItems]);
 
-        React.useEffect(() => {
-          meRef.current = me;
-        }, [me]);
-
-        // --- NETWORKING (Trystero) ---
         const joinGame = async () => {
           if (!name.trim()) return;
-          setConnecting(true);
-
-          // 1. Setup Room
-          const room = joinRoom({ appId: 'pixelgather-v-one-file' }, 'main-hall');
+          
+          const room = joinRoom({ appId: 'pixelgather-v2-final' }, 'main-hall-v3');
           roomRef.current = room;
 
-          // 2. Setup Actions
           const [sendMove, getMove] = room.makeAction('move');
           const [sendChat, getChat] = room.makeAction('chat');
           const [sendIdentity, getIdentity] = room.makeAction('identity');
-          actionsRef.current = { sendMove, sendChat, sendIdentity };
+          const [sendAction, getAction] = room.makeAction('action');
+          const [sendDrop, getDrop] = room.makeAction('drop');
+          const [sendPickup, getPickup] = room.makeAction('pickup');
 
-          // 3. Initialize My Player
-          const myId = `p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          actionsRef.current = { sendMove, sendChat, sendIdentity, sendAction, sendDrop, sendPickup };
+
+          const myId = `p-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
           const initialMe = {
-             id: myId,
-             name: name.trim(),
-             color: selectedColor,
-             position: { x: MAP_SIZE / 2 + (Math.random()*100 - 50), y: MAP_SIZE / 2 + (Math.random()*100 - 50) },
-             isMe: true
+            id: myId,
+            name: name.trim(),
+            color: selectedColor,
+            shapeIndex: selectedShape,
+            heldItem: selectedItem,
+            position: { x: MAP_SIZE / 2 + (Math.random()*200 - 100), y: MAP_SIZE / 2 + (Math.random()*200 - 100) },
+            isMe: true
           };
           setMe(initialMe);
           setGameState(GAME_STATE.CONNECTED);
 
-          // 4. Network Handlers
+          // Network Listeners
+          getIdentity((data, peerId) => setPeers(prev => ({ ...prev, [peerId]: { ...data, isMe: false, peerId } })));
+          getMove((position, peerId) => setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], position } } : prev));
+          getChat((msg) => setMessages(prev => [...prev.slice(-49), msg]));
+          getAction((_, peerId) => setPeers(prev => prev[peerId] ? { ...prev, [peerId]: { ...prev[peerId], lastActionTime: Date.now() } } : prev));
           
-          // Identity: When someone tells us who they are
-          getIdentity((data, peerId) => {
-            setPeers(prev => ({
-              ...prev,
-              [peerId]: { ...data, isMe: false, peerId }
-            }));
-          });
+          getDrop((item) => setWorldItems(prev => [...prev, item]));
+          getPickup((itemId) => setWorldItems(prev => prev.filter(i => i.id !== itemId)));
 
-          // Move: When someone moves
-          getMove((position, peerId) => {
-             setPeers(prev => {
-                if (!prev[peerId]) return prev; // Don't move unknown peers, wait for identity
-                return {
-                   ...prev,
-                   [peerId]: { ...prev[peerId], position }
-                };
-             });
-          });
+          room.onPeerJoin((peerId) => actionsRef.current?.sendIdentity(meRef.current, peerId));
+          room.onPeerLeave((peerId) => setPeers(prev => { const next = { ...prev }; delete next[peerId]; return next; }));
 
-          // Chat: When message received
-          getChat((msg, peerId) => {
-             setMessages(prev => [...prev.slice(-49), msg]);
-          });
-
-          // Peer Join: Send them my identity immediately
-          room.onPeerJoin(peerId => {
-             console.log('Peer joined:', peerId);
-             if (meRef.current) {
-                sendIdentity(meRef.current, peerId);
-             }
-          });
-
-          // Peer Leave
-          room.onPeerLeave(peerId => {
-             setPeers(prev => {
-                const next = { ...prev };
-                delete next[peerId];
-                return next;
-             });
-          });
-
-          // Broadcast my identity to everyone just in case
-          // Give network a moment to settle
-          setTimeout(() => {
-             sendIdentity(initialMe);
-          }, 1000);
-
-          setConnecting(false);
+          setTimeout(() => actionsRef.current?.sendIdentity(initialMe), 500);
         };
 
-        // --- GAME LOOP ---
-        React.useEffect(() => {
+        // Game Loop
+        useEffect(() => {
           if (gameState !== GAME_STATE.CONNECTED) return;
 
-          const handleKeyDown = (e) => keysPressed.current.add(e.code);
+          const handleKeyDown = (e) => {
+             if (e.target.tagName === 'INPUT') return;
+             keysPressed.current.add(e.code);
+
+             // SPACE: Swing
+             if (e.code === 'Space' && meRef.current?.heldItem) {
+               setMe(prev => {
+                 const updated = { ...prev, lastActionTime: Date.now() };
+                 actionsRef.current?.sendAction(null);
+                 actionsRef.current?.sendIdentity(updated); 
+                 return updated;
+               });
+             }
+
+             // Q: Drop
+             if (e.code === 'KeyQ' && meRef.current?.heldItem) {
+                const itemToDrop = {
+                   id: `item-${Date.now()}-${Math.random()}`,
+                   emoji: meRef.current.heldItem,
+                   position: { ...meRef.current.position },
+                   droppedAt: Date.now()
+                };
+                
+                setMe(prev => {
+                   const updated = { ...prev, heldItem: null };
+                   actionsRef.current?.sendIdentity(updated);
+                   return updated;
+                });
+
+                setWorldItems(prev => [...prev, itemToDrop]);
+                actionsRef.current?.sendDrop(itemToDrop);
+             }
+          };
+          
           const handleKeyUp = (e) => keysPressed.current.delete(e.code);
           window.addEventListener('keydown', handleKeyDown);
           window.addEventListener('keyup', handleKeyUp);
@@ -258,144 +383,182 @@
           let rafId;
           const loop = () => {
             if (meRef.current) {
-               let dx = 0;
-               let dy = 0;
-               const keys = keysPressed.current;
+              let dx = 0, dy = 0;
+              const keys = keysPressed.current;
+              if (keys.has('ArrowUp') || keys.has('KeyW')) dy -= 1;
+              if (keys.has('ArrowDown') || keys.has('KeyS')) dy += 1;
+              if (keys.has('ArrowLeft') || keys.has('KeyA')) dx -= 1;
+              if (keys.has('ArrowRight') || keys.has('KeyD')) dx += 1;
 
-               if (keys.has('ArrowUp') || keys.has('KeyW')) dy -= 1;
-               if (keys.has('ArrowDown') || keys.has('KeyS')) dy += 1;
-               if (keys.has('ArrowLeft') || keys.has('KeyA')) dx -= 1;
-               if (keys.has('ArrowRight') || keys.has('KeyD')) dx += 1;
+              if (dx !== 0 || dy !== 0) {
+                const len = Math.sqrt(dx*dx + dy*dy);
+                dx = (dx / len) * MOVE_SPEED;
+                dy = (dy / len) * MOVE_SPEED;
 
-               if (dx !== 0 || dy !== 0) {
-                  const len = Math.sqrt(dx*dx + dy*dy);
-                  dx = (dx / len) * MOVE_SPEED;
-                  dy = (dy / len) * MOVE_SPEED;
+                const newPos = {
+                  x: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.x + dx)),
+                  y: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.y + dy))
+                };
 
-                  const newPos = {
-                     x: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.x + dx)),
-                     y: Math.max(0, Math.min(MAP_SIZE, meRef.current.position.y + dy))
-                  };
+                setMe(prev => prev ? ({ ...prev, position: newPos }) : null);
+                actionsRef.current?.sendMove(newPos);
 
-                  // Local Update
-                  setMe(prev => ({ ...prev, position: newPos }));
-                  
-                  // Network Update (Rate limit could be added here for optimization)
-                  if (actionsRef.current) {
-                     actionsRef.current.sendMove(newPos);
-                  }
-               }
+                // Auto Pickup
+                if (!meRef.current.heldItem) {
+                   const pickupRange = 30;
+                   const item = worldItemsRef.current.find(i => {
+                      const dist = Math.sqrt(Math.pow(i.position.x - newPos.x, 2) + Math.pow(i.position.y - newPos.y, 2));
+                      return dist < pickupRange;
+                   });
+
+                   if (item) {
+                      setMe(prev => {
+                         const updated = { ...prev, heldItem: item.emoji };
+                         actionsRef.current?.sendIdentity(updated);
+                         return updated;
+                      });
+                      setWorldItems(prev => prev.filter(i => i.id !== item.id));
+                      actionsRef.current?.sendPickup(item.id);
+                   }
+                }
+              }
             }
             rafId = requestAnimationFrame(loop);
           };
           rafId = requestAnimationFrame(loop);
 
           return () => {
-             window.removeEventListener('keydown', handleKeyDown);
-             window.removeEventListener('keyup', handleKeyUp);
-             cancelAnimationFrame(rafId);
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+            cancelAnimationFrame(rafId);
           };
         }, [gameState]);
 
         // Camera Follow
-        React.useEffect(() => {
-           if (gameState === GAME_STATE.CONNECTED && me && viewportRef.current) {
-              const halfW = window.innerWidth / 2;
-              const halfH = window.innerHeight / 2;
-              viewportRef.current.scrollTo(me.position.x - halfW, me.position.y - halfH);
-           }
+        useEffect(() => {
+          if (gameState === GAME_STATE.CONNECTED && me && viewportRef.current) {
+            const halfW = window.innerWidth / 2;
+            const halfH = window.innerHeight / 2;
+            viewportRef.current.scrollTo(me.position.x - halfW, me.position.y - halfH);
+          }
         }, [me?.position, gameState]);
 
         const handleSendChat = (text) => {
-           if (!me) return;
-           const msg = {
-              id: `msg-${Date.now()}`,
-              playerId: me.id,
-              playerName: me.name,
-              color: me.color,
-              text,
-              timestamp: Date.now()
-           };
-           // Local Add
-           setMessages(prev => [...prev.slice(-49), msg]);
-           // Network Send
-           if (actionsRef.current) actionsRef.current.sendChat(msg);
+          if (!me) return;
+          const msg = {
+            id: `msg-${Date.now()}`,
+            playerId: me.id,
+            playerName: me.name,
+            color: me.color,
+            text,
+            timestamp: Date.now()
+          };
+          setMessages(prev => [...prev.slice(-49), msg]);
+          actionsRef.current?.sendChat(msg);
         };
 
-        // --- RENDER LOBBY ---
+        // RENDER LOBBY
         if (gameState === GAME_STATE.LOBBY) {
-           return (
-             <div className="w-full h-full flex items-center justify-center bg-slate-900 text-white p-4">
-               <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700">
-                 <h1 className="text-3xl font-bold text-center mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">PixelGather</h1>
-                 <p className="text-center text-slate-400 mb-8 text-sm">Real-time P2P Multiplayer</p>
+          return (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 text-white p-4 relative overflow-hidden">
+              <div className="absolute inset-0 opacity-10 pointer-events-none">
+                 {SHAPES.slice(0,20).map((s, i) => (
+                   <div key={i} className="absolute animate-bounce-small" 
+                        style={{ ...s.style, backgroundColor: COLORS[i], width: '60px', height: '60px', left: `${Math.random()*100}%`, top: `${Math.random()*100}%`, animationDuration: `${3+Math.random()*5}s` }} />
+                 ))}
+              </div>
 
-                 <div className="space-y-6">
-                   <div>
-                     <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Display Name</label>
-                     <input
-                       type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={12}
-                       className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                       placeholder="Enter your name"
-                     />
+              <div className="w-full max-w-2xl bg-slate-800/90 backdrop-blur-lg rounded-2xl shadow-2xl border border-slate-700 flex flex-col md:flex-row overflow-hidden max-h-[90vh]">
+                
+                {/* Preview */}
+                <div className="w-full md:w-1/3 bg-slate-900/50 p-8 flex flex-col items-center justify-center border-b md:border-b-0 md:border-r border-slate-700">
+                   <h2 className="text-sm font-bold text-slate-400 mb-8 uppercase tracking-widest">Preview</h2>
+                   <div className="relative mb-6 transform scale-150">
+                      <div className="w-24 h-24 shadow-[0_0_30px_rgba(0,0,0,0.5)] transition-all duration-300" style={{ backgroundColor: selectedColor, ...SHAPES[selectedShape].style }}>
+                        <div className="w-full h-full flex items-center justify-center gap-2">
+                           <div className="w-2 h-2 bg-white rounded-full opacity-90" />
+                           <div className="w-2 h-2 bg-white rounded-full opacity-90" />
+                        </div>
+                      </div>
+                      {selectedItem && <div className="absolute -right-8 top-0 text-4xl filter drop-shadow-xl animate-bounce-small">{selectedItem}</div>}
                    </div>
-                   <div>
-                     <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Avatar Color</label>
-                     <div className="flex flex-wrap gap-3">
-                       {PLAYER_COLORS.map(c => (
-                         <button
-                           key={c} onClick={() => setSelectedColor(c)}
-                           className={`w-10 h-10 rounded-full transition-transform hover:scale-110 ${selectedColor === c ? 'ring-2 ring-white scale-110' : ''}`}
-                           style={{ backgroundColor: c }}
-                         />
-                       ))}
-                     </div>
+                   <p className="font-bold text-xl">{name || 'Your Name'}</p>
+                </div>
+
+                {/* Controls */}
+                <div className="w-full md:w-2/3 p-6 flex flex-col h-full overflow-hidden">
+                   <div className="mb-4">
+                      <input type="text" value={name} onChange={(e) => setName(e.target.value)} maxLength={12} className="w-full bg-slate-950 border border-slate-600 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none text-white font-medium" placeholder="Nickname..." />
                    </div>
-                   <button
-                     onClick={joinGame} disabled={!name.trim() || connecting}
-                     className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg transition-all transform active:scale-95 shadow-lg"
-                   >
-                     {connecting ? 'Connecting...' : 'Join World'}
-                   </button>
-                   <p className="text-center text-xs text-slate-600">No AI • Real People • P2P Connection</p>
-                 </div>
-               </div>
-             </div>
-           );
+
+                   <div className="flex border-b border-slate-700 mb-4">
+                     {['shape', 'color', 'item'].map(tab => (
+                       <button key={tab} onClick={() => setLobbyTab(tab)} className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors border-b-2 ${lobbyTab === tab ? 'border-blue-500 text-white' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>{tab}</button>
+                     ))}
+                   </div>
+
+                   <div className="flex-1 overflow-y-auto pr-2 min-h-[250px]">
+                     {lobbyTab === 'shape' && (
+                       <div className="grid grid-cols-4 gap-3">
+                         {SHAPES.map((s, i) => (
+                           <button key={i} onClick={() => setSelectedShape(i)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center hover:bg-slate-600 transition-all ${selectedShape === i ? 'ring-2 ring-blue-500 bg-slate-600' : ''}`}>
+                             <div style={{...s.style, width: '50%', height: '50%', backgroundColor: '#cbd5e1'}} />
+                           </button>
+                         ))}
+                       </div>
+                     )}
+                     {lobbyTab === 'color' && (
+                       <div className="grid grid-cols-6 gap-3">
+                         {COLORS.map((c, i) => (
+                           <button key={i} onClick={() => setSelectedColor(c)} className={`aspect-square rounded-full transition-transform hover:scale-110 ${selectedColor === c ? 'ring-2 ring-white scale-110' : ''}`} style={{ backgroundColor: c }} />
+                         ))}
+                       </div>
+                     )}
+                     {lobbyTab === 'item' && (
+                       <div className="grid grid-cols-5 gap-2">
+                         <button onClick={() => setSelectedItem(null)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center text-xs text-slate-400 hover:bg-slate-600 ${selectedItem === null ? 'ring-2 ring-blue-500' : ''}`}>None</button>
+                         {ITEMS.map((item, i) => (
+                           <button key={i} onClick={() => setSelectedItem(item)} className={`aspect-square bg-slate-700 rounded-lg flex items-center justify-center text-2xl hover:bg-slate-600 transition-all ${selectedItem === item ? 'ring-2 ring-blue-500 bg-slate-600' : ''}`}>{item}</button>
+                         ))}
+                       </div>
+                     )}
+                   </div>
+
+                   <div className="mt-4 pt-4 border-t border-slate-700">
+                     <button onClick={joinGame} disabled={!name.trim()} className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold py-3 rounded-lg shadow-lg">Enter World</button>
+                   </div>
+                </div>
+              </div>
+            </div>
+          );
         }
 
-        // --- RENDER WORLD ---
+        // RENDER WORLD
         const allPlayers = [me, ...Object.values(peers)].filter(Boolean);
 
         return (
           <div className="relative w-full h-full bg-slate-950">
-             <div ref={viewportRef} className="w-full h-full overflow-hidden relative" style={{ scrollBehavior: 'auto' }}>
+             <div ref={viewportRef} className="w-full h-full overflow-hidden relative cursor-crosshair">
                 <div style={{ width: MAP_SIZE, height: MAP_SIZE }} className="relative bg-[#0f172a]">
-                   <div className="absolute inset-0 opacity-20 pointer-events-none" 
-                        style={{ backgroundImage: 'linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
-                   <div className="absolute inset-0 border-4 border-red-500/30 pointer-events-none" />
+                   <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'linear-gradient(#334155 1px, transparent 1px), linear-gradient(90deg, #334155 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
                    
+                   {worldItems.map(item => <WorldItemComponent key={item.id} item={item} />)}
                    {allPlayers.map(p => <PlayerAvatar key={p.id || p.peerId} player={p} />)}
                 </div>
              </div>
 
-             {/* HUD */}
-             <div className="fixed top-4 left-4 z-50">
-               <div className="bg-black/40 backdrop-blur px-4 py-2 rounded-full text-slate-300 text-xs font-mono border border-white/10 flex items-center gap-2">
+             <div className="fixed top-4 left-4 z-[90]">
+               <div className="bg-black/40 backdrop-blur px-3 py-1.5 rounded-full text-slate-300 text-xs font-mono border border-white/10 flex items-center gap-2">
                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                 Peers: {Object.keys(peers).length}
+                 {Object.keys(peers).length + 1} Online
                </div>
              </div>
 
-             <div className="fixed top-4 right-4 z-50 text-slate-500 text-xs font-mono pointer-events-none">
-                {Math.round(me.position.x)}, {Math.round(me.position.y)}
+             <div className="fixed bottom-6 right-6 z-[90] text-right pointer-events-none text-[10px] text-white/40 font-mono">
+                [WASD] Move <br/> [SPACE] Use <br/> [Q] Drop
              </div>
 
              <ChatOverlay messages={messages} onSend={handleSendChat} />
-             
-             <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-0 animate-fade-in text-white/50 text-xl font-bold" style={{ animationDelay: '1s', animationDirection: 'reverse', animationFillMode: 'forwards' }}>
-               WASD to Move
-             </div>
           </div>
         );
       };
