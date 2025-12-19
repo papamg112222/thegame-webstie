@@ -70,6 +70,12 @@
             border-color: var(--gold);
         }
 
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
         .btn-sm {
             padding: 0.5rem 1rem;
             font-size: 0.75rem;
@@ -282,9 +288,26 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--purple-light); border-radius: 10px; }
+
+        #loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--bg-dark);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
     </style>
 </head>
 <body>
+
+    <!-- LOADING SCREEN -->
+    <div id="loading-overlay">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-gold"></div>
+        <p class="mt-4 font-bold tracking-widest text-gold uppercase">Connecting to Village...</p>
+    </div>
 
     <!-- START SCREEN -->
     <div id="screen-start" class="screen active">
@@ -295,7 +318,7 @@
             </svg>
         </div>
         <h1 class="text-7xl font-black mb-4 text-purple-300 tracking-tighter">WEREWOLF</h1>
-        <p class="text-xl opacity-60 tracking-widest uppercase mb-12">Pass & Play Card Assigner</p>
+        <p class="text-xl opacity-60 tracking-widest uppercase mb-12">Shared Cloud Card Assigner</p>
         
         <div class="flex flex-col gap-4">
             <button class="btn" onclick="goTo('screen-select')">Enter the Village</button>
@@ -305,8 +328,8 @@
 
     <!-- CUSTOMIZER SCREEN -->
     <div id="screen-custom" class="screen">
-        <h2 class="text-3xl font-bold mb-4">Deck Customizer</h2>
-        <p class="mb-4 opacity-70">Define up to 20 custom roles. If used, these will appear while spinning!</p>
+        <h2 class="text-3xl font-bold mb-4">Cloud Deck Customizer</h2>
+        <p class="mb-4 opacity-70">Define up to 20 roles. Changes sync to all devices instantly!</p>
         
         <div id="custom-slots-container" class="custom-grid">
             <!-- Slots injected by JS -->
@@ -314,7 +337,7 @@
 
         <div class="flex gap-4 mt-8 pb-8">
             <button class="btn" onclick="goTo('screen-start')">Back</button>
-            <button class="btn" onclick="saveCustomRoles()">Save & Apply</button>
+            <button id="save-btn" class="btn" onclick="saveCustomRoles()">Save & Apply Globally</button>
         </div>
     </div>
 
@@ -371,13 +394,27 @@
         <button class="btn" onclick="location.reload()">Start New Session</button>
     </div>
 
-    <script>
-        let totalPlayers = 4;
-        let currentPlayerIndex = 0;
-        let gameRoles = [];
-        let isSpinning = false;
-        let customRolesPool = [];
-        let useCustomDeck = false;
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDocs, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration (Provided by environment)
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Global State
+        window.totalPlayers = 4;
+        window.currentPlayerIndex = 0;
+        window.gameRoles = [];
+        window.isSpinning = false;
+        window.customRolesData = Array(20).fill(null).map(() => ({ name: '', img: '' }));
+        window.customRolesPool = [];
+        window.useCustomDeck = false;
 
         const roleArt = {
             'Werewolf': `<svg viewBox="0 0 100 100"><path fill="#f87171" d="M50 15c-15 0-25 10-25 25 0 10 5 18 12 23l-7 22h40l-7-22c7-5 12-13 12-23 0-15-10-25-25-25zm-8 20c2 0 4 2 4 4s-2 4-4 4-4-2-4-4 2-4 4-4zm16 0c2 0 4 2 4 4s-2 4-4 4-4-2-4-4 2-4 4-4z"/><path fill="#ef4444" d="M40 65l10 10 10-10-5-5h-10l-5 5z"/></svg>`,
@@ -405,11 +442,58 @@
             'Cupid': { desc: 'The matchmaker. On the first night, pick two players to be lovers. If one dies, both die.' }
         };
 
-        function openCustomizer() {
+        // Initialize App & Auth
+        const initGame = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                setupCloudListeners();
+                document.getElementById('loading-overlay').style.display = 'none';
+            }
+        });
+
+        // Setup Firestore Listener for Shared Deck
+        const setupCloudListeners = () => {
+            const deckRef = collection(db, 'artifacts', appId, 'public', 'data', 'customDeck');
+            onSnapshot(deckRef, (snapshot) => {
+                const newData = Array(20).fill(null).map(() => ({ name: '', img: '' }));
+                snapshot.forEach(doc => {
+                    const index = parseInt(doc.id.replace('slot_', ''));
+                    if (index >= 0 && index < 20) {
+                        newData[index] = doc.data();
+                    }
+                });
+                window.customRolesData = newData;
+                updateInternalPool();
+            }, (error) => console.error("Firestore Error:", error));
+        };
+
+        const updateInternalPool = () => {
+            window.customRolesPool = window.customRolesData.filter(r => r && r.name && r.img);
+            window.useCustomDeck = window.customRolesPool.length > 0;
+            
+            const msg = document.getElementById('mode-indicator');
+            if (window.useCustomDeck) {
+                msg.innerText = `Mode: CUSTOM DECK (${window.customRolesPool.length} roles synced)`;
+                msg.className = "text-sm font-bold text-yellow-400 mb-12";
+            } else {
+                msg.innerText = "Mode: Standard Roles";
+                msg.className = "text-sm opacity-50 mb-12";
+            }
+        };
+
+        // Functionality
+        window.openCustomizer = () => {
             const container = document.getElementById('custom-slots-container');
             container.innerHTML = '';
             for (let i = 0; i < 20; i++) {
-                const saved = customRolesPool[i] || { name: '', img: '' };
+                const saved = window.customRolesData[i];
                 const slot = document.createElement('div');
                 slot.className = 'custom-slot';
                 slot.innerHTML = `
@@ -418,31 +502,31 @@
                         <img id="prev-${i}" class="img-preview" src="${saved.img || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}" alt="">
                     </div>
                     <input type="text" id="name-${i}" value="${saved.name}" placeholder="Role Name" class="w-full">
-                    <textarea id="base64-${i}" placeholder="Paste Base64 here..." class="w-full h-12 text-[10px]" oninput="updatePreview(${i})">${saved.img}</textarea>
+                    <textarea id="base64-${i}" placeholder="Paste Base64 here..." class="w-full h-12 text-[10px]" oninput="window.updatePreview(${i})">${saved.img}</textarea>
                     <div class="flex gap-2">
                          <button class="btn btn-sm grow" onclick="document.getElementById('file-${i}').click()">Load File</button>
-                         <input type="file" id="file-${i}" class="hidden" accept="image/*" onchange="handleFileSelect(event, ${i})">
-                         <button class="btn btn-sm bg-red-900" onclick="clearSlot(${i})">Clear</button>
+                         <input type="file" id="file-${i}" class="hidden" accept="image/*" onchange="window.handleFileSelect(event, ${i})">
+                         <button class="btn btn-sm bg-red-900" onclick="window.clearSlot(${i})">Clear</button>
                     </div>
                 `;
                 container.appendChild(slot);
             }
-            goTo('screen-custom');
-        }
+            window.goTo('screen-custom');
+        };
 
-        function handleFileSelect(event, index) {
+        window.handleFileSelect = (event, index) => {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = (e) => {
                 const base64String = e.target.result;
                 document.getElementById(`base64-${index}`).value = base64String;
-                updatePreview(index);
+                window.updatePreview(index);
             };
             reader.readAsDataURL(file);
-        }
+        };
 
-        function updatePreview(index) {
+        window.updatePreview = (index) => {
             const val = document.getElementById(`base64-${index}`).value;
             const img = document.getElementById(`prev-${index}`);
             if (val.startsWith('data:image')) {
@@ -450,66 +534,69 @@
             } else {
                 img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
             }
-        }
+        };
 
-        function clearSlot(index) {
+        window.clearSlot = (index) => {
             document.getElementById(`name-${index}`).value = '';
             document.getElementById(`base64-${index}`).value = '';
             document.getElementById(`prev-${index}`).src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
-        }
+        };
 
-        function saveCustomRoles() {
-            customRolesPool = [];
-            for (let i = 0; i < 20; i++) {
-                const name = document.getElementById(`name-${i}`).value.trim();
-                const img = document.getElementById(`base64-${i}`).value.trim();
-                if (name && img) {
-                    customRolesPool.push({ name, img, desc: 'A custom role from your private deck.' });
+        window.saveCustomRoles = async () => {
+            const saveBtn = document.getElementById('save-btn');
+            saveBtn.disabled = true;
+            saveBtn.innerText = "Syncing...";
+
+            try {
+                for (let i = 0; i < 20; i++) {
+                    const name = document.getElementById(`name-${i}`).value.trim();
+                    const img = document.getElementById(`base64-${i}`).value.trim();
+                    const slotRef = doc(db, 'artifacts', appId, 'public', 'data', 'customDeck', `slot_${i}`);
+                    
+                    // Only update if it's different to save bandwidth/requests
+                    if (window.customRolesData[i].name !== name || window.customRolesData[i].img !== img) {
+                        await setDoc(slotRef, { name, img, desc: 'A custom role from your cloud deck.' });
+                    }
                 }
+                window.goTo('screen-start');
+            } catch (err) {
+                console.error("Save failed:", err);
+                alert("Failed to sync with cloud. Check connection.");
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerText = "Save & Apply Globally";
             }
-            
-            useCustomDeck = customRolesPool.length > 0;
-            if (useCustomDeck) {
-                const msg = document.getElementById('mode-indicator');
-                msg.innerText = `Mode: CUSTOM DECK (${customRolesPool.length} roles)`;
-                msg.className = "text-sm font-bold text-yellow-400 mb-12";
-            } else {
-                const msg = document.getElementById('mode-indicator');
-                msg.innerText = "Mode: Standard Roles";
-                msg.className = "text-sm opacity-50 mb-12";
-            }
-            goTo('screen-start');
-        }
+        };
 
-        function goTo(screenId) {
+        window.goTo = (screenId) => {
             document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
             document.getElementById(screenId).classList.add('active');
-        }
+        };
 
-        function updateCount(val) {
-            totalPlayers = parseInt(val);
+        window.updateCount = (val) => {
+            window.totalPlayers = parseInt(val);
             document.getElementById('player-count-display').innerText = val;
-        }
+        };
 
-        function setupGame() {
-            if (useCustomDeck) {
-                gameRoles = [...customRolesPool].sort(() => Math.random() - 0.5).slice(0, totalPlayers);
-                while(gameRoles.length < totalPlayers) {
-                    gameRoles.push({ name: 'Villager', img: 'standard', desc: roleData['Villager'].desc });
+        window.setupGame = () => {
+            if (window.useCustomDeck) {
+                window.gameRoles = [...window.customRolesPool].sort(() => Math.random() - 0.5).slice(0, window.totalPlayers);
+                while(window.gameRoles.length < window.totalPlayers) {
+                    window.gameRoles.push({ name: 'Villager', img: 'standard', desc: roleData['Villager'].desc });
                 }
-                gameRoles = gameRoles.sort(() => Math.random() - 0.5);
+                window.gameRoles = window.gameRoles.sort(() => Math.random() - 0.5);
             } else {
-                const roles = calculateStandardRoles(totalPlayers);
-                gameRoles = roles.map(r => ({ name: r, img: 'standard', desc: roleData[r].desc }));
-                gameRoles = gameRoles.sort(() => Math.random() - 0.5);
+                const roles = calculateStandardRoles(window.totalPlayers);
+                window.gameRoles = roles.map(r => ({ name: r, img: 'standard', desc: roleData[r].desc }));
+                window.gameRoles = window.gameRoles.sort(() => Math.random() - 0.5);
             }
             
-            currentPlayerIndex = 0;
-            prepareSpin();
-            goTo('screen-rng');
-        }
+            window.currentPlayerIndex = 0;
+            window.prepareSpin();
+            window.goTo('screen-rng');
+        };
 
-        function calculateStandardRoles(count) {
+        const calculateStandardRoles = (count) => {
             let roles = [];
             let wolfCount = Math.max(1, Math.floor(count / 4));
             roles.push('Alpha Wolf');
@@ -522,21 +609,21 @@
             if (count >= 14) roles.push('Tanner');
             while (roles.length < count) roles.push('Villager');
             return roles;
-        }
+        };
 
-        function getRoleMedia(roleObj) {
+        const getRoleMedia = (roleObj) => {
             if (roleObj.img && roleObj.img !== 'standard') {
                 return `<img src="${roleObj.img}" alt="${roleObj.name}">`;
             }
             return roleArt[roleObj.name] || roleArt['Villager'];
-        }
+        };
 
-        function prepareSpin() {
+        window.prepareSpin = () => {
             const track = document.getElementById('slot-track');
             const spinBtn = document.getElementById('spin-btn');
             spinBtn.disabled = false;
             spinBtn.style.opacity = '1';
-            document.getElementById('player-turn-info').innerText = `Player ${currentPlayerIndex + 1}'s Turn`;
+            document.getElementById('player-turn-info').innerText = `Player ${window.currentPlayerIndex + 1}'s Turn`;
             
             track.style.transition = 'none';
             track.style.transform = 'translateX(0px)';
@@ -545,11 +632,9 @@
             const targetIndex = 40; 
             track.innerHTML = '';
             
-            // Pool for fluff cards
             let fluffPool = [];
-            if (useCustomDeck) {
-                fluffPool = [...customRolesPool];
-                // Add some standard roles if pool is small to keep track diverse
+            if (window.useCustomDeck) {
+                fluffPool = [...window.customRolesPool];
                 if (fluffPool.length < 5) {
                     fluffPool.push({ name: 'Villager', img: 'standard' });
                     fluffPool.push({ name: 'Werewolf', img: 'standard' });
@@ -564,7 +649,7 @@
                 
                 let role;
                 if (i === targetIndex) {
-                    role = gameRoles[currentPlayerIndex];
+                    role = window.gameRoles[window.currentPlayerIndex];
                 } else {
                     role = fluffPool[Math.floor(Math.random() * fluffPool.length)];
                 }
@@ -572,11 +657,11 @@
                 card.innerHTML = `${getRoleMedia(role)}<div class="card-label">${role.name}</div>`;
                 track.appendChild(card);
             }
-        }
+        };
 
-        function startSpin() {
-            if (isSpinning) return;
-            isSpinning = true;
+        window.startSpin = () => {
+            if (window.isSpinning) return;
+            window.isSpinning = true;
             
             const track = document.getElementById('slot-track');
             const spinBtn = document.getElementById('spin-btn');
@@ -594,36 +679,39 @@
             track.style.transform = `translateX(${targetPos}px)`;
 
             setTimeout(() => {
-                showResult();
-                isSpinning = false;
+                window.showResult();
+                window.isSpinning = false;
             }, 6500);
-        }
+        };
 
-        function showResult() {
-            const currentRole = gameRoles[currentPlayerIndex];
-            document.getElementById('result-player-title').innerText = `Player ${currentPlayerIndex + 1}`;
+        window.showResult = () => {
+            const currentRole = window.gameRoles[window.currentPlayerIndex];
+            document.getElementById('result-player-title').innerText = `Player ${window.currentPlayerIndex + 1}`;
             document.getElementById('final-role-display').innerText = currentRole.name;
-            document.getElementById('role-description').innerText = currentRole.desc;
+            document.getElementById('role-description').innerText = currentRole.desc || 'A mysterious role...';
             document.getElementById('result-illustration').innerHTML = getRoleMedia(currentRole);
             
             const nextBtn = document.getElementById('next-player-btn');
-            if (currentPlayerIndex === totalPlayers - 1) {
+            if (window.currentPlayerIndex === window.totalPlayers - 1) {
                 nextBtn.innerText = "Finish Assignments";
             } else {
                 nextBtn.innerText = "I have memorized it";
             }
-            goTo('screen-result');
-        }
+            window.goTo('screen-result');
+        };
 
-        function nextPlayer() {
-            currentPlayerIndex++;
-            if (currentPlayerIndex < totalPlayers) {
-                prepareSpin();
-                goTo('screen-rng');
+        window.nextPlayer = () => {
+            window.currentPlayerIndex++;
+            if (window.currentPlayerIndex < window.totalPlayers) {
+                window.prepareSpin();
+                window.goTo('screen-rng');
             } else {
-                goTo('screen-final');
+                window.goTo('screen-final');
             }
-        }
+        };
+
+        // Initialize Firebase on load
+        window.onload = initGame;
     </script>
 </body>
 </html>
