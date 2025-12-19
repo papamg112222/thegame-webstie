@@ -159,35 +159,43 @@
             } 
             
             // --- PASTE YOUR FIREBASE CONFIG BELOW FOR GITHUB PAGES ---
-            // Replace the section below with your actual keys from Firebase Console
+            // 1. Go to console.firebase.google.com
+            // 2. Create a project -> Add Web App -> Copy the config object
+            // 3. Paste it here to replace the null:
+            
             if (!firebaseConfig) {
-                 // firebaseConfig = {
-                 //    apiKey: "YOUR_API_KEY",
-                 //    authDomain: "YOUR_PROJECT.firebaseapp.com",
-                 //    projectId: "YOUR_PROJECT_ID",
-                 //    storageBucket: "YOUR_PROJECT.appspot.com",
-                 //    messagingSenderId: "YOUR_SENDER_ID",
-                 //    appId: "YOUR_APP_ID"
-                 // };
+                 // UNCOMMENT THIS AND PASTE YOUR KEYS INSIDE:
+                 /*
+                 firebaseConfig = {
+                    apiKey: "AIzaSy...",
+                    authDomain: "your-project.firebaseapp.com",
+                    projectId: "your-project-id",
+                    storageBucket: "your-project.appspot.com",
+                    messagingSenderId: "123456...",
+                    appId: "1:12345:web:..."
+                 };
+                 */
                 
                 // If still no config, return null (App runs in offline/demo mode)
                 if (!firebaseConfig) {
                     console.warn("Firebase configuration missing. Running in Offline Mode.");
-                    return null;
+                    // We return null here, but we'll handle the UI update in the App component
                 }
             }
 
             try {
-                const app = window.Firebase.initializeApp(firebaseConfig);
-                const auth = window.Firebase.getAuth(app);
-                const db = window.Firebase.getFirestore(app);
-                // Use a default ID so everyone lands on the same 'page' content
-                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                return { auth, db, appId, ...window.Firebase };
+                // If we have a config, initialize it
+                if (firebaseConfig) {
+                    const app = window.Firebase.initializeApp(firebaseConfig);
+                    const auth = window.Firebase.getAuth(app);
+                    const db = window.Firebase.getFirestore(app);
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                    return { auth, db, appId, ...window.Firebase, isOnline: true };
+                }
             } catch (e) {
                 console.error("Firebase initialization failed:", e);
-                return null;
             }
+            return { isOnline: false }; // Offline mode
         };
 
         const fb = initFirebase();
@@ -553,6 +561,7 @@
             const [introPhase, setIntroPhase] = useState('start');
             const [activeTab, setActiveTab] = useState('HOME');
             const [user, setUser] = useState(null);
+            const [isOnline, setIsOnline] = useState(fb?.isOnline || false); // Track connection status
             
             // Visitor States
             const [realVisitorCount, setRealVisitorCount] = useState(0); // From DB
@@ -597,7 +606,7 @@
 
             // --- FIREBASE INIT ---
             useEffect(() => {
-                if (!fb) return;
+                if (!fb || !fb.isOnline) return;
                 const { auth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = fb;
                 
                 const initAuth = async () => {
@@ -614,7 +623,7 @@
 
             // Helper to save shared data
             const saveSharedData = async (dataToUpdate) => {
-                if (fb && user) {
+                if (fb && fb.isOnline && user) {
                     const { db, appId, doc, setDoc } = fb;
                     const contentRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_content', 'main');
                     try {
@@ -623,12 +632,19 @@
                         console.error("Error saving to shared storage", e);
                         alert("Failed to save changes globally. The image might be too large (limit 1MB) or there was a network error.");
                     }
+                } else {
+                    // FALLBACK: Save to local storage if offline so user doesn't lose work immediately
+                    if (dataToUpdate.profilePic !== undefined) localStorage.setItem('army_profile_pic', dataToUpdate.profilePic);
+                    if (dataToUpdate.bioText !== undefined) localStorage.setItem('army_bio_text', dataToUpdate.bioText);
+                    if (dataToUpdate.headerImages !== undefined) localStorage.setItem('army_header_bg', JSON.stringify(dataToUpdate.headerImages));
+                    if (dataToUpdate.homeCards !== undefined) localStorage.setItem('army_home_cards', JSON.stringify(dataToUpdate.homeCards));
+                    if (dataToUpdate.homeImages !== undefined) localStorage.setItem('army_home_images', JSON.stringify(dataToUpdate.homeImages));
                 }
             }
 
             // --- SHARED DATA LISTENER (Real-time Sync) ---
             useEffect(() => {
-                if (fb && user) {
+                if (fb && fb.isOnline && user) {
                     const { db, appId, doc, onSnapshot } = fb;
                     const contentRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_content', 'main');
 
@@ -681,7 +697,7 @@
 
             // --- VISITOR COUNT LOGIC ---
             useEffect(() => {
-                if (fb && user) {
+                if (fb && fb.isOnline && user) {
                     const { db, appId, doc, onSnapshot, updateDoc, setDoc, increment } = fb;
                     const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
                     
@@ -702,7 +718,7 @@
                          });
                     }
                     return () => unsubscribe();
-                } else if (!fb) {
+                } else {
                     // Offline fallback
                     try {
                         const saved = localStorage.getItem('site_visits_offline');
@@ -810,8 +826,7 @@
                 
                 // 3. Update State & Database
                 setRenderedImage(finalImage);
-                if (fb) saveSharedData({ profilePic: finalImage });
-                else localStorage.setItem('army_profile_pic', finalImage);
+                saveSharedData({ profilePic: finalImage });
                 
                 finalizeImageProcess();
             };
@@ -833,8 +848,7 @@
                 if (passwordInput === '1090') {
                     if (pendingAction === 'RESET_PROFILE') {
                         setRenderedImage(null);
-                        if (fb) saveSharedData({ profilePic: '' });
-                        else localStorage.removeItem('army_profile_pic');
+                        saveSharedData({ profilePic: '' });
                         setShowReset(false);
                     } else if (pendingAction === 'EDIT_HOME') {
                         setIsEditingHome(true);
@@ -846,7 +860,7 @@
                         setIsTestModeUnlocked(true);
                     } else if (pendingAction === 'RESET_VISITORS') {
                         // NEW LOGIC: Reset visitor count to 0 in Firebase
-                        if (fb) {
+                        if (fb && fb.isOnline) {
                             const { db, appId, doc, setDoc } = fb;
                             const statsRef = doc(db, 'artifacts', appId, 'public', 'data', 'site_stats', 'visitors');
                             setDoc(statsRef, { count: 0 }).catch(err => console.error("Reset failed", err));
@@ -867,17 +881,12 @@
             };
 
             const saveBio = () => {
-                if (fb) saveSharedData({ bioText });
-                else localStorage.setItem('army_bio_text', bioText);
+                saveSharedData({ bioText });
                 setIsEditingBio(false);
             };
             
             const saveHomeContent = () => {
-                if (fb) saveSharedData({ homeCards, homeImages });
-                else {
-                    localStorage.setItem('army_home_cards', JSON.stringify(homeCards));
-                    localStorage.setItem('army_home_images', JSON.stringify(homeImages));
-                }
+                saveSharedData({ homeCards, homeImages });
                 setIsEditingHome(false);
                 setVirtualIndex(0);
             };
@@ -897,17 +906,14 @@
                     }));
                     
                     setHeaderImages(processedImages);
-                    
-                    if (fb) saveSharedData({ headerImages: processedImages });
-                    else localStorage.setItem('army_header_bg', JSON.stringify(processedImages));
+                    saveSharedData({ headerImages: processedImages });
                     
                     setIsEditingHeader(false);
                 } catch (err) {
                     console.error("Error processing header images", err);
                     alert("There was an error processing the backgrounds. Saving originals.");
                     
-                    if (fb) saveSharedData({ headerImages });
-                    else localStorage.setItem('army_header_bg', JSON.stringify(headerImages));
+                    saveSharedData({ headerImages });
                     
                     setIsEditingHeader(false);
                 } finally {
@@ -1285,8 +1291,16 @@
                         <main className={`w-full max-w-6xl transition-opacity duration-1000 delay-200 px-4 ${introPhase !== 'start' ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
                             {renderContent()}
                         </main>
-                        <footer className={`relative mt-auto py-8 text-center w-full text-zinc-400 text-xs transition-opacity duration-1000 delay-500 ${introPhase === 'finished' ? 'opacity-100' : 'opacity-0'}`}>
-                            © {new Date().getFullYear()} Army Website. All rights reserved.
+                        <footer className={`relative mt-auto py-8 text-center w-full text-zinc-400 text-xs transition-opacity duration-1000 delay-500 flex flex-col items-center gap-2 ${introPhase === 'finished' ? 'opacity-100' : 'opacity-0'}`}>
+                            <span>© {new Date().getFullYear()} Army Website. All rights reserved.</span>
+                            
+                            {/* Connection Status Indicator */}
+                            <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/50 border border-zinc-100 backdrop-blur-sm shadow-sm">
+                                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                                <span className={`text-[10px] font-bold ${isOnline ? 'text-green-600' : 'text-red-500'}`}>
+                                    {isOnline ? 'ONLINE: Syncing Active' : 'OFFLINE: Local Changes Only'}
+                                </span>
+                            </div>
                         </footer>
                     </div>
                 </div>
