@@ -255,6 +255,21 @@
             color: #ccc;
             font-style: italic;
         }
+
+        #message-box {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #ef4444;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            z-index: 9999;
+            display: none;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -263,6 +278,8 @@
         <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-gold"></div>
         <p class="mt-4 font-bold tracking-widest text-gold uppercase text-sm">Synchronizing Ritual...</p>
     </div>
+
+    <div id="message-box"></div>
 
     <div id="offline-tag" class="offline-notice">Local Storage Mode</div>
 
@@ -277,6 +294,7 @@
 
     <div id="screen-custom" class="screen">
         <h2 class="text-3xl font-bold mb-4 text-gold">Deck Customizer</h2>
+        <p class="mb-4 opacity-70 text-xs">All changes sync instantly to other devices.</p>
         <div id="custom-slots-container" class="custom-grid"></div>
         <div class="flex gap-4 mt-8 pb-8">
             <button class="btn" onclick="window.goTo('screen-start')">Back</button>
@@ -302,7 +320,7 @@
 
     <div id="screen-result" class="screen">
         <div class="player-indicator" id="result-player-name">Player 1</div>
-        <div id="result-illustration" style="width: 240px; height: 240px; border: 3px solid var(--gold); border-radius: 12px; overflow: hidden; margin-bottom: 20px;"></div>
+        <div id="result-illustration" style="width: 240px; height: 240px; border: 3px solid var(--gold); border-radius: 12px; overflow: hidden; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; background: #000;"></div>
         <div id="final-role-display" class="role-reveal-title">WEREWOLF</div>
         <p id="final-role-desc" class="role-desc-text"></p>
         <button class="btn" onclick="window.nextPlayer()">I Have Memorized It</button>
@@ -328,7 +346,6 @@
         window.currentPlayerIndex = 0;
         window.gameRoles = [];
 
-        // Standard explanations for roles
         const defaultDescriptions = {
             'werewolf': 'Each night, you and your fellow wolves choose one villager to eliminate. Blend in during the day!',
             'villager': 'A common citizen. Your goal is to identify the werewolves and vote them out during the day.',
@@ -342,31 +359,29 @@
             'vampire': 'A neutral predator. You strike when the wolves are gone, or create your own coven.'
         };
 
-        // Image Compression Helper
+        window.showMessage = (txt, isError = true) => {
+            const box = document.getElementById('message-box');
+            box.innerText = txt;
+            box.style.background = isError ? '#ef4444' : '#10b981';
+            box.style.display = 'block';
+            setTimeout(() => { box.style.display = 'none'; }, 4000);
+        };
+
         const compressImage = (base64Str) => {
             return new Promise((resolve) => {
                 const img = new Image();
                 img.src = base64Str;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 300;
-                    const MAX_HEIGHT = 300;
-                    let width = img.width;
-                    let height = img.height;
-
+                    const MAX_WIDTH = 400; // Slightly larger for better quality
+                    const MAX_HEIGHT = 400;
+                    let width = img.width, height = img.height;
                     if (width > height) {
-                        if (width > MAX_WIDTH) {
-                            height *= MAX_WIDTH / width;
-                            width = MAX_WIDTH;
-                        }
+                        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
                     } else {
-                        if (height > MAX_HEIGHT) {
-                            width *= MAX_HEIGHT / height;
-                            height = MAX_HEIGHT;
-                        }
+                        if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
                     }
-                    canvas.width = width;
-                    canvas.height = height;
+                    canvas.width = width; canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
                     resolve(canvas.toDataURL('image/jpeg', 0.6));
@@ -399,6 +414,10 @@
                             onSnapshot(deckRef, (snap) => {
                                 if (snap.exists() && snap.data().slots) {
                                     window.customRolesData = snap.data().slots;
+                                    // FORCE UI REFRESH IF CUSTOMIZER IS OPEN
+                                    if (document.getElementById('screen-custom').classList.contains('active')) {
+                                        window.openCustomizer();
+                                    }
                                 }
                             }, (err) => console.warn("Firestore sync error:", err));
                         }
@@ -425,6 +444,8 @@
 
         window.openCustomizer = () => {
             const container = document.getElementById('custom-slots-container');
+            // We only clear if necessary to prevent flickering
+            const currentScroll = container.scrollTop;
             container.innerHTML = '';
             window.customRolesData.forEach((r, i) => {
                 const div = document.createElement('div');
@@ -435,13 +456,14 @@
                         <img id="prev-${i}" class="img-preview" src="${r.img || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}">
                     </div>
                     <input id="name-${i}" value="${r.name || ''}" placeholder="Role Name" oninput="window.autoFillDesc(${i})">
-                    <textarea id="desc-${i}" placeholder="What does this role do?" class="h-12 text-[10px]">${r.desc || ''}</textarea>
-                    <textarea id="base64-${i}" placeholder="Image Data" class="hidden">${r.img || ''}</textarea>
-                    <button class="bg-purple-900 text-xs py-1 rounded" onclick="document.getElementById('file-${i}').click()">Upload Picture</button>
+                    <textarea id="desc-${i}" placeholder="Description" class="h-10 text-[8px]">${r.desc || ''}</textarea>
+                    <textarea id="base64-${i}" class="hidden">${r.img || ''}</textarea>
+                    <button class="bg-purple-900 text-xs py-1 rounded" onclick="document.getElementById('file-${i}').click()">Change Picture</button>
                     <input type="file" id="file-${i}" class="hidden" onchange="window.handleFile(${i}, event)">
                 `;
                 container.appendChild(div);
             });
+            container.scrollTop = currentScroll;
             window.goTo('screen-custom');
         };
 
@@ -469,7 +491,6 @@
             const btn = document.getElementById('save-btn');
             btn.disabled = true;
             btn.innerText = "Syncing...";
-
             try {
                 const slots = [];
                 for (let i=0; i<20; i++) {
@@ -478,20 +499,15 @@
                     const ds = document.getElementById(`desc-${i}`).value || '';
                     slots.push({ name: n, img: im, desc: ds });
                 }
-                
                 if (firebaseReady && currentUser) {
                     const deckRef = doc(db, 'artifacts', appId, 'public', 'data', 'customDeck', 'main');
                     await setDoc(deckRef, { slots });
                 }
                 window.customRolesData = slots;
+                window.showMessage("Ritual synchronized!", false);
                 window.goTo('screen-start');
-            } catch (e) {
-                console.warn("Save Error:", e);
-                window.goTo('screen-start');
-            } finally {
-                btn.disabled = false;
-                btn.innerText = "Save & Sync";
-            }
+            } catch (e) { console.warn("Save Error:", e); } 
+            finally { btn.disabled = false; btn.innerText = "Save & Sync"; }
         };
 
         window.setupGame = () => {
@@ -515,16 +531,15 @@
             track.style.transition = 'none';
             track.style.transform = 'translateX(0)';
             track.innerHTML = '';
-            
             const winner = window.gameRoles[window.currentPlayerIndex];
             const pool = window.customRolesData.filter(r => r.img && r.img.length > 50);
-            
             for (let i=0; i<45; i++) {
                 const card = document.createElement('div');
                 card.className = 'card';
                 if (i === 40) card.id = 'winner-card';
                 const role = (i === 40) ? winner : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : { name: 'Villager', img: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' });
-                card.innerHTML = `<img src="${role.img}" class="w-[140px] h-[140px] object-cover rounded mb-2"><div class="card-label">${role.name}</div>`;
+                card.innerHTML = role.img ? `<img src="${role.img}" class="w-[140px] h-[140px] object-cover rounded mb-2">` : `<div class="w-[140px] h-[140px] bg-purple-900 mb-2 rounded"></div>`;
+                card.innerHTML += `<div class="card-label">${role.name}</div>`;
                 track.appendChild(card);
             }
             document.getElementById('player-turn-info').innerText = `Player ${window.currentPlayerIndex+1}'s Turn`;
@@ -537,18 +552,16 @@
             const offset = -(40 * 220) + (window.innerWidth / 2 - 110);
             track.style.transition = 'transform 6s cubic-bezier(0.1, 0, 0, 1)';
             track.style.transform = `translateX(${offset}px)`;
-            
             setTimeout(() => { 
                 const wc = document.getElementById('winner-card');
                 if (wc) wc.classList.add('winner'); 
             }, 5500);
-
             setTimeout(() => {
                 const winner = window.gameRoles[window.currentPlayerIndex];
                 document.getElementById('result-player-name').innerText = `Player ${window.currentPlayerIndex + 1}`;
                 document.getElementById('final-role-display').innerText = winner.name;
-                document.getElementById('final-role-desc').innerText = winner.desc || "No description provided for this role.";
-                document.getElementById('result-illustration').innerHTML = `<img src="${winner.img}" class="w-full h-full object-cover">`;
+                document.getElementById('final-role-desc').innerText = winner.desc || "A mysterious soul...";
+                document.getElementById('result-illustration').innerHTML = winner.img ? `<img src="${winner.img}" class="w-full h-full object-cover">` : `<div class="w-full h-full bg-purple-900"></div>`;
                 window.goTo('screen-result');
             }, 7500);
         };
