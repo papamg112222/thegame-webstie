@@ -342,7 +342,7 @@
             object-fit: cover;
         }
 
-        /* New Quick Edit Grid */
+        /* Quick Edit Grid */
         .quick-edit-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -397,10 +397,10 @@
 
     <!-- GRIMOIRE (DETAILS) SCREEN -->
     <div id="screen-grimoire" class="screen">
-        <div class="flex items-center gap-2 mb-8">
+        <div class="flex items-center gap-1.5 mb-8">
             <h2 class="text-3xl font-bold tracking-[0.2em] text-gold">THE GRIMOIRE</h2>
             <button onclick="window.openQuickEditor()" class="opacity-20 hover:opacity-100 transition-opacity cursor-pointer p-0.5 mt-1" title="Quick Edit Deck">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                 </svg>
@@ -416,7 +416,7 @@
     <!-- QUICK EDITOR SCREEN -->
     <div id="screen-quick-edit" class="screen">
         <h2 class="text-2xl font-bold mb-4 tracking-[0.2em] text-gold">DECK PAINTER</h2>
-        <p class="text-[10px] opacity-40 uppercase tracking-[0.3em] mb-8">Rename and Illustrate your pack</p>
+        <p class="text-[10px] opacity-40 uppercase tracking-[0.3em] mb-8">Rename and Illustrate standard roles</p>
         
         <div id="quick-edit-container" class="quick-edit-grid mb-10"></div>
 
@@ -426,7 +426,7 @@
         </div>
     </div>
 
-    <!-- CUSTOMIZER SCREEN -->
+    <!-- CUSTOMIZER SCREEN (Architect) -->
     <div id="screen-custom" class="screen">
         <h2 class="text-2xl font-bold mb-8 tracking-[0.2em]">DECK ARCHITECT</h2>
         
@@ -509,6 +509,7 @@
         window.gameRoles = [];
         window.isSpinning = false;
         window.customRolesData = Array(20).fill(null).map(() => ({ name: '', img: '', desc: '' }));
+        window.standardOverrides = {}; // New separate state for Deck Painter
         window.customRolesPool = [];
         window.useCustomDeck = false;
 
@@ -556,11 +557,16 @@
         };
 
         window.onload = () => {
-            const saved = localStorage.getItem('werewolf_p2p_deck_v2');
-            if (saved) {
-                window.customRolesData = JSON.parse(saved);
-                updateInternalPool();
-            }
+            // Load custom slots
+            const savedSlots = localStorage.getItem('werewolf_p2p_deck_v2');
+            if (savedSlots) window.customRolesData = JSON.parse(savedSlots);
+            
+            // Load standard overrides (Painter)
+            const savedOverrides = localStorage.getItem('werewolf_standard_overrides');
+            if (savedOverrides) window.standardOverrides = JSON.parse(savedOverrides);
+            
+            updateInternalPool();
+
             setTimeout(() => {
                 document.getElementById('loading-overlay').style.opacity = '0';
                 setTimeout(() => document.getElementById('loading-overlay').style.display = 'none', 500);
@@ -581,7 +587,11 @@
             });
             peer.on('connection', (conn) => {
                 connections.push(conn);
-                conn.on('open', () => conn.send({ type: 'DECK_UPDATE', data: window.customRolesData }));
+                conn.on('open', () => conn.send({ 
+                    type: 'DECK_UPDATE', 
+                    data: window.customRolesData,
+                    overrides: window.standardOverrides 
+                }));
                 conn.on('data', handleData);
             });
         };
@@ -607,15 +617,27 @@
 
         const handleData = (payload) => {
             if (payload.type === 'DECK_UPDATE') {
-                window.customRolesData = payload.data;
-                localStorage.setItem('werewolf_p2p_deck_v2', JSON.stringify(payload.data));
+                if (payload.data) {
+                    window.customRolesData = payload.data;
+                    localStorage.setItem('werewolf_p2p_deck_v2', JSON.stringify(payload.data));
+                }
+                if (payload.overrides) {
+                    window.standardOverrides = payload.overrides;
+                    localStorage.setItem('werewolf_standard_overrides', JSON.stringify(payload.overrides));
+                }
                 updateInternalPool();
                 if (document.getElementById('screen-custom').classList.contains('active')) window.openCustomizer();
             }
         };
 
         const broadcastDeck = () => {
-            connections.forEach(conn => { if (conn.open) conn.send({ type: 'DECK_UPDATE', data: window.customRolesData }); });
+            connections.forEach(conn => { 
+                if (conn.open) conn.send({ 
+                    type: 'DECK_UPDATE', 
+                    data: window.customRolesData,
+                    overrides: window.standardOverrides 
+                }); 
+            });
         };
 
         // Internal Pool Handling
@@ -632,10 +654,18 @@
             }
         };
 
+        // Logic to find an override, checking Painter's direct overrides first
         const findFuzzyOverride = (standardName) => {
+            // Check Painter (Standard Overrides) first
+            if (window.standardOverrides[standardName]) {
+                const ov = window.standardOverrides[standardName];
+                if (ov.name || ov.img) return ov;
+            }
+
+            // Check Customizer slots second
             let bestMatch = null;
             let highestScore = 0;
-            const threshold = 0.7; // At least 70% match
+            const threshold = 0.7; 
 
             window.customRolesPool.forEach(custom => {
                 const score = getSimilarity(custom.name, standardName);
@@ -647,13 +677,13 @@
             return bestMatch;
         };
 
-        // Quick Editor Logic
+        // Quick Editor Logic (Painter)
         window.openQuickEditor = () => {
             const container = document.getElementById('quick-edit-container');
             container.innerHTML = '';
             
             Object.keys(roleData).forEach(stdName => {
-                const override = findFuzzyOverride(stdName) || { name: stdName, img: '' };
+                const override = window.standardOverrides[stdName] || { name: stdName, img: '' };
                 const card = document.createElement('div');
                 card.className = 'quick-edit-card';
                 card.innerHTML = `
@@ -679,38 +709,33 @@
             reader.onload = (e) => {
                 const imgEl = document.getElementById(`quick-prev-${stdName}`);
                 imgEl.src = e.target.result;
-                imgEl.dataset.newImg = e.target.result;
+                imgEl.dataset.newImg = e.target.result; // Mark for saving
             };
             reader.readAsDataURL(file);
         };
 
         window.saveQuickEdits = () => {
-            const updatedCustomPool = [...window.customRolesData];
+            const newOverrides = {};
             
             Object.keys(roleData).forEach(stdName => {
-                const newName = document.getElementById(`quick-name-${stdName}`).value.trim();
-                const newImg = document.getElementById(`quick-prev-${stdName}`).dataset.newImg || document.getElementById(`quick-prev-${stdName}`).src;
+                const newNameInput = document.getElementById(`quick-name-${stdName}`);
+                const prevImgEl = document.getElementById(`quick-prev-${stdName}`);
                 
-                // Try to find if this role already exists in the custom deck to update it
-                let existingIdx = updatedCustomPool.findIndex(r => r.name === stdName || getSimilarity(r.name, stdName) > 0.8);
+                const nameValue = newNameInput.value.trim();
+                const imgValue = prevImgEl.dataset.newImg || (window.standardOverrides[stdName]?.img || '');
                 
-                // If not found, find first empty slot
-                if (existingIdx === -1) existingIdx = updatedCustomPool.findIndex(r => !r.name);
-                
-                if (existingIdx !== -1) {
-                    updatedCustomPool[existingIdx] = {
-                        name: newName,
-                        img: newImg.length > 100 ? newImg : (updatedCustomPool[existingIdx].img || ''),
-                        desc: roleData[stdName].desc
-                    };
-                }
+                newOverrides[stdName] = { 
+                    name: nameValue, 
+                    img: imgValue,
+                    desc: roleData[stdName].desc 
+                };
             });
 
-            window.customRolesData = updatedCustomPool;
-            localStorage.setItem('werewolf_p2p_deck_v2', JSON.stringify(updatedCustomPool));
-            updateInternalPool();
+            window.standardOverrides = newOverrides;
+            localStorage.setItem('werewolf_standard_overrides', JSON.stringify(newOverrides));
+            
             broadcastDeck();
-            window.openGrimoire();
+            window.openGrimoire(); // Go back to Grimoire to see changes
         };
 
         // Grimoire View Logic
@@ -726,6 +751,7 @@
                 displayed.add(role.name.toLowerCase());
             });
 
+            // Show custom slots that didn't match standard roles
             window.customRolesPool.forEach(custom => {
                 if (!displayed.has(custom.name.toLowerCase())) {
                     addGrimoireItem(container, custom);
@@ -747,7 +773,7 @@
             container.appendChild(item);
         };
 
-        // Standard Customizer Functions (Kept for compatibility)
+        // Standard Customizer Functions (Architect)
         window.openCustomizer = () => {
             const container = document.getElementById('custom-slots-container');
             container.innerHTML = '';
@@ -877,12 +903,14 @@
             const totalCardsInTrack = 50;
             const targetIndex = 45; 
             track.innerHTML = '';
+            
+            // Build fluff pool for RNG animation
             let fluffPool = [...window.customRolesPool];
-            if (fluffPool.length < 5) {
-                Object.keys(roleData).forEach(k => {
-                    fluffPool.push({ name: k, img: 'standard' });
-                });
-            }
+            Object.keys(roleData).forEach(k => {
+                const ov = findFuzzyOverride(k);
+                fluffPool.push(ov ? ov : { name: k, img: 'standard' });
+            });
+
             for (let i = 0; i < totalCardsInTrack; i++) {
                 const card = document.createElement('div');
                 card.className = 'card';
