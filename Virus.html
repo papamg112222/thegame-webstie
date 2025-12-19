@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create the Virus</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
+
+        :root {
+            --primary: #00ff41;
+            --danger: #ff3333;
+            --bg-dark: #050505;
+            --panel-bg: rgba(0, 15, 0, 0.92);
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-dark);
+            color: var(--primary);
+            font-family: 'Share Tech Mono', monospace;
+            background-image: 
+                linear-gradient(rgba(0, 255, 65, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 65, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+            overflow: hidden;
+        }
+
+        /* CRT Effect Overlay */
+        .crt::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0; left: 0; bottom: 0; right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 50;
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+        }
+
+        #bgCanvas {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 0; opacity: 0.4; pointer-events: none;
+        }
+
+        #introScreen, #gameScreen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: opacity 1s ease;
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
+            padding: 20px 0;
+        }
+
+        .hidden { display: none !important; opacity: 0; pointer-events: none; }
+
+        h1 {
+            font-family: 'Orbitron', sans-serif; font-weight: 900; font-size: 4rem;
+            color: var(--danger); text-shadow: 0 0 10px rgba(255, 0, 0, 0.8), 0 0 30px rgba(255, 0, 0, 0.4);
+            margin-bottom: 0.5rem; text-align: center; letter-spacing: 5px; text-transform: uppercase;
+        }
+
+        #typewriterText {
+            font-family: 'Orbitron', sans-serif; font-size: 2.5rem; color: #eee;
+            text-align: center; min-height: 3rem; margin-bottom: 2rem;
+            text-shadow: 0 0 10px rgba(255,255,255,0.5); letter-spacing: 2px;
+        }
+        .cursor { animation: blink 1s step-end infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        .subtitle {
+            color: var(--primary); letter-spacing: 4px; font-size: 1rem;
+            margin-bottom: 3rem; text-shadow: 0 0 5px var(--primary);
+            opacity: 0; transition: opacity 1s;
+        }
+
+        .btn-start {
+            background: rgba(0,0,0,0.8); border: 2px solid var(--primary); color: var(--primary);
+            padding: 1.2rem 4rem; font-size: 1.5rem; cursor: pointer;
+            font-family: 'Orbitron', sans-serif; text-transform: uppercase; letter-spacing: 2px;
+            transition: all 0.3s; position: relative; overflow: hidden;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.2); opacity: 0; pointer-events: none;
+        }
+        .btn-start.visible { opacity: 1; pointer-events: auto; }
+        .btn-start:hover {
+            background: var(--primary); color: #000;
+            box-shadow: 0 0 50px rgba(0, 255, 65, 0.6); transform: scale(1.05);
+        }
+
+        .control-panel {
+            background: var(--panel-bg);
+            border: 1px solid rgba(0, 255, 65, 0.3);
+            border-top: 2px solid var(--primary); border-bottom: 2px solid var(--primary);
+            padding: 25px; width: 95%; max-width: 900px;
+            display: flex; flex-direction: column; gap: 20px;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.8); backdrop-filter: blur(15px);
+            position: relative; margin-bottom: 40px; flex-shrink: 0;
+        }
+        .control-panel::before, .control-panel::after {
+            content: ''; position: absolute; width: 10px; height: 10px;
+            border: 2px solid var(--primary); transition: all 0.3s;
+        }
+        .control-panel::before { top: -2px; left: -2px; border-right: none; border-bottom: none; }
+        .control-panel::after { bottom: -2px; right: -2px; border-left: none; border-top: none; }
+
+        .select-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        @media (max-width: 768px) {
+            .select-group { grid-template-columns: 1fr; }
+            h1 { font-size: 2.5rem; }
+            #introScreen, #gameScreen { padding-top: 50px; justify-content: flex-start; }
+        }
+
+        .input-wrapper { position: relative; }
+        label {
+            font-family: 'Orbitron', sans-serif; font-size: 0.7rem; color: #88ffaa;
+            margin-bottom: 6px; display: block; text-transform: uppercase;
+            letter-spacing: 1px; text-shadow: 0 0 5px rgba(0, 255, 65, 0.3);
+        }
+        select {
+            background: rgba(0, 20, 0, 0.6); color: var(--primary);
+            border: 1px solid #005511; padding: 12px;
+            font-family: 'Share Tech Mono', monospace; width: 100%;
+            cursor: pointer; font-size: 0.9rem; transition: border 0.3s; appearance: none;
+        }
+        select:hover { border-color: #00aa22; }
+        select:focus { outline: none; border-color: var(--primary); background: #001100; box-shadow: 0 0 10px rgba(0,255,65,0.2); }
+
+        .action-group { display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin-top: 5px; }
+        .btn-action {
+            padding: 15px; font-weight: bold; font-family: 'Orbitron', sans-serif;
+            cursor: pointer; text-transform: uppercase; border: none;
+            transition: all 0.2s; letter-spacing: 2px; position: relative;
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+        }
+        .btn-create {
+            background: linear-gradient(45deg, #004400, #002200); color: var(--primary); border: 1px solid #006611;
+        }
+        .btn-create:hover { background: var(--primary); color: #000; box-shadow: 0 0 20px var(--primary); }
+        .btn-ignite {
+            background: linear-gradient(45deg, #440000, #220000); color: var(--danger); border: 1px solid #660000;
+        }
+        .btn-ignite:hover { background: var(--danger); color: #000; box-shadow: 0 0 20px var(--danger); }
+
+        #virusStage {
+            width: 340px; height: 340px; margin-bottom: 20px;
+            background: radial-gradient(circle, #0a0a0a 0%, #000 100%);
+            position: relative; display: flex; align-items: center; justify-content: center;
+            border: 1px solid #333; box-shadow: 0 0 30px rgba(0,0,0,0.8); flex-shrink: 0;
+        }
+        .stage-corner {
+            position: absolute; width: 20px; height: 20px; border-color: #555; border-style: solid; pointer-events: none;
+        }
+        .tl { top: 10px; left: 10px; border-width: 2px 0 0 2px; }
+        .tr { top: 10px; right: 10px; border-width: 2px 2px 0 0; }
+        .bl { bottom: 10px; left: 10px; border-width: 0 0 2px 2px; }
+        .br { bottom: 10px; right: 10px; border-width: 0 2px 2px 0; }
+
+        #virusCanvas { filter: drop-shadow(0 0 10px rgba(0,0,0,0.5)); }
+
+        .data-readout {
+            min-height: 140px; background: rgba(0,0,0,0.3); border: 1px solid #004411;
+            padding: 15px; font-size: 0.85rem; color: #bbb; display: grid; gap: 8px;
+        }
+        .stat-line {
+            display: grid; grid-template-columns: 140px 1fr; gap: 15px;
+            align-items: center; border-bottom: 1px dashed rgba(0, 255, 65, 0.1); padding-bottom: 4px;
+        }
+        .stat-label { color: #008833; font-weight: bold; font-size: 0.75rem; letter-spacing: 1px; }
+
+        .contact-result {
+            margin-top: 10px; padding: 10px; background: rgba(40, 0, 0, 0.2);
+            border-left: 2px solid var(--danger); color: #ffcccc; font-size: 0.8rem;
+            line-height: 1.5; max-height: 100px; overflow-y: auto; text-shadow: 0 0 2px rgba(255, 0, 0, 0.3);
+        }
+
+        .scan-line {
+            position: absolute; top: 0; left: 0; width: 100%; height: 5px;
+            background: rgba(0, 255, 65, 0.1); box-shadow: 0 0 10px rgba(0, 255, 65, 0.4);
+            animation: scan 3s linear infinite; pointer-events: none; z-index: 5;
+        }
+        @keyframes scan { 0% { top: -10%; opacity: 0;} 20% { opacity: 1; } 100% {top: 110%; opacity: 0;} }
+    </style>
+</head>
+<body class="crt">
+    <canvas id="bgCanvas"></canvas>
+
+    <div id="introScreen">
+        <div id="typewriterText"><span class="cursor">|</span></div>
+        <div id="introContent" class="flex flex-col items-center">
+            <h1 class="hidden" id="mainTitle">Create the Virus</h1>
+            <div class="subtitle" id="subTitle">BIO-WEAPONRY SIMULATION LAB // V15.0 - SENTIENCE</div>
+            <button class="btn-start" id="startBtn" onclick="startGame()">ENTER LAB</button>
+        </div>
+    </div>
+
+    <div id="gameScreen" class="hidden">
+        <div id="virusStage">
+            <div class="stage-corner tl"></div> <div class="stage-corner tr"></div>
+            <div class="stage-corner bl"></div> <div class="stage-corner br"></div>
+            <div class="scan-line"></div>
+            <canvas id="virusCanvas" width="300" height="300"></canvas>
+            <div id="emptyState" class="absolute text-gray-600 font-bold text-center pointer-events-none tracking-widest text-xs">
+                // SYSTEM IDLE //<br>AWAITING SYNTHESIS INPUT
+            </div>
+        </div>
+
+        <div class="control-panel">
+            <div class="select-group">
+                <div class="input-wrapper">
+                    <label>01 // EARTH ORIGIN</label>
+                    <select id="starterSelect"></select>
+                </div>
+                <div class="input-wrapper">
+                    <label>02 // BASE STRAIN ID</label>
+                    <select id="virusSelect"></select>
+                </div>
+                <div class="input-wrapper">
+                    <label>03 // COSMIC BINDER</label>
+                    <select id="spaceSelect"></select>
+                </div>
+            </div>
+
+            <div class="action-group">
+                <button class="btn-action btn-create" onclick="synthesizeVirus()">INITIATE MUTATION</button>
+                <button class="btn-action btn-ignite" onclick="igniteVirus()">INCINERATE</button>
+            </div>
+
+            <div class="data-readout" id="dataReadout">
+                <div class="text-center text-gray-600 pt-10 text-xs tracking-[0.2em] font-bold">
+                    // WAITING FOR USER INPUT...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /* --- 1. PROCEDURAL GENERATORS --- */
+        function generateItems(adjList, nounList) {
+            let items = [];
+            for(let a of adjList) for(let n of nounList) items.push(`${a} ${n}`);
+            return items.sort(() => Math.random() - 0.5);
+        }
+        // ... (Item generators same as before) ...
+        const earthAdj = ["Putrid", "Ancient", "Radioactive", "Frozen", "Boiling", "Crystallized", "Fossilized", "Living", "Necrotic", "Synthetic", "Toxic", "Pure", "Corrupted", "Vibrant", "Shadowy", "Magnetic", "Electric", "Viral", "Fungal", "Metallic", "Liquid", "Gaseous", "Petrified", "Charred", "Bloody", "Cursed", "Blessed", "Haunted", "Forgotten", "Forbidden", "Sacred", "Profane", "Glitching", "Hollow", "Screaming"];
+        const earthNoun = ["Mud", "Grass", "Water", "Blood", "Bone", "Root", "Leaf", "Ash", "Sand", "Clay", "Bark", "Flesh", "Slime", "Moss", "Rust", "Oil", "Venom", "Sap", "Pollen", "Spore", "Feather", "Scale", "Fur", "Silk", "Glass", "Tears", "Sweat", "Bile", "Marrow", "Skin", "Teeth", "Hair", "Nails", "Breath", "Sound"];
+        const starters = generateItems(earthAdj, earthNoun);
+
+        const spaceAdj = ["Cosmic", "Void", "Solar", "Lunar", "Nebula", "Stellar", "Galactic", "Interstellar", "Dark", "Anti-", "Plasma", "Quantum", "Hyper", "Neutron", "Gravitational", "Dimensional", "Alien", "Exo-", "Zero-G", "Vacuum", "Meteor", "Comet", "Asteroid", "Star", "Black Hole", "Eldritch", "Psionic", "Temporal", "Spatial", "Infinite", "Abyssal", "Radiant", "Entropic", "Chaos", "Order"];
+        const spaceNoun = ["Dust", "Shard", "Ice", "Gas", "Matter", "Energy", "Residue", "Crystal", "Ore", "Sludge", "Vapor", "Radiation", "Fragment", "Core", "Essence", "Frequency", "Wave", "Particle", "Goo", "Alloy", "Isotope", "Light", "Shadow", "Plasma", "Mist", "Memory", "Thought", "Time", "Space", "Color", "Sound", "Silence", "Void", "Soul", "Dream"];
+        const spaceItems = generateItems(spaceAdj, spaceNoun);
+
+        const prefixes = ["Xeno", "Necro", "Bio", "Cyto", "Astro", "Cryo", "Pyro", "Neuro", "Omni", "Zeta", "Mega", "Giga", "Tera", "Nano", "Exo", "Endo", "Retro", "Lympho", "Hemo", "Osteo", "Viro", "Patho", "Toxo", "Psycho", "Chrono", "Techno", "Cyber", "Spectral", "Phantom", "Demon"];
+        const roots = ["phage", "virus", "pathogen", "scourge", "blight", "plague", "pox", "flu", "rot", "wither", "bane", "death", "morph", "gen", "cell", "doom", "fever", "chill", "strain", "vector", "parasite", "symbiote", "curse", "hex", "glitch", "error", "void", "abyss"];
+        const virusList = [];
+        for(let i=0; i<800; i++) {
+            const p = prefixes[Math.floor(Math.random() * prefixes.length)];
+            const r = roots[Math.floor(Math.random() * roots.length)];
+            const num = Math.floor(Math.random() * 9999);
+            virusList.push(`${p}-${r}-${num}`);
+        }
+
+        /* --- 2. SETUP UI --- */
+        const starterSelect = document.getElementById('starterSelect');
+        const virusSelect = document.getElementById('virusSelect');
+        const spaceSelect = document.getElementById('spaceSelect');
+
+        starters.slice(0, 1200).forEach(item => starterSelect.add(new Option(item, item)));
+        virusList.forEach(item => virusSelect.add(new Option(item, item)));
+        spaceItems.slice(0, 1200).forEach(item => spaceSelect.add(new Option(item, item)));
+
+        /* --- 3. BACKGROUND ANIMATION --- */
+        const bgCanvas = document.getElementById('bgCanvas');
+        const bgCtx = bgCanvas.getContext('2d');
+        let bgParticles = [];
+
+        function resizeBg() {
+            bgCanvas.width = window.innerWidth;
+            bgCanvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeBg);
+        resizeBg();
+
+        class FallingVirus {
+            constructor() { this.reset(); this.y = Math.random() * bgCanvas.height; }
+            reset() {
+                this.x = Math.random() * bgCanvas.width;
+                this.y = -50;
+                this.size = Math.random() * 15 + 5;
+                this.speed = Math.random() * 0.5 + 0.1;
+                this.rotation = Math.random() * Math.PI * 2;
+                this.rotSpeed = (Math.random() - 0.5) * 0.01;
+                this.vertices = Math.floor(Math.random() * 6) + 3;
+                this.color = `rgba(${Math.random()*50}, ${Math.random()*150+50}, ${Math.random()*50}, ${Math.random()*0.2 + 0.05})`;
+                this.wobble = Math.random() * 5;
+            }
+            update() {
+                this.y += this.speed; this.rotation += this.rotSpeed;
+                if (this.y > bgCanvas.height + 50) this.reset();
+            }
+            draw() {
+                bgCtx.save(); bgCtx.translate(this.x, this.y); bgCtx.rotate(this.rotation);
+                bgCtx.fillStyle = this.color; bgCtx.beginPath();
+                for (let i = 0; i < this.vertices * 2; i++) {
+                    const radius = i % 2 === 0 ? this.size : this.size * 0.4;
+                    const angle = (Math.PI * 2 * i) / (this.vertices * 2);
+                    const w = Math.sin(Date.now() * 0.001 + this.x) * this.wobble;
+                    bgCtx.lineTo(Math.cos(angle) * (radius+w), Math.sin(angle) * (radius+w));
+                }
+                bgCtx.fill(); bgCtx.restore();
+            }
+        }
+        for (let i = 0; i < 50; i++) bgParticles.push(new FallingVirus());
+        function animateBg() {
+            bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height);
+            bgParticles.forEach(p => { p.update(); p.draw(); });
+            requestAnimationFrame(animateBg);
+        }
+        animateBg();
+
+        /* --- 4. INTRO --- */
+        const typeEl = document.getElementById('typewriterText');
+        const startBtn = document.getElementById('startBtn');
+        const subTitle = document.getElementById('subTitle');
+        const mainTitle = document.getElementById('mainTitle');
+        
+        async function runIntro() {
+            const text1 = "The chaos."; const text2 = "Has begun...";
+            typeEl.innerHTML = '<span class="cursor">|</span>';
+            await typeString(text1); await wait(800);
+            typeEl.innerHTML = text1 + " "; 
+            typeEl.innerHTML += '<span class="cursor">|</span>';
+            await typeString(text2, 150); await wait(500);
+            mainTitle.classList.remove('hidden'); subTitle.style.opacity = '1'; startBtn.classList.add('visible');
+            setTimeout(() => { typeEl.style.transition = "opacity 1s"; typeEl.style.opacity = "0"; }, 1000);
+        }
+        function typeString(str, speed = 100) {
+            return new Promise(resolve => {
+                let i = 0;
+                function step() {
+                    if (i < str.length) {
+                        const cursor = typeEl.querySelector('.cursor');
+                        const char = document.createTextNode(str.charAt(i));
+                        typeEl.insertBefore(char, cursor); i++; setTimeout(step, speed);
+                    } else resolve();
+                }
+                step();
+            });
+        }
+        function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+        window.onload = runIntro;
+
+        /* --- 5. DATA --- */
+        const FAMILIES = ['CORONAL', 'FILAMENTOUS', 'BACTERIOPHAGE', 'CRYSTALLINE', 'AMOEBIC', 'SWARM', 'PARASITIC', 'DIGITAL', 'ETHEREAL', 'BIOMECH'];
+        const ANOMALY_TYPES = {
+            'GOD': { color: 'text-yellow-400', effect: 'god', label: 'DIVINE ENTITY', immune: true },
+            'FIRE': { color: 'text-orange-500', effect: 'fire', label: 'INFERNO CLASS', immune: true },
+            'ELECTRIC': { color: 'text-blue-400', effect: 'electric', label: 'VOLTAGE STORM', immune: false },
+            'GLITCH': { color: 'text-green-400', effect: 'glitch', label: 'SYSTEM ERROR', immune: false },
+            'VOID': { color: 'text-gray-400', effect: 'void', label: 'VOID SINGULARITY', immune: false },
+            'TOXIC': { color: 'text-lime-400', effect: 'toxic', label: 'CORROSIVE', immune: false },
+            'FROST': { color: 'text-cyan-200', effect: 'frost', label: 'ABSOLUTE ZERO', immune: false },
+            'NORMAL': { color: 'text-gray-500', effect: 'normal', label: 'NONE', immune: false }
+        };
+        const ANOMALY_NAMES = [
+            { name: "Hellfire Protocol", type: 'FIRE' }, { name: "Solar Flare", type: 'FIRE' }, { name: "Magma Core", type: 'FIRE' }, { name: "Phoenix Ash", type: 'FIRE' }, { name: "Napalm Strain", type: 'FIRE' },
+            { name: "Red Giant", type: 'FIRE' }, { name: "Vulcan's Rage", type: 'FIRE' }, { name: "Plasma Burn", type: 'FIRE' }, { name: "Cinder Heart", type: 'FIRE' }, { name: "Eternal Flame", type: 'FIRE' },
+            { name: "Tesla Coil", type: 'ELECTRIC' }, { name: "Thunder Strike", type: 'ELECTRIC' }, { name: "Ion Storm", type: 'ELECTRIC' }, { name: "Voltage Spike", type: 'ELECTRIC' }, { name: "Arc Reactor", type: 'ELECTRIC' },
+            { name: "Static Shock", type: 'ELECTRIC' }, { name: "Lightning Rod", type: 'ELECTRIC' }, { name: "Gigawatt", type: 'ELECTRIC' }, { name: "EMP Blast", type: 'ELECTRIC' }, { name: "Neutron Pulse", type: 'ELECTRIC' },
+            { name: "Zeus Pattern", type: 'GOD' }, { name: "Odin's Eye", type: 'GOD' }, { name: "Seraphim", type: 'GOD' }, { name: "Omniscient", type: 'GOD' }, { name: "Creator's Hand", type: 'GOD' },
+            { name: "Alpha Omega", type: 'GOD' }, { name: "Holy Light", type: 'GOD' }, { name: "Ascension", type: 'GOD' }, { name: "Deity Spark", type: 'GOD' }, { name: "Rapture", type: 'GOD' },
+            { name: "Black Hole", type: 'VOID' }, { name: "Event Horizon", type: 'VOID' }, { name: "Null Space", type: 'VOID' }, { name: "Abyssal Gaze", type: 'VOID' }, { name: "Dark Matter", type: 'VOID' },
+            { name: "Entropy", type: 'VOID' }, { name: "Void Walker", type: 'VOID' }, { name: "Nothingness", type: 'VOID' }, { name: "Vacuum Decay", type: 'VOID' }, { name: "Shadow Realm", type: 'VOID' },
+            { name: "Permafrost", type: 'FROST' }, { name: "Cryo Stasis", type: 'FROST' }, { name: "Ice Age", type: 'FROST' }, { name: "Glacial Wall", type: 'FROST' }, { name: "Frostbite", type: 'FROST' },
+            { name: "Liquid Nitrogen", type: 'FROST' }, { name: "Snow Blind", type: 'FROST' }, { name: "Arctic Wind", type: 'FROST' }, { name: "Winter's Howl", type: 'FROST' }, { name: "Sub Zero", type: 'FROST' },
+            { name: "Acid Rain", type: 'TOXIC' }, { name: "Venom Sac", type: 'TOXIC' }, { name: "Radio Decay", type: 'TOXIC' }, { name: "Bio Hazard", type: 'TOXIC' }, { name: "Gamma Rot", type: 'TOXIC' },
+            { name: "Plague Wind", type: 'TOXIC' }, { name: "Toxic Bloom", type: 'TOXIC' }, { name: "Chemical X", type: 'TOXIC' }, { name: "Nerve Gas", type: 'TOXIC' }, { name: "Ooze Puddle", type: 'TOXIC' },
+            { name: "404 Error", type: 'GLITCH' }, { name: "Blue Screen", type: 'GLITCH' }, { name: "Stack Overflow", type: 'GLITCH' }, { name: "Dead Pixel", type: 'GLITCH' }, { name: "Corrupt Data", type: 'GLITCH' },
+            { name: "Null Pointer", type: 'GLITCH' }, { name: "System Crash", type: 'GLITCH' }, { name: "Binary Noise", type: 'GLITCH' }, { name: "Hack Tool", type: 'GLITCH' }, { name: "Virus.exe", type: 'GLITCH' }
+        ];
+
+        /* --- 6. BIOHAZARD TEXT ENGINE --- */
+        const BIO_TEXTS = {
+            intros: {
+                GENERIC: ["Upon initial contact,", "Analysis indicates that", "Inhalation of particles results in", "Subject displays symptoms where", "The specimen initiates bonding, then", "Molecular scanning reveals", "Microscopic observation shows", "The pathogen enters the host and"],
+                HEAT: ["Thermal scans detect extreme heat,", "The specimen radiates 500°C waves,", "Upon touching the skin, it burns, and", "Ingestion causes internal combustion, where"],
+                COLD: ["The air temperature drops rapidly, and", "Frost forms on the host's skin, as", "Cellular freezing occurs instantly, where", "The subject's breath turns to ice, and"],
+                TECH: ["Nano-machines infiltrate the bloodstream,", "The virus attempts to connect to Wi-Fi,", "Subjects report seeing binary code, as", "Digital corruption spreads to devices, and"],
+                DIVINE: ["Subjects report hearing angelic choirs,", "A blinding halo forms around the host,", "The victim begins to levitate, and", "A feeling of infinite peace occurs, as"],
+                VOID: ["Light bends around the subject, and", "The host's shadow detaches itself, as", "Matter begins to disappear, and", "A low hum from the abyss is heard, where"],
+                TOXIC: ["The skin begins to bubble green, and", "Noxious fumes emit from pores, as", "The blood turns to acid, causing", "A sickening sweet smell fills the room, as"]
+            },
+            targets: {
+                GENERIC: ["the central nervous system", "the skeletal structure", "all white blood cells", "the lung lining", "cardiac muscle tissue", "the optic nerves", "epidermal layers", "the liver function", "renal pathways", "spinal fluid"],
+                HEAT: ["mitochondria, igniting them", "water molecules in the blood", "fat cells, melting them", "the hypothalamus (heat regulation)", "sweat glands, evaporating them"],
+                COLD: ["capillaries, shattering them", "joint fluids, solidifying them", "water in the cells", "the core body temperature", "fingertips and toes"],
+                TECH: ["the bio-electrical field", "pacemakers and implants", "the brain's visual cortex", "synaptic firing rates", "iron in the blood (magnetizing it)"],
+                DIVINE: ["the pineal gland (third eye)", "the concept of 'self'", "the soul itself", "moral judgment centers", "memories of sin"],
+                VOID: ["the host's mass", "the space between atoms", "gravitational anchors", "the reflection in mirrors", "the existence of the heart"],
+                TOXIC: ["gastric linings", "the immune system", "soft tissues", "bone marrow", "mucus membranes"]
+            },
+            actions: {
+                GENERIC: ["to decay rapidly", "to multiply exponentially", "to reject biological life", "to create fibrous growths", "to shut down completely", "to mutate into new forms", "to vibrate violently", "to liquefy instantly", "to harden like stone"],
+                HEAT: ["to boil within seconds", "to turn to ash", "to erupt in flames", "to melt through the floor", "to glow red hot", "to smoke profusely"],
+                COLD: ["to freeze solid", "to shatter like glass", "to cease all movement", "to turn blue and crack", "to become brittle"],
+                TECH: ["to glitch into static", "to display error messages", "to download external data", "to turn into silicon", "to pixellate physically", "to run simulations"],
+                DIVINE: ["to ascend to a higher plane", "to glow with holy light", "to speak in tongues", "to become transparent", "to reject gravity", "to sing without breath"],
+                VOID: ["to cease existing", "to implode violently", "to become a 2D object", "to erase local history", "to turn jet black", "to absorb all light"],
+                TOXIC: ["to dissolve into sludge", "to corrode through metal", "to emit radioactive gas", "to grow fungal spores", "to turn into poison"]
+            },
+            horrors: {
+                GENERIC: ["causing unbearable agony.", "forcing the host to scream.", "leaving only a shell behind.", "turning the subject into a husk.", "creating a bio-hazard zone.", "triggering a quarantine lockdown.", "confusing all medical scanners.", "defying known biology."],
+                HEAT: ["leaving only a scorch mark.", "turning blood into lava.", "igniting the air nearby.", "cooking the subject alive.", "melting the containment glass."],
+                COLD: ["preserving the body perfectly.", "creating a statue of ice.", "lowering room temp to -50°C.", "causing frostbite on observers.", "stopping time locally."],
+                TECH: ["uploading the mind to the cloud.", "replacing eyes with cameras.", "printing 3D copies of organs.", "emitting dial-up modem sounds.", "turning veins into wires."],
+                DIVINE: ["forcing observers to kneel.", "curing all other diseases instantly.", "growing giant feathery wings.", "revealing the secrets of creation.", "blinding anyone who looks."],
+                VOID: ["erasing the victim from memory.", "creating a mini black hole.", "inverting the room geometry.", "whispering secrets of the deep.", "removing the concept of pain."],
+                TOXIC: ["melting the floor beneath.", "creating a cloud of mustard gas.", "spawning parasitic moss.", "polluting the water supply.", "turning bones to jelly."]
+            },
+            aftermaths: {
+                GENERIC: ["Cleanup teams dispatched.", "No cure found.", "Subject terminated.", "Quarantine effective.", "Data classified.", "Specimen contained.", "Lab sector sealed.", "Biological waste secured.", "Researchers baffled.", "Host unrecoverable."],
+                HEAT: ["Ashes collected.", "Sprinklers activated.", "Thermal shielding required.", "Fire department alerted."],
+                COLD: ["Thawing procedure failed.", "Subject shattered.", "Liquid nitrogen leak detected.", "Winter gear required."],
+                TECH: ["System rebooting...", "Data backup corrupted.", "Firewall breached.", "AI analysis pending."],
+                DIVINE: ["Worship cult formed.", "Miracle confirmed.", "Vatican notified.", "Reality check failed."],
+                VOID: ["Subject missing.", "Timeline altered.", "Gravity normalized.", "Dark energy traces found."],
+                TOXIC: ["Hazmat suits required.", "Decontamination complete.", "Ventilation active.", "Acid burn treated."]
+            }
+        };
+
+        /* --- 7. RENDER ENGINE & LOGIC --- */
+        const vCanvas = document.getElementById('virusCanvas');
+        const vCtx = vCanvas.getContext('2d');
+        let currentVirus = null;
+        let virusHistory = [];
+
+        function stringToHash(string) {
+            let hash = 0;
+            if (string.length == 0) return hash;
+            for (let i = 0; i < string.length; i++) {
+                let char = string.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return hash;
+        }
+
+        class ActiveVirus {
+            constructor(seed, baseName, salt = 0) {
+                this.seed = seed + salt; 
+                this.time = 0;
+                this.isIgnited = false;
+                this.burnLevel = 0;
+                this.particles = [];
+                this.fireParticles = [];
+                this.anomalyParticles = [];
+
+                const rnd = () => {
+                    const x = Math.sin(this.seed++) * 10000;
+                    return x - Math.floor(x);
+                };
+
+                const greek = ["Alpha", "Beta", "Gamma", "Omicron", "Sigma", "Psi", "Omega", "Epsilon", "Zeta", "Theta", "Lambda"];
+                const suffix = greek[Math.floor(rnd() * greek.length)];
+                const mutCode = Math.floor(rnd() * 90000) + 10000;
+                this.displayName = `${baseName} :: ${suffix}-${mutCode}`;
+                
+                this.family = FAMILIES[Math.floor(rnd() * FAMILIES.length)];
+                this.r = Math.floor(rnd()*200) + 55;
+                this.g = Math.floor(rnd()*200) + 55;
+                this.b = Math.floor(rnd()*200) + 55;
+                
+                this.coreSize = rnd() * 40 + 35;
+                this.rotationSpeed = (rnd() - 0.5) * 0.015;
+                this.rotationDir = rnd() > 0.5 ? 1 : -1;
+                
+                this.params = {
+                    spikes: Math.floor(rnd() * 18) + 6,
+                    spikeLen: rnd() * 60 + 20,
+                    armCount: Math.floor(rnd() * 8) + 3,
+                    segmentCount: Math.floor(rnd() * 12) + 6,
+                    wobbleFreq: rnd() * 8 + 1,
+                    textureNoise: rnd(),
+                    polySides: Math.floor(rnd() * 5) + 3,
+                    detailLevel: rnd()
+                };
+
+                // Anomaly Logic
+                const anomalyRoll = rnd();
+                if (anomalyRoll > 0.85) {
+                    const picked = ANOMALY_NAMES[Math.floor(rnd() * ANOMALY_NAMES.length)];
+                    this.anomaly = { ...ANOMALY_TYPES[picked.type], name: picked.name };
+                } else {
+                    this.anomaly = { ...ANOMALY_TYPES['NORMAL'], name: 'NONE' };
+                }
+
+                // Initial Anomaly Setup
+                if (this.anomaly.effect === 'fire') { for(let i=0; i<30; i++) this.spawnFireParticle(); } 
+                else if (this.anomaly.effect === 'void') {
+                    for(let i=0; i<50; i++) {
+                        this.anomalyParticles.push({
+                            x: (Math.random()-0.5)*300, y: (Math.random()-0.5)*300,
+                            angle: Math.random()*Math.PI*2, speed: Math.random()*2+1, size: Math.random()*2
+                        });
+                    }
+                } else if (this.anomaly.effect === 'toxic') {
+                    for(let i=0; i<20; i++) {
+                        this.anomalyParticles.push({
+                            x: (Math.random()-0.5)*100, y: 50 + Math.random()*50,
+                            vx: (Math.random()-0.5)*0.5, vy: -Math.random()*1 - 0.5, size: Math.random()*5+2
+                        });
+                    }
+                } else if (this.anomaly.effect === 'frost') { this.rotationSpeed = 0; }
+
+                this.stats = {
+                    lethality: Math.floor(rnd() * 100),
+                    contagion: Math.floor(rnd() * 100),
+                    mutation: Math.floor(rnd() * 100)
+                };
+                
+                // --- NEW GENERATION CALL ---
+                this.desc = this.generateDescription(rnd);
+                this.initParticles();
+            }
+
+            initParticles() {
+                for(let i=0; i<20; i++) {
+                    this.particles.push({
+                        x: (Math.random()-0.5)*100, y: (Math.random()-0.5)*100,
+                        s: Math.random()*3, speed: Math.random()*0.5, off: Math.random()*Math.PI*2
+                    });
+                }
+            }
+
+            generateDescription(rnd) {
+                // Determine Tags
+                let tags = ['GENERIC'];
+                const f = this.family; const a = this.anomaly.effect;
+                
+                // Map Anomaly
+                if (a === 'fire') tags.push('HEAT');
+                if (a === 'frost') tags.push('COLD');
+                if (a === 'glitch' || a === 'electric') tags.push('TECH');
+                if (a === 'god') tags.push('DIVINE');
+                if (a === 'void') tags.push('VOID');
+                if (a === 'toxic') tags.push('TOXIC');
+                
+                // Map Family if anomaly is normal (or to add flavor)
+                if (f === 'DIGITAL' || f === 'BIOMECH') tags.push('TECH');
+                if (f === 'CRYSTALLINE') tags.push('COLD'); // Crystals feel cold/sharp
+                if (f === 'SWARM') tags.push('TOXIC');
+                
+                // Helper to get random item from pool based on tags
+                const pick = (category) => {
+                    let pool = [];
+                    // Add generic multiple times to ensure sentences form even if tags miss
+                    pool = pool.concat(BIO_TEXTS[category].GENERIC);
+                    // Add specific tags with weight (add 3 times to make them likely)
+                    tags.forEach(t => {
+                        if(BIO_TEXTS[category][t]) {
+                            pool = pool.concat(BIO_TEXTS[category][t]);
+                            pool = pool.concat(BIO_TEXTS[category][t]); // Weight x2
+                            pool = pool.concat(BIO_TEXTS[category][t]); // Weight x3
+                        }
+                    });
+                    return pool[Math.floor(rnd() * pool.length)];
+                };
+
+                return `${pick('intros')} ${pick('targets')} ${pick('actions')}, ${pick('horrors')} ${pick('aftermaths')}`;
+            }
+
+            spawnFireParticle() {
+                this.fireParticles.push({
+                    x: (Math.random()-0.5) * this.coreSize * 2.5, y: (Math.random()-0.5) * this.coreSize * 2.5, 
+                    vx: (Math.random()-0.5)*1, vy: -Math.random()*2 - 1, life: 1.0, size: Math.random()*6 + 2,
+                    color: `hsla(${Math.random()*40 + 10}, 100%, 60%, 0.8)`
+                });
+            }
+
+            ignite() { 
+                if (this.anomaly.immune) return false;
+                this.isIgnited = true; return true;
+            }
+
+            updateEffects() {
+                if(this.isIgnited || this.anomaly.effect === 'fire') {
+                    if (this.isIgnited) this.burnLevel += 0.008;
+                    for(let i=0; i<(this.isIgnited?5:2); i++) this.spawnFireParticle();
+                }
+                for(let i=this.fireParticles.length-1; i>=0; i--) {
+                    let p = this.fireParticles[i];
+                    p.x += p.vx; p.y += p.vy; p.life -= 0.03; p.size *= 0.94;
+                    if(p.life <= 0) this.fireParticles.splice(i, 1);
+                }
+                if (this.anomaly.effect === 'void') {
+                    this.anomalyParticles.forEach(p => {
+                        const dx = 0 - p.x; const dy = 0 - p.y; const dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist < 10) { const angle = Math.random() * Math.PI * 2; const r = 150; p.x = Math.cos(angle) * r; p.y = Math.sin(angle) * r; } 
+                        else { p.x += (dx/dist) * p.speed; p.y += (dy/dist) * p.speed; }
+                    });
+                }
+                if (this.anomaly.effect === 'toxic') {
+                     this.anomalyParticles.forEach(p => {
+                        p.y += p.vy; p.x += Math.sin(this.time + p.y)*0.5;
+                        if(p.y < -100) { p.y = 100; p.x = (Math.random()-0.5)*100; }
+                     });
+                }
+            }
+
+            draw(ctx, w, h) {
+                this.time += 0.02; this.updateEffects();
+                if(this.anomaly.effect === 'glitch' && Math.random() > 0.8) { ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(0,0,w,h); } else { ctx.clearRect(0, 0, w, h); }
+                if(this.burnLevel >= 1.5) return;
+                ctx.save(); ctx.translate(w/2, h/2);
+
+                if (this.anomaly.effect === 'god') {
+                    const grd = ctx.createRadialGradient(0,0,10, 0,0, 200); grd.addColorStop(0, 'rgba(255,255,200,0.8)'); grd.addColorStop(1, 'rgba(255,200,0,0)');
+                    ctx.fillStyle = grd; ctx.globalCompositeOperation = 'screen'; ctx.fillRect(-150,-150,300,300);
+                    ctx.save(); ctx.rotate(this.time * 0.2); ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+                    for(let i=0; i<8; i++) { ctx.rotate(Math.PI/4); ctx.beginPath(); ctx.moveTo(0,50); ctx.lineTo(0,150); ctx.stroke(); } ctx.restore(); ctx.globalCompositeOperation = 'source-over';
+                }
+                if (this.anomaly.effect === 'void') {
+                    ctx.fillStyle = '#000'; this.anomalyParticles.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); });
+                }
+                if (this.anomaly.effect === 'god' || (this.anomaly.effect === 'glitch' && Math.random()>0.9)) { ctx.translate((Math.random()-0.5)*5, (Math.random()-0.5)*5); }
+                if(this.family !== 'BIOMECH' && this.family !== 'CRYSTALLINE' && this.anomaly.effect !== 'frost') { ctx.rotate(this.time * this.rotationSpeed * this.rotationDir); }
+
+                const charFactor = Math.min(1, this.burnLevel * 2); 
+                const r = Math.floor(this.r * (1-charFactor)); const g = Math.floor(this.g * (1-charFactor)); const b = Math.floor(this.b * (1-charFactor));
+                const pulse = 1 + Math.sin(this.time * 2) * 0.1;
+
+                let glowColor = `rgba(${r},${g},${b},0.3)`;
+                if(this.isIgnited) glowColor = 'orange'; else if(this.anomaly.effect === 'electric') glowColor = 'cyan'; else if(this.anomaly.effect === 'toxic') glowColor = '#0f0';
+                ctx.shadowBlur = (this.isIgnited || this.anomaly.effect !== 'normal') ? 40 : 25; ctx.shadowColor = glowColor;
+
+                switch(this.family) {
+                    case 'CORONAL': this.drawCoronal(ctx, r, g, b, pulse); break;
+                    case 'FILAMENTOUS': this.drawFilamentous(ctx, r, g, b); break;
+                    case 'BACTERIOPHAGE': this.drawPhage(ctx, r, g, b); break;
+                    case 'CRYSTALLINE': this.drawCrystal(ctx, r, g, b); break;
+                    case 'AMOEBIC': this.drawAmoebic(ctx, r, g, b); break;
+                    case 'SWARM': this.drawSwarm(ctx, r, g, b); break;
+                    case 'PARASITIC': this.drawParasitic(ctx, r, g, b); break;
+                    case 'DIGITAL': this.drawDigital(ctx, r, g, b); break;
+                    case 'ETHEREAL': this.drawEthereal(ctx, r, g, b); break;
+                    case 'BIOMECH': this.drawBiomech(ctx, r, g, b); break;
+                }
+
+                ctx.shadowBlur = 0; ctx.fillStyle = `rgba(255,255,255,0.5)`;
+                this.particles.forEach(p => {
+                    const rot = p.off + this.time * p.speed; const rad = p.s * 10 + Math.sin(this.time)*5;
+                    if(rad < this.coreSize) { ctx.beginPath(); ctx.arc(Math.cos(rot)*rad, Math.sin(rot)*rad, p.s, 0, Math.PI*2); ctx.fill(); }
+                });
+
+                ctx.rotate(-this.time * this.rotationSpeed * this.rotationDir);
+                if(this.isIgnited || this.anomaly.effect === 'fire') {
+                    ctx.globalCompositeOperation = 'lighter';
+                    this.fireParticles.forEach(p => { ctx.fillStyle = p.color; ctx.globalAlpha = p.life; ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); });
+                    ctx.globalCompositeOperation = 'source-over';
+                }
+                if (this.anomaly.effect === 'electric') {
+                    if (Math.random() > 0.5) {
+                        ctx.strokeStyle = '#aaffff'; ctx.lineWidth = 2; ctx.shadowColor = 'cyan'; ctx.shadowBlur = 10; ctx.beginPath();
+                        let ex = (Math.random()-0.5)*50; let ey = (Math.random()-0.5)*50; ctx.moveTo(ex, ey);
+                        for(let k=0; k<5; k++) { ex += (Math.random()-0.5)*40; ey += (Math.random()-0.5)*40; ctx.lineTo(ex, ey); } ctx.stroke();
+                    }
+                }
+                if (this.anomaly.effect === 'toxic') {
+                    ctx.fillStyle = 'rgba(100, 255, 0, 0.6)'; this.anomalyParticles.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fill(); });
+                }
+                if (this.anomaly.effect === 'frost') {
+                    ctx.fillStyle = 'rgba(200, 240, 255, 0.8)';
+                    for(let i=0; i<5; i++) { const fx = (Math.random()-0.5) * this.coreSize * 3; const fy = (Math.random()-0.5) * this.coreSize * 3; ctx.fillRect(fx, fy, 2, 2); }
+                }
+                ctx.restore();
+            }
+
+            drawCoronal(ctx, r, g, b, pulse) {
+                const grad = ctx.createRadialGradient(-10,-10, 5, 0,0, this.coreSize); grad.addColorStop(0, `rgb(${Math.min(255,r+80)},${Math.min(255,g+80)},${Math.min(255,b+80)})`); grad.addColorStop(0.4, `rgb(${r},${g},${b})`); grad.addColorStop(1, `rgb(${Math.floor(r*0.3)},${Math.floor(g*0.3)},${Math.floor(b*0.3)})`);
+                ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0,0,this.coreSize,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                for(let i=0; i<this.params.spikes; i++) {
+                    const a = (Math.PI*2*i)/this.params.spikes; const len = this.params.spikeLen * pulse;
+                    ctx.save(); ctx.rotate(a); ctx.beginPath(); ctx.moveTo(0, this.coreSize - 5); ctx.bezierCurveTo(5, this.coreSize+10, 2, this.coreSize+len-5, 0, this.coreSize+len); ctx.bezierCurveTo(-2, this.coreSize+len-5, -5, this.coreSize+10, 0, this.coreSize-5); ctx.fill();
+                    ctx.fillStyle = `rgb(${Math.min(255,r+50)},${Math.min(255,g+50)},${Math.min(255,b+50)})`; ctx.beginPath(); ctx.arc(0, this.coreSize+len, 4, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.restore();
+                }
+            }
+            drawFilamentous(ctx, r, g, b) {
+                ctx.strokeStyle = `rgb(${r},${g},${b})`; ctx.lineCap = 'round';
+                for(let k=0; k<3; k++) {
+                    ctx.lineWidth = this.coreSize/3 - k*2; ctx.strokeStyle = k===1 ? `rgba(${r+50},${g+50},${b+50},0.8)` : `rgba(${r},${g},${b},${0.5 + k*0.2})`; ctx.beginPath();
+                    for(let i=0; i<this.params.segmentCount; i++) { const t = i * 0.4 + this.time + k; const x = Math.sin(t) * (25 + k*10); const y = (i - this.params.segmentCount/2) * (15+k); if(i===0) ctx.moveTo(x,y); else ctx.quadraticCurveTo(x+10, y-10, x, y); } ctx.stroke();
+                }
+            }
+            drawPhage(ctx, r, g, b) {
+                ctx.fillStyle = `rgba(${r},${g},${b}, 0.8)`; ctx.strokeStyle = `rgb(${Math.min(255,r+100)},${Math.min(255,g+100)},${Math.min(255,b+100)})`; ctx.lineWidth = 2;
+                ctx.beginPath(); for(let i=0; i<6; i++) { const a = (Math.PI*2*i)/6; ctx.lineTo(Math.cos(a)*this.coreSize, Math.sin(a)*this.coreSize); } ctx.closePath(); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill();
+                ctx.strokeStyle = `rgb(${r},${g},${b})`;
+                for(let i=0; i<this.params.armCount; i++) {
+                    const a = (Math.PI*2*i)/this.params.armCount + this.time*0.5; const len = this.params.spikeLen + 30;
+                    ctx.beginPath(); ctx.moveTo(Math.cos(a)*10, Math.sin(a)*10); ctx.lineTo(Math.cos(a)*len*0.6, Math.sin(a)*len*0.6); ctx.lineTo(Math.cos(a+0.4)*len, Math.sin(a+0.4)*len); ctx.stroke();
+                }
+            }
+            drawCrystal(ctx, r, g, b) {
+                const sides = this.params.polySides; ctx.lineWidth = 1;
+                for(let k=0; k<4; k++) {
+                    ctx.save(); ctx.rotate(k + this.time * (k%2===0?0.5:-0.5)); ctx.fillStyle = `rgba(${r},${g},${b}, ${0.2 + k*0.1})`; ctx.strokeStyle = `rgba(255,255,255,0.4)`; ctx.beginPath();
+                    for(let i=0; i<sides; i++) { const a = (Math.PI*2*i)/sides; const dist = this.coreSize + (k*8); ctx.lineTo(Math.cos(a)*dist, Math.sin(a)*dist); } ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+                }
+            }
+            drawAmoebic(ctx, r, g, b) {
+                const grad = ctx.createRadialGradient(0,0,5,0,0,this.coreSize+20); grad.addColorStop(0, `rgb(${r},${g},${b})`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`);
+                ctx.fillStyle = grad; ctx.beginPath(); for(let i=0; i<=Math.PI*2; i+=0.2) { const rOff = Math.sin(i * this.params.armCount + this.time*3) * 10; const dist = this.coreSize + rOff; ctx.lineTo(Math.cos(i)*dist, Math.sin(i)*dist); } ctx.closePath(); ctx.fill();
+                ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(Math.sin(this.time)*10, Math.cos(this.time)*5, this.coreSize/3, 0, Math.PI*2); ctx.fill();
+            }
+            drawSwarm(ctx, r, g, b) {
+                const count = 40;
+                for(let i=0; i<count; i++) { const t = this.time + i; const orbitR = this.coreSize + Math.sin(t*0.5 + i)*25; const px = Math.cos(t * (0.5 + (i%3)*0.2)) * orbitR; const py = Math.sin(t * (0.5 + (i%3)*0.2)) * orbitR; ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.beginPath(); ctx.arc(px,py, (Math.sin(t*5)+2)*1.5, 0, Math.PI*2); ctx.fill(); }
+                const grad = ctx.createRadialGradient(0,0,0,0,0,this.coreSize); grad.addColorStop(0, `rgba(${r},${g},${b},0.8)`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`); ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(0,0,this.coreSize,0,Math.PI*2); ctx.fill();
+            }
+            drawParasitic(ctx, r, g, b) {
+                ctx.fillStyle = `rgb(${Math.floor(r/2)},${Math.floor(g/2)},${Math.floor(b/2)})`; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill();
+                ctx.strokeStyle = `rgb(${r},${g},${b})`; ctx.lineWidth = 3; ctx.lineCap = 'round';
+                for(let i=0; i<this.params.armCount; i++) { const angle = (Math.PI*2*i)/this.params.armCount; ctx.beginPath(); for(let d=0; d<this.params.spikeLen + 20; d+=5) { const wave = Math.sin(d*0.1 - this.time*4 + i) * 8; const px = Math.cos(angle)*d + Math.cos(angle+Math.PI/2)*wave; const py = Math.sin(angle)*d + Math.sin(angle+Math.PI/2)*wave; if(d===0) ctx.moveTo(px,py); else ctx.lineTo(px,py); } ctx.stroke(); }
+                ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(Math.cos(this.time)*3, Math.sin(this.time)*3,5,0,Math.PI*2); ctx.fill();
+            }
+            drawDigital(ctx, r, g, b) {
+                ctx.fillStyle = `rgb(${r},${g},${b})`; const s = this.coreSize; const glX = Math.random() > 0.9 ? (Math.random()-0.5)*10 : 0; ctx.fillRect(-s/2 + glX, -s/2, s, s);
+                ctx.fillStyle = `rgba(${r},${g},${b},0.6)`; for(let i=0; i<4; i++) { const d = s + 5 + Math.sin(this.time*5 + i)*10; if(i===0) ctx.fillRect(-d, -5, 10, 10); if(i===1) ctx.fillRect(d, -5, 10, 10); if(i===2) ctx.fillRect(-5, -d, 10, 10); if(i===3) ctx.fillRect(-5, d, 10, 10); } ctx.fillStyle = 'rgba(0,0,0,0.5)'; for(let y=-s/2; y<s/2; y+=4) ctx.fillRect(-s/2, y, s, 2);
+            }
+            drawEthereal(ctx, r, g, b) {
+                for(let i=0; i<6; i++) { ctx.save(); const t = this.time * 0.5 + i; ctx.rotate(t * (i%2==0?1:-1)); const scale = 1 + Math.sin(t)*0.2; ctx.scale(scale, scale); const grad = ctx.createRadialGradient(10,10,0, 0,0, this.coreSize + i*5); grad.addColorStop(0, `rgba(${r},${g},${b},0)`); grad.addColorStop(0.5, `rgba(${r},${g},${b},0.15)`); grad.addColorStop(1, `rgba(${r},${g},${b},0)`); ctx.fillStyle = grad; ctx.beginPath(); for(let a=0; a<Math.PI*2; a+=0.5) { const d = this.coreSize + Math.random()*5; ctx.lineTo(Math.cos(a)*d, Math.sin(a)*d); } ctx.closePath(); ctx.fill(); ctx.restore(); }
+            }
+            drawBiomech(ctx, r, g, b) {
+                ctx.strokeStyle = `rgb(${r},${g},${b})`; ctx.lineWidth = 8; ctx.lineCap = 'butt'; for(let i=0; i<4; i++) { ctx.beginPath(); ctx.arc(0,0, this.coreSize - i*8, i + this.time, i + this.time + Math.PI); ctx.stroke(); }
+                ctx.strokeStyle = `rgba(${r+50},${g+50},${b+50}, 0.6)`; ctx.lineWidth = 2; for(let i=0; i<8; i++) { const a = (Math.PI*2*i)/8; ctx.beginPath(); ctx.moveTo(Math.cos(a)*20, Math.sin(a)*20); ctx.lineTo(Math.cos(a)*(this.coreSize+20), Math.sin(a)*(this.coreSize+20)); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(Math.cos(a)*(this.coreSize+20), Math.sin(a)*(this.coreSize+20), 2, 0, Math.PI*2); ctx.fill(); }
+            }
+        }
+
+        /* --- 8. GAME CONTROL --- */
+        function startGame() {
+            document.getElementById('introScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.remove('hidden');
+            mainLoop();
+        }
+
+        function synthesizeVirus() {
+            const s1 = starterSelect.value;
+            const s2 = virusSelect.value;
+            const s3 = spaceSelect.value;
+            document.getElementById('emptyState').style.display = 'none';
+
+            const recipeHash = stringToHash(s1 + s2 + s3);
+            let salt = 0; let finalVirus = null; let attempts = 0;
+            
+            while(attempts < 50) {
+                const tempVirus = new ActiveVirus(recipeHash, s2, salt);
+                const now = Date.now();
+                virusHistory = virusHistory.filter(v => now - v.timestamp < 20000);
+                
+                const collision = virusHistory.find(v => 
+                    v.family === tempVirus.family && Math.abs(v.r - tempVirus.r) < 30 && Math.abs(v.g - tempVirus.g) < 30 && Math.abs(v.b - tempVirus.b) < 30
+                );
+
+                if (collision) {
+                    if (collision.seed === tempVirus.seed) { finalVirus = tempVirus; break; } 
+                    else { salt += 1000; attempts++; }
+                } else {
+                    finalVirus = tempVirus; break;
+                }
+            }
+            if (!finalVirus) finalVirus = new ActiveVirus(recipeHash, s2, salt);
+            currentVirus = finalVirus;
+            
+            virusHistory.push({ seed: currentVirus.seed, family: currentVirus.family, r: currentVirus.r, g: currentVirus.g, b: currentVirus.b, timestamp: Date.now() });
+
+            // UI
+            const readout = document.getElementById('dataReadout');
+            const anomalyData = currentVirus.anomaly;
+            const anomalyHtml = `<span class="${anomalyData.color} font-bold animate-pulse tracking-widest">${anomalyData.label}</span>`;
+            
+            readout.innerHTML = `
+                <div class="stat-line">
+                    <span class="stat-label">CLASS:</span> 
+                    <span class="text-green-400 font-bold tracking-wider">${currentVirus.family}</span>
+                </div>
+                <div class="stat-line">
+                    <span class="stat-label">DESIGNATION:</span> 
+                    <span class="text-white font-bold tracking-wider">${currentVirus.displayName}</span>
+                </div>
+                <div class="stat-line">
+                    <span class="stat-label">ANOMALY:</span> 
+                    <div>${anomalyHtml}</div>
+                </div>
+                <div class="stat-line">
+                    <span class="stat-label">THREAT LEVEL:</span> 
+                    <div class="w-full bg-black h-2 border border-green-900 flex opacity-80">
+                        <div class="bg-red-600 h-full" style="width:${currentVirus.stats.lethality}%"></div>
+                        <div class="bg-yellow-500 h-full" style="width:${currentVirus.stats.contagion}%"></div>
+                        <div class="bg-purple-500 h-full" style="width:${currentVirus.stats.mutation}%"></div>
+                    </div>
+                </div>
+                <div class="contact-result">
+                    <strong class="text-red-500 block mb-1 tracking-wider text-[0.7rem]">>> BIO-HAZARD ANALYSIS:</strong>
+                    ${currentVirus.desc}
+                </div>
+            `;
+        }
+
+        function igniteVirus() {
+            if (!currentVirus) return;
+
+            const success = currentVirus.ignite();
+            const readout = document.getElementById('dataReadout');
+
+            if (!success) {
+                // Immune Logic
+                const msg = currentVirus.anomaly.effect === 'god' ? 'DIVINE INTERVENTION' : 'IMMUNITY DETECTED';
+                readout.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full text-red-600">
+                        <div class="text-2xl font-bold animate-bounce tracking-widest font-['Orbitron']">PURGE FAILED</div>
+                        <div class="text-sm font-bold text-yellow-500">${msg}</div>
+                    </div>
+                `;
+                // Shake screen
+                const stage = document.getElementById('virusStage');
+                stage.style.transform = 'translate(5px, 5px)';
+                setTimeout(() => stage.style.transform = 'translate(0,0)', 100);
+                return;
+            }
+
+            // Success Logic
+            readout.innerHTML = `
+                <div class="flex flex-col items-center justify-center h-full text-red-600">
+                    <div class="text-2xl font-bold animate-pulse tracking-widest font-['Orbitron']">INCINERATION</div>
+                    <div class="text-sm">THERMAL PURGE ACTIVE...</div>
+                </div>
+            `;
+            setTimeout(() => {
+                currentVirus = null;
+                vCtx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+                document.getElementById('emptyState').style.display = 'block';
+                document.getElementById('dataReadout').innerHTML = `
+                    <div class="text-center text-gray-600 pt-10 text-xs tracking-[0.2em] font-bold">// READY FOR NEW SYNTHESIS</div>
+                `;
+            }, 3000);
+        }
+
+        function mainLoop() {
+            if (currentVirus) currentVirus.draw(vCtx, vCanvas.width, vCanvas.height);
+            requestAnimationFrame(mainLoop);
+        }
+    </script>
+</body>
+</html>
+
+
