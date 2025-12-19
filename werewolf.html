@@ -358,6 +358,23 @@
             display: flex;
             align-items: center;
             gap: 1rem;
+            position: relative;
+        }
+
+        .delete-card-btn {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            opacity: 0.3;
+            transition: all 0.2s;
+            cursor: pointer;
+            padding: 8px;
+            color: #ef4444;
+        }
+        .delete-card-btn:hover {
+            opacity: 1;
+            transform: translateY(-50%) scale(1.1);
         }
 
         ::-webkit-scrollbar { width: 6px; }
@@ -448,7 +465,7 @@
     <div id="screen-grimoire" class="screen">
         <div class="flex items-center gap-1.5 mb-6">
             <h2 class="text-2xl sm:text-3xl font-bold tracking-[0.2em] text-gold uppercase">THE GRIMOIRE</h2>
-            <button onclick="window.openQuickEditor()" class="opacity-20 hover:opacity-100 transition-opacity cursor-pointer p-0.5 mt-1" title="Quick Edit Deck">
+            <button onclick="window.openQuickEditor()" class="opacity-20 hover:opacity-100 transition-opacity cursor-pointer p-0.5 mt-1" title="Edit Characters & Deck">
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"></circle>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -465,16 +482,18 @@
         </div>
     </div>
 
-    <!-- QUICK EDITOR SCREEN -->
+    <!-- QUICK EDITOR SCREEN (DECK ARCHITECT) -->
     <div id="screen-quick-edit" class="screen">
-        <h2 class="text-xl sm:text-2xl font-bold mb-4 tracking-[0.2em] text-gold">DECK PAINTER</h2>
-        <p class="text-[9px] sm:text-[10px] opacity-40 uppercase tracking-[0.3em] mb-6">Rename and Illustrate standard roles</p>
+        <h2 class="text-xl sm:text-2xl font-bold mb-4 tracking-[0.2em] text-gold uppercase">DECK PAINTER</h2>
+        <p class="text-[9px] sm:text-[10px] opacity-40 uppercase tracking-[0.3em] mb-6">Rename, Illustrate, and Manage characters</p>
         
         <div id="quick-edit-container" class="quick-edit-grid mb-8"></div>
 
+        <button onclick="window.addNewQuickRole()" class="btn btn-sm mb-12 !border-gold/30 !bg-gold/5 max-w-[200px] !text-gold">+ New Character</button>
+
         <div class="flex gap-4 w-full max-w-sm">
             <button class="btn !py-3 !bg-transparent !border-white/10" onclick="window.goTo('screen-grimoire')">Cancel</button>
-            <button class="btn !py-3" onclick="window.saveQuickEdits()">Save</button>
+            <button class="btn !py-3" onclick="window.saveQuickEdits()">Apply Ritual</button>
         </div>
     </div>
 
@@ -561,7 +580,7 @@
         window.currentPlayerIndex = 0;
         window.gameRoles = [];
         window.isSpinning = false;
-        window.customRolesData = Array(20).fill(null).map(() => ({ name: '', img: '', desc: '' }));
+        window.customRolesData = []; // Changed to dynamic array
         window.standardOverrides = {}; 
         window.customRolesPool = [];
         window.useCustomDeck = false;
@@ -637,7 +656,7 @@
             if (input === '1090') {
                 localStorage.removeItem('werewolf_p2p_deck_v2');
                 localStorage.removeItem('werewolf_standard_overrides');
-                window.customRolesData = Array(20).fill(null).map(() => ({ name: '', img: '', desc: '' }));
+                window.customRolesData = [];
                 window.standardOverrides = {};
                 updateInternalPool();
                 broadcastDeck();
@@ -759,35 +778,91 @@
             return bestMatch;
         };
 
+        // NEW: Open Quick Editor with Add/Delete functionality
         window.openQuickEditor = () => {
             const container = document.getElementById('quick-edit-container');
             container.innerHTML = '';
+
+            // 1. Add Standard Roles
             Object.keys(roleData).forEach(stdName => {
                 const override = window.standardOverrides[stdName] || { name: stdName, img: '' };
                 const card = document.createElement('div');
                 card.className = 'quick-edit-card';
+                card.dataset.type = 'standard';
+                card.dataset.original = stdName;
                 card.innerHTML = `
                     <div class="relative group flex-shrink-0">
                         <img id="quick-prev-${stdName}" class="img-preview w-12 h-12" src="${override.img || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}">
                         <input type="file" id="quick-file-${stdName}" class="hidden" accept="image/*" onchange="window.handleQuickFile(event, '${stdName}')">
                         <button onclick="document.getElementById('quick-file-${stdName}').click()" class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[8px] font-bold">SET</button>
                     </div>
-                    <div class="flex flex-col grow gap-1">
+                    <div class="flex flex-col grow gap-1 mr-8">
                         <span class="text-[8px] text-white/40 font-bold tracking-widest uppercase">${stdName}</span>
                         <input type="text" id="quick-name-${stdName}" value="${override.name}" class="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-gold">
+                    </div>
+                    <div class="delete-card-btn" onclick="this.closest('.quick-edit-card').remove()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                     </div>
                 `;
                 container.appendChild(card);
             });
+
+            // 2. Add Custom Roles
+            window.customRolesData.forEach((custom, index) => {
+                const id = 'custom-' + index;
+                const card = document.createElement('div');
+                card.className = 'quick-edit-card';
+                card.dataset.type = 'custom';
+                card.innerHTML = `
+                    <div class="relative group flex-shrink-0">
+                        <img id="quick-prev-${id}" class="img-preview w-12 h-12" src="${custom.img || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}">
+                        <input type="file" id="quick-file-${id}" class="hidden" accept="image/*" onchange="window.handleQuickFile(event, '${id}')">
+                        <button onclick="document.getElementById('quick-file-${id}').click()" class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[8px] font-bold">SET</button>
+                    </div>
+                    <div class="flex flex-col grow gap-1 mr-8">
+                        <span class="text-[8px] text-purple-400 font-bold tracking-widest uppercase">Custom Role</span>
+                        <input type="text" id="quick-name-${id}" value="${custom.name}" class="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-gold">
+                    </div>
+                    <div class="delete-card-btn" onclick="this.closest('.quick-edit-card').remove()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+
             window.goTo('screen-quick-edit');
         };
 
-        window.handleQuickFile = (event, stdName) => {
+        window.addNewQuickRole = () => {
+            const container = document.getElementById('quick-edit-container');
+            const id = 'new-' + Date.now();
+            const card = document.createElement('div');
+            card.className = 'quick-edit-card';
+            card.dataset.type = 'custom';
+            card.innerHTML = `
+                <div class="relative group flex-shrink-0">
+                    <img id="quick-prev-${id}" class="img-preview w-12 h-12" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+                    <input type="file" id="quick-file-${id}" class="hidden" accept="image/*" onchange="window.handleQuickFile(event, '${id}')">
+                    <button onclick="document.getElementById('quick-file-${id}').click()" class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-[8px] font-bold">SET</button>
+                </div>
+                <div class="flex flex-col grow gap-1 mr-8">
+                    <span class="text-[8px] text-purple-400 font-bold tracking-widest uppercase">Custom Role</span>
+                    <input type="text" id="quick-name-${id}" value="" placeholder="New Role Name..." class="bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-gold">
+                </div>
+                <div class="delete-card-btn" onclick="this.closest('.quick-edit-card').remove()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </div>
+            `;
+            container.appendChild(card);
+            container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+        };
+
+        window.handleQuickFile = (event, id) => {
             const file = event.target.files[0];
             if (!file) return;
             const reader = new FileReader();
             reader.onload = (e) => {
-                const imgEl = document.getElementById(`quick-prev-${stdName}`);
+                const imgEl = document.getElementById(`quick-prev-${id}`);
                 imgEl.src = e.target.result;
                 imgEl.dataset.newImg = e.target.result; 
             };
@@ -795,19 +870,44 @@
         };
 
         window.saveQuickEdits = () => {
-            const newOverrides = { ...window.standardOverrides };
-            Object.keys(roleData).forEach(stdName => {
-                const nameVal = document.getElementById(`quick-name-${stdName}`).value.trim();
-                const imgEl = document.getElementById(`quick-prev-${stdName}`);
-                const imgVal = imgEl.dataset.newImg || (window.standardOverrides[stdName]?.img || '');
-                newOverrides[stdName] = { 
-                    name: nameVal, 
-                    img: imgVal,
-                    desc: roleData[stdName].desc 
-                };
+            const container = document.getElementById('quick-edit-container');
+            const cards = Array.from(container.querySelectorAll('.quick-edit-card'));
+            
+            const newOverrides = {};
+            const newCustoms = [];
+
+            cards.forEach(card => {
+                const type = card.dataset.type;
+                const idSuffix = card.dataset.original || card.querySelector('input[type="file"]').id.replace('quick-file-', '');
+                const nameVal = card.querySelector('input[type="text"]').value.trim();
+                const imgEl = card.querySelector('img');
+                const imgVal = imgEl.dataset.newImg || (imgEl.src.startsWith('data:image') && imgEl.src.length > 50 ? imgEl.src : '');
+
+                if (type === 'standard') {
+                    const originalName = card.dataset.original;
+                    newOverrides[originalName] = {
+                        name: nameVal || originalName,
+                        img: imgVal,
+                        desc: roleData[originalName].desc
+                    };
+                } else {
+                    if (nameVal || imgVal) {
+                        newCustoms.push({
+                            name: nameVal || "Unnamed Soul",
+                            img: imgVal,
+                            desc: "A custom character added to the ritual grimoire."
+                        });
+                    }
+                }
             });
+
             window.standardOverrides = newOverrides;
+            window.customRolesData = newCustoms;
+            
             localStorage.setItem('werewolf_standard_overrides', JSON.stringify(newOverrides));
+            localStorage.setItem('werewolf_p2p_deck_v2', JSON.stringify(newCustoms));
+            
+            updateInternalPool();
             broadcastDeck();
             window.openGrimoire();
         };
@@ -816,17 +916,22 @@
             const container = document.getElementById('grimoire-container');
             container.innerHTML = '';
             const displayed = new Set();
+
+            // Display standard roles (with potential overrides)
             Object.keys(roleData).forEach(name => {
                 const override = findFuzzyOverride(name);
                 const role = override ? override : { name, img: 'standard', desc: roleData[name].desc };
                 addGrimoireItem(container, role);
                 displayed.add(role.name.toLowerCase());
             });
-            window.customRolesPool.forEach(custom => {
+
+            // Display custom roles
+            window.customRolesData.forEach(custom => {
                 if (!displayed.has(custom.name.toLowerCase())) {
                     addGrimoireItem(container, custom);
                 }
             });
+            
             window.goTo('screen-grimoire');
         };
 
