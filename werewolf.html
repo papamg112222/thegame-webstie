@@ -435,21 +435,40 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase Configuration (Safely parsed for external usage like GitHub)
+        /**
+         * EXTERNAL HOSTING FIX:
+         * To fix "Offline Mode" on GitHub, create a Firebase project and paste your config below.
+         * If you are playing inside the Canvas environment, this will be handled automatically.
+         */
+        const myManualConfig = null; // Example: { apiKey: "...", authDomain: "...", ... }
+        const myManualAppId = "my-custom-werewolf-game";
+
+        // Firebase Configuration Parsing
         let firebaseReady = false;
         let auth, db, appId;
 
         try {
-            if (typeof __firebase_config !== 'undefined') {
-                const firebaseConfig = JSON.parse(__firebase_config);
-                const app = initializeApp(firebaseConfig);
+            let configToUse = null;
+
+            // Priority 1: Manual config provided by the user
+            if (myManualConfig) {
+                configToUse = myManualConfig;
+                appId = myManualAppId;
+            } 
+            // Priority 2: Canvas environment variable
+            else if (typeof __firebase_config !== 'undefined') {
+                configToUse = JSON.parse(__firebase_config);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            }
+
+            if (configToUse) {
+                const app = initializeApp(configToUse);
                 auth = getAuth(app);
                 db = getFirestore(app);
-                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
                 firebaseReady = true;
             }
         } catch (e) {
-            console.warn("Firebase config missing or invalid. Running in Local Mode.");
+            console.warn("Firebase configuration error. Running in Local Mode.", e);
         }
 
         // Global State
@@ -504,6 +523,7 @@
             } catch (e) {
                 console.error("Auth failed, continuing in limited mode.");
                 document.getElementById('loading-overlay').style.display = 'none';
+                document.getElementById('offline-tag').style.display = 'block';
             }
         };
 
@@ -517,7 +537,6 @@
         }
 
         const setupCloudListeners = () => {
-            // Optimized: We now listen to one single "deck" document instead of 20 slots
             const deckDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'customDeck', 'main');
             onSnapshot(deckDocRef, (snapshot) => {
                 if (snapshot.exists()) {
@@ -612,7 +631,6 @@
                 newSlots.push({ name, img, desc: 'A custom role from your cloud deck.' });
             }
 
-            // If offline, just update locally
             if (!firebaseReady) {
                 window.customRolesData = newSlots;
                 updateInternalPool();
@@ -623,7 +641,6 @@
             }
 
             try {
-                // Optimized: Single document update is 20x faster than updating individual slots
                 const deckDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'customDeck', 'main');
                 await setDoc(deckDocRef, { slots: newSlots });
                 window.goTo('screen-start');
@@ -711,7 +728,7 @@
             track.innerHTML = '';
             
             let fluffPool = [...window.customRolesPool];
-            Object.keys(roleData).forEach(k => {
+            Object.keys(roleArt).forEach(k => {
                 if (!findOverride(k)) fluffPool.push({ name: k, img: 'standard' });
             });
 
