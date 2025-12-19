@@ -246,6 +246,15 @@
             display: none;
             z-index: 500;
         }
+
+        .role-desc-text {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            max-width: 400px;
+            margin: 10px auto 25px auto;
+            color: #ccc;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -295,6 +304,7 @@
         <div class="player-indicator" id="result-player-name">Player 1</div>
         <div id="result-illustration" style="width: 240px; height: 240px; border: 3px solid var(--gold); border-radius: 12px; overflow: hidden; margin-bottom: 20px;"></div>
         <div id="final-role-display" class="role-reveal-title">WEREWOLF</div>
+        <p id="final-role-desc" class="role-desc-text"></p>
         <button class="btn" onclick="window.nextPlayer()">I Have Memorized It</button>
     </div>
 
@@ -313,12 +323,26 @@
 
         let firebaseReady = false, db, appId, auth, currentUser = null;
 
-        window.customRolesData = Array(20).fill(null).map(() => ({ name: '', img: '' }));
+        window.customRolesData = Array(20).fill(null).map(() => ({ name: '', img: '', desc: '' }));
         window.totalPlayers = 4;
         window.currentPlayerIndex = 0;
         window.gameRoles = [];
 
-        // Image Compression Helper (Prevents Crashes/Warnings)
+        // Standard explanations for roles
+        const defaultDescriptions = {
+            'werewolf': 'Each night, you and your fellow wolves choose one villager to eliminate. Blend in during the day!',
+            'villager': 'A common citizen. Your goal is to identify the werewolves and vote them out during the day.',
+            'seer': 'Each night, you may peek at one player\'s identity to see if they are a werewolf.',
+            'doctor': 'Each night, you can choose one player to protect. If the wolves attack them, they will survive.',
+            'hunter': 'If you are eliminated, you have one final shot to take down another player of your choice.',
+            'witch': 'You have two potions: one to save a player from the wolves and one to eliminate a player.',
+            'bodyguard': 'Choose a player to protect each night. You cannot choose the same player twice in a row.',
+            'tanner': 'You hate your life and the village. You only win if the village votes to execute you!',
+            'cupid': 'At the start, pick two players to be lovers. If one of them dies, the other dies of a broken heart.',
+            'vampire': 'A neutral predator. You strike when the wolves are gone, or create your own coven.'
+        };
+
+        // Image Compression Helper
         const compressImage = (base64Str) => {
             return new Promise((resolve) => {
                 const img = new Image();
@@ -345,7 +369,7 @@
                     canvas.height = height;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.6)); // High compression
+                    resolve(canvas.toDataURL('image/jpeg', 0.6));
                 };
             });
         };
@@ -410,14 +434,23 @@
                         <span class="text-xs text-purple-300">Slot ${i+1}</span>
                         <img id="prev-${i}" class="img-preview" src="${r.img || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}">
                     </div>
-                    <input id="name-${i}" value="${r.name || ''}" placeholder="Role Name">
-                    <textarea id="base64-${i}" placeholder="Image Data" class="h-10 text-[8px]">${r.img || ''}</textarea>
-                    <button class="bg-purple-900 text-xs py-1 rounded" onclick="document.getElementById('file-${i}').click()">Upload</button>
+                    <input id="name-${i}" value="${r.name || ''}" placeholder="Role Name" oninput="window.autoFillDesc(${i})">
+                    <textarea id="desc-${i}" placeholder="What does this role do?" class="h-12 text-[10px]">${r.desc || ''}</textarea>
+                    <textarea id="base64-${i}" placeholder="Image Data" class="hidden">${r.img || ''}</textarea>
+                    <button class="bg-purple-900 text-xs py-1 rounded" onclick="document.getElementById('file-${i}').click()">Upload Picture</button>
                     <input type="file" id="file-${i}" class="hidden" onchange="window.handleFile(${i}, event)">
                 `;
                 container.appendChild(div);
             });
             window.goTo('screen-custom');
+        };
+
+        window.autoFillDesc = (i) => {
+            const nameInput = document.getElementById(`name-${i}`).value.toLowerCase().trim();
+            const descArea = document.getElementById(`desc-${i}`);
+            if (defaultDescriptions[nameInput] && !descArea.value) {
+                descArea.value = defaultDescriptions[nameInput];
+            }
         };
 
         window.handleFile = async (i, e) => {
@@ -432,12 +465,6 @@
             reader.readAsDataURL(file);
         };
 
-        window.updatePreview = (i) => {
-            const val = document.getElementById(`base64-${i}`).value;
-            const img = document.getElementById(`prev-${i}`);
-            img.src = val || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-        };
-
         window.saveCustomRoles = async () => {
             const btn = document.getElementById('save-btn');
             btn.disabled = true;
@@ -446,10 +473,10 @@
             try {
                 const slots = [];
                 for (let i=0; i<20; i++) {
-                    slots.push({ 
-                        name: document.getElementById(`name-${i}`).value || '', 
-                        img: document.getElementById(`base64-${i}`).value || '' 
-                    });
+                    const n = document.getElementById(`name-${i}`).value || '';
+                    const im = document.getElementById(`base64-${i}`).value || '';
+                    const ds = document.getElementById(`desc-${i}`).value || '';
+                    slots.push({ name: n, img: im, desc: ds });
                 }
                 
                 if (firebaseReady && currentUser) {
@@ -460,7 +487,7 @@
                 window.goTo('screen-start');
             } catch (e) {
                 console.warn("Save Error:", e);
-                window.goTo('screen-start'); // Fallback to local proceed
+                window.goTo('screen-start');
             } finally {
                 btn.disabled = false;
                 btn.innerText = "Save & Sync";
@@ -468,13 +495,13 @@
         };
 
         window.setupGame = () => {
-            const pool = window.customRolesData.filter(r => r.name && r.img && r.img.length > 50);
+            const pool = window.customRolesData.filter(r => r.name && r.img.length > 50);
             window.gameRoles = [];
             for (let i=0; i<window.totalPlayers; i++) {
                 if (pool.length > 0) {
                     window.gameRoles.push(pool[i % pool.length]);
                 } else {
-                    window.gameRoles.push({ name: 'Villager', img: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7' });
+                    window.gameRoles.push({ name: 'Villager', img: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', desc: defaultDescriptions['villager'] });
                 }
             }
             window.gameRoles.sort(() => Math.random() - 0.5);
@@ -520,6 +547,7 @@
                 const winner = window.gameRoles[window.currentPlayerIndex];
                 document.getElementById('result-player-name').innerText = `Player ${window.currentPlayerIndex + 1}`;
                 document.getElementById('final-role-display').innerText = winner.name;
+                document.getElementById('final-role-desc').innerText = winner.desc || "No description provided for this role.";
                 document.getElementById('result-illustration').innerHTML = `<img src="${winner.img}" class="w-full h-full object-cover">`;
                 window.goTo('screen-result');
             }, 7500);
