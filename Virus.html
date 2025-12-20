@@ -479,16 +479,26 @@
 
         // --- MOCK CLASSES FOR SIMULATION ---
         class MockAuth {
+            constructor() {
+                this.currentUserVal = null;
+                this.cb = null;
+            }
             signInAnonymously() {
                 return new Promise((resolve) => {
                     const user = { uid: 'sim-user-' + Math.floor(Math.random()*1000000) };
-                    this.onAuthStateChangedCallback(user);
+                    this.currentUserVal = user;
+                    // IF a listener is already registered, fire it
+                    if(this.cb) this.cb(user);
                     resolve({ user });
                 });
             }
             signInWithCustomToken() { return this.signInAnonymously(); }
-            onAuthStateChanged(cb) { this.onAuthStateChangedCallback = cb; }
-            get currentUser() { return currentUser; }
+            onAuthStateChanged(cb) { 
+                this.cb = cb;
+                // IF user is already signed in (race condition fix), fire immediately
+                if(this.currentUserVal) cb(this.currentUserVal);
+            }
+            get currentUser() { return this.currentUserVal; }
         }
 
         class MockDoc {
@@ -567,18 +577,8 @@
             db = firebase.firestore();
         }
 
-        /* --- 1. AUTH & ADMIN LOGIC --- */
+        /* --- 1. ADMIN LOGIC (Listeners first) --- */
         
-        async function initAuth() {
-             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token && !useSimulation) {
-                await auth.signInWithCustomToken(__initial_auth_token);
-            } else {
-                await auth.signInAnonymously();
-            }
-        }
-
-        initAuth();
-
         auth.onAuthStateChanged(async (user) => {
             if (user) {
                 currentUser = user;
@@ -1229,7 +1229,11 @@
         
         // MODIFIED START FUNCTION TO CHECK PERMISSION
         async function tryStartGame() {
-            if(!myDocRef) return; // Wait for auth
+            if(!myDocRef) {
+                // If this is null, initAuth() might still be working
+                console.warn("Auth not ready. Waiting for network...");
+                return; 
+            }
             
             const doc = await myDocRef.get();
             if(doc.exists) {
@@ -1458,6 +1462,17 @@
 
             scanId = requestAnimationFrame(animateScan);
         }
+
+        /* --- 9. START AUTHENTICATION (Last Step) --- */
+        async function initAuth() {
+             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token && !useSimulation) {
+                await auth.signInWithCustomToken(__initial_auth_token);
+            } else {
+                await auth.signInAnonymously();
+            }
+        }
+        // CRITICAL: Call this AFTER onAuthStateChanged listener is defined
+        initAuth();
 
     </script>
 </body>
