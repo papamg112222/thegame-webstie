@@ -441,22 +441,136 @@
     </div>
 
     <script>
-        /* --- FIREBASE SETUP --- */
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        /* --- CONFIGURATION & DETECTION --- */
+        let useSimulation = false;
+        let firebaseConfig = null;
+        let appId = 'default-app-id';
 
+        // 1. Check if we are in the Artifacts Environment
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+            console.log("Running in Artifacts Environment");
+            firebaseConfig = JSON.parse(__firebase_config);
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        } 
+        // 2. Check if User provided custom config for GitHub/Standalone
+        // PASTE YOUR FIREBASE CONFIG INSIDE THE QUOTES BELOW IF YOU WANT REAL MULTIPLAYER
+        else if (false) { 
+             /* Example: 
+                firebaseConfig = { 
+                    apiKey: "...", 
+                    authDomain: "...", 
+                    projectId: "...", 
+                    ... 
+                }; 
+             */
+        }
+        // 3. Fallback to Simulation Mode (GitHub Pages without Config)
+        else {
+            console.warn("No Firebase Config detected. Switching to SIMULATION MODE (localStorage).");
+            useSimulation = true;
+        }
+
+        /* --- FIREBASE OR MOCK INIT --- */
+        let app, auth, db;
         let currentUser = null;
         let isAdmin = false;
         let myDocRef = null;
         let myName = "world-destroyer" + Math.floor(Math.random() * 9999);
 
+        // --- MOCK CLASSES FOR SIMULATION ---
+        class MockAuth {
+            signInAnonymously() {
+                return new Promise((resolve) => {
+                    const user = { uid: 'sim-user-' + Math.floor(Math.random()*1000000) };
+                    this.onAuthStateChangedCallback(user);
+                    resolve({ user });
+                });
+            }
+            signInWithCustomToken() { return this.signInAnonymously(); }
+            onAuthStateChanged(cb) { this.onAuthStateChangedCallback = cb; }
+            get currentUser() { return currentUser; }
+        }
+
+        class MockDoc {
+            constructor(path) { this.path = path; this.id = path.split('/').pop(); }
+            get() {
+                const data = JSON.parse(localStorage.getItem('virus_game_users') || '{}');
+                const docData = data[this.id];
+                return Promise.resolve({ exists: !!docData, data: () => docData, id: this.id });
+            }
+            set(obj) {
+                const data = JSON.parse(localStorage.getItem('virus_game_users') || '{}');
+                data[this.id] = { ...obj };
+                localStorage.setItem('virus_game_users', JSON.stringify(data));
+                window.dispatchEvent(new Event('storage_update'));
+                return Promise.resolve();
+            }
+            update(obj) {
+                const data = JSON.parse(localStorage.getItem('virus_game_users') || '{}');
+                if(data[this.id]) {
+                    data[this.id] = { ...data[this.id], ...obj };
+                    localStorage.setItem('virus_game_users', JSON.stringify(data));
+                    window.dispatchEvent(new Event('storage_update'));
+                }
+                return Promise.resolve();
+            }
+            onSnapshot(cb) {
+                const check = async () => {
+                    const snap = await this.get();
+                    cb(snap);
+                };
+                check();
+                const handler = () => check();
+                window.addEventListener('storage_update', handler); // Local event
+                window.addEventListener('storage', handler); // Cross-tab event
+                setInterval(check, 1000); // Polling backup
+                return () => { window.removeEventListener('storage_update', handler); };
+            }
+        }
+
+        class MockCollection {
+            constructor(path) { this.path = path; }
+            doc(id) { return new MockDoc(this.path + '/' + id); }
+            onSnapshot(cb) {
+                const check = () => {
+                    const data = JSON.parse(localStorage.getItem('virus_game_users') || '{}');
+                    const docs = Object.keys(data).map(key => ({
+                        id: key,
+                        data: () => data[key]
+                    }));
+                    cb({ forEach: (fn) => docs.forEach(fn) });
+                };
+                check();
+                const handler = () => check();
+                window.addEventListener('storage_update', handler);
+                window.addEventListener('storage', handler);
+                setInterval(check, 1000);
+                return () => { window.removeEventListener('storage_update', handler); };
+            }
+        }
+
+        class MockDB {
+            collection(p) { 
+                // We simplify and map all "collection" calls to our mock wrapper
+                // The app only uses the 'users' collection effectively
+                return new MockCollection('users'); 
+            }
+        }
+
+        // --- INITIALIZATION ---
+        if (useSimulation) {
+            auth = new MockAuth();
+            db = new MockDB();
+        } else {
+            app = firebase.initializeApp(firebaseConfig);
+            auth = firebase.auth();
+            db = firebase.firestore();
+        }
+
         /* --- 1. AUTH & ADMIN LOGIC --- */
         
         async function initAuth() {
-             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token && !useSimulation) {
                 await auth.signInWithCustomToken(__initial_auth_token);
             } else {
                 await auth.signInAnonymously();
@@ -471,7 +585,13 @@
                 document.getElementById('myUserIdDisplay').innerText = user.uid.substring(0,8);
                 
                 // Set initial presence
-                const usersCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+                let usersCollection;
+                if(useSimulation) {
+                    usersCollection = db.collection('users'); // Simplified mock path
+                } else {
+                    usersCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+                }
+                
                 myDocRef = usersCollection.doc(user.uid);
                 
                 // Check if I exist already (persistence), otherwise create
@@ -482,7 +602,7 @@
                     await myDocRef.set({
                         name: myName,
                         status: 'standby', 
-                        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                        lastSeen: useSimulation ? Date.now() : firebase.firestore.FieldValue.serverTimestamp()
                     });
                     startStatusListener();
                 } else {
@@ -492,7 +612,9 @@
 
                 // Heartbeat
                 setInterval(() => {
-                    if(currentUser) myDocRef.update({ lastSeen: firebase.firestore.FieldValue.serverTimestamp() });
+                    if(currentUser) myDocRef.update({ 
+                        lastSeen: useSimulation ? Date.now() : firebase.firestore.FieldValue.serverTimestamp() 
+                    });
                 }, 30000);
             }
         });
@@ -576,7 +698,12 @@
             myDocRef.update({ status: 'active', isAdmin: true });
             
             // Listen to all users
-            const usersCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+            let usersCollection;
+            if(useSimulation) {
+                usersCollection = db.collection('users');
+            } else {
+                usersCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+            }
             usersCollection.onSnapshot(renderAdminList);
         }
 
@@ -642,8 +769,14 @@
         // Expose to window for onclick
         window.updateUserStatus = function(targetUid, newStatus) {
             if(!isAdmin) return;
-            db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users')
-                .doc(targetUid).update({ status: newStatus });
+            
+            let usersCollection;
+            if(useSimulation) {
+                usersCollection = db.collection('users');
+            } else {
+                usersCollection = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('users');
+            }
+            usersCollection.doc(targetUid).update({ status: newStatus });
         };
 
         window.switchAdminTab = function(tabName) {
