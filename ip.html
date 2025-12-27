@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cottage Nightmare</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; user-select: none; touch-action: none; }
+        canvas { display: block; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+        }
+
+        #eyelids {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background-color: black;
+            opacity: 1;
+            transition: opacity 0.2s ease-in-out;
+            z-index: 1;
+        }
+
+        #story-text {
+            color: white;
+            font-size: 24px;
+            text-align: center;
+            z-index: 2;
+            opacity: 0;
+            transition: opacity 1s ease;
+            text-shadow: 0 0 5px red;
+            max-width: 80%;
+            background: rgba(0,0,0,0.5);
+            padding: 20px;
+            border-radius: 5px;
+        }
+
+        /* PAUSE / START SCREEN */
+        #pause-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            color: #ccc;
+            display: none; 
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 30;
+            flex-direction: column;
+            pointer-events: auto;
+        }
+        #pause-screen h1 {
+            border: 1px solid #666;
+            padding: 20px 40px;
+            background: #111;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #050505;
+            color: #888;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            z-index: 20;
+            flex-direction: column;
+            transition: opacity 0.5s;
+        }
+        
+        #start-screen h1 {
+            border: 1px solid #444;
+            padding: 20px;
+            border-radius: 2px;
+            font-weight: lighter;
+            letter-spacing: 2px;
+            color: #ccc;
+        }
+
+        #crosshair {
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 4px; height: 4px;
+            background: rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            display: none; 
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        /* --- INTERACTION LABEL --- */
+        #interact-label {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(20px, -50%); /* Offset to the right of crosshair */
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+            text-shadow: 1px 1px 2px black;
+            display: none;
+            pointer-events: none;
+            z-index: 6;
+            background: rgba(0,0,0,0.6);
+            padding: 5px 10px;
+            border-radius: 4px;
+            border-left: 3px solid white;
+        }
+        .key-hint {
+            color: #ffaa00;
+            font-weight: bold;
+            margin-left: 5px;
+        }
+
+        /* --- MOBILE CONTROLS --- */
+        #mobile-ui { display: none; pointer-events: none; width:100%; height:100%; position:absolute; top:0; left:0; z-index: 15; }
+        
+        .touch-zone {
+            position: absolute;
+            bottom: 0;
+            height: 100%; 
+            pointer-events: auto;
+        }
+        #zone-move { left: 0; width: 40%; background: transparent; }
+        #zone-look { right: 0; width: 60%; background: transparent; }
+
+        .joystick-hint {
+            position: absolute;
+            bottom: 60px;
+            left: 60px;
+            width: 100px;
+            height: 100px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-radius: 50%;
+            pointer-events: none;
+        }
+        
+        #interact-btn {
+            position: absolute;
+            bottom: 80px;
+            right: 40px;
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            pointer-events: auto; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 30px;
+            backdrop-filter: blur(2px);
+            user-select: none;
+        }
+        #interact-btn:active {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(0.95);
+        }
+
+        @media (hover: none) and (pointer: coarse) {
+            #mobile-ui { display: block; }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="start-screen">
+        <h1>TAP TO WAKE UP</h1>
+        <p style="margin-top:10px; font-size: 12px; color:#555">Headphones Recommended</p>
+    </div>
+
+    <div id="pause-screen">
+        <h1>CLICK TO RESUME</h1>
+    </div>
+
+    <div id="crosshair"></div>
+    <div id="interact-label"></div>
+
+    <div id="mobile-ui">
+        <div id="zone-move" class="touch-zone"></div>
+        <div id="zone-look" class="touch-zone"></div>
+        <div id="interact-btn">🖐️</div>
+        <div class="joystick-hint"></div>
+    </div>
+
+    <div id="ui-layer">
+        <div id="eyelids"></div>
+        <div id="story-text"></div>
+    </div>
+
+    <!-- Three.js Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
+
+    <script>
+        // --- VARIABLES ---
+        let camera, scene, renderer, controls;
+        let moveForward = false, moveBackward = false, moveLeft = false, moveRight = false;
+        let prevTime = performance.now();
+        let velocity = new THREE.Vector3();
+        let direction = new THREE.Vector3();
+        let isCutsceneActive = true;
+        let isPaused = false;
+        
+        // Interaction & Holding
+        let handGroup;
+        let heldItem = null;
+        let interactableObjects = [];
+        let fallingObjects = []; // Array to track physics items
+        const interactLabel = document.getElementById('interact-label');
+        let currentTarget = null;
+        
+        // Head Bob & Sway
+        let bobTimer = 0;
+        const bobFrequency = 10;
+        const bobAmplitude = 0.1;
+        const defaultCamHeight = 3.5;
+        let swayX = 0;
+        let swayY = 0;
+
+        // Mobile / Touch
+        let touchMoveOrigin = null;
+        let touchLookLast = null;
+        let mobileMoveVector = { x: 0, y: 0 };
+        const pitchLimit = Math.PI / 2 - 0.1;
+
+        // Dimensions
+        const roomWidth = 10;
+        const roomDepth = 12;
+        const roomHeight = 6;
+
+        const textElement = document.getElementById('story-text');
+        const eyelids = document.getElementById('eyelids');
+        const startScreen = document.getElementById('start-screen');
+        const pauseScreen = document.getElementById('pause-screen');
+        const crosshair = document.getElementById('crosshair');
+        const interactBtn = document.getElementById('interact-btn');
+
+        // Raycasting
+        const raycaster = new THREE.Raycaster();
+        const center = new THREE.Vector2(0, 0);
+
+        init();
+        animate();
+
+        function init() {
+            scene = new THREE.Scene();
+            // Thinner fog so we can see the moon better
+            scene.fog = new THREE.FogExp2(0x050510, 0.005); 
+
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000); 
+            camera.rotation.order = "YXZ"; 
+            // Start: Lying down
+            camera.position.set(-roomWidth/2 + 2, 1.4, -0.5); 
+            camera.rotation.x = -1.2; 
+            camera.rotation.y = -0.8; 
+            camera.rotation.z = -0.5;
+
+            // Hand
+            handGroup = new THREE.Group();
+            handGroup.position.set(0.5, -0.6, -1);
+            camera.add(handGroup);
+            scene.add(camera);
+
+            renderer = new THREE.WebGLRenderer({ antialias: window.devicePixelRatio < 2, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.setClearColor(0x020205);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.physicallyCorrectLights = true; 
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            document.body.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0x202040, 0.4); 
+            scene.add(ambientLight);
+
+            const ceilingLight = new THREE.PointLight(0xffaa55, 60, 20); 
+            ceilingLight.position.set(0, 4.2, 0);
+            ceilingLight.castShadow = true;
+            ceilingLight.shadow.bias = -0.0005;
+            ceilingLight.shadow.mapSize.width = 1024;
+            ceilingLight.shadow.mapSize.height = 1024;
+            ceilingLight.userData = { isMainLight: true, baseInt: 60 };
+            scene.add(ceilingLight);
+
+            // Moon Light
+            const moonLight = new THREE.DirectionalLight(0xccccff, 0.8);
+            moonLight.position.set(200, 400, -300);
+            moonLight.castShadow = true;
+            moonLight.shadow.camera.left = -500;
+            moonLight.shadow.camera.right = 500;
+            moonLight.shadow.camera.top = 500;
+            moonLight.shadow.camera.bottom = -500;
+            moonLight.shadow.mapSize.width = 1024;
+            moonLight.shadow.mapSize.height = 1024;
+            scene.add(moonLight);
+
+            createRealisticEnvironment();
+            createGrasslandExterior(); 
+
+            controls = new THREE.PointerLockControls(camera, document.body);
+
+            // Listeners
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
+            
+            // Start & Pause handlers
+            startScreen.addEventListener('click', startGame);
+            startScreen.addEventListener('touchstart', startGame);
+            pauseScreen.addEventListener('click', () => {
+                if(!isCutsceneActive) {
+                    controls.lock();
+                    pauseScreen.style.display = 'none';
+                    isPaused = false;
+                }
+            });
+
+            controls.addEventListener('unlock', () => {
+                if (!isCutsceneActive && !isMobile()) {
+                    isPaused = true;
+                    pauseScreen.style.display = 'flex';
+                }
+            });
+
+            interactBtn.addEventListener('touchstart', handleInteractMobile);
+            window.addEventListener('resize', onWindowResize);
+            setupTouchControls();
+        }
+
+        function createWoodTexture(colorHex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = colorHex;
+            ctx.fillRect(0,0,512,512);
+            ctx.globalAlpha = 0.1;
+            ctx.fillStyle = '#000000';
+            for(let i=0; i<100; i++) {
+                const y = Math.random() * 512;
+                const h = Math.random() * 2 + 1;
+                ctx.fillRect(0, y, 512, h);
+            }
+            ctx.globalAlpha = 0.05;
+            for(let i=0; i<20; i++) {
+                ctx.beginPath();
+                ctx.moveTo(0, Math.random()*512);
+                ctx.bezierCurveTo(150, Math.random()*512, 350, Math.random()*512, 512, Math.random()*512);
+                ctx.lineWidth = 10;
+                ctx.strokeStyle = '#220000';
+                ctx.stroke();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        function createPlankTexture(colorHex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = colorHex;
+            ctx.fillRect(0,0,512,512);
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#1a0d05'; 
+            ctx.beginPath();
+            const planks = 8;
+            const step = 512/planks;
+            for(let i=0; i<=planks; i++) {
+                ctx.moveTo(0, i*step);
+                ctx.lineTo(512, i*step);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 0.5;
+            for(let i=0; i<planks; i++) {
+                const x = Math.random() * 512;
+                ctx.beginPath();
+                ctx.moveTo(x, i*step);
+                ctx.lineTo(x, (i+1)*step);
+                ctx.stroke();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        function createFabricTexture(colorHex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = colorHex;
+            ctx.fillRect(0,0,256,256);
+            ctx.globalAlpha = 0.05;
+            ctx.fillStyle = '#ffffff';
+            for(let i=0; i<256; i+=4) {
+                ctx.fillRect(i, 0, 1, 256);
+                ctx.fillRect(0, i, 256, 1);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        function createRealisticEnvironment() {
+            const woodTex = createWoodTexture('#4a3c2a');
+            const floorTex = createPlankTexture('#2e1e12');
+            const fabricTex = createFabricTexture('#8f8f8f');
+            const blanketTex = createFabricTexture('#5e2c2c');
+            const wallTex = createWoodTexture('#3d2b1f');
+
+            const woodMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.7, metalness: 0.0 });
+            const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.8, metalness: 0.0 });
+            const floorMat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.9, bumpMap: floorTex, bumpScale: 0.02 });
+            const fabricMat = new THREE.MeshStandardMaterial({ map: fabricTex, roughness: 1.0 });
+            const blanketMat = new THREE.MeshStandardMaterial({ map: blanketTex, roughness: 1.0 });
+            const glassMat = new THREE.MeshPhysicalMaterial({ 
+                color: 0x88ccff, metalness: 0, roughness: 0.1, transmission: 0.9, transparent: true, opacity: 0.3 
+            });
+
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomDepth), floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            const ceilingMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.9 });
+            const ceiling = new THREE.Mesh(new THREE.PlaneGeometry(roomWidth, roomDepth), ceilingMat);
+            ceiling.rotation.x = Math.PI / 2;
+            ceiling.position.y = roomHeight;
+            scene.add(ceiling);
+
+            const bulbGroup = new THREE.Group();
+            bulbGroup.position.set(0, roomHeight, 0);
+            bulbGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.5), new THREE.MeshBasicMaterial({color: 0x111111})).translateY(-0.25));
+            bulbGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 16), new THREE.MeshStandardMaterial({emissive: 0xffaa00, emissiveIntensity: 2, color: 0xffffff, roughness: 0.1})).translateY(-0.55));
+            scene.add(bulbGroup);
+
+            const plankH = 0.5;
+            const buildWall = (cx, cz, w, isRotated, hasDoor, hasWin) => {
+                const container = new THREE.Group();
+                container.position.set(cx, 0, cz);
+                if(isRotated) container.rotation.y = Math.PI / 2;
+
+                const rows = roomHeight / plankH;
+                const doorW = 3.0;
+                const doorH = 3.5;
+                
+                for(let i=0; i<rows; i++) {
+                    const y = i * plankH + plankH/2;
+                    if(hasDoor && y < doorH) {
+                        const sideW = (w - doorW) / 2;
+                        const left = new THREE.Mesh(new THREE.BoxGeometry(sideW, plankH-0.02, 0.4), wallMat);
+                        left.position.set(-w/2 + sideW/2, y, 0);
+                        left.castShadow = true; left.receiveShadow = true;
+                        container.add(left);
+                        const right = new THREE.Mesh(new THREE.BoxGeometry(sideW, plankH-0.02, 0.4), wallMat);
+                        right.position.set(w/2 - sideW/2, y, 0);
+                        right.castShadow = true; right.receiveShadow = true;
+                        container.add(right);
+                        if(i === 0) {
+                            const pivot = new THREE.Group();
+                            pivot.position.set(-doorW/2 + 0.1, 0, 0); 
+                            const doorMesh = new THREE.Mesh(new THREE.BoxGeometry(doorW - 0.2, doorH, 0.2), new THREE.MeshStandardMaterial({map:woodTex, color: 0x2b1d0e}));
+                            doorMesh.position.set((doorW - 0.2)/2, doorH/2, 0);
+                            doorMesh.castShadow = true; doorMesh.receiveShadow = true;
+                            const handle = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshStandardMaterial({color:0xdddddd, metalness:0.8}));
+                            handle.position.set(doorW - 0.5, doorH/2, 0.15);
+                            pivot.add(doorMesh); pivot.add(handle);
+                            pivot.userData = { interactable: true, type: 'door', isOpen: false, label: 'Door' };
+                            interactableObjects.push(pivot);
+                            container.add(pivot);
+                        }
+                    } 
+                    else if (hasWin && i > 3 && i < 7) {
+                        const winW = 3.0;
+                        const sideW = (w - winW) / 2;
+                        const left = new THREE.Mesh(new THREE.BoxGeometry(sideW, plankH-0.02, 0.4), wallMat);
+                        left.position.set(-w/2 + sideW/2, y, 0);
+                        container.add(left);
+                        const right = new THREE.Mesh(new THREE.BoxGeometry(sideW, plankH-0.02, 0.4), wallMat);
+                        right.position.set(w/2 - sideW/2, y, 0);
+                        container.add(right);
+                        if(i===5) {
+                            const glass = new THREE.Mesh(new THREE.PlaneGeometry(winW, 1.5), glassMat);
+                            glass.position.set(0, y + 0.25, 0);
+                            container.add(glass);
+                            const barV = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.5, 0.1), wallMat);
+                            barV.position.set(0, y+0.25, 0);
+                            container.add(barV);
+                        }
+                    }
+                    else {
+                        const p = new THREE.Mesh(new THREE.BoxGeometry(w, plankH-0.02, 0.4), wallMat);
+                        p.position.set(0, y, 0);
+                        p.position.z += (Math.random()-0.5)*0.05;
+                        p.castShadow = true; p.receiveShadow = true;
+                        container.add(p);
+                    }
+                }
+                scene.add(container);
+            };
+
+            buildWall(0, -roomDepth/2, roomWidth, false, false, false); 
+            buildWall(0, roomDepth/2, roomWidth, false, true, false); 
+            buildWall(-roomWidth/2, 0, roomDepth, true, false, false); 
+            buildWall(roomWidth/2, 0, roomDepth, true, false, true); 
+
+            const bedGroup = new THREE.Group();
+            bedGroup.position.set(-roomWidth/2 + 2, 0, 0); 
+            bedGroup.add(new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 6), woodMat).translateY(0.25));
+            bedGroup.add(new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.4, 5.8), fabricMat).translateY(0.7));
+            const pillow = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.2, 1), fabricMat);
+            pillow.position.set(0, 0.9, -2.2);
+            bedGroup.add(pillow);
+            const blanket = new THREE.Mesh(new THREE.BoxGeometry(3, 0.5, 4), blanketMat);
+            blanket.position.set(0, 0.8, 1);
+            bedGroup.add(blanket);
+            scene.add(bedGroup);
+
+            const tableGroup = new THREE.Group();
+            tableGroup.position.set(roomWidth/2 - 1.5, 0, 0); 
+            const tableTop = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 4), woodMat);
+            tableTop.position.y = 2;
+            tableTop.receiveShadow = true; tableTop.castShadow = true;
+            tableGroup.add(tableTop);
+            
+            const legGeo = new THREE.CylinderGeometry(0.05, 0.05, 2);
+            const legMesh = new THREE.Mesh(legGeo, woodMat);
+            const l1=legMesh.clone(); l1.position.set(-1,1,-1.8); tableGroup.add(l1);
+            const l2=legMesh.clone(); l2.position.set(1,1,-1.8); tableGroup.add(l2);
+            const l3=legMesh.clone(); l3.position.set(-1,1,1.8); tableGroup.add(l3);
+            const l4=legMesh.clone(); l4.position.set(1,1,1.8); tableGroup.add(l4);
+            
+            createHyperDetailedBasket(tableGroup);
+            scene.add(tableGroup);
+        }
+
+        function createGrasslandExterior() {
+            // STARFIELD
+            const starGeo = new THREE.BufferGeometry();
+            const starCoords = [];
+            for (let i = 0; i < 6000; i++) {
+                const x = (Math.random() - 0.5) * 3000;
+                const y = Math.random() * 1500;
+                const z = (Math.random() - 0.5) * 3000;
+                starCoords.push(x, y, z);
+            }
+            starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starCoords, 3));
+            const starMat = new THREE.PointsMaterial({ color: 0xFFFFFF, size: 0.8, transparent: true, opacity: 0.8 });
+            const stars = new THREE.Points(starGeo, starMat);
+            scene.add(stars);
+
+            // THE MOON (Visible sphere, made bright)
+            const moonGeo = new THREE.SphereGeometry(25, 32, 32);
+            const moonMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF }); // Basic material ignores fog/light
+            const moonMesh = new THREE.Mesh(moonGeo, moonMat);
+            moonMesh.position.set(300, 500, -800); // Position it high and far
+            scene.add(moonMesh);
+
+            // FLAT GRASSLAND TERRAIN
+            const terrainSize = 3000;
+            const res = 64;
+            const terrainGeo = new THREE.PlaneGeometry(terrainSize, terrainSize, res, res);
+            terrainGeo.rotateX(-Math.PI / 2);
+
+            const pos = terrainGeo.attributes.position;
+            const colors = [];
+            const color = new THREE.Color();
+            for (let i = 0; i < pos.count; i++) {
+                let h = (Math.random() - 0.5) * 0.15;
+                pos.setY(i, h);
+                const shade = 0.05 + Math.random() * 0.08;
+                color.setRGB(shade * 0.3, shade, shade * 0.2);
+                colors.push(color.r, color.g, color.b);
+            }
+            terrainGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            terrainGeo.computeVertexNormals();
+
+            const terrainMat = new THREE.MeshStandardMaterial({ 
+                vertexColors: true, 
+                roughness: 1.0 
+            });
+            const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+            terrain.position.y = -0.1;
+            terrain.receiveShadow = true;
+            scene.add(terrain);
+
+            // FOREST (Scattered trees in the flat land)
+            const treeCount = 2000;
+            const treeTrunkGeo = new THREE.CylinderGeometry(0.2, 0.4, 10);
+            const treeFoliageGeo = new THREE.ConeGeometry(5, 18, 6);
+            const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x1a0f0a });
+            const treeFoliageMat = new THREE.MeshStandardMaterial({ color: 0x051205 });
+
+            const instTrunks = new THREE.InstancedMesh(treeTrunkGeo, treeTrunkMat, treeCount);
+            const instFoliage = new THREE.InstancedMesh(treeFoliageGeo, treeFoliageMat, treeCount);
+
+            const dummy = new THREE.Object3D();
+            for (let i = 0; i < treeCount; i++) {
+                let x = (Math.random() - 0.5) * 2800;
+                let z = (Math.random() - 0.5) * 2800;
+                let r = Math.sqrt(x * x + z * z);
+                if (r < 40) continue; 
+
+                let s = 0.4 + Math.random() * 1.6;
+                dummy.position.set(x, 5 * s - 0.1, z);
+                dummy.scale.set(s, s, s);
+                dummy.updateMatrix();
+                instTrunks.setMatrixAt(i, dummy.matrix);
+
+                dummy.position.set(x, 12 * s - 0.1, z);
+                dummy.updateMatrix();
+                instFoliage.setMatrixAt(i, dummy.matrix);
+            }
+            scene.add(instTrunks);
+            scene.add(instFoliage);
+        }
+
+        function createHyperDetailedBasket(parentGroup) {
+            const basketGroup = new THREE.Group();
+            basketGroup.position.set(0, 2.05, 0);
+            basketGroup.rotation.y = Math.random();
+
+            const wickerMat = new THREE.MeshStandardMaterial({color: 0x8b5a2b, roughness: 1.0});
+            const uprightsCount = 16;
+            const radius = 0.4;
+            const height = 0.5;
+            
+            for(let i=0; i<uprightsCount; i++) {
+                const angle = (i / uprightsCount) * Math.PI * 2;
+                const rib = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, height), wickerMat);
+                rib.position.set(Math.cos(angle) * radius, height/2, Math.sin(angle) * radius);
+                rib.rotation.z = (Math.random()-0.5)*0.1;
+                rib.rotation.x = (Math.random()-0.5)*0.1;
+                basketGroup.add(rib);
+            }
+
+            const strandCount = 15;
+            for(let j=0; j<strandCount; j++) {
+                const y = (j / strandCount) * height + 0.02;
+                const weaveRing = new THREE.Mesh(new THREE.TorusGeometry(radius, 0.015, 4, 32), wickerMat);
+                weaveRing.rotation.x = Math.PI / 2;
+                weaveRing.position.y = y;
+                const scaleNoise = 1 + (Math.random()-0.5)*0.05;
+                weaveRing.scale.set(scaleNoise, scaleNoise, 1);
+                basketGroup.add(weaveRing);
+            }
+            
+            const bottom = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.02, 32), wickerMat);
+            bottom.position.y = 0.01;
+            basketGroup.add(bottom);
+
+            const coalCount = 400; 
+            const coalGeo = new THREE.DodecahedronGeometry(0.06, 0); 
+            const coalMat = new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.6, metalness: 0.2});
+            const instancedCoal = new THREE.InstancedMesh(coalGeo, coalMat, coalCount);
+            
+            const dummy = new THREE.Object3D();
+            for(let i=0; i<coalCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = Math.sqrt(Math.random()) * (radius - 0.05); 
+                const hBase = Math.sqrt(1 - (r/radius)); 
+                const y = (Math.random() * 0.3) + (hBase * 0.3); 
+                dummy.position.set(Math.cos(angle) * r, y, Math.sin(angle) * r);
+                dummy.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+                const s = 0.5 + Math.random() * 0.8;
+                dummy.scale.set(s, s, s);
+                dummy.updateMatrix();
+                instancedCoal.setMatrixAt(i, dummy.matrix);
+            }
+            instancedCoal.castShadow = true;
+            instancedCoal.receiveShadow = true;
+            basketGroup.add(instancedCoal);
+
+            basketGroup.userData = { interactable: true, type: 'pickup', label: 'Basket of Coal' };
+            interactableObjects.push(basketGroup);
+            parentGroup.add(basketGroup);
+        }
+
+        // --- CONTROLS LOGIC ---
+        function setupTouchControls() {
+            const zoneMove = document.getElementById('zone-move');
+            const zoneLook = document.getElementById('zone-look');
+
+            zoneMove.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                touchMoveOrigin = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }, { passive: false });
+
+            zoneMove.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!touchMoveOrigin) return;
+                const currentX = e.touches[0].clientX;
+                const currentY = e.touches[0].clientY;
+                const maxDist = 50; 
+                let dx = (currentX - touchMoveOrigin.x) / maxDist;
+                let dy = (currentY - touchMoveOrigin.y) / maxDist;
+                if (dx > 1) dx = 1; if (dx < -1) dx = -1;
+                if (dy > 1) dy = 1; if (dy < -1) dy = -1;
+                mobileMoveVector = { x: dx, y: dy };
+            }, { passive: false });
+
+            zoneMove.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                touchMoveOrigin = null;
+                mobileMoveVector = { x: 0, y: 0 };
+            }, { passive: false });
+
+            zoneLook.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if(e.target.id === 'interact-btn') return;
+                touchLookLast = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }, { passive: false });
+
+            zoneLook.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!touchLookLast) return;
+                const currentX = e.touches[0].clientX;
+                const currentY = e.touches[0].clientY;
+                const sensitivity = 0.003; 
+                const dx = currentX - touchLookLast.x;
+                const dy = currentY - touchLookLast.y;
+                camera.rotation.y -= dx * sensitivity;
+                camera.rotation.x -= dy * sensitivity; 
+                camera.rotation.x = Math.max(-pitchLimit, Math.min(pitchLimit, camera.rotation.x));
+                camera.rotation.z = 0;
+                touchLookLast = { x: currentX, y: currentY };
+            }, { passive: false });
+
+            zoneLook.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                touchLookLast = null;
+            }, { passive: false });
+        }
+        
+        function attemptInteraction() {
+            if (currentTarget) {
+                const obj = currentTarget.object;
+                if (obj.userData.type === 'pickup') {
+                    if (heldItem) dropItem();
+                    heldItem = obj;
+                    let parent = obj.parent;
+                    parent.remove(obj);
+                    handGroup.add(obj);
+                    obj.position.set(0, 0, 0);
+                    obj.rotation.set(0, 0, 0);
+                    obj.scale.set(0.5, 0.5, 0.5); 
+                    interactLabel.style.display = 'none';
+                    currentTarget = null;
+                }
+                else if (obj.userData.type === 'door') {
+                    obj.userData.isOpen = !obj.userData.isOpen;
+                    const targetRot = obj.userData.isOpen ? -Math.PI / 2 : 0;
+                    const duration = 500;
+                    const startRot = obj.rotation.y;
+                    const startTime = performance.now();
+                    function animateDoor(time) {
+                        const elapsed = time - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const ease = 1 - Math.pow(1 - progress, 3);
+                        obj.rotation.y = startRot + (targetRot - startRot) * ease;
+                        if (progress < 1) requestAnimationFrame(animateDoor);
+                    }
+                    requestAnimationFrame(animateDoor);
+                }
+            } 
+            else if (heldItem) {
+                dropItem();
+            }
+        }
+
+        function dropItem() {
+            if(!heldItem) return;
+            handGroup.remove(heldItem);
+            scene.add(heldItem);
+            const dropPos = new THREE.Vector3();
+            camera.getWorldPosition(dropPos);
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            dropPos.add(dir.clone().multiplyScalar(1.0)); 
+            heldItem.position.copy(dropPos);
+            heldItem.scale.set(1, 1, 1);
+            heldItem.userData.velocity = new THREE.Vector3(dir.x * 5, 2, dir.z * 5);
+            fallingObjects.push(heldItem);
+            heldItem = null;
+            interactLabel.style.display = 'none';
+        }
+
+        function handleInteractMobile(e) {
+            e.preventDefault(); e.stopPropagation();
+            attemptInteraction();
+            interactBtn.style.background = 'rgba(255,255,255,0.5)';
+            setTimeout(() => { interactBtn.style.background = 'rgba(255,255,255,0.1)'; }, 100);
+        }
+
+        function startGame() {
+            startScreen.style.opacity = '0';
+            setTimeout(() => {
+                startScreen.style.display = 'none';
+                playCutscene();
+            }, 500);
+        }
+
+        function playCutscene() {
+            const t_text1 = 1500, t_blink1 = 4500, t_text2 = 7000, t_blink2 = 10000, t_blink3 = 12000, t_realization = 13500, t_panic = 16000, t_stand = 17500;
+            const showText = (text, duration) => {
+                textElement.innerText = text; textElement.style.opacity = 1;
+                setTimeout(() => { textElement.style.opacity = 0; }, duration - 500);
+            };
+            setTimeout(() => showText("Damn. What was last night's dream...", 3000), t_text1);
+            setTimeout(() => { eyelids.style.opacity = 0.3; textElement.innerText = ""; }, t_blink1);
+            setTimeout(() => { eyelids.style.opacity = 1; }, t_blink1 + 1000); 
+            setTimeout(() => showText("I think I should take more rest...", 3000), t_text2);
+            setTimeout(() => { eyelids.style.opacity = 0.2; }, t_blink2);
+            setTimeout(() => { eyelids.style.opacity = 1; }, t_blink2 + 800);
+            setTimeout(() => { eyelids.style.opacity = 0; }, t_blink3);
+            setTimeout(() => showText("Wait... what time is it??!!??", 2000), t_realization);
+            setTimeout(() => showText("OH NO I'M LATE", 1500), t_panic);
+            setTimeout(() => { standUpAnimation(); }, t_stand);
+        }
+
+        function standUpAnimation() {
+            let startTime = null; const duration = 2000; 
+            const startPos = camera.position.clone();
+            const startRotX = camera.rotation.x, startRotY = camera.rotation.y, startRotZ = camera.rotation.z;
+            const endPos = new THREE.Vector3(startPos.x + 1.5, defaultCamHeight, 0); 
+            function anim(time) {
+                if (!startTime) startTime = time;
+                const progress = Math.min((time - startTime) / duration, 1);
+                const ease = 1 - Math.pow(1 - progress, 3);
+                camera.position.lerpVectors(startPos, endPos, ease);
+                camera.rotation.x = startRotX + (0 - startRotX) * ease;
+                camera.rotation.y = startRotY + (0 - startRotY) * ease;
+                camera.rotation.z = startRotZ + (0 - startRotZ) * ease;
+                if (progress < 1) requestAnimationFrame(anim);
+                else enableGameplay();
+            }
+            requestAnimationFrame(anim);
+        }
+
+        function enableGameplay() {
+            isCutsceneActive = false; crosshair.style.display = 'block'; textElement.innerText = ""; 
+            if(!isMobile()) {
+                pauseScreen.style.display = 'flex';
+                pauseScreen.querySelector('h1').innerText = "CLICK TO START";
+            } else {
+                document.getElementById('mobile-ui').style.display = 'block';
+            }
+        }
+
+        function isMobile() {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 900;
+        }
+
+        function onKeyDown(event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = true; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = true; break;
+                case 'ArrowRight': case 'KeyD': moveRight = true; break;
+                case 'KeyE': attemptInteraction(); break;
+            }
+        }
+        function onKeyUp(event) {
+            switch (event.code) {
+                case 'ArrowUp': case 'KeyW': moveForward = false; break;
+                case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
+                case 'ArrowDown': case 'KeyS': moveBackward = false; break;
+                case 'ArrowRight': case 'KeyD': moveRight = false; break;
+            }
+        }
+        function onMouseDown(event) {
+            if(!isCutsceneActive && controls.isLocked && event.button === 0) attemptInteraction();
+        }
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateInteractionUI() {
+            if(heldItem && !currentTarget) {
+                 interactLabel.style.display = 'block';
+                 interactLabel.innerHTML = `Drop ${heldItem.userData.label} <span class="key-hint">[E]</span>`;
+            } else if (!currentTarget && !heldItem) {
+                interactLabel.style.display = 'none';
+            }
+            raycaster.setFromCamera(center, camera);
+            const intersects = raycaster.intersectObjects(interactableObjects, true); 
+            let hit = null;
+            if(intersects.length > 0) {
+                let obj = intersects[0].object;
+                let dist = intersects[0].distance;
+                while(obj) {
+                    if(obj.userData && obj.userData.interactable) break;
+                    obj = obj.parent;
+                }
+                if (obj && dist < 3.5) hit = obj;
+            }
+            if(hit) {
+                currentTarget = { object: hit };
+                interactLabel.style.display = 'block';
+                const action = hit.userData.type === 'door' ? (hit.userData.isOpen ? 'Close' : 'Open') : 'Grab';
+                interactLabel.innerHTML = `${action} ${hit.userData.label} <span class="key-hint">[E]</span>`;
+            } else {
+                currentTarget = null;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!isCutsceneActive && !isPaused) {
+                const time = performance.now();
+                const delta = Math.min((time - prevTime) / 1000, 0.1); 
+                for(let i = fallingObjects.length - 1; i >= 0; i--) {
+                    const obj = fallingObjects[i];
+                    obj.userData.velocity.y -= 20.0 * delta; 
+                    obj.position.add(obj.userData.velocity.clone().multiplyScalar(delta));
+                    const onTableX = obj.position.x > 2.25 && obj.position.x < 4.75;
+                    const onTableZ = obj.position.z > -2 && obj.position.z < 2;
+                    if (onTableX && onTableZ && obj.position.y < 2.25 && obj.position.y > 1.5) {
+                        obj.position.y = 2.25; obj.userData.velocity.set(0,0,0);
+                        fallingObjects.splice(i, 1); continue;
+                    }
+                    if (obj.position.y < 0.25) {
+                        obj.position.y = 0.25; obj.userData.velocity.set(0,0,0);
+                        fallingObjects.splice(i, 1); continue;
+                    }
+                }
+                velocity.x -= velocity.x * 10.0 * delta; velocity.z -= velocity.z * 10.0 * delta;
+                direction.z = Number(moveForward) - Number(moveBackward); direction.x = Number(moveRight) - Number(moveLeft);
+                let inputZ = direction.z; let inputX = direction.x;
+                if (Math.abs(mobileMoveVector.y) > 0) inputZ = -mobileMoveVector.y; 
+                if (Math.abs(mobileMoveVector.x) > 0) inputX = mobileMoveVector.x;
+                const speed = 40.0; 
+                if (inputZ !== 0) velocity.z -= inputZ * speed * delta;
+                if (inputX !== 0) velocity.x -= inputX * speed * delta;
+                controls.moveRight(-velocity.x * delta); controls.moveForward(-velocity.z * delta);
+                if (Math.abs(velocity.x) > 1 || Math.abs(velocity.z) > 1) {
+                    bobTimer += delta * bobFrequency;
+                    camera.position.y = defaultCamHeight + Math.sin(bobTimer) * bobAmplitude;
+                    swayX = Math.sin(bobTimer * 0.5) * 0.05; swayY = Math.abs(Math.cos(bobTimer)) * 0.05;
+                } else {
+                    camera.position.y = THREE.MathUtils.lerp(camera.position.y, defaultCamHeight, delta * 5);
+                    swayX = THREE.MathUtils.lerp(swayX, 0, delta * 5); swayY = THREE.MathUtils.lerp(swayY, 0, delta * 5);
+                }
+                handGroup.position.x = 0.5 + swayX; handGroup.position.y = -0.6 + swayY; handGroup.rotation.z = swayX;
+                
+                // COLLISION AND BOUNDARIES
+                const doorBound = roomDepth/2 - 1.2; 
+                
+                // If deep inside the cottage area
+                if(camera.position.z < doorBound) {
+                    if(camera.position.x < -roomWidth/2 + 1) camera.position.x = -roomWidth/2 + 1;
+                    if(camera.position.x > roomWidth/2 - 1) camera.position.x = roomWidth/2 - 1;
+                    if(camera.position.z < -roomDepth/2 + 1) camera.position.z = -roomDepth/2 + 1;
+                }
+
+                // Boundary logic near the door exit
+                const door = interactableObjects.find(o => o.userData.type === 'door');
+                const isDoorOpen = door && door.userData.isOpen;
+                
+                // If approaching or at the door threshold
+                if(camera.position.z >= doorBound && camera.position.z < doorBound + 1.0) {
+                    const isAligned = Math.abs(camera.position.x) < 1.2; 
+                    if (!isDoorOpen || !isAligned) {
+                        // Not going through door? Block them.
+                        camera.position.z = doorBound;
+                    }
+                }
+                
+                // Once well outside (z > threshold), movement is completely free
+                // No constraints applied to x or z here.
+                
+                updateInteractionUI(); prevTime = time;
+            } else { prevTime = performance.now(); }
+            if(Math.random() > 0.95) {
+               scene.children.forEach(c => {
+                   if(c.userData && c.userData.isMainLight) c.intensity = c.userData.baseInt * (0.8 + Math.random() * 0.4);
+               });
+            }
+            renderer.render(scene, camera);
+        }
+        THREE.Mesh.prototype.translateY = function(d) { this.position.y += d; return this; }
+    </script>
+</body>
+</html>
