@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PHONK PULSE | ULTRA POLISHED</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Syncopate:wght@400;700&family=Inter:wght@400;700;900&display=swap');
+        
+        :root {
+            --primary: #ff0055;
+        }
+
+        body {
+            background-color: #000;
+            color: #ffffff;
+            overflow: hidden;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .canvas-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        .bg-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 0;
+            background-size: cover;
+            background-position: center;
+            transition: filter 0.5s ease;
+        }
+
+        .vignette {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle, transparent 20%, rgba(0,0,0,0.9) 100%);
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .glass-panel {
+            background: rgba(0, 0, 0, 0.65);
+            backdrop-filter: blur(30px);
+            -webkit-backdrop-filter: blur(30px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+        }
+
+        .phonk-title {
+            font-family: 'Syncopate', sans-serif;
+            letter-spacing: -0.05em;
+        }
+
+        /* Scanline CRT Effect */
+        .scanlines {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+            background-size: 100% 3px, 3px 100%;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0.4;
+        }
+
+        /* Kinetic Grid Animation */
+        .grid-bg {
+            position: absolute;
+            width: 200%;
+            height: 200%;
+            top: -50%;
+            left: -50%;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 60px 60px;
+            transform: perspective(1000px) rotateX(60deg);
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: transparent;
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            background: rgba(255, 255, 255, 0.1);
+            height: 4px;
+            border-radius: 2px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #fff;
+            margin-top: -7px;
+            box-shadow: 0 0 20px var(--primary);
+            border: 3px solid #000;
+        }
+
+        .btn-glow:hover {
+            box-shadow: 0 0 25px var(--primary);
+            transform: scale(1.05);
+        }
+    </style>
+
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "@google/genai": "https://esm.sh/@google/genai@1.34.0",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="module">
+        import React, { useState, useRef, useEffect, useMemo } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { GoogleGenAI, Type } from "@google/genai";
+
+        // --- VISUALIZER COMPONENT ---
+        const VisualizerCanvas = ({ analyser, config, logoUrl, customBgUrl }) => {
+            const canvasRef = useRef(null);
+            const gridRef = useRef(null);
+            const bgRef = useRef(null);
+            const requestRef = useRef();
+            const particles = useRef([]);
+            const smoothedBass = useRef(0);
+            const rotationOffset = useRef(0);
+            const logoImgRef = useRef(null);
+            const [logoLoaded, setLogoLoaded] = useState(false);
+
+            useEffect(() => {
+                if (logoUrl) {
+                    const img = new Image();
+                    img.src = logoUrl;
+                    img.onload = () => { logoImgRef.current = img; setLogoLoaded(true); };
+                } else {
+                    logoImgRef.current = null;
+                    setLogoLoaded(false);
+                }
+            }, [logoUrl]);
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                const initParticles = () => {
+                    particles.current = Array.from({ length: 250 }, () => ({
+                        x: Math.random() * canvas.width,
+                        y: Math.random() * canvas.height,
+                        size: Math.random() * 2 + 0.3,
+                        speedX: (Math.random() - 0.5) * 1.5,
+                        speedY: (Math.random() - 0.5) * 1.5,
+                        color: Math.random() > 0.6 ? config.primaryColor : '#ffffff',
+                        opacity: Math.random() * 0.4 + 0.1
+                    }));
+                };
+
+                const resize = () => {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                    initParticles();
+                };
+
+                window.addEventListener('resize', resize);
+                resize();
+
+                const dataArray = new Uint8Array(analyser?.frequencyBinCount || 0);
+
+                const animate = () => {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    if (analyser) {
+                        analyser.getByteFrequencyData(dataArray);
+                        
+                        let bassSum = 0;
+                        for (let i = 0; i < 10; i++) bassSum += dataArray[i];
+                        const rawBass = (bassSum / 10) / 255;
+                        smoothedBass.current += (rawBass - smoothedBass.current) * (rawBass > smoothedBass.current ? 0.35 : 0.12);
+
+                        const centerX = canvas.width / 2;
+                        const centerY = canvas.height / 2;
+                        rotationOffset.current += 0.005 + (smoothedBass.current * 0.06);
+
+                        // Reactive Background
+                        if (bgRef.current) {
+                            const zoom = 1 + (smoothedBass.current * 0.08);
+                            const shake = (smoothedBass.current > 0.9) ? (Math.random() - 0.5) * 20 : 0;
+                            bgRef.current.style.transform = `scale(${zoom}) translate(${shake}px, ${shake}px)`;
+                            bgRef.current.style.filter = `brightness(${0.2 + smoothedBass.current * 0.5}) blur(${15 - (smoothedBass.current * 10)}px)`;
+                        }
+                        
+                        // Kinetic Grid
+                        if (gridRef.current) {
+                            const speed = 15 + (smoothedBass.current * 100);
+                            gridRef.current.style.backgroundPosition = `0px ${ (Date.now() / 20) % 60 + (smoothedBass.current * 30)}px`;
+                            gridRef.current.style.opacity = 0.05 + smoothedBass.current * 0.3;
+                        }
+
+                        if (config.shakeEnabled && smoothedBass.current > 0.88) {
+                            ctx.save();
+                            ctx.translate((Math.random() - 0.5) * 35 * smoothedBass.current, (Math.random() - 0.5) * 35 * smoothedBass.current);
+                        }
+
+                        // Particles
+                        particles.current.forEach(p => {
+                            const drift = 1 + (smoothedBass.current * 12);
+                            p.x += p.speedX * drift;
+                            p.y += p.speedY * drift;
+                            if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
+                            if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+                            
+                            ctx.beginPath();
+                            ctx.arc(p.x, p.y, p.size * (1 + (smoothedBass.current * 2)), 0, Math.PI * 2);
+                            ctx.fillStyle = `${p.color}${Math.floor(p.opacity * 255).toString(16).padStart(2, '0')}`;
+                            ctx.fill();
+                        });
+
+                        const baseRadius = Math.min(canvas.width, canvas.height) * 0.16;
+                        const reactiveRadius = baseRadius + (Math.pow(smoothedBass.current, 2.5) * baseRadius * 1.5 * config.bassSensitivity);
+
+                        // Waveform Ring
+                        const points = 240;
+                        const wavePoints = [];
+                        for (let i = 0; i < points; i++) {
+                            const angle = (i / points) * Math.PI * 2 + (rotationOffset.current * 0.5);
+                            const freqIndex = Math.floor((i / points) * dataArray.length * 0.4);
+                            const val = dataArray[freqIndex] / 255;
+                            const r = reactiveRadius + (val * 180 * config.bassSensitivity);
+                            wavePoints.push({ x: centerX + Math.cos(angle) * r, y: centerY + Math.sin(angle) * r });
+                        }
+
+                        ctx.beginPath();
+                        ctx.moveTo(wavePoints[0].x, wavePoints[0].y);
+                        for (let i = 0; i < wavePoints.length; i++) {
+                            const next = wavePoints[(i + 1) % wavePoints.length];
+                            const midX = (wavePoints[i].x + next.x) / 2;
+                            const midY = (wavePoints[i].y + next.y) / 2;
+                            ctx.quadraticCurveTo(wavePoints[i].x, wavePoints[i].y, midX, midY);
+                        }
+                        ctx.closePath();
+                        ctx.strokeStyle = config.primaryColor;
+                        ctx.lineWidth = 10;
+                        ctx.shadowBlur = 80 * smoothedBass.current;
+                        ctx.shadowColor = config.primaryColor;
+                        ctx.stroke();
+                        ctx.shadowBlur = 0;
+
+                        // Core Clipping
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(centerX, centerY, reactiveRadius, 0, Math.PI * 2);
+                        ctx.clip();
+
+                        if (logoImgRef.current && logoLoaded) {
+                            const img = logoImgRef.current;
+                            const scale = Math.max(reactiveRadius * 2 / img.width, reactiveRadius * 2 / img.height);
+                            ctx.translate(centerX, centerY);
+                            ctx.rotate(rotationOffset.current * -0.15);
+                            ctx.drawImage(img, -img.width * scale / 2, -img.height * scale / 2, img.width * scale, img.height * scale);
+                        } else {
+                            const grad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, reactiveRadius);
+                            grad.addColorStop(0, '#000');
+                            grad.addColorStop(0.7, '#111');
+                            grad.addColorStop(1, config.primaryColor);
+                            ctx.fillStyle = grad;
+                            ctx.fill();
+                            
+                            // High-detail core accents
+                            ctx.beginPath();
+                            ctx.arc(centerX, centerY, reactiveRadius * 0.85, 0, Math.PI * 2);
+                            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                        ctx.restore();
+
+                        if (config.shakeEnabled && smoothedBass.current > 0.88) ctx.restore();
+                    } else {
+                        const time = Date.now() * 0.001;
+                        ctx.beginPath();
+                        ctx.arc(canvas.width / 2, canvas.height / 2, (Math.min(canvas.width, canvas.height) * 0.16) + Math.sin(time) * 5, 0, Math.PI * 2);
+                        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                        ctx.setLineDash([5, 10]);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                    requestRef.current = requestAnimationFrame(animate);
+                };
+
+                requestRef.current = requestAnimationFrame(animate);
+                return () => { cancelAnimationFrame(requestRef.current); window.removeEventListener('resize', resize); };
+            }, [analyser, config, logoLoaded]);
+
+            return React.createElement('div', { className: 'contents' },
+                React.createElement('div', { 
+                    ref: bgRef, 
+                    className: 'bg-layer', 
+                    style: { backgroundImage: customBgUrl ? `url(${customBgUrl})` : 'none', backgroundColor: customBgUrl ? 'transparent' : '#030303' } 
+                }),
+                React.createElement('div', { ref: gridRef, className: 'grid-bg' }),
+                React.createElement('div', { className: 'scanlines' }),
+                React.createElement('div', { className: 'vignette' }),
+                React.createElement('canvas', { ref: canvasRef, className: 'canvas-container' })
+            );
+        };
+
+        // --- APP ENTRY ---
+        const App = () => {
+            const [audioFile, setAudioFile] = useState(null);
+            const [logoUrl, setLogoUrl] = useState(null);
+            const [bgUrl, setBgUrl] = useState(null);
+            const [config, setConfig] = useState({ primaryColor: '#ff0055', shakeEnabled: true, bassSensitivity: 1.5 });
+            const [isPlaying, setIsPlaying] = useState(false);
+            const [currentTime, setCurrentTime] = useState(0);
+            const [duration, setDuration] = useState(0);
+            const [vibe, setVibe] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [showUI, setShowUI] = useState(true);
+
+            const audioRef = useRef(null);
+            const audioCtxRef = useRef(null);
+            const analyserRef = useRef(null);
+
+            const handleFile = (e) => {
+                const file = e.target.files?.[0];
+                if (file) { setAudioFile(file); audioRef.current.src = URL.createObjectURL(file); setIsPlaying(false); }
+            };
+
+            const handleUpload = (type, e) => {
+                const file = e.target.files?.[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => { if (type === 'logo') setLogoUrl(ev.target.result); else setBgUrl(ev.target.result); };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const togglePlay = async () => {
+                if (!audioFile) return;
+                if (!audioCtxRef.current) {
+                    audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+                    analyserRef.current = audioCtxRef.current.createAnalyser();
+                    analyserRef.current.fftSize = 2048;
+                    const source = audioCtxRef.current.createMediaElementSource(audioRef.current);
+                    source.connect(analyserRef.current);
+                    analyserRef.current.connect(audioCtxRef.current.destination);
+                }
+                if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
+                if (isPlaying) audioRef.current.pause(); else audioRef.current.play();
+                setIsPlaying(!isPlaying);
+            };
+
+            const handleEnhance = async () => {
+                if (!vibe.trim()) return;
+                setLoading(true);
+                try {
+                    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+                    const response = await ai.models.generateContent({
+                        model: 'gemini-3-flash-preview',
+                        contents: `Theme: "${vibe}". Return JSON: primaryColor(hex), bassSensitivity(1.0-2.5).`,
+                        config: { responseMimeType: "application/json" }
+                    });
+                    const theme = JSON.parse(response.text);
+                    setConfig(prev => ({ ...prev, ...theme }));
+                    document.documentElement.style.setProperty('--primary', theme.primaryColor);
+                } catch (e) { console.error(e); }
+                setLoading(false);
+            };
+
+            useEffect(() => {
+                const handleKey = (e) => { if (e.key.toLowerCase() === 'w') setShowUI(p => !p); };
+                window.addEventListener('keydown', handleKey);
+                return () => window.removeEventListener('keydown', handleKey);
+            }, []);
+
+            return React.createElement('div', { className: 'relative w-screen h-screen' },
+                React.createElement('audio', { 
+                    ref: audioRef, className: 'hidden',
+                    onTimeUpdate: (e) => setCurrentTime(e.target.currentTime),
+                    onLoadedMetadata: (e) => setDuration(e.target.duration),
+                    onEnded: () => setIsPlaying(false)
+                }),
+
+                React.createElement(VisualizerCanvas, { analyser: analyserRef.current, config, logoUrl, customBgUrl: bgUrl }),
+
+                React.createElement('div', { className: `absolute inset-0 z-10 p-10 flex flex-col justify-between transition-opacity duration-1000 ${showUI ? 'opacity-100' : 'opacity-0 pointer-events-none'}` },
+                    React.createElement('header', { className: 'flex justify-between items-start' },
+                        React.createElement('div', null,
+                            React.createElement('h1', { className: 'phonk-title text-7xl font-black italic uppercase text-white drop-shadow-2xl' }, 'PHONK', React.createElement('span', { style: { color: config.primaryColor } }, 'PULSE')),
+                            React.createElement('p', { className: 'text-[10px] font-mono tracking-[0.6em] uppercase opacity-40 mt-3 pl-1' }, 'Ultra Engine Standalone v6.1')
+                        ),
+                        React.createElement('div', { className: 'glass-panel p-6 rounded-[2.5rem] flex flex-col gap-6' },
+                            React.createElement('div', { className: 'flex flex-col gap-3' },
+                                React.createElement('span', { className: 'text-[8px] font-bold opacity-30 uppercase tracking-widest text-center' }, 'Asset Management'),
+                                React.createElement('div', { className: 'flex gap-3' },
+                                    React.createElement('label', { className: 'w-14 h-14 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-all' },
+                                        React.createElement('i', { className: 'fa-solid fa-circle-user text-lg opacity-60' }),
+                                        React.createElement('input', { type: 'file', accept: 'image/*', onChange: (e) => handleUpload('logo', e), className: 'hidden' })
+                                    ),
+                                    React.createElement('label', { className: 'w-14 h-14 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-all' },
+                                        React.createElement('i', { className: 'fa-solid fa-panorama text-lg opacity-60' }),
+                                        React.createElement('input', { type: 'file', accept: 'image/*', onChange: (e) => handleUpload('bg', e), className: 'hidden' })
+                                    )
+                                )
+                            ),
+                            React.createElement('div', { className: 'flex flex-col gap-3' },
+                                React.createElement('span', { className: 'text-[8px] font-bold opacity-30 uppercase tracking-widest text-center' }, 'Color Swatch'),
+                                React.createElement('div', { className: 'grid grid-cols-2 gap-2' },
+                                    ['#ff0055', '#00f2ff', '#bd00ff', '#ff8400'].map(c => React.createElement('button', {
+                                        key: c, onClick: () => { setConfig(p => ({...p, primaryColor: c})); document.documentElement.style.setProperty('--primary', c); },
+                                        className: 'w-full h-8 rounded-lg border border-white/10 transition-transform hover:scale-105',
+                                        style: { backgroundColor: c }
+                                    }))
+                                )
+                            )
+                        )
+                    ),
+
+                    !audioFile && React.createElement('div', { className: 'flex-1 flex flex-col items-center justify-center' },
+                        React.createElement('label', { className: 'group cursor-pointer' },
+                            React.createElement('div', { className: 'relative px-24 py-10 rounded-full transition-all group-hover:scale-110 active:scale-95 shadow-2xl overflow-hidden' },
+                                React.createElement('div', { className: 'absolute inset-0 bg-white' }),
+                                React.createElement('div', { className: 'relative flex items-center gap-6 text-black' },
+                                    React.createElement('i', { className: 'fa-solid fa-cloud-arrow-up text-2xl' }),
+                                    React.createElement('span', { className: 'text-xl font-black uppercase tracking-[0.5em]' }, 'Select Track')
+                                )
+                            ),
+                            React.createElement('input', { type: 'file', accept: 'audio/*', onChange: handleFile, className: 'hidden' })
+                        )
+                    ),
+
+                    audioFile && React.createElement('footer', { className: 'max-w-7xl mx-auto w-full glass-panel p-12 rounded-[4.5rem] flex flex-col gap-12' },
+                        React.createElement('div', { className: 'flex flex-col xl:flex-row items-center gap-12' },
+                            React.createElement('div', { className: 'flex-1 w-full' },
+                                React.createElement('div', { className: 'flex items-center gap-5 mb-4' },
+                                    React.createElement('div', { className: 'w-3 h-3 rounded-full bg-white animate-pulse' }),
+                                    React.createElement('h2', { className: 'text-4xl font-black truncate text-white tracking-tighter' }, audioFile.name)
+                                ),
+                                React.createElement('div', { className: 'flex items-center gap-10' },
+                                    React.createElement('span', { className: 'text-base font-mono opacity-50 tabular-nums bg-white/5 px-4 py-2 rounded-xl' }, `${Math.floor(currentTime/60)}:${Math.floor(currentTime%60).toString().padStart(2,'0')} / ${Math.floor(duration/60)}:${Math.floor(duration%60).toString().padStart(2,'0')}`),
+                                    React.createElement('div', { className: 'flex items-center gap-4 bg-white/5 px-6 py-3 rounded-2xl border border-white/5' },
+                                        React.createElement('input', { 
+                                            value: vibe, onChange: (e) => setVibe(e.target.value), placeholder: 'Vibe Prompt...', 
+                                            className: 'bg-transparent text-xs w-48 focus:outline-none uppercase font-bold placeholder:opacity-20' 
+                                        }),
+                                        React.createElement('button', { onClick: handleEnhance, className: 'text-[10px] font-black uppercase text-cyan-400 hover:text-white transition-colors' }, loading ? 'RE-SCANNING...' : 'AI THEME')
+                                    )
+                                )
+                            ),
+
+                            React.createElement('div', { className: 'flex items-center gap-14' },
+                                React.createElement('button', { onClick: togglePlay, className: 'w-28 h-28 rounded-full bg-white text-black flex items-center justify-center hover:scale-110 active:scale-90 transition-all shadow-[0_0_60px_rgba(255,255,255,0.2)] btn-glow' },
+                                    React.createElement('i', { className: `fa-solid ${isPlaying ? 'fa-pause' : 'fa-play'} text-5xl` })
+                                ),
+                                React.createElement('div', { className: 'flex gap-12 border-l border-white/10 pl-12' },
+                                    React.createElement('div', { className: 'flex flex-col gap-4 min-w-[160px]' },
+                                        React.createElement('div', { className: 'flex justify-between text-[11px] font-black opacity-30 uppercase tracking-widest' }, 
+                                            React.createElement('span', null, 'Gain Control'),
+                                            React.createElement('span', { className: 'text-white opacity-100' }, `x${config.bassSensitivity.toFixed(1)}`)
+                                        ),
+                                        React.createElement('input', { 
+                                            type: 'range', min: '0.5', max: '3', step: '0.1', 
+                                            value: config.bassSensitivity, onChange: (e) => setConfig(c => ({...c, bassSensitivity: parseFloat(e.target.value)}))
+                                        })
+                                    ),
+                                    React.createElement('button', { 
+                                        onClick: () => setConfig(c => ({...c, shakeEnabled: !c.shakeEnabled})),
+                                        className: `w-16 h-16 rounded-3xl flex items-center justify-center border transition-all ${config.shakeEnabled ? 'border-white bg-white/20 shadow-[0_0_30px_rgba(255,255,255,0.1)]' : 'border-white/5 opacity-20'}`
+                                    }, React.createElement('i', { className: 'fa-solid fa-burst text-2xl' }))
+                                )
+                            )
+                        ),
+
+                        React.createElement('div', { className: 'relative h-8 flex items-center px-2' },
+                            React.createElement('input', { 
+                                type: 'range', min: '0', max: duration || 1, step: '0.1', value: currentTime, 
+                                onChange: (e) => { audioRef.current.currentTime = e.target.value; setCurrentTime(e.target.value); },
+                                className: 'absolute inset-0 w-full opacity-0 z-20 cursor-pointer' 
+                            }),
+                            React.createElement('div', { className: 'w-full h-2 bg-white/5 rounded-full relative z-10 overflow-hidden' },
+                                React.createElement('div', { 
+                                    className: 'h-full transition-all duration-100', 
+                                    style: { width: `${(currentTime/(duration||1))*100}%`, backgroundColor: config.primaryColor, boxShadow: `0 0 30px ${config.primaryColor}` } 
+                                })
+                            )
+                        )
+                    )
+                )
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
