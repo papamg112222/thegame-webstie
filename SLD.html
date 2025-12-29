@@ -165,7 +165,55 @@
         import React, { useState, useRef, useEffect, useCallback } from 'react';
         import ReactDOM from 'react-dom/client';
 
-        const apiKey = ""; // Runtime provided
+        const apiKey = ""; // Runtime provided. Note: Features will fail if key is empty outside the preview environment.
+
+        // --- GEMINI API ENGINE ---
+        const callGemini = async (prompt, retries = 0) => {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: {
+                    parts: [{ text: "You are a professional music visual engine architect. You output precise JSON for Phonk music aesthetics. primaryColor must be a bright hex value. bassSensitivity must be between 1.0 and 2.5." }]
+                },
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            primaryColor: { type: "STRING" },
+                            bassSensitivity: { type: "NUMBER" }
+                        },
+                        required: ["primaryColor", "bassSensitivity"]
+                    }
+                }
+            };
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!text) throw new Error("AI returned an empty response.");
+                return JSON.parse(text);
+            } catch (error) {
+                if (retries < 5) {
+                    // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                    const delays = [1000, 2000, 4000, 8000, 16000];
+                    await new Promise(resolve => setTimeout(resolve, delays[retries]));
+                    return callGemini(prompt, retries + 1);
+                }
+                throw error;
+            }
+        };
 
         // --- VISUALIZER ENGINE ---
         const VisualizerCanvas = ({ analyser, config, logoUrl, customBgUrl }) => {
@@ -436,45 +484,6 @@
                 }
             };
 
-            const callGemini = async (prompt, retries = 0) => {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-                const payload = {
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                primaryColor: { type: "STRING" },
-                                bassSensitivity: { type: "NUMBER" }
-                            },
-                            required: ["primaryColor", "bassSensitivity"]
-                        }
-                    },
-                    systemInstruction: {
-                        parts: [{ text: "You are a professional music visual engine architect. You output precise JSON for Phonk music aesthetics. primaryColor must be a bright hex value. bassSensitivity must be between 1.0 and 2.5." }]
-                    }
-                };
-
-                try {
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (!response.ok) throw new Error('API Error');
-                    const data = await response.json();
-                    return JSON.parse(data.candidates[0].content.parts[0].text);
-                } catch (error) {
-                    if (retries < 5) {
-                        const delay = Math.pow(2, retries) * 1000;
-                        await new Promise(r => setTimeout(r, delay));
-                        return callGemini(prompt, retries + 1);
-                    }
-                    throw error;
-                }
-            };
-
             const handleEnhance = async () => {
                 if (!vibe.trim()) return;
                 setLoading(true);
@@ -485,8 +494,12 @@
                     document.documentElement.style.setProperty('--primary', theme.primaryColor);
                     document.documentElement.style.setProperty('--primary-glow', theme.primaryColor + '80');
                 } catch (e) {
-                    setErrorMsg('Vibe sync failed. Using default settings.');
-                    setTimeout(() => setErrorMsg(''), 3000);
+                    // Provide a descriptive error message to the user
+                    const apiError = e.message?.toLowerCase().includes('api key') 
+                        ? "API key missing or invalid. Set a Gemini API key in the script to use AI features on GitHub."
+                        : `Vibe sync failed: ${e.message}`;
+                    setErrorMsg(apiError);
+                    setTimeout(() => setErrorMsg(''), 6000);
                 }
                 setLoading(false);
             };
@@ -586,7 +599,7 @@
                                         }, loading ? 'SYNCING...' : 'AI ADAPT')
                                     )
                                 ),
-                                errorMsg && React.createElement('p', { className: 'text-[10px] text-red-500 font-bold mt-2 uppercase' }, errorMsg)
+                                errorMsg && React.createElement('p', { className: 'text-[10px] text-red-500 font-bold mt-2 uppercase max-w-md' }, errorMsg)
                             ),
 
                             React.createElement('div', { className: 'flex items-center gap-10' },
