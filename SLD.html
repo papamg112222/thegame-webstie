@@ -41,7 +41,11 @@
             z-index: 0;
             background-size: cover;
             background-position: center;
-            transition: filter 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            background-repeat: no-repeat;
+            /* Ensure the background layer itself is always black */
+            background-color: #000;
+            /* Faster transition for manual styling, but we handle most in JS */
+            transition: filter 0.1s ease-out, opacity 0.1s ease-out;
         }
 
         .vignette {
@@ -65,6 +69,7 @@
             letter-spacing: -0.05em;
         }
 
+        /* Scanline CRT Effect */
         .scanlines {
             position: absolute;
             inset: 0;
@@ -85,6 +90,7 @@
             mix-blend-mode: overlay;
         }
 
+        /* Kinetic Grid Animation */
         .grid-bg {
             position: absolute;
             width: 200%;
@@ -127,6 +133,7 @@
             transform: translateY(-2px);
         }
 
+        /* Animations */
         @keyframes pulse-soft {
             0%, 100% { opacity: 0.4; }
             50% { opacity: 0.7; }
@@ -162,6 +169,10 @@
         import React, { useState, useRef, useEffect, useCallback } from 'react';
         import ReactDOM from 'react-dom/client';
 
+        /**
+         * IMPORTANT: This key is provided by the execution environment at runtime.
+         * If hosting on GitHub, you must provide your own API key here.
+         */
         const apiKey = ""; 
 
         // --- VISUALIZER ENGINE ---
@@ -206,12 +217,8 @@
                 };
 
                 const resize = () => {
-                    const dpr = window.devicePixelRatio || 1;
-                    canvas.width = window.innerWidth * dpr;
-                    canvas.height = window.innerHeight * dpr;
-                    canvas.style.width = window.innerWidth + 'px';
-                    canvas.style.height = window.innerHeight + 'px';
-                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
                     initParticles();
                 };
 
@@ -221,11 +228,8 @@
                 const dataArray = new Uint8Array(analyser?.frequencyBinCount || 1024);
 
                 const animate = () => {
-                    const width = window.innerWidth;
-                    const height = window.innerHeight;
-
                     ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-                    ctx.fillRect(0, 0, width, height);
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
                     if (analyser) {
                         analyser.getByteFrequencyData(dataArray);
@@ -238,15 +242,27 @@
                         const attack = rawBass > smoothedBass.current ? 0.3 : 0.1;
                         smoothedBass.current += (rawBass - smoothedBass.current) * attack;
 
-                        const centerX = width / 2;
-                        const centerY = height / 2;
+                        const centerX = canvas.width / 2;
+                        const centerY = canvas.height / 2;
                         rotationOffset.current += 0.003 + (smoothedBass.current * 0.08);
 
+                        // --- UPDATED BACKGROUND REACTIVITY (POPPING EFFECT) ---
                         if (bgRef.current) {
-                            const zoom = 1 + (smoothedBass.current * 0.12);
-                            const shake = (smoothedBass.current > 0.9) ? (Math.random() - 0.5) * 30 : 0;
+                            // Base scale is 1.1 to prevent edges showing during shake/zoom
+                            // Hard drops hit at > 0.8 bass
+                            const isDrop = smoothedBass.current > 0.85;
+                            const zoom = 1.1 + (smoothedBass.current * 0.15);
+                            const shake = isDrop ? (Math.random() - 0.5) * 40 : 0;
+                            
+                            // High bass makes background sharp and bright instantly, 
+                            // lower bass keeps it dimmed and blurred.
+                            const brightness = isDrop ? (0.8 + smoothedBass.current * 0.5) : (0.2 + smoothedBass.current * 0.3);
+                            const blurVal = isDrop ? (5 - smoothedBass.current * 5) : 15;
+                            const opacityVal = isDrop ? 1.0 : (0.1 + smoothedBass.current * 0.4);
+
                             bgRef.current.style.transform = `scale(${zoom}) translate(${shake}px, ${shake}px)`;
-                            bgRef.current.style.filter = `brightness(${0.3 + smoothedBass.current * 0.6}) blur(${12 - (smoothedBass.current * 8)}px)`;
+                            bgRef.current.style.filter = `brightness(${brightness}) blur(${blurVal}px)`;
+                            bgRef.current.style.opacity = opacityVal;
                         }
                         
                         if (gridRef.current) {
@@ -260,8 +276,8 @@
                             const drift = 1 + (smoothedBass.current * 15);
                             p.x += p.speedX * drift;
                             p.y += p.speedY * drift;
-                            if (p.x < 0) p.x = width; if (p.x > width) p.x = 0;
-                            if (p.y < 0) p.y = height; if (p.y > height) p.y = 0;
+                            if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0;
+                            if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
                             
                             ctx.beginPath();
                             ctx.arc(p.x, p.y, p.size * (1 + (smoothedBass.current * 1.5)), 0, Math.PI * 2);
@@ -269,7 +285,7 @@
                             ctx.fill();
                         });
 
-                        const baseRadius = Math.min(width, height) * 0.18;
+                        const baseRadius = Math.min(canvas.width, canvas.height) * 0.18;
                         const reactiveRadius = baseRadius + (Math.pow(smoothedBass.current, 3) * baseRadius * 1.8 * config.bassSensitivity);
 
                         if (config.shakeEnabled && smoothedBass.current > 0.85) {
@@ -321,6 +337,7 @@
                             grad.addColorStop(1, config.primaryColor);
                             ctx.fillStyle = grad;
                             ctx.fill();
+                            
                             ctx.beginPath();
                             ctx.arc(centerX, centerY, reactiveRadius * 0.9, 0, Math.PI * 2);
                             ctx.strokeStyle = 'rgba(255,255,255,0.1)';
@@ -333,7 +350,7 @@
                     } else {
                         const time = Date.now() * 0.002;
                         ctx.beginPath();
-                        ctx.arc(width / 2, height / 2, (Math.min(width, height) * 0.18) + Math.sin(time) * 8, 0, Math.PI * 2);
+                        ctx.arc(canvas.width / 2, canvas.height / 2, (Math.min(canvas.width, canvas.height) * 0.18) + Math.sin(time) * 8, 0, Math.PI * 2);
                         ctx.strokeStyle = 'rgba(255,255,255,0.05)';
                         ctx.setLineDash([10, 20]);
                         ctx.stroke();
@@ -352,7 +369,6 @@
                     className: 'bg-layer', 
                     style: { 
                         backgroundImage: customBgUrl ? `url(${customBgUrl})` : 'none', 
-                        backgroundColor: customBgUrl ? 'transparent' : '#020202' 
                     } 
                 }),
                 React.createElement('div', { ref: gridRef, className: 'grid-bg' }),
@@ -363,6 +379,7 @@
             );
         };
 
+        // --- APP CORE ---
         const App = () => {
             const [audioFile, setAudioFile] = useState(null);
             const [logoUrl, setLogoUrl] = useState(null);
@@ -374,6 +391,7 @@
             const [vibe, setVibe] = useState('');
             const [loading, setLoading] = useState(false);
             const [showUI, setShowUI] = useState(true);
+            const [errorMsg, setErrorMsg] = useState('');
 
             const audioRef = useRef(null);
             const audioCtxRef = useRef(null);
@@ -413,43 +431,85 @@
                         analyserRef.current.connect(audioCtxRef.current.destination);
                     }
                     if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
-                    isPlaying ? audioRef.current.pause() : audioRef.current.play();
+                    
+                    if (isPlaying) {
+                        audioRef.current.pause();
+                    } else {
+                        audioRef.current.play();
+                    }
                     setIsPlaying(!isPlaying);
-                } catch (e) { console.error(e); }
+                } catch (e) {
+                    console.error("Audio Playback Error:", e);
+                }
+            };
+
+            const callGemini = async (prompt, retries = 0) => {
+                if (!apiKey) {
+                    throw new Error("API_KEY_MISSING");
+                }
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                primaryColor: { type: "STRING" },
+                                bassSensitivity: { type: "NUMBER" }
+                            },
+                            required: ["primaryColor", "bassSensitivity"]
+                        }
+                    },
+                    systemInstruction: {
+                        parts: [{ text: "You are a professional music visual engine architect. You output precise JSON for Phonk music aesthetics. primaryColor must be a bright hex value. bassSensitivity must be between 1.0 and 2.5." }]
+                    }
+                };
+
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error('API Error');
+                    const data = await response.json();
+                    return JSON.parse(data.candidates[0].content.parts[0].text);
+                } catch (error) {
+                    if (retries < 5) {
+                        const delay = Math.pow(2, retries) * 1000;
+                        await new Promise(r => setTimeout(r, delay));
+                        return callGemini(prompt, retries + 1);
+                    }
+                    throw error;
+                }
             };
 
             const handleEnhance = async () => {
                 if (!vibe.trim()) return;
                 setLoading(true);
+                setErrorMsg('');
                 try {
-                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            contents: [{ parts: [{ text: `Vibe Prompt: "${vibe}"` }] }],
-                            generationConfig: {
-                                responseMimeType: "application/json",
-                                responseSchema: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        primaryColor: { type: "STRING" },
-                                        bassSensitivity: { type: "NUMBER" }
-                                    },
-                                    required: ["primaryColor", "bassSensitivity"]
-                                }
-                            }
-                        })
-                    });
-                    const data = await response.json();
-                    const theme = JSON.parse(data.candidates[0].content.parts[0].text);
+                    const theme = await callGemini(`Visual Theme Prompt: "${vibe}"`);
                     setConfig(prev => ({ ...prev, ...theme }));
                     document.documentElement.style.setProperty('--primary', theme.primaryColor);
-                } catch (e) { console.error(e); }
+                    document.documentElement.style.setProperty('--primary-glow', theme.primaryColor + '80');
+                } catch (e) {
+                    if (e.message === "API_KEY_MISSING") {
+                        setErrorMsg('Missing API Key. Add your key to line 170 for GitHub hosting.');
+                    } else {
+                        setErrorMsg('AI Sync failed. Please try again or check connection.');
+                    }
+                    setTimeout(() => setErrorMsg(''), 5000);
+                }
                 setLoading(false);
             };
 
             useEffect(() => {
-                const handleKey = (e) => { if (e.key.toLowerCase() === 'w') setShowUI(p => !p); };
+                const handleKey = (e) => { 
+                    if (e.key.toLowerCase() === 'w') setShowUI(p => !p); 
+                };
                 window.addEventListener('keydown', handleKey);
                 return () => window.removeEventListener('keydown', handleKey);
             }, []);
@@ -477,11 +537,11 @@
                             React.createElement('div', { className: 'flex flex-col gap-3' },
                                 React.createElement('span', { className: 'text-[9px] font-bold opacity-30 uppercase tracking-[0.2em] text-center' }, 'Custom Assets'),
                                 React.createElement('div', { className: 'flex gap-3' },
-                                    React.createElement('label', { className: 'w-14 h-14 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-all active:scale-90' },
+                                    React.createElement('label', { title: "Upload Logo", className: 'w-14 h-14 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-all active:scale-90' },
                                         React.createElement('i', { className: 'fa-solid fa-circle-user text-xl opacity-60' }),
                                         React.createElement('input', { type: 'file', accept: 'image/*', onChange: (e) => handleUpload('logo', e), className: 'hidden' })
                                     ),
-                                    React.createElement('label', { className: 'w-14 h-14 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-all active:scale-90' },
+                                    React.createElement('label', { title: "Upload Background", className: 'w-14 h-14 flex items-center justify-center bg-white/5 border border-white/10 rounded-2xl hover:bg-white/10 cursor-pointer transition-all active:scale-90' },
                                         React.createElement('i', { className: 'fa-solid fa-panorama text-xl opacity-60' }),
                                         React.createElement('input', { type: 'file', accept: 'image/*', onChange: (e) => handleUpload('bg', e), className: 'hidden' })
                                     )
@@ -534,10 +594,16 @@
                                             placeholder: 'DEFINE VIBE (e.g. DRIFT, CYBER, MIDNIGHT)...', 
                                             className: 'bg-transparent text-[10px] flex-1 focus:outline-none uppercase font-bold placeholder:opacity-20' 
                                         }),
-                                        React.createElement('button', { onClick: handleEnhance, className: 'text-[10px] font-black uppercase text-white hover:opacity-100 opacity-60' }, loading ? 'SYNCING...' : 'AI ADAPT')
+                                        React.createElement('button', { 
+                                            onClick: handleEnhance, 
+                                            disabled: loading,
+                                            className: 'text-[10px] font-black uppercase text-white hover:opacity-100 opacity-60 transition-opacity' 
+                                        }, loading ? 'SYNCING...' : 'AI ADAPT')
                                     )
-                                )
+                                ),
+                                errorMsg && React.createElement('p', { className: 'text-[10px] text-yellow-500 font-bold mt-2 uppercase' }, errorMsg)
                             ),
+
                             React.createElement('div', { className: 'flex items-center gap-10' },
                                 React.createElement('button', { onClick: togglePlay, className: 'w-24 h-24 rounded-full bg-white text-black flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-[0_0_50px_rgba(255,255,255,0.2)] btn-glow' },
                                     React.createElement('i', { className: `fa-solid ${isPlaying ? 'fa-pause' : 'fa-play'} text-4xl` })
@@ -548,14 +614,20 @@
                                             React.createElement('span', null, 'Bass Gain'),
                                             React.createElement('span', { className: 'text-white opacity-100' }, `x${config.bassSensitivity.toFixed(1)}`)
                                         ),
-                                        React.createElement('input', { type: 'range', min: '0.8', max: '2.5', step: '0.1', value: config.bassSensitivity, onChange: (e) => setConfig(c => ({...c, bassSensitivity: parseFloat(e.target.value)})) })
+                                        React.createElement('input', { 
+                                            type: 'range', min: '0.8', max: '2.5', step: '0.1', 
+                                            value: config.bassSensitivity, onChange: (e) => setConfig(c => ({...c, bassSensitivity: parseFloat(e.target.value)}))
+                                        })
                                     ),
-                                    React.createElement('button', { onClick: () => setConfig(c => ({...c, shakeEnabled: !c.shakeEnabled})), className: `w-14 h-14 rounded-2xl flex items-center justify-center border transition-all active:scale-90 ${config.shakeEnabled ? 'border-white bg-white/10' : 'border-white/5 opacity-20'}` }, 
-                                        React.createElement('i', { className: 'fa-solid fa-burst text-xl' })
-                                    )
+                                    React.createElement('button', { 
+                                        onClick: () => setConfig(c => ({...c, shakeEnabled: !c.shakeEnabled})),
+                                        title: 'Toggle Screen Shake',
+                                        className: `w-14 h-14 rounded-2xl flex items-center justify-center border transition-all active:scale-90 ${config.shakeEnabled ? 'border-white bg-white/10' : 'border-white/5 opacity-20'}`
+                                    }, React.createElement('i', { className: 'fa-solid fa-burst text-xl' }))
                                 )
                             )
                         ),
+
                         React.createElement('div', { className: 'relative h-4 flex items-center group cursor-pointer' },
                             React.createElement('input', { 
                                 type: 'range', min: '0', max: duration || 1, step: '0.01', value: currentTime, 
@@ -580,7 +652,9 @@
                     ),
 
                     React.createElement('div', { className: 'flex justify-between items-center' },
-                        React.createElement('div', { className: 'flex gap-8' }, ['DRIVE', 'SYNC', 'PULSE', 'VOID'].map(tag => React.createElement('span', { key: tag, className: 'text-[9px] font-black tracking-widest opacity-20' }, tag))),
+                        React.createElement('div', { className: 'flex gap-8' },
+                            ['DRIVE', 'SYNC', 'PULSE', 'VOID'].map(tag => React.createElement('span', { key: tag, className: 'text-[9px] font-black tracking-widest opacity-20' }, tag))
+                        ),
                         React.createElement('span', { className: 'text-[9px] font-black opacity-40' }, 'PRESS [W] TO TOGGLE UI')
                     )
                 )
