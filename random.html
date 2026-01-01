@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neon Coin Chase - Multiplayer</title>
+    <!-- PeerJS Library for connecting without a server -->
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            touch-action: none; /* Prevent scrolling on mobile */
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 30px;
+            border-radius: 15px;
+            border: 2px solid #00ffcc;
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.3);
+            max-width: 90%;
+            width: 400px;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #00ffcc;
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+        }
+
+        input {
+            width: 70%;
+            padding: 12px;
+            margin: 10px 0;
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 4px;
+            font-family: inherit;
+            text-align: center;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: #00ffcc;
+            color: black;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            border-radius: 4px;
+            margin: 5px;
+            transition: all 0.2s;
+        }
+
+        button:hover { 
+            background: #00cca3; 
+            transform: scale(1.05);
+        }
+
+        canvas {
+            display: block;
+            background: #0a0a0a;
+        }
+
+        .hidden { display: none !important; }
+        
+        #status { 
+            color: #ffff00; 
+            margin-bottom: 15px; 
+            font-size: 0.9em;
+            min-height: 1.2em;
+        }
+
+        #score-board {
+            position: absolute;
+            top: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: space-around;
+            font-size: 28px;
+            font-weight: bold;
+            pointer-events: none;
+            z-index: 5;
+            text-shadow: 2px 2px 0px #000;
+        }
+
+        .instruction {
+            font-size: 0.85em;
+            color: #ccc;
+            margin: 15px 0;
+            line-height: 1.4;
+        }
+
+        #copy-btn {
+            background: #555;
+            color: white;
+            font-size: 12px;
+            padding: 5px 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="score-board" class="hidden">
+        <span style="color: #00ffcc">YOU: <span id="myScore">0</span></span>
+        <span style="color: #ff0055">FOE: <span id="opScore">0</span></span>
+    </div>
+
+    <div id="ui-layer">
+        <h2>Neon Coin Chase</h2>
+        <div id="status">Initializing PeerJS...</div>
+        
+        <div id="menu">
+            <div class="instruction">
+                Play against a friend on another device!<br>
+                One person <b>Hosts</b>, the other <b>Joins</b>.
+            </div>
+            
+            <div style="margin-bottom: 20px; border-bottom: 1px solid #444; padding-bottom: 20px;">
+                <button onclick="createGame()">Host Game</button>
+            </div>
+
+            <div class="instruction">OR Join a friend:</div>
+            <input type="text" id="friendId" placeholder="Paste Host ID here">
+            <br>
+            <button onclick="joinGame()">Join Game</button>
+        </div>
+
+        <div id="copy-area" class="hidden">
+            <p>Share this ID with your friend:</p>
+            <div style="display: flex; justify-content: center; gap: 5px;">
+                <input type="text" id="myIdDisplay" readonly onclick="this.select()">
+                <button id="copy-btn" onclick="copyId()">Copy</button>
+            </div>
+            <p id="waiting-msg" style="font-size: 0.9em; color: yellow; margin-top: 15px;">Waiting for connection...</p>
+            <button onclick="location.reload()" style="background: #ff4444; color: white; font-size: 12px; margin-top: 20px;">Cancel</button>
+        </div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- CONFIGURATION ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Resize canvas to fit screen
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Game State
+        let myId = null;
+        let peer = null;
+        let conn = null;
+        let isHost = false;
+        let gameActive = false;
+        
+        // Player Positions
+        const player = { x: 100, y: 100, score: 0, color: '#00ffcc', size: 20 };
+        const opponent = { x: 300, y: 300, score: 0, color: '#ff0055', size: 20 };
+        const coin = { x: canvas.width/2, y: canvas.height/2, size: 15, pulse: 0 };
+
+        // --- NETWORK SETUP (PeerJS) ---
+        function initPeer() {
+            // Create a random peer ID
+            try {
+                peer = new Peer(null, {
+                    debug: 2
+                }); 
+
+                peer.on('open', (id) => {
+                    myId = id;
+                    document.getElementById('status').innerText = "Network Ready.";
+                });
+
+                // If someone connects to us (We are Host)
+                peer.on('connection', (c) => {
+                    if(!conn) {
+                        conn = c;
+                        setupConnection();
+                    }
+                });
+
+                peer.on('error', (err) => {
+                    console.error(err);
+                    let msg = "Network Error.";
+                    if(err.type === 'browser-incompatible') msg = "Browser not supported.";
+                    if(err.type === 'peer-unavailable') msg = "ID not found/offline.";
+                    if(err.type === 'network') msg = "Firewall blocked connection.";
+                    document.getElementById('status').innerText = msg;
+                    document.getElementById('status').style.color = '#ff4444';
+                });
+            } catch (e) {
+                document.getElementById('status').innerText = "Failed to load PeerJS.";
+            }
+        }
+
+        function createGame() {
+            if(!myId) return alert("Network not ready yet. Wait a second.");
+            isHost = true;
+            document.getElementById('menu').classList.add('hidden');
+            document.getElementById('copy-area').classList.remove('hidden');
+            document.getElementById('myIdDisplay').value = myId;
+            // Host controls the coin spawn
+            moveCoin(); 
+        }
+
+        function copyId() {
+            const copyText = document.getElementById("myIdDisplay");
+            copyText.select();
+            copyText.setSelectionRange(0, 99999); 
+            try {
+                document.execCommand('copy'); // Legacy support
+                navigator.clipboard.writeText(copyText.value);
+            } catch(e) {}
+            document.getElementById('copy-btn').innerText = "Copied!";
+        }
+
+        function joinGame() {
+            if(!myId) return alert("Network not ready yet.");
+            const destId = document.getElementById('friendId').value.trim();
+            if(!destId) return alert("Please enter the ID");
+            if(destId === myId) return alert("You can't connect to yourself!");
+            
+            document.getElementById('status').innerText = "Connecting...";
+            conn = peer.connect(destId);
+            isHost = false;
+            setupConnection();
+        }
+
+        function setupConnection() {
+            conn.on('open', () => {
+                document.getElementById('ui-layer').classList.add('hidden');
+                document.getElementById('score-board').classList.remove('hidden');
+                gameActive = true;
+                
+                // Initial sync request
+                if(!isHost) {
+                     conn.send({ type: 'hello' });
+                }
+                
+                startGameLoop();
+            });
+
+            conn.on('data', (data) => {
+                handleData(data);
+            });
+            
+            conn.on('close', () => {
+                alert("Connection lost!");
+                location.reload();
+            });
+        }
+
+        // --- GAME LOGIC ---
+
+        // Handle incoming data
+        function handleData(data) {
+            if (data.type === 'move') {
+                opponent.x = data.x * canvas.width; // Use normalized coordinates
+                opponent.y = data.y * canvas.height;
+            } else if (data.type === 'coinUpdate') {
+                coin.x = data.x * canvas.width;
+                coin.y = data.y * canvas.height;
+            } else if (data.type === 'scoreUpdate') {
+                player.score = data.pScore; // Actually opponent's score from our POV
+                opponent.score = data.myScore; 
+                updateScoreBoard();
+            } else if (data.type === 'hello' && isHost) {
+                // New player joined, send current state
+                sendSync();
+            }
+        }
+        
+        function sendSync() {
+            if(conn && conn.open) {
+                conn.send({ 
+                    type: 'coinUpdate', 
+                    x: coin.x / canvas.width, 
+                    y: coin.y / canvas.height 
+                });
+                conn.send({ 
+                    type: 'scoreUpdate', 
+                    myScore: player.score, 
+                    pScore: opponent.score 
+                });
+            }
+        }
+
+        // Input Handling
+        function handleInput(x, y) {
+            if(!gameActive) return;
+            
+            player.x = x;
+            player.y = y;
+
+            // Send normalized coordinates (0-1) to handle different screen sizes
+            if(conn && conn.open) {
+                conn.send({ 
+                    type: 'move', 
+                    x: player.x / canvas.width, 
+                    y: player.y / canvas.height 
+                });
+            }
+        }
+
+        // Mouse Movement
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            handleInput(e.clientX - rect.left, e.clientY - rect.top);
+        });
+
+        // Touch support (mobile)
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            handleInput(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+        }, {passive: false});
+        
+        canvas.addEventListener('touchstart', (e) => {
+             e.preventDefault();
+             const rect = canvas.getBoundingClientRect();
+             handleInput(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top);
+        }, {passive: false});
+
+        function moveCoin() {
+            if (isHost) {
+                // Keep away from edges
+                const padding = 50;
+                const newX = Math.random() * (canvas.width - padding*2) + padding;
+                const newY = Math.random() * (canvas.height - padding*2) + padding;
+                
+                coin.x = newX;
+                coin.y = newY;
+                
+                if(conn && conn.open) {
+                    conn.send({ 
+                        type: 'coinUpdate', 
+                        x: coin.x / canvas.width, 
+                        y: coin.y / canvas.height 
+                    });
+                }
+            }
+        }
+
+        function checkCollisions() {
+            // Simplified Logic: Host Authoritative
+            // Only HOST checks collisions
+            if(isHost && gameActive) {
+                
+                // Did HOST hit?
+                const dist = Math.hypot(player.x - coin.x, player.y - coin.y);
+                if (dist < player.size + coin.size) {
+                    player.score++;
+                    updateScoreBoard();
+                    moveCoin();
+                    conn.send({ type: 'scoreUpdate', myScore: player.score, pScore: opponent.score });
+                }
+
+                // Did OPPONENT hit?
+                const opDist = Math.hypot(opponent.x - coin.x, opponent.y - coin.y);
+                if (opDist < opponent.size + coin.size) {
+                    opponent.score++;
+                    updateScoreBoard();
+                    moveCoin();
+                    conn.send({ type: 'scoreUpdate', myScore: player.score, pScore: opponent.score });
+                }
+            }
+        }
+
+        function updateScoreBoard() {
+            document.getElementById('myScore').innerText = player.score;
+            document.getElementById('opScore').innerText = opponent.score;
+            
+            // Visual pop effect
+            const sb = document.getElementById('score-board');
+            sb.style.transform = "scale(1.2)";
+            setTimeout(() => sb.style.transform = "scale(1)", 100);
+        }
+
+        function draw() {
+            // Clear background
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Grid lines (retro effect)
+            ctx.strokeStyle = '#222';
+            ctx.lineWidth = 1;
+            const gridSize = 50;
+            
+            ctx.beginPath();
+            for(let x=0; x<canvas.width; x+=gridSize) {
+                ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height);
+            }
+            for(let y=0; y<canvas.height; y+=gridSize) {
+                ctx.moveTo(0, y); ctx.lineTo(canvas.width, y);
+            }
+            ctx.stroke();
+
+            // Draw Coin
+            coin.pulse += 0.1;
+            const pulseSize = Math.sin(coin.pulse) * 3;
+            
+            ctx.beginPath();
+            ctx.arc(coin.x, coin.y, coin.size + pulseSize, 0, Math.PI * 2);
+            ctx.fillStyle = 'yellow';
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = 'yellow';
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            // Connect line between players (optional visual)
+            if(gameActive) {
+                ctx.beginPath();
+                ctx.moveTo(player.x, player.y);
+                ctx.lineTo(opponent.x, opponent.y);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+                ctx.setLineDash([5, 5]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Draw Me
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size, 0, Math.PI * 2);
+            ctx.fillStyle = player.color;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = player.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            
+            // Indicator ring
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, player.size + 5, 0, Math.PI * 2);
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Draw Opponent
+            ctx.beginPath();
+            ctx.arc(opponent.x, opponent.y, opponent.size, 0, Math.PI * 2);
+            ctx.fillStyle = opponent.color;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = opponent.color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function startGameLoop() {
+            draw();
+            if(isHost) checkCollisions();
+            requestAnimationFrame(startGameLoop);
+        }
+
+        // Initialize
+        initPeer();
+
+    </script>
+</body>
+</html>
