@@ -3,1137 +3,256 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Procedural Forest Biome</title>
+    <title>Black Hole - Realistic Physics Simulation</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; user-select: none; }
-        
-        #loading {
-            position: absolute; top: 50%; left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 20px 40px;
-            border-radius: 8px;
-            font-size: 24px;
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Courier New', monospace;
+        }
+        canvas {
+            display: block;
+            background: #000;
+        }
+        .info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-size: 12px;
+            text-shadow: 0 0 10px rgba(0,0,0,0.8);
             pointer-events: none;
-            opacity: 1;
-            transition: opacity 0.5s;
             z-index: 10;
         }
-
-        #crosshair {
-            position: absolute; top: 50%; left: 50%;
-            width: 20px; height: 20px;
-            transform: translate(-50%, -50%);
-            pointer-events: none;
-            z-index: 5;
+        .info h2 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            color: #4af;
         }
-        #crosshair::before, #crosshair::after {
-            content: ''; position: absolute; background: rgba(255, 255, 255, 0.8);
-        }
-        #crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
-        #crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
-
-        #damage-overlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: red; opacity: 0; pointer-events: none;
-            transition: opacity 0.1s;
-            z-index: 4;
-        }
-
-        #stats-container {
-            position: absolute;
-            bottom: 60px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 368px; 
-            display: flex;
-            justify-content: space-between;
-            pointer-events: none;
-            z-index: 5;
-            padding: 0 4px; 
-            box-sizing: border-box;
-        }
-
-        #health, #hunger {
-            display: flex;
-            gap: 1px;
-            font-size: 14px; 
-            text-shadow: 2px 2px 0 #000;
-            align-items: center;
-        }
-
-        #health { color: #ff3333; }
-        #hunger { color: #d35400; flex-direction: row-reverse; }
-
-        #hotbar {
-            position: absolute;
-            bottom: 10px;
-            left: 50%;
-            transform: translateX(-50%);
-            display: flex;
-            gap: 4px;
-            background: #222;
-            padding: 4px;
-            border: 2px solid #000;
-            border-radius: 2px;
-            pointer-events: none; 
-            box-sizing: content-box;
-        }
-        .slot {
-            width: 36px;
-            height: 36px;
-            background: #8b8b8b;
-            border: 2px solid #373737;
-            border-top-color: #eee;
-            border-left-color: #eee;
-            box-sizing: border-box;
-        }
-        .slot.active {
-            border: 3px solid white;
-            background: #a0a0a0;
-            transform: scale(1.05);
-        }
-
-        #click-catcher {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            cursor: pointer;
-            z-index: 1;
-        }
-        
-        #coord-debug {
-            position: absolute; top: 10px; left: 10px; color: white; font-family: monospace;
-            background: rgba(0,0,0,0.5); padding: 5px; pointer-events: none;
+        .info p {
+            margin: 5px 0;
+            opacity: 0.8;
         }
     </style>
 </head>
 <body>
-    <div id="loading">Generating World...</div>
-    <div id="crosshair"></div>
-    <div id="damage-overlay"></div>
-    <div id="coord-debug">Chunk: 0, 0</div>
-    
-    <div id="stats-container">
-        <div id="health"></div>
-        <div id="hunger">
-            <span>🍗</span><span>🍗</span><span>🍗</span><span>🍗</span><span>🍗</span>
-            <span>🍗</span><span>🍗</span><span>🍗</span><span>🍗</span><span>🍗</span>
-        </div>
+    <div class="info">
+        <h2>Black Hole Physics Simulation</h2>
+        <p>• Event Horizon (Schwarzschild Radius)</p>
+        <p>• Gravitational Lensing Effects</p>
+        <p>• Accretion Disk with Doppler Shift</p>
+        <p>• Photon Sphere</p>
+        <p>• Hawking Radiation Glow</p>
     </div>
-
-    <div id="hotbar">
-        <div class="slot active" id="slot-0"></div>
-        <div class="slot" id="slot-1"></div>
-        <div class="slot" id="slot-2"></div>
-        <div class="slot" id="slot-3"></div>
-        <div class="slot" id="slot-4"></div>
-        <div class="slot" id="slot-5"></div>
-        <div class="slot" id="slot-6"></div>
-        <div class="slot" id="slot-7"></div>
-        <div class="slot" id="slot-8"></div>
-    </div>
-
-    <div id="click-catcher"></div>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+    <canvas id="canvas"></canvas>
 
     <script>
-        // --- CHUNK CONFIGURATION ---
-        const BLOCK_SIZE = 4;
-        const CHUNK_SIZE = 16; // 16x16 blocks per chunk
-        const CHUNK_WIDTH = CHUNK_SIZE * BLOCK_SIZE; // Physical size (64 units)
-        const RENDER_DISTANCE = 3; // Radius of chunks to keep loaded
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
         
-        const TERRAIN_ROUGHNESS = 0.005;
-        const TERRAIN_HEIGHT = 25;
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
         
-        const PREGEN_DIRT_LAYERS = 3;
-        const PREGEN_STONE_LAYERS = 4; 
-        const TOTAL_PREGEN_LAYERS = 1 + PREGEN_DIRT_LAYERS + PREGEN_STONE_LAYERS; 
-
-        const treeConfig = {
-            maxDepth: 7, angle: 0.5, lengthDecay: 0.78, widthDecay: 0.65, randomness: 0.2, leafSize: 0.8
-        };
-
-        // --- TEXTURES ---
-        const TEX_GRASS_SIDE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABTUlEQVR4AdySvU7DQBCEZ89xEuL8CHcUPA5PwpPRIgpEBR0FLxMhojhOJP8bfYfOcmjTJdLmbndnZ8dju8enh/6ScLrwdw0Et++liP9WJG/5WSl++RnyMf7Mg/uveABNp9PhzsByuRzytm2Hu6uqSn3fexVlWSr9qHT3aQLEIBHQ0fO3x0VR5M+b10yOTc45UdztdprNZiqKwuecLAgEYJumCakmk4nc6XTSYrHwMZ/P/WYQqCJnqOs6QRRy+pvN5o8gSRJy7fd7xXGsuq59mJmv84dCiLhDxgkeQpfnuczMy4aAJieqxnKp4wunmfkZVLo0TXU8HoUStgPATDaFrdR4XnzivlqtxGJwLgzRyLJMeBKMhCS8vrGaw+EgSJjx3wEFngdjUII0moSZaawEFWynB86t12sR2+3WmweBmQlSQLhPIJccQ8N2M9MvAAAA//9IMxDhAAAABklEQVQDAD/DzrVjsRZDAAAAAElFTkSuQmCC";
-        const TEX_GRASS_BOTTOM = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAB0klEQVR4AWyTuU4DUQxFbWffkyJVvoMO0VEgGjpER4Fo6BAdBeJnoyhRoux7Msy5MIiCKH72837tN/H2cJW83F0kH083yfvjdcI946/3l9Jxxwfb5/OtfJChaLVaVqlUbLVaWblcNn673Q5mEWHIh8PBut2u7IvFwrjLIT1iPp+n7Ps/m82+hZ+TxKfTyc7ns/X7fdtut9ZsNq1arcqDezQaDfubNZ/Py8ix2Wwsl8sZHD8SUpCE6/VaHakDd1cVgo7HI0ywEAgGJpWR0VGZLkgWKEqlkkHIEDKVkam63+8RfylLRNIgE+1hTZJEcIBEm+j+o16v96uO8Xhs4GYD4Gq321ar1WwwGMiJLSBkk6cqMXD0QYvL5VIQUNIuzp1ORxMHL44kZz7gLhaLBkevGRDEmlgZHWAAJ04MkDtzoVMS1et1VKKgKhkhjODH4u4wETBIzoXZDIdDdQDsGI1G6I0BMlBd0gNoKdOfigSSBJlACgMvaI1gjGAngq2Al67c3eiMoGy1PHH8oKA9d9fDQUY5nU5hGixdFQoFPWMp04MCKdOTVgd8SJkjBipSha6wkYCOICBkc5IfAcCYTCbGBkhEBTaTfVxAYwMkdHd9ucRBXwAAAP//kptujwAAAAZJREFUAwBCPii7qGT37AAAAABJRU5ErkJggg==";
-
-        let scene, camera, renderer, orbitControls, pointerLockControls;
-        let clock = new THREE.Clock();
-        let leafUniforms;
-        let simplex = new SimplexNoise();
-        let raycaster; 
-        let physicsRaycaster; 
-
-        // Chunk Management
-        let chunks = {}; // Map of "x,z" to chunk data
-        let activeChunkKeys = [];
-        let currentChunk = { x: 0, z: 0 };
-
-        let dynamicBlocks = []; 
-        let breakingOverlay; 
+        // Black hole parameters
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const schwarzschildRadius = 60; // Event horizon
+        const photonSphere = schwarzschildRadius * 1.5;
+        const innerDiskRadius = schwarzschildRadius * 3;
+        const outerDiskRadius = schwarzschildRadius * 8;
         
-        let collidableObjects = []; // Only nearby chunks + dynamic
-
-        let treeHealthMap = {}; 
-        let fallingTrees = []; 
-
-        let leafParticles, leafGeo, leafMat;
-        let woodParticles, woodGeo, woodMat;
-        const leafCount = 200;
-        const woodCount = 100;
-
-        let handMesh, handGroup;
-        let isSwinging = false;
-        let isMining = false; 
-        let mineTimer = 0; 
-        let currentMineTarget = null; 
-        let swingProgress = 0;
-        let selectedSlot = 0; 
-
-        let playerHealth = 10;
-        let maxHealth = 10;
-        let isDead = false;
-
-        let moveForward = false;
-        let moveBackward = false;
-        let moveLeft = false;
-        let moveRight = false;
-        let canJump = false;
-        let isSprinting = false;
-        let isCrouching = false;
-        let holdingJump = false; 
-        
-        let velocity = new THREE.Vector3();
-        let direction = new THREE.Vector3();
-        let isWalking = false;
-        let wasInAir = false;
-
-        const BASE_SPEED = 150.0;
-        const SPRINT_SPEED = 280.0;
-        const CROUCH_SPEED = 60.0;
-        const STANDING_HEIGHT = 7.5;
-        const CROUCH_HEIGHT = 6.0; 
-        let currentEyeHeight = STANDING_HEIGHT;
-        const BASE_FOV = 60;
-        const SPRINT_FOV = 75;
-
-        // --- HELPER FUNCTIONS ---
-
-        function getChunkKey(x, z) {
-            return `${x},${z}`;
-        }
-
-        function updateHealthUI() {
-            const container = document.getElementById('health');
-            container.innerHTML = '';
-            for(let i=0; i<maxHealth; i++) {
-                const span = document.createElement('span');
-                span.innerText = i < playerHealth ? '❤' : '🖤';
-                container.appendChild(span);
-            }
-        }
-
-        function takeDamage(amount) {
-            playerHealth = Math.max(0, playerHealth - amount);
-            updateHealthUI();
-            const overlay = document.getElementById('damage-overlay');
-            overlay.style.opacity = 0.5;
-            setTimeout(() => { overlay.style.opacity = 0; }, 200);
-
-            if (playerHealth <= 0 && !isDead) {
-                isDead = true;
-                alert("You died! Respawning...");
-                playerHealth = 10;
-                updateHealthUI();
-                velocity.set(0,0,0);
-                camera.position.set(0, getTerrainHeight(0,0) + 20, 0);
-                isDead = false;
-            }
-        }
-
-        function snapToGrid(vec) {
-            vec.x = Math.round(vec.x / BLOCK_SIZE) * BLOCK_SIZE;
-            vec.z = Math.round(vec.z / BLOCK_SIZE) * BLOCK_SIZE;
-            vec.y = Math.round((vec.y - 2) / BLOCK_SIZE) * BLOCK_SIZE + 2;
-            return vec;
-        }
-
-        function spawnWoodParticles(pos) {
-            if(!woodParticles) return;
-            const positions = woodParticles.geometry.attributes.position.array;
-            const life = woodParticles.userData.life;
-            const vels = woodParticles.userData.velocity;
-
-            let count = 0;
-            for(let i=0; i<woodCount; i++) {
-                if(life[i] <= 0 && count < 8) {
-                    life[i] = 1.0; 
-                    positions[i*3] = pos.x + (Math.random()-0.5)*2;
-                    positions[i*3+1] = pos.y + (Math.random()-0.5)*2;
-                    positions[i*3+2] = pos.z + (Math.random()-0.5)*2;
-                    
-                    vels[i*3] = (Math.random()-0.5) * 10;
-                    vels[i*3+1] = Math.random() * 10; 
-                    vels[i*3+2] = (Math.random()-0.5) * 10;
-                    count++;
-                }
-            }
-            woodParticles.geometry.attributes.position.needsUpdate = true;
-        }
-
-        function getTerrainHeight(x, z) {
-            let y = 0;
-            y += Math.sin(x * 0.01) * 5;
-            y += Math.sin(z * 0.01) * 5;
-            y += simplex.noise2D(x * TERRAIN_ROUGHNESS, z * TERRAIN_ROUGHNESS) * TERRAIN_HEIGHT;
-            y = Math.max(y, -10);
-            return Math.floor(y / BLOCK_SIZE) * BLOCK_SIZE;
-        }
-
-        function mulberry32(a) {
-            return function() {
-                var t = a += 0x6D2B79F5;
-                t = Math.imul(t ^ t >>> 15, t | 1);
-                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-                return ((t ^ t >>> 14) >>> 0) / 4294967296;
-            }
-        }
-
-        // Texture Generators (Same as before)
-        function createBarkTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#3E2723'; ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<200; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#2d1e18' : '#4e342e'; ctx.fillRect(Math.random()*64, Math.random()*64, 2, 8); }
-            const tex = new THREE.CanvasTexture(canvas); tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; return tex;
-        }
-        function createLeafTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
-            const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, 128, 128); ctx.beginPath(); ctx.moveTo(64, 128); ctx.ellipse(64, 64, 50, 60, 0, 0, Math.PI * 2); ctx.fillStyle = '#4CAF50'; ctx.fill();
-            return new THREE.CanvasTexture(canvas);
-        }
-        function createCompositeSideTexture() {
-            return new Promise((resolve) => {
-                const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
-                const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
-                const imgSide = new Image(); imgSide.onload = () => { ctx.drawImage(imgSide, 0, 0, 16, 16); const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; resolve(tex); }; imgSide.src = TEX_GRASS_SIDE;
+        // Star field for gravitational lensing
+        const stars = [];
+        for (let i = 0; i < 800; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 1.5,
+                brightness: Math.random()
             });
         }
-        function createTopTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#eeeeee'; ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<400; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#cccccc' : '#aaaaaa'; const s = Math.random() * 2 + 1; ctx.fillRect(Math.random()*64, Math.random()*64, s, s); }
-            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
-        }
-        function createBottomTexture() { const tex = new THREE.TextureLoader().load(TEX_GRASS_BOTTOM); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex; }
-        function createStoneTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#757575'; ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<300; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#616161' : '#9e9e9e'; const s = Math.random() * 3 + 1; ctx.fillRect(Math.random()*64, Math.random()*64, s, s); }
-            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
-        }
-        function createDeepslateTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#2f2f2f'; ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<64; i+=8) { ctx.fillStyle = Math.random() > 0.5 ? '#3a3a3a' : '#252525'; ctx.fillRect(0, i, 64, 4); ctx.fillStyle = Math.random() > 0.5 ? '#333' : '#2a2a2a'; ctx.fillRect(0, i+4, 64, 4); }
-             for(let i=0; i<100; i++) { ctx.fillStyle = '#444'; ctx.fillRect(Math.random()*64, Math.random()*64, 2, 2); }
-            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
-        }
-        function createBedrockTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<600; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#222' : '#000'; const s = Math.random() * 4 + 2; ctx.fillRect(Math.random()*64, Math.random()*64, s, s); }
-            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
-        }
-        function createCrackTexture() {
-            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0,0,64,64); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
-            ctx.beginPath(); ctx.moveTo(32, 32); ctx.lineTo(10, 10); ctx.moveTo(32, 32); ctx.lineTo(54, 15); ctx.moveTo(32, 32); ctx.lineTo(20, 50); ctx.stroke();
-            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; return tex;
-        }
-
-        const leafVertexShader = `
-            uniform float time;
-            varying vec2 vUv;
-            varying vec3 vNormal;
-            void main() {
-                vUv = uv; vNormal = normal;
-                vec3 pos = position;
-                vec4 worldPosition = instanceMatrix * vec4(pos, 1.0);
-                float windStrength = 0.1 + (worldPosition.y * 0.03); 
-                float windWave = sin(time * 1.5 + worldPosition.x * 0.1 + worldPosition.z * 0.1);
-                worldPosition.x += windWave * windStrength;
-                worldPosition.z += cos(time * 1.2 + worldPosition.y * 0.5) * windStrength * 0.5;
-                gl_Position = projectionMatrix * viewMatrix * worldPosition;
-            }
-        `;
-
-        const leafFragmentShader = `
-            uniform sampler2D map;
-            varying vec2 vUv;
-            varying vec3 vNormal;
-            void main() {
-                vec4 texColor = texture2D(map, vUv);
-                if (texColor.a < 0.6) discard;
-                vec3 lightDir = normalize(vec3(50.0, 100.0, 50.0));
-                float diff = max(dot(vNormal, lightDir), 0.0);
-                vec3 lighting = vec3(0.3) + vec3(diff * 0.8);
-                gl_FragColor = vec4(texColor.rgb * lighting, 1.0);
-                float depth = gl_FragCoord.z / gl_FragCoord.w;
-                float fogFactor = smoothstep(50.0, 300.0, depth);
-                gl_FragColor = mix(gl_FragColor, vec4(0.53, 0.81, 0.92, 1.0), fogFactor);
-            }
-        `;
-
-        function calculateTreeGeometry(rootX, rootY, rootZ, seed, treeId, bMats, lMats, bIds, lIds, roots) {
-            let rng = mulberry32(seed);
-            function random() { return rng(); }
-            const dummy = new THREE.Object3D();
-
-            roots[treeId] = new THREE.Vector3(rootX, rootY, rootZ);
-
-            function grow(x, y, z, length, radius, rotX, rotZ, rotY, depth) {
-                dummy.position.set(x, y, z);
-                dummy.rotation.set(rotX, rotY, rotZ);
-                dummy.scale.set(radius, length, radius); 
-                dummy.updateMatrix();
-                
-                bMats.push(dummy.matrix.clone());
-                bIds.push(treeId); 
-
-                const tip = new THREE.Vector3(0, length, 0);
-                tip.applyEuler(new THREE.Euler(rotX, rotY, rotZ, 'XYZ'));
-                const tipX = x + tip.x;
-                const tipY = y + tip.y;
-                const tipZ = z + tip.z;
-
-                if (depth < treeConfig.maxDepth) {
-                    const numBranches = 2 + Math.floor(random() * 1.5);
-                    for (let i = 0; i < numBranches; i++) {
-                        const spread = treeConfig.angle + ((random() - 0.5) * treeConfig.randomness * 2);
-                        const spin = (Math.PI * 2 / numBranches) * i + (random()*0.5);
-                        grow(tipX, tipY, tipZ, length * treeConfig.lengthDecay, radius * treeConfig.widthDecay, rotX + (Math.cos(spin) * spread), rotZ + (Math.sin(spin) * spread), rotY + ((random()-0.5) * 0.5), depth + 1);
-                    }
-                } else {
-                    for(let j=0; j<4; j++) { 
-                        dummy.position.set(tipX + (random()-0.5)*2.0, tipY + (random()-0.5)*2.0, tipZ + (random()-0.5)*2.0);
-                        dummy.rotation.set(random()*Math.PI, random()*Math.PI, random()*Math.PI);
-                        const s = treeConfig.leafSize * (1.2 + random()*0.6);
-                        dummy.scale.set(s, s, s);
-                        dummy.updateMatrix();
-                        lMats.push(dummy.matrix.clone());
-                        lIds.push(treeId); 
-                    }
-                }
-            }
-            grow(rootX, rootY, rootZ, 8 + random()*4, 1.2 + random()*0.5, 0, 0, 0, 0);
-        }
-
-        // --- CHUNK GENERATION ---
-        function generateChunk(cx, cz) {
-            const chunkGroup = new THREE.Group();
-            
-            const grassMats = [window.sideMat, window.sideMat, window.topMat, window.dirtMat, window.sideMat, window.sideMat];
-            const dirtMats = [window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat];
-            const stoneMats = [window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat];
-
-            const totalBlocks = CHUNK_SIZE * CHUNK_SIZE;
-            
-            // Instanced Meshes for this chunk
-            const imGrass = new THREE.InstancedMesh(window.blockGeo, grassMats, totalBlocks);
-            const imDirt = new THREE.InstancedMesh(window.blockGeo, dirtMats, totalBlocks * PREGEN_DIRT_LAYERS);
-            const imStone = new THREE.InstancedMesh(window.blockGeo, stoneMats, totalBlocks * PREGEN_STONE_LAYERS);
-
-            imGrass.receiveShadow = true; imGrass.castShadow = false;
-            imDirt.receiveShadow = true; imDirt.castShadow = false;
-            imStone.receiveShadow = true; imStone.castShadow = false;
-
-            const dummy = new THREE.Object3D();
-            let idxG = 0, idxD = 0, idxS = 0;
-
-            const startX = cx * CHUNK_WIDTH;
-            const startZ = cz * CHUNK_WIDTH;
-
-            const localTreeBMats = [];
-            const localTreeLMats = [];
-            const localBIds = [];
-            const localLIds = [];
-            const localRoots = {};
-
-            for (let x = 0; x < CHUNK_WIDTH; x += BLOCK_SIZE) {
-                for (let z = 0; z < CHUNK_WIDTH; z += BLOCK_SIZE) {
-                    const worldX = startX + x;
-                    const worldZ = startZ + z;
-                    const h = getTerrainHeight(worldX, worldZ);
-                    const surfaceY = h - (BLOCK_SIZE/2);
-
-                    // GRASS
-                    dummy.position.set(worldX, surfaceY, worldZ);
-                    dummy.updateMatrix();
-                    imGrass.setMatrixAt(idxG++, dummy.matrix);
-
-                    // DIRT
-                    for(let i=1; i<=PREGEN_DIRT_LAYERS; i++) {
-                        dummy.position.set(worldX, surfaceY - (i*BLOCK_SIZE), worldZ);
-                        dummy.updateMatrix();
-                        imDirt.setMatrixAt(idxD++, dummy.matrix);
-                    }
-
-                    // STONE
-                    for(let i=1; i<=PREGEN_STONE_LAYERS; i++) {
-                        dummy.position.set(worldX, surfaceY - ((PREGEN_DIRT_LAYERS + i)*BLOCK_SIZE), worldZ);
-                        dummy.updateMatrix();
-                        imStone.setMatrixAt(idxS++, dummy.matrix);
-                    }
-
-                    // TREES (Random chance per block in chunk)
-                    const treeSeed = Math.abs(Math.sin(worldX * 12.9898 + worldZ * 78.233) * 43758.5453);
-                    if (treeSeed > 0.97 && h > -5) { 
-                        const treeId = `${worldX},${worldZ}`;
-                        calculateTreeGeometry(worldX, h, worldZ, Math.floor(treeSeed * 1000), treeId, localTreeBMats, localTreeLMats, localBIds, localLIds, localRoots);
-                    }
-                }
-            }
-
-            chunkGroup.add(imGrass);
-            chunkGroup.add(imDirt);
-            chunkGroup.add(imStone);
-
-            // Create Tree Instanced Meshes for this chunk
-            if (localTreeBMats.length > 0) {
-                const imBranch = new THREE.InstancedMesh(window.treeBGeo, window.treeBMat, localTreeBMats.length);
-                for(let i=0; i<localTreeBMats.length; i++) imBranch.setMatrixAt(i, localTreeBMats[i]);
-                imBranch.userData = { treeIds: localBIds }; 
-                chunkGroup.add(imBranch);
-            }
-            if (localTreeLMats.length > 0) {
-                const imLeaf = new THREE.InstancedMesh(window.treeLGeo, window.treeLMat, localTreeLMats.length);
-                for(let i=0; i<localTreeLMats.length; i++) imLeaf.setMatrixAt(i, localTreeLMats[i]);
-                imLeaf.userData = { treeIds: localLIds };
-                chunkGroup.add(imLeaf);
-            }
-
-            chunkGroup.userData = {
-                roots: localRoots,
-                meshes: [imGrass, imDirt, imStone]
-            };
-
-            return chunkGroup;
-        }
-
-        function updateChunks() {
-            const px = camera.position.x;
-            const pz = camera.position.z;
-            
-            const chunkX = Math.floor(px / CHUNK_WIDTH);
-            const chunkZ = Math.floor(pz / CHUNK_WIDTH);
-
-            if (chunkX !== currentChunk.x || chunkZ !== currentChunk.z || activeChunkKeys.length === 0) {
-                currentChunk.x = chunkX;
-                currentChunk.z = chunkZ;
-                
-                document.getElementById('coord-debug').innerText = `Chunk: ${chunkX}, ${chunkZ}`;
-
-                // Determine visible chunks
-                const visibleKeys = new Set();
-                for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
-                    for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
-                        visibleKeys.add(getChunkKey(chunkX + x, chunkZ + z));
-                    }
-                }
-
-                // Remove old chunks
-                activeChunkKeys.forEach(key => {
-                    if (!visibleKeys.has(key)) {
-                        scene.remove(chunks[key]);
-                        delete chunks[key];
-                    }
-                });
-
-                // Add new chunks
-                visibleKeys.forEach(key => {
-                    if (!chunks[key]) {
-                        const [cx, cz] = key.split(',').map(Number);
-                        const chunk = generateChunk(cx, cz);
-                        scene.add(chunk);
-                        chunks[key] = chunk;
-                    }
-                });
-
-                activeChunkKeys = Array.from(visibleKeys);
-                
-                // Update Collision List
-                collidableObjects = [];
-                activeChunkKeys.forEach(key => {
-                    if (chunks[key]) {
-                        chunks[key].traverse(child => {
-                            if (child.isMesh) collidableObjects.push(child);
-                        });
-                    }
-                });
-                collidableObjects = collidableObjects.concat(dynamicBlocks);
-            }
-        }
-
-        function triggerTreeFall(treeId, chunkGroup) {
-            const rootPos = chunkGroup.userData.roots[treeId];
-            if (!rootPos) return;
-
-            const treeFallGroup = new THREE.Group();
-            treeFallGroup.position.copy(rootPos);
-            scene.add(treeFallGroup);
-
-            // Find branches in this chunk's mesh
-            const imBranch = chunkGroup.children.find(c => c.geometry === window.treeBGeo);
-            if (imBranch) {
-                const ids = imBranch.userData.treeIds;
-                const dummy = new THREE.Object3D();
-                const zero = new THREE.Matrix4().makeScale(0,0,0);
-                
-                for(let i=0; i<imBranch.count; i++) {
-                    if (ids[i] === treeId) {
-                        imBranch.getMatrixAt(i, dummy.matrix);
-                        dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
-                        const mesh = new THREE.Mesh(window.treeBGeo, window.treeBMat);
-                        mesh.position.copy(dummy.position).sub(rootPos);
-                        mesh.quaternion.copy(dummy.quaternion);
-                        mesh.scale.copy(dummy.scale);
-                        treeFallGroup.add(mesh);
-                        imBranch.setMatrixAt(i, zero);
-                    }
-                }
-                imBranch.instanceMatrix.needsUpdate = true;
-            }
-
-            const imLeaf = chunkGroup.children.find(c => c.geometry === window.treeLGeo);
-            if (imLeaf) {
-                const ids = imLeaf.userData.treeIds;
-                const dummy = new THREE.Object3D();
-                const zero = new THREE.Matrix4().makeScale(0,0,0);
-                
-                for(let i=0; i<imLeaf.count; i++) {
-                    if (ids[i] === treeId) {
-                        imLeaf.getMatrixAt(i, dummy.matrix);
-                        dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
-                        const mesh = new THREE.Mesh(window.treeLGeo, window.treeLMat);
-                        mesh.position.copy(dummy.position).sub(rootPos);
-                        mesh.quaternion.copy(dummy.quaternion);
-                        mesh.scale.copy(dummy.scale);
-                        treeFallGroup.add(mesh);
-                        imLeaf.setMatrixAt(i, zero);
-                    }
-                }
-                imLeaf.instanceMatrix.needsUpdate = true;
-            }
-
+        
+        // Accretion disk particles
+        const particles = [];
+        for (let i = 0; i < 3000; i++) {
             const angle = Math.random() * Math.PI * 2;
-            const axis = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
-
-            fallingTrees.push({
-                group: treeFallGroup,
-                axis: axis,
-                angle: 0,
-                speed: 0,
-                life: 15.0 
-            });
-        }
-
-        async function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 30, 150); 
-
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 40, 0);
-
-            handGroup = new THREE.Group();
-            const handGeo = new THREE.BoxGeometry(1.2, 1.2, 3.5); 
-            const handMat = new THREE.MeshStandardMaterial({ color: 0xdeb887 }); 
-            handMesh = new THREE.Mesh(handGeo, handMat);
-            handMesh.position.set(2, -2, -3); 
-            handMesh.rotation.set(0.2, -0.2, 0); 
-            handGroup.add(handMesh);
-            camera.add(handGroup); 
-
-            const crackTex = createCrackTexture();
-            const crackMat = new THREE.MeshBasicMaterial({ 
-                map: crackTex, 
-                transparent: true, 
-                opacity: 0,
-                depthTest: true, 
-                depthWrite: false, 
-                polygonOffset: true, 
-                polygonOffsetFactor: -1.0, 
-                polygonOffsetUnits: -1.0,
-                side: THREE.FrontSide
-            });
-            const crackGeo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-            breakingOverlay = new THREE.Mesh(crackGeo, crackMat);
-            scene.add(breakingOverlay);
-            breakingOverlay.visible = false;
-
-            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
-            document.body.appendChild(renderer.domElement);
-
-            orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
-            orbitControls.enableDamping = true;
-            orbitControls.maxPolarAngle = Math.PI / 2 - 0.05;
-            orbitControls.minDistance = 10;
-            orbitControls.maxDistance = 250;
-
-            pointerLockControls = new THREE.PointerLockControls(camera, renderer.domElement); // FIX: use renderer.domElement
-            raycaster = new THREE.Raycaster();
-            physicsRaycaster = new THREE.Raycaster();
-
-            const clickCatcher = document.getElementById('click-catcher');
-
-            clickCatcher.addEventListener('click', () => { pointerLockControls.lock(); });
-
-            pointerLockControls.addEventListener('lock', () => {
-                isWalking = true;
-                orbitControls.enabled = false;
-                if(camera.position.y > 50) {
-                    camera.position.set(0, getTerrainHeight(0,0) + STANDING_HEIGHT, 0);
-                }
-            });
-
-            pointerLockControls.addEventListener('unlock', () => {
-                isWalking = false;
-                orbitControls.enabled = true;
-                isMining = false;
-                mineTimer = 0;
-            });
-
-            function updateHotbar(index) {
-                document.querySelectorAll('.slot').forEach(s => s.classList.remove('active'));
-                selectedSlot = index;
-                const slot = document.getElementById('slot-' + selectedSlot);
-                if(slot) slot.classList.add('active');
-            }
-            document.addEventListener('wheel', (e) => {
-                if(!isWalking) return;
-                if(e.deltaY > 0) selectedSlot = (selectedSlot + 1) % 9;
-                else selectedSlot = (selectedSlot - 1 + 9) % 9;
-                updateHotbar(selectedSlot);
-            });
-            const onKeyDown = function (event) {
-                if (event.key >= '1' && event.key <= '9') updateHotbar(parseInt(event.key) - 1);
-                switch (event.code) {
-                    case 'ArrowUp': case 'KeyW': moveForward = true; break;
-                    case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
-                    case 'ArrowDown': case 'KeyS': moveBackward = true; break;
-                    case 'ArrowRight': case 'KeyD': moveRight = true; break;
-                    case 'ShiftLeft': case 'ShiftRight': isCrouching = true; break;
-                    case 'ControlLeft': case 'ControlRight': if (isWalking) isSprinting = !isSprinting; break;
-                    case 'Space': holdingJump = true; break;
-                }
-            };
-            const onKeyUp = function (event) {
-                switch (event.code) {
-                    case 'ArrowUp': case 'KeyW': moveForward = false; break;
-                    case 'ArrowLeft': case 'KeyA': moveLeft = false; break;
-                    case 'ArrowDown': case 'KeyS': moveBackward = false; break;
-                    case 'ArrowRight': case 'KeyD': moveRight = false; break;
-                    case 'ShiftLeft': case 'ShiftRight': isCrouching = false; break;
-                    case 'Space': holdingJump = false; break;
-                }
-            };
-            document.addEventListener('keydown', onKeyDown);
-            document.addEventListener('keyup', onKeyUp);
-
-            document.addEventListener('mousedown', (event) => {
-                if (!isWalking || !pointerLockControls.isLocked) return;
-                if (event.button === 0) {
-                    isMining = true;
-                    if (!isSwinging) { isSwinging = true; swingProgress = 0; }
-                }
-                else if (event.button === 2) { 
-                    raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-                    raycaster.far = 15; 
-                    let objs = collidableObjects; 
-                    
-                    const hits = raycaster.intersectObjects(objs);
-                    if(hits.length > 0) {
-                        const hit = hits[0];
-                        const normal = hit.face.normal.clone();
-                        const placePos = hit.point.clone().add(normal.multiplyScalar(BLOCK_SIZE/2));
-                        
-                        snapToGrid(placePos);
-
-                        const newBlock = new THREE.Mesh(window.blockGeo, window.topMat); 
-                        newBlock.position.copy(placePos);
-                        scene.add(newBlock);
-                        dynamicBlocks.push(newBlock);
-                        collidableObjects.push(newBlock); 
-                    }
-                }
-            });
-
-            document.addEventListener('mouseup', () => {
-                isMining = false;
-                mineTimer = 0;
-                currentMineTarget = null;
-                breakingOverlay.visible = false;
-            });
-
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-            scene.add(ambientLight);
-            const sunLight = new THREE.DirectionalLight(0xffdfba, 1.2);
-            sunLight.position.set(100, 150, 50);
-            sunLight.castShadow = true;
-            sunLight.shadow.mapSize.width = 1024; 
-            sunLight.shadow.mapSize.height = 1024;
-            sunLight.shadow.camera.near = 0.5;
-            sunLight.shadow.camera.far = 300;
-            const d = 150;
-            sunLight.shadow.camera.left = -d; sunLight.shadow.camera.right = d;
-            sunLight.shadow.camera.top = d; sunLight.shadow.camera.bottom = -d;
-            scene.add(sunLight);
-
-            leafGeo = new THREE.BufferGeometry();
-            const pPositions = []; const pVelocities = [];
-            for(let i=0; i<leafCount; i++) { pPositions.push(0,0,0); pVelocities.push(0, -Math.random()*0.2-0.1, 0); }
-            leafGeo.setAttribute('position', new THREE.Float32BufferAttribute(pPositions, 3));
-            leafMat = new THREE.PointsMaterial({ color: 0x4CAF50, size: 0.8, transparent: true, opacity: 0.8 });
-            leafParticles = new THREE.Points(leafGeo, leafMat);
-            leafParticles.userData = { velocities: pVelocities };
-            scene.add(leafParticles);
-
-            woodGeo = new THREE.BufferGeometry();
-            const wPositions = new Float32Array(woodCount * 3);
-            const wVelocities = new Float32Array(woodCount * 3);
-            const wLife = new Float32Array(woodCount);
-            for(let i=0; i<woodCount; i++) { wPositions[i*3+1] = -1000; wLife[i] = 0; }
-            woodGeo.setAttribute('position', new THREE.BufferAttribute(wPositions, 3));
-            woodMat = new THREE.PointsMaterial({ color: 0x8D6E63, size: 0.5 });
-            woodParticles = new THREE.Points(woodGeo, woodMat);
-            woodParticles.userData = { velocity: wVelocities, life: wLife };
-            scene.add(woodParticles);
-
-            window.blockGeo = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-            const grassSideTex = await createCompositeSideTexture();
-            const grassTopTex = createTopTexture();
-            const dirtBottomTex = createBottomTexture();
-            const stoneTex = createStoneTexture();
-            const deepslateTex = createDeepslateTexture();
-            const bedrockTex = createBedrockTexture();
-
-            window.topMat = new THREE.MeshStandardMaterial({ map: grassTopTex, roughness: 1.0, color: 0x4db24b });
-            window.sideMat = new THREE.MeshStandardMaterial({ map: grassSideTex, roughness: 1.0 });
-            window.dirtMat = new THREE.MeshStandardMaterial({ map: dirtBottomTex, roughness: 1.0 });
-            window.stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.9 });
-            window.deepslateMat = new THREE.MeshStandardMaterial({ map: deepslateTex, roughness: 0.9 });
-            window.bedrockMat = new THREE.MeshStandardMaterial({ map: bedrockTex, roughness: 1.0 });
-
-            // Tree Assets
-            window.treeBGeo = new THREE.CylinderGeometry(0.7, 1, 1, 5);
-            window.treeBGeo.translate(0, 0.5, 0);
-            window.treeBMat = new THREE.MeshStandardMaterial({ map: createBarkTexture(), roughness: 0.9, color: 0x8D6E63 });
+            const radius = innerDiskRadius + Math.random() * (outerDiskRadius - innerDiskRadius);
+            const orbitalSpeed = Math.sqrt(schwarzschildRadius / radius) * 0.02;
             
-            window.treeLGeo = new THREE.PlaneGeometry(1, 1, 2, 2);
-            const posAttr = window.treeLGeo.attributes.position;
-            for(let i=0; i<posAttr.count; i++) posAttr.setZ(i, Math.pow(posAttr.getX(i) * 1.5, 2) * 0.3);
-            window.treeLGeo.computeVertexNormals();
-            leafUniforms = { time: { value: 0 }, map: { value: createLeafTexture() } };
-            window.treeLMat = new THREE.ShaderMaterial({
-                defines: { 'USE_INSTANCING': '' },
-                uniforms: leafUniforms, vertexShader: leafVertexShader, fragmentShader: leafFragmentShader,
-                side: THREE.DoubleSide, transparent: true
+            particles.push({
+                angle: angle,
+                radius: radius,
+                size: Math.random() * 1.5 + 0.5,
+                orbitalSpeed: orbitalSpeed,
+                brightness: Math.random(),
+                temperature: 1 / (radius / innerDiskRadius) // Hotter closer to black hole
             });
-
-            updateHealthUI();
-            document.getElementById('loading').style.opacity = 0;
-            animate();
         }
-
-        function onWindowResize() {
-            if (!camera || !renderer) return;
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+        
+        // Apply gravitational lensing effect to a point
+        function applyLensing(x, y) {
+            const dx = x - centerX;
+            const dy = y - centerY;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < schwarzschildRadius) return null; // Inside event horizon
+            
+            // Lensing strength (simplified Einstein ring calculation)
+            const lensStrength = (schwarzschildRadius * schwarzschildRadius) / (distance * distance);
+            const angle = Math.atan2(dy, dx);
+            
+            const bentDistance = distance * (1 - lensStrength * 0.5);
+            
+            return {
+                x: centerX + Math.cos(angle) * bentDistance,
+                y: centerY + Math.sin(angle) * bentDistance,
+                brightness: 1 / (1 + lensStrength * 2) // Dimming due to lensing
+            };
         }
-
+        
+        // Draw stars with gravitational lensing
+        function drawStars() {
+            stars.forEach(star => {
+                const lensed = applyLensing(star.x, star.y);
+                if (!lensed) return;
+                
+                const brightness = star.brightness * lensed.brightness;
+                ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
+                ctx.beginPath();
+                ctx.arc(lensed.x, lensed.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Twinkle effect
+                if (brightness > 0.7) {
+                    ctx.fillStyle = `rgba(200, 220, 255, ${brightness * 0.3})`;
+                    ctx.beginPath();
+                    ctx.arc(lensed.x, lensed.y, star.size * 2, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+        
+        // Draw accretion disk with Doppler shift
+        function drawAccretionDisk() {
+            particles.forEach(particle => {
+                const x = centerX + Math.cos(particle.angle) * particle.radius;
+                const y = centerY + Math.sin(particle.angle) * particle.radius * 0.3; // Flattened disk
+                
+                // Calculate velocity vector for Doppler shift
+                const velocityAngle = particle.angle + Math.PI / 2;
+                const velocityX = Math.cos(velocityAngle);
+                
+                // Doppler shift: blue-shifted approaching, red-shifted receding
+                const dopplerFactor = velocityX * 0.5 + 0.5;
+                
+                // Temperature-based color (hotter = bluer, near black hole)
+                const temp = particle.temperature;
+                const r = Math.floor(255 * (1 - dopplerFactor) * temp);
+                const g = Math.floor(180 * temp);
+                const b = Math.floor(255 * dopplerFactor * temp);
+                
+                const alpha = particle.brightness * 0.6;
+                
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                ctx.beginPath();
+                ctx.arc(x, y, particle.size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Add glow for hot particles
+                if (particle.temperature > 0.7) {
+                    const gradient = ctx.createRadialGradient(x, y, 0, x, y, particle.size * 3);
+                    gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha * 0.3})`);
+                    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.arc(x, y, particle.size * 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+        
+        // Draw event horizon
+        function drawEventHorizon() {
+            // Pure black circle
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, schwarzschildRadius, 0, Math.PI * 2);
+            ctx.fill();
+            
+            // Hawking radiation glow (extremely faint)
+            const gradient = ctx.createRadialGradient(centerX, centerY, schwarzschildRadius, 
+                                                     centerX, centerY, schwarzschildRadius * 1.2);
+            gradient.addColorStop(0, 'rgba(100, 150, 255, 0.1)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, schwarzschildRadius * 1.2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // Draw photon sphere
+        function drawPhotonSphere() {
+            ctx.strokeStyle = 'rgba(255, 200, 100, 0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, photonSphere, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+        
+        // Update particle positions
+        function updateParticles() {
+            particles.forEach(particle => {
+                particle.angle += particle.orbitalSpeed;
+                
+                // Particles gradually spiral inward
+                particle.radius -= particle.orbitalSpeed * 0.5;
+                
+                // Reset particle if it falls into black hole
+                if (particle.radius < innerDiskRadius) {
+                    particle.radius = outerDiskRadius;
+                    particle.angle = Math.random() * Math.PI * 2;
+                    particle.orbitalSpeed = Math.sqrt(schwarzschildRadius / particle.radius) * 0.02;
+                    particle.temperature = 1 / (particle.radius / innerDiskRadius);
+                }
+            });
+        }
+        
+        // Add background nebula effect
+        function drawNebula() {
+            const gradient = ctx.createRadialGradient(centerX, centerY, 0, 
+                                                     centerX, centerY, outerDiskRadius * 3);
+            gradient.addColorStop(0, 'rgba(50, 20, 80, 0)');
+            gradient.addColorStop(0.5, 'rgba(80, 30, 120, 0.03)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        // Animation loop
         function animate() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            drawNebula();
+            drawStars();
+            drawAccretionDisk();
+            drawPhotonSphere();
+            drawEventHorizon();
+            updateParticles();
+            
             requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            const time = clock.getElapsedTime();
-
-            if(leafUniforms) leafUniforms.time.value = time;
-
-            updateChunks();
-
-            for (let i = fallingTrees.length - 1; i >= 0; i--) {
-                const ft = fallingTrees[i];
-                if (ft.angle < Math.PI / 2) {
-                    ft.speed += delta * 1.0; 
-                    ft.angle += ft.speed * delta;
-                    ft.group.rotateOnAxis(ft.axis, ft.speed * delta);
-                } else {
-                    ft.speed = 0;
-                }
-                ft.life -= delta;
-                if (ft.life <= 0) {
-                    scene.remove(ft.group);
-                    fallingTrees.splice(i, 1);
-                }
-            }
-
-            const playerPos = camera.position.clone();
-            playerPos.y = 0; 
-            fallingTrees.forEach(ft => {
-                if (ft.angle >= Math.PI / 2) {
-                    const treePos = ft.group.position.clone();
-                    treePos.y = 0;
-                    if (playerPos.distanceTo(treePos) < 2) {
-                         const pushDir = treePos.sub(playerPos).normalize();
-                         ft.group.position.add(pushDir.multiplyScalar(delta * 5));
-                    }
-                }
-            });
-
-            if(leafParticles) {
-                const positions = leafParticles.geometry.attributes.position.array;
-                const vels = leafParticles.userData.velocities;
-                for(let i=0; i<leafCount; i++) {
-                    positions[i*3+1] += vels[i*3+1]; 
-                    if(positions[i*3+1] < camera.position.y - 30) {
-                         positions[i*3+1] = camera.position.y + 40;
-                         positions[i*3] = camera.position.x + (Math.random()-0.5)*100;
-                         positions[i*3+2] = camera.position.z + (Math.random()-0.5)*100;
-                    }
-                }
-                leafParticles.geometry.attributes.position.needsUpdate = true;
-                leafParticles.position.x = camera.position.x * 0.8; 
-                leafParticles.position.z = camera.position.z * 0.8;
-            }
-            if(woodParticles) {
-                const positions = woodParticles.geometry.attributes.position.array;
-                const vels = woodParticles.userData.velocity;
-                const life = woodParticles.userData.life;
-                for(let i=0; i<woodCount; i++) {
-                    if(life[i] > 0) {
-                        life[i] -= delta * 2.0; 
-                        if(life[i] <= 0) {
-                            positions[i*3+1] = -1000;
-                        } else {
-                            vels[i*3+1] -= 20 * delta;
-                            positions[i*3] += vels[i*3] * delta;
-                            positions[i*3+1] += vels[i*3+1] * delta;
-                            positions[i*3+2] += vels[i*3+2] * delta;
-                        }
-                    }
-                }
-                woodParticles.geometry.attributes.position.needsUpdate = true;
-            }
-
-            if (isMining) {
-                if (!isSwinging) {
-                    isSwinging = true;
-                    swingProgress = 0;
-                }
-                
-                raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-                raycaster.far = 15; 
-                let objs = collidableObjects;
-                
-                const hits = raycaster.intersectObjects(objs);
-                if (hits.length > 0) {
-                    const hit = hits[0];
-                    mineTimer += delta;
-                    breakingOverlay.visible = true;
-                    
-                    let targetCenter = hit.point.clone().sub(hit.face.normal.multiplyScalar(0.1));
-                    snapToGrid(targetCenter);
-                    breakingOverlay.position.copy(targetCenter);
-                    breakingOverlay.rotation.set(0,0,0);
-
-                    const progress = Math.min(mineTimer / 0.5, 1.0); 
-                    breakingOverlay.material.opacity = 0.5 + (progress * 0.5);
-
-                    if (mineTimer > 0.5) { 
-                        isMining = false;
-                        mineTimer = 0;
-                        breakingOverlay.visible = false;
-                        
-                        if (hit.object.geometry === window.treeBGeo) {
-                            const instId = hit.instanceId;
-                            const ids = hit.object.userData.treeIds;
-                            const treeId = ids[instId];
-                            if (treeHealthMap[treeId] === undefined) treeHealthMap[treeId] = 6;
-                            treeHealthMap[treeId]--;
-                            spawnWoodParticles(hit.point);
-                            const tempMatrix = new THREE.Matrix4();
-                            hit.object.getMatrixAt(instId, tempMatrix);
-                            const pos = new THREE.Vector3(), quat = new THREE.Quaternion(), scl = new THREE.Vector3();
-                            tempMatrix.decompose(pos, quat, scl);
-                            scl.x *= 0.8; scl.z *= 0.8;
-                            tempMatrix.compose(pos, quat, scl);
-                            hit.object.setMatrixAt(instId, tempMatrix);
-                            hit.object.instanceMatrix.needsUpdate = true;
-                            if (treeHealthMap[treeId] <= 0) {
-                                triggerTreeFall(treeId, hit.object.parent); 
-                            }
-                        }
-                        else {
-                            if (hit.object.isInstancedMesh) {
-                                const tempMatrix = new THREE.Matrix4();
-                                hit.object.getMatrixAt(hit.instanceId, tempMatrix);
-                                tempMatrix.scale(new THREE.Vector3(0,0,0));
-                                hit.object.setMatrixAt(hit.instanceId, tempMatrix);
-                                hit.object.instanceMatrix.needsUpdate = true;
-                            } else {
-                                scene.remove(hit.object);
-                                dynamicBlocks = dynamicBlocks.filter(b => b !== hit.object);
-                                collidableObjects = collidableObjects.filter(b => b !== hit.object);
-                            }
-
-                            const normal = hit.face.normal.clone();
-                            const targetBlockPos = hit.point.clone().sub(normal.multiplyScalar(BLOCK_SIZE/2));
-                            snapToGrid(targetBlockPos);
-
-                            const posBelow = targetBlockPos.clone();
-                            posBelow.y -= BLOCK_SIZE;
-                            
-                            if (posBelow.y > -300) { 
-                                const surfaceY = getTerrainHeight(posBelow.x, posBelow.z);
-                                const depth = Math.round(((surfaceY - (BLOCK_SIZE/2)) - posBelow.y) / BLOCK_SIZE);
-
-                                if (depth >= TOTAL_PREGEN_LAYERS && depth <= 64) {
-                                    let material;
-                                    if (depth <= 28) material = window.stoneMat; 
-                                    else if (depth <= 63) material = window.deepslateMat; 
-                                    else material = window.bedrockMat;
-
-                                    const newBlock = new THREE.Mesh(window.blockGeo, material);
-                                    newBlock.position.copy(posBelow);
-                                    scene.add(newBlock);
-                                    dynamicBlocks.push(newBlock);
-                                    collidableObjects.push(newBlock);
-                                }
-                            }
-                        } 
-                    }
-                } else {
-                    breakingOverlay.visible = false;
-                    mineTimer = 0;
-                }
-            } else {
-                breakingOverlay.visible = false;
-            }
-
-            if (isSwinging && handMesh) {
-                swingProgress += delta * 15;
-                handMesh.rotation.x = -Math.sin(swingProgress) * 1.5; 
-                handMesh.rotation.z = Math.sin(swingProgress) * 0.5;
-                if (swingProgress >= Math.PI) {
-                    if (!isMining) {
-                        isSwinging = false;
-                        handMesh.rotation.set(0.2, -0.2, 0);
-                    } else {
-                        swingProgress = 0; 
-                    }
-                }
-            }
-
-            if (isWalking && pointerLockControls.isLocked && !isDead) {
-                let targetSpeed = BASE_SPEED;
-                let targetHeight = STANDING_HEIGHT;
-                let targetFOV = BASE_FOV;
-
-                if (isCrouching) {
-                    targetSpeed = CROUCH_SPEED;
-                    targetHeight = CROUCH_HEIGHT;
-                } else if (isSprinting && (moveForward || moveBackward || moveLeft || moveRight)) {
-                    targetSpeed = SPRINT_SPEED;
-                    targetFOV = SPRINT_FOV;
-                }
-
-                currentEyeHeight = THREE.MathUtils.lerp(currentEyeHeight, targetHeight, 15 * delta);
-                camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 5 * delta);
-                camera.updateProjectionMatrix();
-
-                velocity.x -= velocity.x * 15.0 * delta;
-                velocity.z -= velocity.z * 15.0 * delta;
-                velocity.y -= 90.0 * delta; 
-
-                direction.z = Number(moveForward) - Number(moveBackward);
-                direction.x = Number(moveRight) - Number(moveLeft);
-                direction.normalize();
-
-                if (moveForward || moveBackward) velocity.z -= direction.z * targetSpeed * delta;
-                if (moveLeft || moveRight) velocity.x -= direction.x * targetSpeed * delta;
-
-                const oldPos = camera.position.clone();
-                pointerLockControls.moveRight(-velocity.x * delta);
-                pointerLockControls.moveForward(-velocity.z * delta);
-                
-                const newPos = camera.position.clone();
-                let newGroundY = -300; 
-                
-                physicsRaycaster.set(newPos, new THREE.Vector3(0,-1,0));
-                physicsRaycaster.far = 100;
-                
-                const downHits = physicsRaycaster.intersectObjects(collidableObjects);
-                if(downHits.length > 0) newGroundY = downHits[0].point.y;
-                
-                const feetY = oldPos.y - currentEyeHeight; 
-                
-                if (newGroundY > feetY + 1.0) { 
-                    camera.position.x = oldPos.x;
-                    camera.position.z = oldPos.z;
-                    physicsRaycaster.set(oldPos, new THREE.Vector3(0,-1,0));
-                    const oldHits = physicsRaycaster.intersectObjects(collidableObjects);
-                    if(oldHits.length > 0) newGroundY = oldHits[0].point.y;
-                    else newGroundY = -300;
-                }
-
-                const currentFeetY = camera.position.y - currentEyeHeight;
-                
-                if (currentFeetY <= newGroundY + 0.5) { 
-                    if (wasInAir) {
-                        if (velocity.y < -35) { 
-                            const damage = Math.floor(Math.abs(velocity.y + 35) / 10);
-                            if (damage > 0) takeDamage(damage);
-                        }
-                        wasInAir = false;
-                    }
-                    velocity.y = Math.max(0, velocity.y);
-                    camera.position.y = newGroundY + currentEyeHeight;
-                    canJump = true;
-                    
-                    if (holdingJump) {
-                        velocity.y = 28; 
-                        canJump = false;
-                    }
-                } else {
-                    wasInAir = true;
-                    canJump = false; 
-                }
-
-                camera.position.y += velocity.y * delta;
-                
-                if (camera.position.y < newGroundY + currentEyeHeight) {
-                    camera.position.y = newGroundY + currentEyeHeight;
-                    velocity.y = 0;
-                    canJump = true;
-                }
-                if (camera.position.y < -300) takeDamage(10); 
-            } else {
-                if(orbitControls) orbitControls.update();
-            }
-
-            if(renderer && scene && camera) renderer.render(scene, camera);
         }
-
-        setTimeout(init, 100);
-        window.addEventListener('resize', onWindowResize, false);
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+        
+        // Start animation
+        animate();
     </script>
 </body>
 </html>
