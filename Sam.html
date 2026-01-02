@@ -100,12 +100,18 @@
             cursor: pointer;
             z-index: 1;
         }
+        
+        #coord-debug {
+            position: absolute; top: 10px; left: 10px; color: white; font-family: monospace;
+            background: rgba(0,0,0,0.5); padding: 5px; pointer-events: none;
+        }
     </style>
 </head>
 <body>
-    <div id="loading">Generating Forest...</div>
+    <div id="loading">Generating World...</div>
     <div id="crosshair"></div>
     <div id="damage-overlay"></div>
+    <div id="coord-debug">Chunk: 0, 0</div>
     
     <div id="stats-container">
         <div id="health"></div>
@@ -129,26 +135,27 @@
 
     <div id="click-catcher"></div>
 
-    <!-- Three.js Dependencies -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
 
     <script>
-        const FOREST_SIZE = 800; 
-        const TREE_COUNT = 150;  
+        // --- CHUNK CONFIGURATION ---
+        const BLOCK_SIZE = 4;
+        const CHUNK_SIZE = 16; // 16x16 blocks per chunk
+        const CHUNK_WIDTH = CHUNK_SIZE * BLOCK_SIZE; // Physical size (64 units)
+        const RENDER_DISTANCE = 3; // Radius of chunks to keep loaded
+        
         const TERRAIN_ROUGHNESS = 0.005;
         const TERRAIN_HEIGHT = 25;
-        const BLOCK_SIZE = 4;
         
-        // Depth Configuration
         const PREGEN_DIRT_LAYERS = 3;
-        const PREGEN_STONE_LAYERS = 4; // Generate this many stone layers initially
-        const TOTAL_PREGEN_LAYERS = 1 + PREGEN_DIRT_LAYERS + PREGEN_STONE_LAYERS; // 8 layers total
+        const PREGEN_STONE_LAYERS = 4; 
+        const TOTAL_PREGEN_LAYERS = 1 + PREGEN_DIRT_LAYERS + PREGEN_STONE_LAYERS; 
 
         const treeConfig = {
-            maxDepth: 9, angle: 0.5, lengthDecay: 0.78, widthDecay: 0.65, randomness: 0.2, leafSize: 0.8
+            maxDepth: 7, angle: 0.5, lengthDecay: 0.78, widthDecay: 0.65, randomness: 0.2, leafSize: 0.8
         };
 
         // --- TEXTURES ---
@@ -160,21 +167,17 @@
         let leafUniforms;
         let simplex = new SimplexNoise();
         let raycaster; 
+        let physicsRaycaster; 
 
-        let allBranchMatrices = [];
-        let allLeafMatrices = [];
-        let branchTreeIds = []; 
-        let leafTreeIds = []; 
-        let treeRoots = []; 
+        // Chunk Management
+        let chunks = {}; // Map of "x,z" to chunk data
+        let activeChunkKeys = [];
+        let currentChunk = { x: 0, z: 0 };
 
-        // Instanced Meshes
-        let imGrass, imDirt, imStone; // Pre-generated layers
-        let dynamicBlocks = []; // For placed blocks or deep mined blocks
-        let branchMesh, leafMesh; 
+        let dynamicBlocks = []; 
         let breakingOverlay; 
         
-        // Physics & Collision Optimization
-        let collidableObjects = []; // Persistent array to avoid GC
+        let collidableObjects = []; // Only nearby chunks + dynamic
 
         let treeHealthMap = {}; 
         let fallingTrees = []; 
@@ -220,6 +223,10 @@
         const SPRINT_FOV = 75;
 
         // --- HELPER FUNCTIONS ---
+
+        function getChunkKey(x, z) {
+            return `${x},${z}`;
+        }
 
         function updateHealthUI() {
             const container = document.getElementById('health');
@@ -297,150 +304,56 @@
             }
         }
 
-        // Texture Generators
+        // Texture Generators (Same as before)
         function createBarkTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#3E2723';
-            ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<200; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#2d1e18' : '#4e342e';
-                ctx.fillRect(Math.random()*64, Math.random()*64, 2, 8);
-            }
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-            return tex;
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#3E2723'; ctx.fillRect(0, 0, 64, 64);
+            for(let i=0; i<200; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#2d1e18' : '#4e342e'; ctx.fillRect(Math.random()*64, Math.random()*64, 2, 8); }
+            const tex = new THREE.CanvasTexture(canvas); tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping; return tex;
         }
-
         function createLeafTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 128; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.clearRect(0, 0, 128, 128);
-            ctx.beginPath();
-            ctx.moveTo(64, 128);
-            ctx.ellipse(64, 64, 50, 60, 0, 0, Math.PI * 2);
-            ctx.fillStyle = '#4CAF50';
-            ctx.fill();
+            const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, 128, 128); ctx.beginPath(); ctx.moveTo(64, 128); ctx.ellipse(64, 64, 50, 60, 0, 0, Math.PI * 2); ctx.fillStyle = '#4CAF50'; ctx.fill();
             return new THREE.CanvasTexture(canvas);
         }
-
         function createCompositeSideTexture() {
             return new Promise((resolve) => {
-                const canvas = document.createElement('canvas');
-                canvas.width = 16; canvas.height = 16;
-                const ctx = canvas.getContext('2d');
-                ctx.imageSmoothingEnabled = false;
-                const imgSide = new Image();
-                imgSide.onload = () => {
-                    ctx.drawImage(imgSide, 0, 0, 16, 16);
-                    const tex = new THREE.CanvasTexture(canvas);
-                    tex.magFilter = THREE.NearestFilter;
-                    tex.minFilter = THREE.NearestFilter;
-                    resolve(tex);
-                };
-                imgSide.src = TEX_GRASS_SIDE;
+                const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16;
+                const ctx = canvas.getContext('2d'); ctx.imageSmoothingEnabled = false;
+                const imgSide = new Image(); imgSide.onload = () => { ctx.drawImage(imgSide, 0, 0, 16, 16); const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; resolve(tex); }; imgSide.src = TEX_GRASS_SIDE;
             });
         }
-
         function createTopTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#eeeeee'; 
-            ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<400; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#cccccc' : '#aaaaaa';
-                const s = Math.random() * 2 + 1;
-                ctx.fillRect(Math.random()*64, Math.random()*64, s, s);
-            }
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.magFilter = THREE.NearestFilter;
-            tex.minFilter = THREE.NearestFilter;
-            return tex;
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#eeeeee'; ctx.fillRect(0, 0, 64, 64);
+            for(let i=0; i<400; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#cccccc' : '#aaaaaa'; const s = Math.random() * 2 + 1; ctx.fillRect(Math.random()*64, Math.random()*64, s, s); }
+            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
         }
-
-        function createBottomTexture() {
-            const tex = new THREE.TextureLoader().load(TEX_GRASS_BOTTOM);
-            tex.magFilter = THREE.NearestFilter;
-            tex.minFilter = THREE.NearestFilter;
-            return tex;
-        }
-
+        function createBottomTexture() { const tex = new THREE.TextureLoader().load(TEX_GRASS_BOTTOM); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex; }
         function createStoneTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#757575'; 
-            ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<300; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#616161' : '#9e9e9e';
-                const s = Math.random() * 3 + 1;
-                ctx.fillRect(Math.random()*64, Math.random()*64, s, s);
-            }
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.magFilter = THREE.NearestFilter;
-            tex.minFilter = THREE.NearestFilter;
-            return tex;
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#757575'; ctx.fillRect(0, 0, 64, 64);
+            for(let i=0; i<300; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#616161' : '#9e9e9e'; const s = Math.random() * 3 + 1; ctx.fillRect(Math.random()*64, Math.random()*64, s, s); }
+            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
         }
-
         function createDeepslateTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#2f2f2f';
-            ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<64; i+=8) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#3a3a3a' : '#252525';
-                ctx.fillRect(0, i, 64, 4);
-                ctx.fillStyle = Math.random() > 0.5 ? '#333' : '#2a2a2a';
-                ctx.fillRect(0, i+4, 64, 4);
-            }
-             for(let i=0; i<100; i++) {
-                ctx.fillStyle = '#444';
-                ctx.fillRect(Math.random()*64, Math.random()*64, 2, 2);
-            }
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.magFilter = THREE.NearestFilter;
-            tex.minFilter = THREE.NearestFilter;
-            return tex;
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#2f2f2f'; ctx.fillRect(0, 0, 64, 64);
+            for(let i=0; i<64; i+=8) { ctx.fillStyle = Math.random() > 0.5 ? '#3a3a3a' : '#252525'; ctx.fillRect(0, i, 64, 4); ctx.fillStyle = Math.random() > 0.5 ? '#333' : '#2a2a2a'; ctx.fillRect(0, i+4, 64, 4); }
+             for(let i=0; i<100; i++) { ctx.fillStyle = '#444'; ctx.fillRect(Math.random()*64, Math.random()*64, 2, 2); }
+            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
         }
-
         function createBedrockTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#111'; 
-            ctx.fillRect(0, 0, 64, 64);
-            for(let i=0; i<600; i++) {
-                ctx.fillStyle = Math.random() > 0.5 ? '#222' : '#000';
-                const s = Math.random() * 4 + 2;
-                ctx.fillRect(Math.random()*64, Math.random()*64, s, s);
-            }
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.magFilter = THREE.NearestFilter;
-            tex.minFilter = THREE.NearestFilter;
-            return tex;
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 64, 64);
+            for(let i=0; i<600; i++) { ctx.fillStyle = Math.random() > 0.5 ? '#222' : '#000'; const s = Math.random() * 4 + 2; ctx.fillRect(Math.random()*64, Math.random()*64, s, s); }
+            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
         }
-
         function createCrackTexture() {
-            const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'rgba(0,0,0,0.5)'; 
-            ctx.fillRect(0,0,64,64); 
-            ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(32, 32); ctx.lineTo(10, 10);
-            ctx.moveTo(32, 32); ctx.lineTo(54, 15);
-            ctx.moveTo(32, 32); ctx.lineTo(20, 50);
-            ctx.stroke();
-            const tex = new THREE.CanvasTexture(canvas);
-            tex.magFilter = THREE.NearestFilter;
-            return tex;
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0,0,64,64); ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+            ctx.beginPath(); ctx.moveTo(32, 32); ctx.lineTo(10, 10); ctx.moveTo(32, 32); ctx.lineTo(54, 15); ctx.moveTo(32, 32); ctx.lineTo(20, 50); ctx.stroke();
+            const tex = new THREE.CanvasTexture(canvas); tex.magFilter = THREE.NearestFilter; return tex;
         }
 
         const leafVertexShader = `
@@ -450,7 +363,6 @@
             void main() {
                 vUv = uv; vNormal = normal;
                 vec3 pos = position;
-                // instanceMatrix comes from standard Three.js prefix when USE_INSTANCING is defined
                 vec4 worldPosition = instanceMatrix * vec4(pos, 1.0);
                 float windStrength = 0.1 + (worldPosition.y * 0.03); 
                 float windWave = sin(time * 1.5 + worldPosition.x * 0.1 + worldPosition.z * 0.1);
@@ -477,12 +389,12 @@
             }
         `;
 
-        function calculateTreeGeometry(rootX, rootY, rootZ, seed, treeId) {
+        function calculateTreeGeometry(rootX, rootY, rootZ, seed, treeId, bMats, lMats, bIds, lIds, roots) {
             let rng = mulberry32(seed);
             function random() { return rng(); }
             const dummy = new THREE.Object3D();
 
-            treeRoots[treeId] = new THREE.Vector3(rootX, rootY, rootZ);
+            roots[treeId] = new THREE.Vector3(rootX, rootY, rootZ);
 
             function grow(x, y, z, length, radius, rotX, rotZ, rotY, depth) {
                 dummy.position.set(x, y, z);
@@ -490,8 +402,8 @@
                 dummy.scale.set(radius, length, radius); 
                 dummy.updateMatrix();
                 
-                allBranchMatrices.push(dummy.matrix.clone());
-                branchTreeIds.push(treeId); 
+                bMats.push(dummy.matrix.clone());
+                bIds.push(treeId); 
 
                 const tip = new THREE.Vector3(0, length, 0);
                 tip.applyEuler(new THREE.Euler(rotX, rotY, rotZ, 'XYZ'));
@@ -513,62 +425,216 @@
                         const s = treeConfig.leafSize * (1.2 + random()*0.6);
                         dummy.scale.set(s, s, s);
                         dummy.updateMatrix();
-                        allLeafMatrices.push(dummy.matrix.clone());
-                        leafTreeIds.push(treeId); 
+                        lMats.push(dummy.matrix.clone());
+                        lIds.push(treeId); 
                     }
                 }
             }
             grow(rootX, rootY, rootZ, 8 + random()*4, 1.2 + random()*0.5, 0, 0, 0, 0);
         }
 
-        function triggerTreeFall(treeId) {
-            const treeGroup = new THREE.Group();
-            const rootPos = treeRoots[treeId];
-            treeGroup.position.copy(rootPos);
-            scene.add(treeGroup);
+        // --- CHUNK GENERATION ---
+        function generateChunk(cx, cz) {
+            const chunkGroup = new THREE.Group();
+            
+            const grassMats = [window.sideMat, window.sideMat, window.topMat, window.dirtMat, window.sideMat, window.sideMat];
+            const dirtMats = [window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat];
+            const stoneMats = [window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat];
 
-            const branchGeo = branchMesh.geometry; 
-            const branchMat = branchMesh.material;
+            const totalBlocks = CHUNK_SIZE * CHUNK_SIZE;
+            
+            // Instanced Meshes for this chunk
+            const imGrass = new THREE.InstancedMesh(window.blockGeo, grassMats, totalBlocks);
+            const imDirt = new THREE.InstancedMesh(window.blockGeo, dirtMats, totalBlocks * PREGEN_DIRT_LAYERS);
+            const imStone = new THREE.InstancedMesh(window.blockGeo, stoneMats, totalBlocks * PREGEN_STONE_LAYERS);
+
+            imGrass.receiveShadow = true; imGrass.castShadow = false;
+            imDirt.receiveShadow = true; imDirt.castShadow = false;
+            imStone.receiveShadow = true; imStone.castShadow = false;
+
             const dummy = new THREE.Object3D();
-            const zeroScale = new THREE.Matrix4().makeScale(0,0,0);
+            let idxG = 0, idxD = 0, idxS = 0;
 
-            for(let i=0; i<branchTreeIds.length; i++) {
-                if(branchTreeIds[i] === treeId) {
-                    branchMesh.getMatrixAt(i, dummy.matrix);
-                    dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
-                    const mesh = new THREE.Mesh(branchGeo, branchMat);
-                    mesh.position.copy(dummy.position).sub(rootPos); 
-                    mesh.quaternion.copy(dummy.quaternion);
-                    mesh.scale.copy(dummy.scale);
-                    treeGroup.add(mesh);
-                    branchMesh.setMatrixAt(i, zeroScale);
+            const startX = cx * CHUNK_WIDTH;
+            const startZ = cz * CHUNK_WIDTH;
+
+            const localTreeBMats = [];
+            const localTreeLMats = [];
+            const localBIds = [];
+            const localLIds = [];
+            const localRoots = {};
+
+            for (let x = 0; x < CHUNK_WIDTH; x += BLOCK_SIZE) {
+                for (let z = 0; z < CHUNK_WIDTH; z += BLOCK_SIZE) {
+                    const worldX = startX + x;
+                    const worldZ = startZ + z;
+                    const h = getTerrainHeight(worldX, worldZ);
+                    const surfaceY = h - (BLOCK_SIZE/2);
+
+                    // GRASS
+                    dummy.position.set(worldX, surfaceY, worldZ);
+                    dummy.updateMatrix();
+                    imGrass.setMatrixAt(idxG++, dummy.matrix);
+
+                    // DIRT
+                    for(let i=1; i<=PREGEN_DIRT_LAYERS; i++) {
+                        dummy.position.set(worldX, surfaceY - (i*BLOCK_SIZE), worldZ);
+                        dummy.updateMatrix();
+                        imDirt.setMatrixAt(idxD++, dummy.matrix);
+                    }
+
+                    // STONE
+                    for(let i=1; i<=PREGEN_STONE_LAYERS; i++) {
+                        dummy.position.set(worldX, surfaceY - ((PREGEN_DIRT_LAYERS + i)*BLOCK_SIZE), worldZ);
+                        dummy.updateMatrix();
+                        imStone.setMatrixAt(idxS++, dummy.matrix);
+                    }
+
+                    // TREES (Random chance per block in chunk)
+                    const treeSeed = Math.abs(Math.sin(worldX * 12.9898 + worldZ * 78.233) * 43758.5453);
+                    if (treeSeed > 0.97 && h > -5) { 
+                        const treeId = `${worldX},${worldZ}`;
+                        calculateTreeGeometry(worldX, h, worldZ, Math.floor(treeSeed * 1000), treeId, localTreeBMats, localTreeLMats, localBIds, localLIds, localRoots);
+                    }
                 }
             }
-            branchMesh.instanceMatrix.needsUpdate = true;
 
-            if (leafMesh) {
-                const leafGeo = leafMesh.geometry;
-                const leafMat = leafMesh.material;
-                for(let i=0; i<leafTreeIds.length; i++) {
-                    if(leafTreeIds[i] === treeId) {
-                        leafMesh.getMatrixAt(i, dummy.matrix);
+            chunkGroup.add(imGrass);
+            chunkGroup.add(imDirt);
+            chunkGroup.add(imStone);
+
+            // Create Tree Instanced Meshes for this chunk
+            if (localTreeBMats.length > 0) {
+                const imBranch = new THREE.InstancedMesh(window.treeBGeo, window.treeBMat, localTreeBMats.length);
+                for(let i=0; i<localTreeBMats.length; i++) imBranch.setMatrixAt(i, localTreeBMats[i]);
+                imBranch.userData = { treeIds: localBIds }; 
+                chunkGroup.add(imBranch);
+            }
+            if (localTreeLMats.length > 0) {
+                const imLeaf = new THREE.InstancedMesh(window.treeLGeo, window.treeLMat, localTreeLMats.length);
+                for(let i=0; i<localTreeLMats.length; i++) imLeaf.setMatrixAt(i, localTreeLMats[i]);
+                imLeaf.userData = { treeIds: localLIds };
+                chunkGroup.add(imLeaf);
+            }
+
+            chunkGroup.userData = {
+                roots: localRoots,
+                meshes: [imGrass, imDirt, imStone]
+            };
+
+            return chunkGroup;
+        }
+
+        function updateChunks() {
+            const px = camera.position.x;
+            const pz = camera.position.z;
+            
+            const chunkX = Math.floor(px / CHUNK_WIDTH);
+            const chunkZ = Math.floor(pz / CHUNK_WIDTH);
+
+            if (chunkX !== currentChunk.x || chunkZ !== currentChunk.z || activeChunkKeys.length === 0) {
+                currentChunk.x = chunkX;
+                currentChunk.z = chunkZ;
+                
+                document.getElementById('coord-debug').innerText = `Chunk: ${chunkX}, ${chunkZ}`;
+
+                // Determine visible chunks
+                const visibleKeys = new Set();
+                for (let x = -RENDER_DISTANCE; x <= RENDER_DISTANCE; x++) {
+                    for (let z = -RENDER_DISTANCE; z <= RENDER_DISTANCE; z++) {
+                        visibleKeys.add(getChunkKey(chunkX + x, chunkZ + z));
+                    }
+                }
+
+                // Remove old chunks
+                activeChunkKeys.forEach(key => {
+                    if (!visibleKeys.has(key)) {
+                        scene.remove(chunks[key]);
+                        delete chunks[key];
+                    }
+                });
+
+                // Add new chunks
+                visibleKeys.forEach(key => {
+                    if (!chunks[key]) {
+                        const [cx, cz] = key.split(',').map(Number);
+                        const chunk = generateChunk(cx, cz);
+                        scene.add(chunk);
+                        chunks[key] = chunk;
+                    }
+                });
+
+                activeChunkKeys = Array.from(visibleKeys);
+                
+                // Update Collision List
+                collidableObjects = [];
+                activeChunkKeys.forEach(key => {
+                    if (chunks[key]) {
+                        chunks[key].traverse(child => {
+                            if (child.isMesh) collidableObjects.push(child);
+                        });
+                    }
+                });
+                collidableObjects = collidableObjects.concat(dynamicBlocks);
+            }
+        }
+
+        function triggerTreeFall(treeId, chunkGroup) {
+            const rootPos = chunkGroup.userData.roots[treeId];
+            if (!rootPos) return;
+
+            const treeFallGroup = new THREE.Group();
+            treeFallGroup.position.copy(rootPos);
+            scene.add(treeFallGroup);
+
+            // Find branches in this chunk's mesh
+            const imBranch = chunkGroup.children.find(c => c.geometry === window.treeBGeo);
+            if (imBranch) {
+                const ids = imBranch.userData.treeIds;
+                const dummy = new THREE.Object3D();
+                const zero = new THREE.Matrix4().makeScale(0,0,0);
+                
+                for(let i=0; i<imBranch.count; i++) {
+                    if (ids[i] === treeId) {
+                        imBranch.getMatrixAt(i, dummy.matrix);
                         dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
-                        const mesh = new THREE.Mesh(leafGeo, leafMat);
+                        const mesh = new THREE.Mesh(window.treeBGeo, window.treeBMat);
                         mesh.position.copy(dummy.position).sub(rootPos);
                         mesh.quaternion.copy(dummy.quaternion);
                         mesh.scale.copy(dummy.scale);
-                        treeGroup.add(mesh);
-                        leafMesh.setMatrixAt(i, zeroScale);
+                        treeFallGroup.add(mesh);
+                        imBranch.setMatrixAt(i, zero);
                     }
                 }
-                leafMesh.instanceMatrix.needsUpdate = true;
+                imBranch.instanceMatrix.needsUpdate = true;
+            }
+
+            const imLeaf = chunkGroup.children.find(c => c.geometry === window.treeLGeo);
+            if (imLeaf) {
+                const ids = imLeaf.userData.treeIds;
+                const dummy = new THREE.Object3D();
+                const zero = new THREE.Matrix4().makeScale(0,0,0);
+                
+                for(let i=0; i<imLeaf.count; i++) {
+                    if (ids[i] === treeId) {
+                        imLeaf.getMatrixAt(i, dummy.matrix);
+                        dummy.matrix.decompose(dummy.position, dummy.quaternion, dummy.scale);
+                        const mesh = new THREE.Mesh(window.treeLGeo, window.treeLMat);
+                        mesh.position.copy(dummy.position).sub(rootPos);
+                        mesh.quaternion.copy(dummy.quaternion);
+                        mesh.scale.copy(dummy.scale);
+                        treeFallGroup.add(mesh);
+                        imLeaf.setMatrixAt(i, zero);
+                    }
+                }
+                imLeaf.instanceMatrix.needsUpdate = true;
             }
 
             const angle = Math.random() * Math.PI * 2;
             const axis = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
 
             fallingTrees.push({
-                group: treeGroup,
+                group: treeFallGroup,
                 axis: axis,
                 angle: 0,
                 speed: 0,
@@ -579,10 +645,10 @@
         async function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.Fog(0x87CEEB, 30, 300);
+            scene.fog = new THREE.Fog(0x87CEEB, 30, 150); 
 
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 40, 100);
+            camera.position.set(0, 40, 0);
 
             handGroup = new THREE.Group();
             const handGeo = new THREE.BoxGeometry(1.2, 1.2, 3.5); 
@@ -622,8 +688,9 @@
             orbitControls.minDistance = 10;
             orbitControls.maxDistance = 250;
 
-            pointerLockControls = new THREE.PointerLockControls(camera, document.body);
+            pointerLockControls = new THREE.PointerLockControls(camera, renderer.domElement); // FIX: use renderer.domElement
             raycaster = new THREE.Raycaster();
+            physicsRaycaster = new THREE.Raycaster();
 
             const clickCatcher = document.getElementById('click-catcher');
 
@@ -634,7 +701,6 @@
                 orbitControls.enabled = false;
                 if(camera.position.y > 50) {
                     camera.position.set(0, getTerrainHeight(0,0) + STANDING_HEIGHT, 0);
-                    camera.lookAt(0, getTerrainHeight(0,10) + STANDING_HEIGHT, 10);
                 }
             });
 
@@ -651,21 +717,14 @@
                 const slot = document.getElementById('slot-' + selectedSlot);
                 if(slot) slot.classList.add('active');
             }
-
             document.addEventListener('wheel', (e) => {
                 if(!isWalking) return;
-                if(e.deltaY > 0) {
-                    selectedSlot = (selectedSlot + 1) % 9;
-                } else {
-                    selectedSlot = (selectedSlot - 1 + 9) % 9;
-                }
+                if(e.deltaY > 0) selectedSlot = (selectedSlot + 1) % 9;
+                else selectedSlot = (selectedSlot - 1 + 9) % 9;
                 updateHotbar(selectedSlot);
             });
-
             const onKeyDown = function (event) {
-                if (event.key >= '1' && event.key <= '9') {
-                    updateHotbar(parseInt(event.key) - 1);
-                }
+                if (event.key >= '1' && event.key <= '9') updateHotbar(parseInt(event.key) - 1);
                 switch (event.code) {
                     case 'ArrowUp': case 'KeyW': moveForward = true; break;
                     case 'ArrowLeft': case 'KeyA': moveLeft = true; break;
@@ -673,9 +732,7 @@
                     case 'ArrowRight': case 'KeyD': moveRight = true; break;
                     case 'ShiftLeft': case 'ShiftRight': isCrouching = true; break;
                     case 'ControlLeft': case 'ControlRight': if (isWalking) isSprinting = !isSprinting; break;
-                    case 'Space': 
-                        holdingJump = true; 
-                        break;
+                    case 'Space': holdingJump = true; break;
                 }
             };
             const onKeyUp = function (event) {
@@ -700,7 +757,7 @@
                 else if (event.button === 2) { 
                     raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
                     raycaster.far = 15; 
-                    let objs = collidableObjects;
+                    let objs = collidableObjects; 
                     
                     const hits = raycaster.intersectObjects(objs);
                     if(hits.length > 0) {
@@ -710,11 +767,11 @@
                         
                         snapToGrid(placePos);
 
-                        const newBlock = new THREE.Mesh(blockGeo, topMat); 
+                        const newBlock = new THREE.Mesh(window.blockGeo, window.topMat); 
                         newBlock.position.copy(placePos);
                         scene.add(newBlock);
                         dynamicBlocks.push(newBlock);
-                        collidableObjects.push(newBlock); // Add to cache
+                        collidableObjects.push(newBlock); 
                     }
                 }
             });
@@ -731,22 +788,18 @@
             const sunLight = new THREE.DirectionalLight(0xffdfba, 1.2);
             sunLight.position.set(100, 150, 50);
             sunLight.castShadow = true;
-            sunLight.shadow.mapSize.width = 2048; 
-            sunLight.shadow.mapSize.height = 2048;
+            sunLight.shadow.mapSize.width = 1024; 
+            sunLight.shadow.mapSize.height = 1024;
             sunLight.shadow.camera.near = 0.5;
-            sunLight.shadow.camera.far = 500;
-            const d = 200;
+            sunLight.shadow.camera.far = 300;
+            const d = 150;
             sunLight.shadow.camera.left = -d; sunLight.shadow.camera.right = d;
             sunLight.shadow.camera.top = d; sunLight.shadow.camera.bottom = -d;
             scene.add(sunLight);
 
             leafGeo = new THREE.BufferGeometry();
-            const pPositions = [];
-            const pVelocities = [];
-            for(let i=0; i<leafCount; i++) {
-                pPositions.push((Math.random()-0.5)*200, Math.random()*50 + 20, (Math.random()-0.5)*200);
-                pVelocities.push(0, -Math.random()*0.2 - 0.1, 0); 
-            }
+            const pPositions = []; const pVelocities = [];
+            for(let i=0; i<leafCount; i++) { pPositions.push(0,0,0); pVelocities.push(0, -Math.random()*0.2-0.1, 0); }
             leafGeo.setAttribute('position', new THREE.Float32BufferAttribute(pPositions, 3));
             leafMat = new THREE.PointsMaterial({ color: 0x4CAF50, size: 0.8, transparent: true, opacity: 0.8 });
             leafParticles = new THREE.Points(leafGeo, leafMat);
@@ -756,7 +809,7 @@
             woodGeo = new THREE.BufferGeometry();
             const wPositions = new Float32Array(woodCount * 3);
             const wVelocities = new Float32Array(woodCount * 3);
-            const wLife = new Float32Array(woodCount); 
+            const wLife = new Float32Array(woodCount);
             for(let i=0; i<woodCount; i++) { wPositions[i*3+1] = -1000; wLife[i] = 0; }
             woodGeo.setAttribute('position', new THREE.BufferAttribute(wPositions, 3));
             woodMat = new THREE.PointsMaterial({ color: 0x8D6E63, size: 0.5 });
@@ -773,109 +826,27 @@
             const bedrockTex = createBedrockTexture();
 
             window.topMat = new THREE.MeshStandardMaterial({ map: grassTopTex, roughness: 1.0, color: 0x4db24b });
-            const sideMat = new THREE.MeshStandardMaterial({ map: grassSideTex, roughness: 1.0 });
+            window.sideMat = new THREE.MeshStandardMaterial({ map: grassSideTex, roughness: 1.0 });
             window.dirtMat = new THREE.MeshStandardMaterial({ map: dirtBottomTex, roughness: 1.0 });
             window.stoneMat = new THREE.MeshStandardMaterial({ map: stoneTex, roughness: 0.9 });
             window.deepslateMat = new THREE.MeshStandardMaterial({ map: deepslateTex, roughness: 0.9 });
             window.bedrockMat = new THREE.MeshStandardMaterial({ map: bedrockTex, roughness: 1.0 });
 
-            const grassMats = [sideMat, sideMat, topMat, dirtMat, sideMat, sideMat];
-            const dirtMats = [window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat, window.dirtMat];
-            const stoneMats = [window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat, window.stoneMat];
-
-            const gridCount = Math.ceil(FOREST_SIZE / BLOCK_SIZE);
-            const totalCols = gridCount * gridCount;
+            // Tree Assets
+            window.treeBGeo = new THREE.CylinderGeometry(0.7, 1, 1, 5);
+            window.treeBGeo.translate(0, 0.5, 0);
+            window.treeBMat = new THREE.MeshStandardMaterial({ map: createBarkTexture(), roughness: 0.9, color: 0x8D6E63 });
             
-            // Separate Instanced Meshes for Layers
-            // Grass: 1 per col
-            imGrass = new THREE.InstancedMesh(blockGeo, grassMats, totalCols);
-            // Dirt: 3 per col
-            imDirt = new THREE.InstancedMesh(blockGeo, dirtMats, totalCols * PREGEN_DIRT_LAYERS);
-            // Stone: 4 per col (Pre-gen limit)
-            imStone = new THREE.InstancedMesh(blockGeo, stoneMats, totalCols * PREGEN_STONE_LAYERS);
-
-            imGrass.receiveShadow = true; imGrass.castShadow = false;
-            imDirt.receiveShadow = true; imDirt.castShadow = false;
-            imStone.receiveShadow = true; imStone.castShadow = false;
-
-            const dummy = new THREE.Object3D();
-            let idxG = 0, idxD = 0, idxS = 0;
-
-            for(let x = -FOREST_SIZE/2; x < FOREST_SIZE/2; x += BLOCK_SIZE) {
-                for(let z = -FOREST_SIZE/2; z < FOREST_SIZE/2; z += BLOCK_SIZE) {
-                    if (idxG >= imGrass.count) break;
-                    const h = getTerrainHeight(x, z);
-                    const surfaceY = h - (BLOCK_SIZE/2); // Center of surface block
-
-                    // GRASS
-                    dummy.position.set(x, surfaceY, z);
-                    dummy.updateMatrix();
-                    imGrass.setMatrixAt(idxG++, dummy.matrix);
-
-                    // DIRT LAYERS (1-3)
-                    for(let i=1; i<=PREGEN_DIRT_LAYERS; i++) {
-                        dummy.position.set(x, surfaceY - (i*BLOCK_SIZE), z);
-                        dummy.updateMatrix();
-                        imDirt.setMatrixAt(idxD++, dummy.matrix);
-                    }
-
-                    // STONE LAYERS (4-7)
-                    for(let i=1; i<=PREGEN_STONE_LAYERS; i++) {
-                        dummy.position.set(x, surfaceY - ((PREGEN_DIRT_LAYERS + i)*BLOCK_SIZE), z);
-                        dummy.updateMatrix();
-                        imStone.setMatrixAt(idxS++, dummy.matrix);
-                    }
-                }
-            }
-            scene.add(imGrass);
-            scene.add(imDirt);
-            scene.add(imStone);
-            
-            // Initialize Collidable Objects Array (Optimization)
-            collidableObjects.push(imGrass, imDirt, imStone);
-
-            for(let i=0; i<TREE_COUNT; i++) {
-                let x = (Math.random() - 0.5) * (FOREST_SIZE * 0.8);
-                let z = (Math.random() - 0.5) * (FOREST_SIZE * 0.8);
-                x = Math.round(x / BLOCK_SIZE) * BLOCK_SIZE; 
-                z = Math.round(z / BLOCK_SIZE) * BLOCK_SIZE;
-                
-                const y = getTerrainHeight(x, z);
-                if(y > -5) calculateTreeGeometry(x, y, z, Math.floor(Math.random() * 999999), i);
-            }
-
-            if (allBranchMatrices.length > 0) {
-                const bGeo = new THREE.CylinderGeometry(0.7, 1, 1, 5);
-                bGeo.translate(0, 0.5, 0);
-                const bMat = new THREE.MeshStandardMaterial({ map: createBarkTexture(), roughness: 0.9, color: 0x8D6E63 });
-                branchMesh = new THREE.InstancedMesh(bGeo, bMat, allBranchMatrices.length);
-                branchMesh.castShadow = true; branchMesh.receiveShadow = true;
-                for(let i=0; i<allBranchMatrices.length; i++) branchMesh.setMatrixAt(i, allBranchMatrices[i]);
-                scene.add(branchMesh);
-                collidableObjects.push(branchMesh);
-            }
-
-            if (allLeafMatrices.length > 0) {
-                const lGeo = new THREE.PlaneGeometry(1, 1, 2, 2);
-                const posAttr = lGeo.attributes.position;
-                for(let i=0; i<posAttr.count; i++) posAttr.setZ(i, Math.pow(posAttr.getX(i) * 1.5, 2) * 0.3);
-                lGeo.computeVertexNormals();
-                leafUniforms = { time: { value: 0 }, map: { value: createLeafTexture() } };
-                
-                const lMat = new THREE.ShaderMaterial({
-                    defines: { 'USE_INSTANCING': '' },
-                    uniforms: leafUniforms, 
-                    vertexShader: leafVertexShader, 
-                    fragmentShader: leafFragmentShader,
-                    side: THREE.DoubleSide, 
-                    transparent: true
-                });
-                leafMesh = new THREE.InstancedMesh(lGeo, lMat, allLeafMatrices.length);
-                leafMesh.castShadow = false; 
-                leafMesh.receiveShadow = true;
-                for(let i=0; i<allLeafMatrices.length; i++) leafMesh.setMatrixAt(i, allLeafMatrices[i]);
-                scene.add(leafMesh);
-            }
+            window.treeLGeo = new THREE.PlaneGeometry(1, 1, 2, 2);
+            const posAttr = window.treeLGeo.attributes.position;
+            for(let i=0; i<posAttr.count; i++) posAttr.setZ(i, Math.pow(posAttr.getX(i) * 1.5, 2) * 0.3);
+            window.treeLGeo.computeVertexNormals();
+            leafUniforms = { time: { value: 0 }, map: { value: createLeafTexture() } };
+            window.treeLMat = new THREE.ShaderMaterial({
+                defines: { 'USE_INSTANCING': '' },
+                uniforms: leafUniforms, vertexShader: leafVertexShader, fragmentShader: leafFragmentShader,
+                side: THREE.DoubleSide, transparent: true
+            });
 
             updateHealthUI();
             document.getElementById('loading').style.opacity = 0;
@@ -895,6 +866,8 @@
             const time = clock.getElapsedTime();
 
             if(leafUniforms) leafUniforms.time.value = time;
+
+            updateChunks();
 
             for (let i = fallingTrees.length - 1; i >= 0; i--) {
                 const ft = fallingTrees[i];
@@ -930,8 +903,6 @@
                 const vels = leafParticles.userData.velocities;
                 for(let i=0; i<leafCount; i++) {
                     positions[i*3+1] += vels[i*3+1]; 
-                    positions[i*3] += Math.sin(time + i) * 0.1;
-                    positions[i*3+2] += Math.cos(time + i) * 0.1;
                     if(positions[i*3+1] < camera.position.y - 30) {
                          positions[i*3+1] = camera.position.y + 40;
                          positions[i*3] = camera.position.x + (Math.random()-0.5)*100;
@@ -942,7 +913,6 @@
                 leafParticles.position.x = camera.position.x * 0.8; 
                 leafParticles.position.z = camera.position.z * 0.8;
             }
-
             if(woodParticles) {
                 const positions = woodParticles.geometry.attributes.position.array;
                 const vels = woodParticles.userData.velocity;
@@ -992,10 +962,10 @@
                         mineTimer = 0;
                         breakingOverlay.visible = false;
                         
-                        // Handle Trees
-                        if (hit.object === branchMesh) {
+                        if (hit.object.geometry === window.treeBGeo) {
                             const instId = hit.instanceId;
-                            const treeId = branchTreeIds[instId];
+                            const ids = hit.object.userData.treeIds;
+                            const treeId = ids[instId];
                             if (treeHealthMap[treeId] === undefined) treeHealthMap[treeId] = 6;
                             treeHealthMap[treeId]--;
                             spawnWoodParticles(hit.point);
@@ -1007,26 +977,23 @@
                             tempMatrix.compose(pos, quat, scl);
                             hit.object.setMatrixAt(instId, tempMatrix);
                             hit.object.instanceMatrix.needsUpdate = true;
-                            if (treeHealthMap[treeId] <= 0) triggerTreeFall(treeId);
+                            if (treeHealthMap[treeId] <= 0) {
+                                triggerTreeFall(treeId, hit.object.parent); 
+                            }
                         }
-                        // Handle Ground Blocks
                         else {
                             if (hit.object.isInstancedMesh) {
-                                // Hide the instance
                                 const tempMatrix = new THREE.Matrix4();
                                 hit.object.getMatrixAt(hit.instanceId, tempMatrix);
                                 tempMatrix.scale(new THREE.Vector3(0,0,0));
                                 hit.object.setMatrixAt(hit.instanceId, tempMatrix);
                                 hit.object.instanceMatrix.needsUpdate = true;
                             } else {
-                                // Is Dynamic Mesh
                                 scene.remove(hit.object);
                                 dynamicBlocks = dynamicBlocks.filter(b => b !== hit.object);
-                                // OPTIMIZATION: Remove from collidableObjects as well
                                 collidableObjects = collidableObjects.filter(b => b !== hit.object);
                             }
 
-                            // CHECK & SPAWN BLOCK BELOW (If deeper than pre-gen)
                             const normal = hit.face.normal.clone();
                             const targetBlockPos = hit.point.clone().sub(normal.multiplyScalar(BLOCK_SIZE/2));
                             snapToGrid(targetBlockPos);
@@ -1036,23 +1003,19 @@
                             
                             if (posBelow.y > -300) { 
                                 const surfaceY = getTerrainHeight(posBelow.x, posBelow.z);
-                                // Surface Y is center of top block.
-                                // Depth = (SurfaceY - CurrentY) / 4
                                 const depth = Math.round(((surfaceY - (BLOCK_SIZE/2)) - posBelow.y) / BLOCK_SIZE);
 
-                                // Only spawn if we are deeper than pre-generated layers
-                                // We pre-generated TOTAL_PREGEN_LAYERS (e.g. 8)
                                 if (depth >= TOTAL_PREGEN_LAYERS && depth <= 64) {
                                     let material;
-                                    if (depth <= 28) material = window.stoneMat; // Still in stone layer
-                                    else if (depth <= 63) material = window.deepslateMat; // Deepslate
-                                    else material = window.bedrockMat; // Bedrock at 64
+                                    if (depth <= 28) material = window.stoneMat; 
+                                    else if (depth <= 63) material = window.deepslateMat; 
+                                    else material = window.bedrockMat;
 
-                                    const newBlock = new THREE.Mesh(blockGeo, material);
+                                    const newBlock = new THREE.Mesh(window.blockGeo, material);
                                     newBlock.position.copy(posBelow);
                                     scene.add(newBlock);
                                     dynamicBlocks.push(newBlock);
-                                    collidableObjects.push(newBlock); // Add new block to physics
+                                    collidableObjects.push(newBlock);
                                 }
                             }
                         } 
@@ -1112,11 +1075,12 @@
                 pointerLockControls.moveForward(-velocity.z * delta);
                 
                 const newPos = camera.position.clone();
-                let newGroundY = -300; // Default low
+                let newGroundY = -300; 
                 
-                const downRay = new THREE.Raycaster(newPos, new THREE.Vector3(0,-1,0), 0, 100);
-                let checkObjs = collidableObjects;
-                const downHits = downRay.intersectObjects(checkObjs);
+                physicsRaycaster.set(newPos, new THREE.Vector3(0,-1,0));
+                physicsRaycaster.far = 100;
+                
+                const downHits = physicsRaycaster.intersectObjects(collidableObjects);
                 if(downHits.length > 0) newGroundY = downHits[0].point.y;
                 
                 const feetY = oldPos.y - currentEyeHeight; 
@@ -1124,9 +1088,8 @@
                 if (newGroundY > feetY + 1.0) { 
                     camera.position.x = oldPos.x;
                     camera.position.z = oldPos.z;
-                    // Recalculate ground at old pos
-                    const oldRay = new THREE.Raycaster(oldPos, new THREE.Vector3(0,-1,0), 0, 100);
-                    const oldHits = oldRay.intersectObjects(checkObjs);
+                    physicsRaycaster.set(oldPos, new THREE.Vector3(0,-1,0));
+                    const oldHits = physicsRaycaster.intersectObjects(collidableObjects);
                     if(oldHits.length > 0) newGroundY = oldHits[0].point.y;
                     else newGroundY = -300;
                 }
