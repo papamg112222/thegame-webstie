@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic Textured Tree (HTML Export)</title>
+    <style id="mainStyle">
+        body { margin: 0; overflow: hidden; background-color: #87CEEB; font-family: sans-serif; }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+            width: 300px;
+            pointer-events: auto;
+            max-height: 90vh;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        h3 { margin: 0; color: #333; border-bottom: 1px solid #ddd; padding-bottom: 10px; }
+        .control-group { display: flex; flex-direction: column; gap: 5px; }
+        label { display: flex; justify-content: space-between; font-size: 13px; font-weight: bold; color: #555; }
+        input[type=range] { width: 100%; cursor: pointer; }
+        
+        button {
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            transition: transform 0.1s, box-shadow 0.1s;
+            color: white;
+        }
+        button:active { transform: scale(0.98); }
+        
+        #regenerate { background: linear-gradient(to bottom, #4CAF50, #45a049); }
+        #getHtmlBtn { background: #2196F3; }
+        #copyBtn { background: #FF9800; }
+
+        .code-section { 
+            border-top: 1px solid #eee; 
+            padding-top: 15px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            resize: vertical;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 11px;
+            background: #f1f1f1;
+            white-space: pre;
+            overflow-x: auto;
+        }
+
+        #loading {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 20px 40px;
+            border-radius: 8px;
+            font-size: 18px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .stats { font-size: 11px; color: #888; text-align: center; margin-top: -10px;}
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <h3>Tree Generator</h3>
+        
+        <div class="control-group">
+            <label><span>Spread Angle</span> <span id="val-angle">0.5</span></label>
+            <input type="range" id="angle" min="0.2" max="1.2" step="0.05" value="0.5">
+        </div>
+        <div class="control-group">
+            <label><span>Randomness</span> <span id="val-rand">0.3</span></label>
+            <input type="range" id="randomness" min="0" max="0.8" step="0.05" value="0.3">
+        </div>
+        <div class="control-group">
+            <label><span>Density (Depth)</span> <span id="val-depth">10</span></label>
+            <input type="range" id="recursion" min="8" max="12" step="1" value="10">
+        </div>
+        <div class="control-group">
+            <label><span>Leaf Size</span> <span id="val-leaf">1.0</span></label>
+            <input type="range" id="leafSize" min="0.5" max="2.0" step="0.1" value="1.0">
+        </div>
+
+        <button id="regenerate">Generate New Random Tree</button>
+        <div class="stats" id="stats">Ready</div>
+
+        <div class="code-section">
+            <label>Export Tree (HTML Code)</label>
+            <textarea id="htmlOutput" readonly placeholder="Click 'Get HTML Code' to generate the full code for this tree..."></textarea>
+            <div style="display: flex; gap: 10px;">
+                <button id="getHtmlBtn" style="flex: 1;">Get HTML Code</button>
+                <button id="copyBtn" style="flex: 1;">Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+    <div id="loading">Generating Geometry...</div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+    <script id="mainScript">
+        let scene, camera, renderer, controls;
+        let branchMesh, leafMesh; 
+        let clock = new THREE.Clock();
+        let leafUniforms;
+
+        // --- STATE START ---
+        // This block will be dynamically updated when exporting
+        let currentSeed = 12345;
+        let config = {
+            maxDepth: 10,
+            angle: 0.5,
+            lengthDecay: 0.78,
+            widthDecay: 0.65,
+            randomness: 0.3,
+            leafSize: 1.0
+        };
+        // --- STATE END ---
+
+        // PRNG
+        function mulberry32(a) {
+            return function() {
+                var t = a += 0x6D2B79F5;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
+        let rng = mulberry32(currentSeed);
+        function random() { return rng(); }
+
+        // Textures
+        function createBarkTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#3E2723';
+            ctx.fillRect(0, 0, 512, 512);
+            for(let i=0; i<4000; i++) {
+                ctx.globalAlpha = 0.1 + Math.random() * 0.2;
+                ctx.fillStyle = Math.random() > 0.5 ? '#1a100c' : '#5D4037';
+                const x = Math.random() * 512;
+                const w = 1 + Math.random() * 4;
+                const h = 20 + Math.random() * 100;
+                ctx.fillRect(x, Math.random() * 512, w, h);
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(1, 4);
+            return tex;
+        }
+
+        function createLeafTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            const w = 512; const h = 512;
+            ctx.clearRect(0, 0, w, h);
+            
+            ctx.beginPath();
+            ctx.moveTo(w/2, h);
+            for (let i = 0; i <= 100; i++) {
+                const t = i / 100;
+                const width = Math.sin(t * Math.PI) * (w * 0.45);
+                const jig = (i % 2 === 0) ? -5 : 5;
+                ctx.lineTo((w/2) - width + jig, h - (t * h * 0.95));
+            }
+            ctx.lineTo(w/2, 10);
+            for (let i = 100; i >= 0; i--) {
+                const t = i / 100;
+                const width = Math.sin(t * Math.PI) * (w * 0.45);
+                const jig = (i % 2 === 0) ? 5 : -5;
+                ctx.lineTo((w/2) + width + jig, h - (t * h * 0.95));
+            }
+            ctx.closePath();
+            
+            const grad = ctx.createLinearGradient(w/2, h, w/2, 0);
+            grad.addColorStop(0, '#1e3c00'); grad.addColorStop(0.3, '#33691e');
+            grad.addColorStop(0.7, '#64dd17'); grad.addColorStop(1.0, '#76ff03');
+            ctx.fillStyle = grad; ctx.fill();
+
+            ctx.globalCompositeOperation = 'source-atop';
+            for(let i=0; i<3000; i++) {
+                ctx.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+                ctx.beginPath(); ctx.arc(Math.random()*w, Math.random()*h, Math.random()*2+1, 0, Math.PI*2); ctx.fill();
+            }
+
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.strokeStyle = 'rgba(200, 255, 200, 0.3)'; ctx.lineCap = 'round';
+            ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(w/2, h); ctx.quadraticCurveTo(w/2 + 10, h/2, w/2, 20); ctx.stroke();
+            ctx.lineWidth = 2;
+            for(let i=0; i<12; i++) {
+                const yPos = h - (i * (h/14)) - 50;
+                ctx.beginPath(); ctx.moveTo(w/2, yPos); ctx.quadraticCurveTo(w/2 - 20, yPos - 10, w/2 - 150, yPos - 80); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(w/2, yPos); ctx.quadraticCurveTo(w/2 + 20, yPos - 10, w/2 + 150, yPos - 80); ctx.stroke();
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const leafVertexShader = `
+            uniform float time;
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            void main() {
+                vUv = uv; vNormal = normal;
+                vec3 pos = position;
+                vec4 worldPosition = instanceMatrix * vec4(pos, 1.0);
+                float windStrength = 0.1 + (worldPosition.y * 0.02); 
+                float windWave = sin(time * 2.0 + worldPosition.x * 0.5 + worldPosition.z * 0.5);
+                worldPosition.x += windWave * windStrength;
+                worldPosition.z += cos(time * 1.5 + worldPosition.y) * windStrength * 0.5;
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+            }
+        `;
+
+        const leafFragmentShader = `
+            uniform sampler2D map;
+            varying vec2 vUv;
+            varying vec3 vNormal;
+            void main() {
+                vec4 texColor = texture2D(map, vUv);
+                if (texColor.a < 0.6) discard; 
+                vec3 lightDir = normalize(vec3(20.0, 50.0, 20.0));
+                float diff = dot(vNormal, lightDir);
+                float translucent = max(0.0, -diff) * 0.6; 
+                float direct = max(0.0, diff) * 0.9;      
+                vec3 ambient = vec3(0.4);
+                vec3 lighting = ambient + vec3(direct + translucent);
+                gl_FragColor = vec4(texColor.rgb * lighting, 1.0);
+            }
+        `;
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 30, 150);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 500);
+            camera.position.set(0, 20, 40);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            
+            // Remove old canvas if exists (for export re-run safety)
+            const oldCanvas = document.querySelector('canvas');
+            if(oldCanvas) oldCanvas.remove();
+            
+            document.body.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.target.set(0, 15, 0);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffdfba, 1.2);
+            dirLight.position.set(30, 60, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048; dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5; dirLight.shadow.camera.far = 200;
+            dirLight.shadow.camera.left = -50; dirLight.shadow.camera.right = 50;
+            dirLight.shadow.camera.top = 50; dirLight.shadow.camera.bottom = -50;
+            scene.add(dirLight);
+
+            const groundTex = createBarkTexture();
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x556B2F, roughness: 1, map: groundTex });
+            const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 500), groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Setup Listeners
+            setupUI();
+
+            // Initial Generation
+            generateTreeWrapper();
+            animate();
+        }
+
+        function setupUI() {
+            const regenBtn = document.getElementById('regenerate');
+            if(regenBtn) regenBtn.onclick = () => {
+                currentSeed = Math.floor(Math.random() * 999999);
+                generateTreeWrapper();
+            };
+
+            const htmlBtn = document.getElementById('getHtmlBtn');
+            if(htmlBtn) htmlBtn.onclick = generateHTMLCode;
+
+            const copyBtn = document.getElementById('copyBtn');
+            if(copyBtn) copyBtn.onclick = () => {
+                const box = document.getElementById('htmlOutput');
+                if(!box.value) generateHTMLCode();
+                box.select();
+                document.execCommand('copy');
+                const originalText = copyBtn.innerText;
+                copyBtn.innerText = "Copied!";
+                setTimeout(() => copyBtn.innerText = originalText, 1500);
+            };
+
+            const inputs = ['angle', 'randomness', 'recursion', 'leafSize'];
+            inputs.forEach(id => {
+                const el = document.getElementById(id);
+                if(!el) return;
+                
+                // Update label on load
+                const valId = 'val-' + (id === 'leafSize' ? 'leaf' : id === 'recursion' ? 'depth' : id === 'angle' ? 'angle' : 'rand');
+                const valEl = document.getElementById(valId);
+                
+                // Set initial slider values based on config
+                if(id === 'angle') el.value = config.angle;
+                if(id === 'randomness') el.value = config.randomness;
+                if(id === 'recursion') el.value = config.maxDepth;
+                if(id === 'leafSize') el.value = config.leafSize;
+                if(valEl) valEl.innerText = el.value;
+
+                el.oninput = (e) => {
+                    config[id === 'recursion' ? 'maxDepth' : id] = parseFloat(e.target.value);
+                    if(valEl) valEl.innerText = e.target.value;
+                };
+            });
+        }
+
+        function generateHTMLCode() {
+            // Get current CSS
+            const styleContent = document.getElementById('mainStyle').innerHTML;
+            
+            // Get current JS
+            let scriptContent = document.getElementById('mainScript').innerHTML;
+            
+            // Replace the STATE block with current values
+            // We use a specific marker comment in the code to find the block
+            const stateStart = "// --- STATE START ---";
+            const stateEnd = "// --- STATE END ---";
+            
+            const newState = `
+        let currentSeed = ${currentSeed};
+        let config = ${JSON.stringify(config, null, 4)};
+            `;
+            
+            // Regex to replace the content between markers
+            const regex = new RegExp(`${stateStart}[\\s\\S]*?${stateEnd}`);
+            scriptContent = scriptContent.replace(regex, `${stateStart}${newState}        ${stateEnd}`);
+
+            // Construct the full HTML file
+            const fullHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic Tree (Seed: ${currentSeed})</title>
+    <style id="mainStyle">${styleContent}</style>
+</head>
+<body>
+    <div id="controls">
+        <h3>Tree Generator</h3>
+        <div class="control-group">
+            <label><span>Spread Angle</span> <span id="val-angle">${config.angle}</span></label>
+            <input type="range" id="angle" min="0.2" max="1.2" step="0.05" value="${config.angle}">
+        </div>
+        <div class="control-group">
+            <label><span>Randomness</span> <span id="val-rand">${config.randomness}</span></label>
+            <input type="range" id="randomness" min="0" max="0.8" step="0.05" value="${config.randomness}">
+        </div>
+        <div class="control-group">
+            <label><span>Density (Depth)</span> <span id="val-depth">${config.maxDepth}</span></label>
+            <input type="range" id="recursion" min="8" max="12" step="1" value="${config.maxDepth}">
+        </div>
+        <div class="control-group">
+            <label><span>Leaf Size</span> <span id="val-leaf">${config.leafSize}</span></label>
+            <input type="range" id="leafSize" min="0.5" max="2.0" step="0.1" value="${config.leafSize}">
+        </div>
+        <button id="regenerate">Generate New Random Tree</button>
+        <div class="stats" id="stats">Ready</div>
+        
+        <div class="code-section">
+            <label>Export Tree (HTML Code)</label>
+            <textarea id="htmlOutput" readonly placeholder="Click 'Get HTML Code' to generate the full code for this tree..."></textarea>
+            <div style="display: flex; gap: 10px;">
+                <button id="getHtmlBtn" style="flex: 1;">Get HTML Code</button>
+                <button id="copyBtn" style="flex: 1;">Copy to Clipboard</button>
+            </div>
+        </div>
+    </div>
+    <div id="loading">Generating Geometry...</div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"><\/script>
+
+    <script id="mainScript">${scriptContent}<\/script>
+</body>
+</html>`;
+
+            document.getElementById('htmlOutput').value = fullHTML;
+        }
+
+        function generateTreeWrapper() {
+            document.getElementById('loading').style.opacity = '1';
+            setTimeout(generateTree, 50);
+        }
+
+        function generateTree() {
+            if(branchMesh) scene.remove(branchMesh);
+            if(leafMesh) scene.remove(leafMesh);
+
+            rng = mulberry32(currentSeed);
+
+            const branchMatrices = [];
+            const leafMatrices = [];
+            const dummy = new THREE.Object3D();
+
+            function grow(x, y, z, length, radius, rotX, rotZ, rotY, depth) {
+                dummy.position.set(x, y, z);
+                dummy.rotation.set(rotX, rotY, rotZ);
+                dummy.scale.set(radius, length, radius); 
+                dummy.updateMatrix();
+                branchMatrices.push(dummy.matrix.clone());
+
+                const tip = new THREE.Vector3(0, length, 0);
+                const euler = new THREE.Euler(rotX, rotY, rotZ, 'XYZ');
+                tip.applyEuler(euler);
+                
+                const tipX = x + tip.x;
+                const tipY = y + tip.y;
+                const tipZ = z + tip.z;
+
+                if (depth < config.maxDepth) {
+                    const numBranches = 2 + Math.floor(random() * 1.5); 
+                    
+                    for (let i = 0; i < numBranches; i++) {
+                        const newLen = length * config.lengthDecay;
+                        const newRad = radius * config.widthDecay;
+                        const angleVar = (random() - 0.5) * config.randomness * 2;
+                        const spread = config.angle + angleVar;
+                        const spin = (Math.PI * 2 / numBranches) * i + (random()*0.5);
+                        
+                        const nextRotX = rotX + (Math.cos(spin) * spread);
+                        const nextRotZ = rotZ + (Math.sin(spin) * spread);
+                        const nextRotY = rotY + ((random()-0.5) * 0.5);
+
+                        grow(tipX, tipY, tipZ, newLen, newRad, nextRotX, nextRotZ, nextRotY, depth + 1);
+                    }
+                } else {
+                    for(let j=0; j<5; j++) {
+                        dummy.position.set(
+                            tipX + (random()-0.5)*1.5, 
+                            tipY + (random()-0.5)*1.5, 
+                            tipZ + (random()-0.5)*1.5
+                        );
+                        dummy.rotation.set(random()*Math.PI, random()*Math.PI, random()*Math.PI);
+                        const s = config.leafSize * (1.2 + random()*0.6);
+                        dummy.scale.set(s, s, s);
+                        dummy.updateMatrix();
+                        leafMatrices.push(dummy.matrix.clone());
+                    }
+                }
+            }
+
+            grow(0, 0, 0, 8, 1.0, 0, 0, 0, 0);
+
+            const bGeo = new THREE.CylinderGeometry(0.7, 1, 1, 7); 
+            bGeo.translate(0, 0.5, 0); 
+            const bMat = new THREE.MeshStandardMaterial({ 
+                map: createBarkTexture(), roughness: 0.9, color: 0x8D6E63
+            });
+            branchMesh = new THREE.InstancedMesh(bGeo, bMat, branchMatrices.length);
+            branchMesh.castShadow = true; branchMesh.receiveShadow = true;
+            for(let i=0; i<branchMatrices.length; i++) branchMesh.setMatrixAt(i, branchMatrices[i]);
+            scene.add(branchMesh);
+
+            const lGeo = new THREE.PlaneGeometry(1, 1, 2, 2);
+            const posAttr = lGeo.attributes.position;
+            for(let i=0; i<posAttr.count; i++){
+                const x = posAttr.getX(i);
+                posAttr.setZ(i, Math.pow(x * 1.5, 2) * 0.3);
+            }
+            lGeo.computeVertexNormals();
+            
+            leafUniforms = { time: { value: 0 }, map: { value: createLeafTexture() } };
+            const lMat = new THREE.ShaderMaterial({
+                uniforms: leafUniforms, vertexShader: leafVertexShader, fragmentShader: leafFragmentShader,
+                side: THREE.DoubleSide, transparent: true
+            });
+            leafMesh = new THREE.InstancedMesh(lGeo, lMat, leafMatrices.length);
+            leafMesh.customDepthMaterial = new THREE.MeshDepthMaterial({
+                depthPacking: THREE.RGBADepthPacking, map: leafUniforms.map.value, alphaTest: 0.6
+            });
+            leafMesh.castShadow = true; leafMesh.receiveShadow = true;
+            for(let i=0; i<leafMatrices.length; i++) leafMesh.setMatrixAt(i, leafMatrices[i]);
+            scene.add(leafMesh);
+
+            document.getElementById('stats').innerText = `Branches: ${branchMatrices.length} | Leaves: ${leafMatrices.length}`;
+            document.getElementById('loading').style.opacity = '0';
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            if(leafUniforms) leafUniforms.time.value = time;
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        init();
+        window.addEventListener('resize', onWindowResize, false);
+    </script>
+</body>
+</html>
