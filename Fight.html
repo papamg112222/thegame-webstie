@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pixel Commando 3D</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Press Start 2P', cursive; /* Retro font */
+            touch-action: none;
+            user-select: none;
+        }
+
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Scanline effect overlay */
+        #scanlines {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 4px, 6px 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #ui-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            z-index: 10;
+        }
+
+        /* HUD */
+        .hud-top {
+            display: flex;
+            justify-content: space-between;
+            padding: 20px;
+        }
+
+        .bar-wrap {
+            width: 40%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .hp-border {
+            border: 4px solid #fff;
+            background: #222;
+            height: 25px;
+            position: relative;
+        }
+
+        .hp-fill {
+            height: 100%;
+            background: #ffcc00;
+            width: 100%;
+            transition: width 0.1s;
+        }
+        
+        .p2-fill { background: #ff3333; }
+
+        .name {
+            color: #fff;
+            margin-bottom: 5px;
+            text-shadow: 2px 2px #000;
+            font-size: 12px;
+        }
+
+        /* Controls */
+        #controls {
+            pointer-events: auto;
+            padding: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            margin-bottom: 20px;
+        }
+
+        .d-pad {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+        }
+
+        .action-pad {
+            position: relative;
+            width: 260px;
+            height: 240px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.15);
+            border: 4px solid rgba(255,255,255,0.8);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 20px;
+            box-shadow: 0 6px 0 #000;
+            active: transform: translateY(4px);
+            cursor: pointer;
+            backdrop-filter: blur(2px);
+        }
+
+        .btn:active, .btn.pressed {
+            transform: translateY(6px);
+            box-shadow: 0 0 0 #000;
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .btn-move { width: 70px; height: 70px; border-radius: 10px; }
+        .btn-jump { width: 80px; height: 80px; border-radius: 10px; margin-bottom: 20px; background: rgba(0, 255, 0, 0.2); border-color: #0f0; }
+
+        .btn-atk {
+            position: absolute;
+            bottom: 0; right: 0;
+            width: 110px; height: 110px;
+            border-radius: 50%;
+            background: rgba(255, 0, 0, 0.3);
+            border-color: #f00;
+            font-size: 18px;
+            z-index: 20;
+        }
+
+        .btn-skill {
+            position: absolute;
+            width: 70px; height: 70px;
+            border-radius: 50%;
+            font-size: 10px;
+            border-width: 3px;
+        }
+
+        .btn-s1 { bottom: 20px; right: 125px; border-color: #0ff; color: #0ff; background: rgba(0, 255, 255, 0.2); }
+        .btn-s2 { bottom: 100px; right: 100px; border-color: #ff0; color: #ff0; background: rgba(255, 255, 0, 0.2); }
+        .btn-s3 { bottom: 130px; right: 10px; border-color: #f0f; color: #f0f; background: rgba(255, 0, 255, 0.2); }
+
+        .cd-overlay {
+            position: absolute;
+            top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.8);
+            border-radius: 50%;
+            display: none;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            color: #fff;
+        }
+        
+        h1 { 
+            color: #ff3333; 
+            text-shadow: 4px 4px #000, -2px -2px #555;
+            font-size: 30px; text-align: center; margin-bottom: 10px;
+        }
+
+        .start-btn {
+            padding: 20px 40px;
+            font-family: inherit;
+            font-size: 20px;
+            background: #00f;
+            color: #fff;
+            border: 4px solid #fff;
+            cursor: pointer;
+            margin-top: 20px;
+            animation: blink 1s infinite;
+        }
+
+        @keyframes blink { 50% { opacity: 0.5; } }
+        
+        .combo-text {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 40px;
+            color: #ffcc00;
+            text-shadow: 4px 4px #f00;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container"></div>
+<div id="scanlines"></div>
+
+<div id="ui-layer">
+    <div class="hud-top">
+        <div class="bar-wrap">
+            <div class="name">COMMANDO 1</div>
+            <div class="hp-border"><div class="hp-fill" id="p1-hp"></div></div>
+        </div>
+        <div class="bar-wrap" style="align-items: flex-end;">
+            <div class="name">COMMANDO 2</div>
+            <div class="hp-border" style="width: 100%"><div class="hp-fill p2-fill" id="p2-hp"></div></div>
+        </div>
+    </div>
+    
+    <div id="combo-display" class="combo-text">COMBO!</div>
+
+    <div id="controls">
+        <div class="d-pad">
+            <div class="btn btn-move" id="btn-left">◀</div>
+            <div class="btn btn-jump" id="btn-jump">JUMP</div>
+            <div class="btn btn-move" id="btn-right">▶</div>
+        </div>
+        <div class="action-pad">
+            <div class="btn btn-atk" id="btn-atk">ATK</div>
+            <div class="btn btn-skill btn-s1" id="btn-s1">PLASMA<div class="cd-overlay" id="cd-s1"></div></div>
+            <div class="btn btn-skill btn-s2" id="btn-s2">DASH<div class="cd-overlay" id="cd-s2"></div></div>
+            <div class="btn btn-skill btn-s3" id="btn-s3">NUKE<div class="cd-overlay" id="cd-s3"></div></div>
+        </div>
+    </div>
+</div>
+
+<div id="start-screen">
+    <h1>PIXEL COMMANDO<br>CHRONICLES</h1>
+    <p style="font-size: 10px; color: #888;">LOW-RES 3D ENGINE LOADED</p>
+    <button class="start-btn" id="start-btn">INSERT COIN</button>
+</div>
+
+<script>
+    // --- SOUND ENGINE ---
+    const AudioSys = {
+        ctx: null,
+        init: () => { window.AudioContext = window.AudioContext || window.webkitAudioContext; AudioSys.ctx = new AudioContext(); },
+        playTone: (freq, type, dur, vol=0.1) => {
+            if(!AudioSys.ctx) return;
+            const osc = AudioSys.ctx.createOscillator();
+            const gain = AudioSys.ctx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, AudioSys.ctx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(freq/2, AudioSys.ctx.currentTime + dur);
+            gain.gain.setValueAtTime(vol, AudioSys.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, AudioSys.ctx.currentTime + dur);
+            osc.connect(gain); gain.connect(AudioSys.ctx.destination);
+            osc.start(); osc.stop(AudioSys.ctx.currentTime + dur);
+        },
+        noise: (dur) => {
+            if(!AudioSys.ctx) return;
+            const size = AudioSys.ctx.sampleRate * dur;
+            const buf = AudioSys.ctx.createBuffer(1, size, AudioSys.ctx.sampleRate);
+            const data = buf.getChannelData(0);
+            for(let i=0;i<size;i++) data[i] = Math.random()*2-1;
+            const src = AudioSys.ctx.createBufferSource();
+            src.buffer = buf;
+            const gain = AudioSys.ctx.createGain();
+            gain.gain.setValueAtTime(0.2, AudioSys.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, AudioSys.ctx.currentTime + dur);
+            src.connect(gain); gain.connect(AudioSys.ctx.destination);
+            src.start();
+        }
+    };
+
+    // --- THREE.JS PIXEL ENGINE ---
+    const container = document.getElementById('game-container');
+    
+    // Setup Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: false });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(1); // Force 1:1 for pixelation control
+    container.appendChild(renderer.domElement);
+
+    // Scenes
+    const sceneGame = new THREE.Scene();
+    sceneGame.background = new THREE.Color(0x203040); // Dark blue night sky
+    sceneGame.fog = new THREE.Fog(0x203040, 10, 30);
+
+    const sceneScreen = new THREE.Scene(); // For render-to-texture
+
+    // Cameras
+    const aspect = window.innerWidth / window.innerHeight;
+    const camGame = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+    camGame.position.set(0, 4, 12);
+    
+    const camScreen = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // Low-Res Render Target (The magic pixel effect)
+    const RES_W = 320; 
+    const RES_H = Math.floor(320 / aspect);
+    const renderTarget = new THREE.WebGLRenderTarget(RES_W, RES_H, {
+        minFilter: THREE.NearestFilter,
+        magFilter: THREE.NearestFilter,
+        format: THREE.RGBFormat
+    });
+
+    // Screen Quad
+    const quadMat = new THREE.MeshBasicMaterial({ map: renderTarget.texture });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), quadMat);
+    sceneScreen.add(quad);
+
+    // --- GAME WORLD ASSETS ---
+    
+    // Lighting
+    const ambLight = new THREE.AmbientLight(0xffffff, 0.5);
+    sceneGame.add(ambLight);
+    const dirLight = new THREE.DirectionalLight(0xffaa00, 0.8);
+    dirLight.position.set(5, 10, 5);
+    sceneGame.add(dirLight);
+
+    // Floor (Jungle Base)
+    const texLoader = new THREE.TextureLoader(); // We'll just use colors for procedural generation to keep it 1 file
+    
+    const groundGeo = new THREE.PlaneGeometry(100, 20);
+    const groundMat = new THREE.MeshStandardMaterial({ color: 0x1a472a, roughness: 1 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI/2;
+    sceneGame.add(ground);
+
+    // Environment Detail (Voxel Trees/Rocks)
+    function createVoxelProp(x, z, h, color) {
+        const geo = new THREE.BoxGeometry(1, h, 1);
+        const mat = new THREE.MeshLambertMaterial({ color: color });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.set(x, h/2, z);
+        sceneGame.add(mesh);
+    }
+    for(let i=0; i<20; i++) {
+        createVoxelProp((Math.random()-0.5)*40, -5 - Math.random()*10, 2 + Math.random()*4, 0x0f2f1f); // Trees
+    }
+
+    // --- ENTITY CLASSES ---
+
+    const GRAVITY = 0.02;
+    const GROUND = 0;
+
+    class Particle {
+        constructor(x, y, z, color, size, life, vel) {
+            this.mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(size, size, size),
+                new THREE.MeshBasicMaterial({ color: color })
+            );
+            this.mesh.position.set(x, y, z);
+            this.vel = vel;
+            this.life = life;
+            sceneGame.add(this.mesh);
+        }
+        update() {
+            this.mesh.position.add(this.vel);
+            this.life--;
+            this.mesh.rotation.x += 0.1;
+            this.mesh.scale.multiplyScalar(0.95);
+            if(this.life <= 0) {
+                sceneGame.remove(this.mesh);
+                return false;
+            }
+            return true;
+        }
+    }
+
+    let particles = [];
+    function spawnBoom(x, y, z, color, count, speed=0.2) {
+        for(let i=0; i<count; i++) {
+            const v = new THREE.Vector3((Math.random()-0.5)*speed, (Math.random()-0.5)*speed, (Math.random()-0.5)*speed);
+            particles.push(new Particle(x, y, z, color, 0.3, 30, v));
+        }
+    }
+
+    class Character {
+        constructor(x, color, isPlayer) {
+            this.x = x; this.y = 0; this.z = 0;
+            this.vy = 0;
+            this.facingRight = isPlayer;
+            this.hp = 100;
+            this.maxHp = 100;
+            this.state = 'idle';
+            this.timer = 0;
+            this.combo = 0; // 0, 1, 2
+            this.cooldowns = { s1:0, s2:0, s3:0 };
+            
+            // --- CONTRA SOLDIER MODEL ---
+            this.root = new THREE.Group();
+            
+            const matSkin = new THREE.MeshLambertMaterial({ color: 0xffccaa });
+            const matPants = new THREE.MeshLambertMaterial({ color: isPlayer ? 0x335533 : 0x553333 }); // Green vs Red Camo
+            const matBoot = new THREE.MeshLambertMaterial({ color: 0x111111 });
+            const matBandana = new THREE.MeshLambertMaterial({ color: color });
+
+            // Legs
+            this.legL = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, 0.6), matPants);
+            this.legR = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, 0.6), matPants);
+            this.legL.position.set(-0.3, 0.6, 0);
+            this.legR.position.set(0.3, 0.6, 0);
+            
+            // Boots
+            const bootL = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 0.7), matBoot);
+            const bootR = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 0.7), matBoot);
+            bootL.position.y = -0.4; bootR.position.y = -0.4;
+            this.legL.add(bootL); this.legR.add(bootR);
+
+            // Torso (Muscular V-shape approx)
+            this.torso = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.3, 0.7), matSkin);
+            this.torso.position.set(0, 1.85, 0);
+
+            // Head
+            this.head = new THREE.Group();
+            this.head.position.set(0, 2.8, 0);
+            const face = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.7), matSkin);
+            const band = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.2, 0.75), matBandana);
+            band.position.y = 0.2;
+            const knot = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.5, 0.2), matBandana);
+            knot.position.set(0, 0.1, -0.4);
+            knot.rotation.x = 0.5;
+            this.head.add(face, band, knot);
+
+            // Arms
+            this.armL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.3, 0.4), matSkin);
+            this.armR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.3, 0.4), matSkin);
+            
+            // Shoulder pivots
+            this.pivL = new THREE.Group(); this.pivL.position.set(-0.7, 2.3, 0);
+            this.pivR = new THREE.Group(); this.pivR.position.set(0.7, 2.3, 0);
+            
+            this.armL.position.y = -0.5;
+            this.armR.position.y = -0.5;
+            
+            this.pivL.add(this.armL);
+            this.pivR.add(this.armR);
+
+            this.root.add(this.legL, this.legR, this.torso, this.head, this.pivL, this.pivR);
+            sceneGame.add(this.root);
+        }
+
+        update(opponent) {
+            // Physics
+            this.vy -= GRAVITY;
+            this.y += this.vy;
+            if(this.y <= GROUND) {
+                this.y = GROUND;
+                this.vy = 0;
+            }
+            this.root.position.set(this.x, this.y, this.z);
+
+            // Facing
+            if(this.state !== 'dash' && this.state !== 'hurt') {
+                if(opponent.x > this.x) this.facingRight = true;
+                else this.facingRight = false;
+            }
+            this.root.rotation.y = this.facingRight ? Math.PI/2 : -Math.PI/2;
+
+            // Cooldowns
+            if(this.cooldowns.s1 > 0) this.cooldowns.s1--;
+            if(this.cooldowns.s2 > 0) this.cooldowns.s2--;
+            if(this.cooldowns.s3 > 0) this.cooldowns.s3--;
+
+            // State Management
+            if(this.timer > 0) {
+                this.timer--;
+                if(this.timer === 0 && this.state !== 'idle') {
+                    this.state = 'idle';
+                    this.combo = 0; // Reset combo if timed out
+                    this.resetAnim();
+                }
+            }
+
+            this.animate();
+        }
+
+        resetAnim() {
+            this.pivL.rotation.set(0,0,0);
+            this.pivR.rotation.set(0,0,0);
+            this.legL.rotation.x = 0;
+            this.legR.rotation.x = 0;
+            this.root.rotation.z = 0;
+        }
+
+        animate() {
+            const t = Date.now() * 0.01;
+            
+            if(this.state === 'idle') {
+                // Fighting Stance
+                this.pivL.rotation.x = -0.5 + Math.sin(t)*0.1;
+                this.pivR.rotation.x = -0.8 + Math.cos(t)*0.1;
+                this.pivL.rotation.z = 0.5;
+                this.pivR.rotation.z = -0.5;
+                this.legL.rotation.x = -0.2;
+                this.legR.rotation.x = 0.2;
+            } 
+            else if (this.state === 'run') {
+                this.legL.rotation.x = Math.sin(t*2);
+                this.legR.rotation.x = Math.cos(t*2);
+                this.pivL.rotation.x = Math.cos(t*2);
+                this.pivR.rotation.x = Math.sin(t*2);
+            }
+            else if (this.state === 'attack') {
+                // Combo Animations
+                const arm = this.facingRight ? this.pivR : this.pivR; // Logic simplified
+                
+                if (this.combo === 1) { // Left Jab
+                    this.pivL.rotation.x = -1.5;
+                    this.pivL.position.z = 0.5; // Extension
+                    setTimeout(()=> this.pivL.position.z = 0, 100);
+                } else if (this.combo === 2) { // Right Hook
+                    this.pivR.rotation.y = -1.5;
+                    this.pivR.rotation.x = -1.0;
+                } else if (this.combo === 3) { // Uppercut
+                    this.pivR.rotation.x = -2.5;
+                    this.root.position.y += 0.1; // Jump slightly
+                    this.root.rotation.x = -0.2;
+                }
+            }
+            else if (this.state === 'dash') {
+                this.root.rotation.z = this.facingRight ? -0.5 : 0.5;
+                spawnBoom(this.x, 1, 0, 0xffffff, 1, 0.05); // Trail
+            }
+        }
+
+        move(dir) {
+            if(this.state !== 'idle' && this.state !== 'run') return;
+            this.x += dir * 0.15;
+            this.state = 'run';
+            this.timer = 2; // Reset to idle quickly if input stops
+        }
+
+        jump() {
+            if(this.y === GROUND && (this.state === 'idle' || this.state === 'run')) {
+                this.vy = 0.5;
+                AudioSys.playTone(300, 'square', 0.1);
+            }
+        }
+
+        // --- COMBAT ---
+
+        hit(opponent, damage, knockbackY = 0) {
+            // Hitbox Logic
+            const dist = Math.abs(this.x - opponent.x);
+            if(dist < 2.0 && Math.abs(this.y - opponent.y) < 2.0) {
+                // Visual Hit
+                spawnBoom(opponent.x, opponent.y + 2, 0, 0xff0000, 5);
+                opponent.hp -= damage;
+                opponent.x += this.facingRight ? 1 : -1;
+                opponent.vy = knockbackY;
+                AudioSys.playTone(100, 'sawtooth', 0.1);
+                
+                // Screen freeze frame effect?
+                // Just shake
+                shake = 5;
+                return true;
+            }
+            return false;
+        }
+
+        performAttack(opponent) {
+            if(this.state !== 'idle' && this.state !== 'run') return;
+            
+            // Advance Combo
+            this.combo++;
+            if(this.combo > 3) this.combo = 1;
+            
+            this.state = 'attack';
+            this.timer = 15; // Animation window
+            
+            let dmg = 5;
+            let lift = 0;
+            
+            if(this.combo === 1) { // Jab
+                dmg = 4;
+                AudioSys.playTone(400, 'triangle', 0.05);
+            } else if (this.combo === 2) { // Hook
+                dmg = 8;
+                AudioSys.playTone(300, 'square', 0.1);
+            } else if (this.combo === 3) { // Uppercut
+                dmg = 15;
+                lift = 0.6;
+                this.timer = 25; // Longer recovery
+                AudioSys.playTone(150, 'sawtooth', 0.2);
+                
+                // Show combo text
+                const el = document.getElementById('combo-display');
+                el.style.opacity = 1;
+                el.style.transform = "translate(-50%, -50%) scale(1.5)";
+                setTimeout(() => { el.style.opacity = 0; el.style.transform = "translate(-50%, -50%) scale(1)"; }, 500);
+            }
+            
+            // Delayed hit calculation for sync with animation
+            setTimeout(() => {
+                this.hit(opponent, dmg, lift);
+            }, 100);
+        }
+
+        skill1(opponent) { // Plasma Shot
+            if(this.cooldowns.s1 > 0) return;
+            this.cooldowns.s1 = 60;
+            this.state = 'attack';
+            this.timer = 20;
+            
+            const dir = this.facingRight ? 1 : -1;
+            shots.push(new Projectile(this.x + dir, 2.5, dir, this));
+            AudioSys.playTone(600, 'square', 0.2);
+        }
+
+        skill2(opponent) { // Dash
+            if(this.cooldowns.s2 > 0) return;
+            this.cooldowns.s2 = 100;
+            this.state = 'dash';
+            this.timer = 20;
+            this.vy = 0; // Float
+            
+            const dir = this.facingRight ? 1 : -1;
+            
+            let dashInt = setInterval(() => {
+                this.x += dir * 0.8;
+                if(this.hit(opponent, 10)) {
+                    clearInterval(dashInt);
+                }
+            }, 30);
+            setTimeout(() => clearInterval(dashInt), 200);
+            AudioSys.noise(0.2);
+        }
+
+        skill3(opponent) { // Nuke
+            if(this.cooldowns.s3 > 0) return;
+            this.cooldowns.s3 = 200;
+            this.state = 'attack';
+            this.timer = 60;
+            this.vy = 0.8; // Jump high
+            
+            setTimeout(() => {
+                this.vy = -1.0; // Slam down
+                let slamCheck = setInterval(() => {
+                    if(this.y <= GROUND) {
+                        clearInterval(slamCheck);
+                        // NUKE EFFECT
+                        shake = 20;
+                        AudioSys.noise(0.5);
+                        spawnBoom(this.x, 0, 0, 0xffaa00, 50, 0.8);
+                        
+                        // Pillar of light
+                        const geo = new THREE.CylinderGeometry(2, 2, 20, 8);
+                        const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 });
+                        const beam = new THREE.Mesh(geo, mat);
+                        beam.position.set(this.x, 10, 0);
+                        sceneGame.add(beam);
+                        
+                        const beamInt = setInterval(() => {
+                            beam.scale.x *= 0.9;
+                            beam.scale.z *= 0.9;
+                            beam.material.opacity -= 0.1;
+                            if(beam.material.opacity <= 0) {
+                                clearInterval(beamInt);
+                                sceneGame.remove(beam);
+                            }
+                        }, 50);
+
+                        // Damage Logic
+                        const dist = Math.abs(this.x - opponent.x);
+                        if(dist < 6) {
+                            opponent.hp -= 25;
+                            opponent.vy = 0.8;
+                        }
+                    }
+                }, 16);
+            }, 300);
+        }
+    }
+
+    class Projectile {
+        constructor(x, y, dir, owner) {
+            this.x = x; this.y = y; this.dir = dir; this.owner = owner;
+            this.active = true;
+            
+            const geo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+            const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+            this.mesh = new THREE.Mesh(geo, mat);
+            sceneGame.add(this.mesh);
+            
+            // Light
+            this.light = new THREE.PointLight(0x00ffff, 1, 5);
+            this.mesh.add(this.light);
+        }
+        update(opponent) {
+            if(!this.active) return false;
+            this.x += this.dir * 0.4;
+            this.mesh.position.set(this.x, this.y, 0);
+            this.mesh.rotation.x += 0.2;
+            this.mesh.rotation.z += 0.2;
+            
+            spawnBoom(this.x, this.y, 0, 0x00ffff, 1, 0.05);
+
+            // Bounds
+            if(Math.abs(this.x) > 30) {
+                this.destroy(); return false;
+            }
+
+            // Hit
+            const dist = Math.abs(this.x - opponent.x);
+            if(dist < 1.5 && Math.abs(this.y - opponent.y) < 2) {
+                opponent.hp -= 12;
+                opponent.vy = 0.2;
+                spawnBoom(this.x, this.y, 0, 0x00ffff, 10);
+                AudioSys.playTone(100, 'square', 0.1);
+                this.destroy();
+                return false;
+            }
+            return true;
+        }
+        destroy() {
+            this.active = false;
+            sceneGame.remove(this.mesh);
+        }
+    }
+
+    // --- MAIN GAME LOOP ---
+    
+    let p1, p2;
+    let shots = [];
+    let shake = 0;
+
+    function init() {
+        p1 = new Character(-5, 0xff0000, true); // Red bandana
+        p2 = new Character(5, 0x0000ff, false); // Blue bandana
+        
+        // AI Loop
+        setInterval(() => {
+            if(p2.hp <= 0) return;
+            const dist = Math.abs(p2.x - p1.x);
+            const dir = p1.x > p2.x ? 1 : -1;
+            
+            if(dist > 3) p2.move(dir);
+            else {
+                if(Math.random()<0.05) p2.performAttack(p1);
+            }
+        }, 100);
+
+        loop();
+    }
+
+    function loop() {
+        requestAnimationFrame(loop);
+
+        // Update Characters
+        p1.update(p2);
+        p2.update(p1);
+
+        // Inputs
+        if(keys['ArrowLeft'] || touch.l) p1.move(-1);
+        if(keys['ArrowRight'] || touch.r) p1.move(1);
+
+        // Projectiles
+        shots = shots.filter(s => s.update(s.owner === p1 ? p2 : p1));
+
+        // Particles
+        particles = particles.filter(p => p.update());
+
+        // Camera Shake
+        if(shake > 0) {
+            camGame.position.x = (Math.random()-0.5)*shake*0.1;
+            camGame.position.y = 4 + (Math.random()-0.5)*shake*0.1;
+            shake *= 0.9;
+        } else {
+            camGame.position.x = 0;
+            camGame.position.y = 4;
+            // Smooth Camera Follow
+            const mid = (p1.x + p2.x)/2;
+            camGame.position.x += (mid - camGame.position.x) * 0.1;
+        }
+
+        // UI
+        document.getElementById('p1-hp').style.width = Math.max(0, p1.hp) + '%';
+        document.getElementById('p2-hp').style.width = Math.max(0, p2.hp) + '%';
+        
+        const setCD = (id, val) => {
+            const el = document.getElementById(id);
+            if(val > 0) { el.style.display = 'flex'; el.innerText = Math.ceil(val/60); }
+            else el.style.display = 'none';
+        }
+        setCD('cd-s1', p1.cooldowns.s1);
+        setCD('cd-s2', p1.cooldowns.s2);
+        setCD('cd-s3', p1.cooldowns.s3);
+
+        // Render to Texture (Low Res)
+        renderer.setRenderTarget(renderTarget);
+        renderer.render(sceneGame, camGame);
+        
+        // Render to Screen (Upscaled)
+        renderer.setRenderTarget(null);
+        renderer.render(sceneScreen, camScreen);
+
+        if(p2.hp <= 0) { p2.hp = 100; p2.x = 10; spawnBoom(10, 2, 0, 0xffffff, 20); }
+        if(p1.hp <= 0) { p1.hp = 100; p1.x = -10; }
+    }
+
+    // Input Handling
+    const keys = {};
+    const touch = { l: false, r: false };
+
+    window.addEventListener('keydown', e => {
+        keys[e.key] = true;
+        if(e.key === 'ArrowUp') p1.jump();
+        if(e.key === 'z') p1.performAttack(p2);
+        if(e.key === 'x') p1.skill1(p2);
+        if(e.key === 'c') p1.skill2(p2);
+        if(e.key === 'v') p1.skill3(p2);
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    const bindTouch = (id, key, fn) => {
+        const el = document.getElementById(id);
+        const start = (e) => { e.preventDefault(); if(key) touch[key]=true; if(fn) fn(); el.classList.add('pressed'); };
+        const end = (e) => { e.preventDefault(); if(key) touch[key]=false; el.classList.remove('pressed'); };
+        el.addEventListener('touchstart', start); el.addEventListener('touchend', end);
+        el.addEventListener('mousedown', start); el.addEventListener('mouseup', end);
+    };
+
+    bindTouch('btn-left', 'l');
+    bindTouch('btn-right', 'r');
+    bindTouch('btn-jump', null, () => p1.jump());
+    bindTouch('btn-atk', null, () => p1.performAttack(p2));
+    bindTouch('btn-s1', null, () => p1.skill1(p2));
+    bindTouch('btn-s2', null, () => p1.skill2(p2));
+    bindTouch('btn-s3', null, () => p1.skill3(p2));
+
+    document.getElementById('start-btn').addEventListener('click', () => {
+        AudioSys.init();
+        document.getElementById('start-screen').style.display = 'none';
+        init();
+    });
+
+    // Resize
+    window.addEventListener('resize', () => {
+        const a = window.innerWidth/window.innerHeight;
+        camGame.aspect = a; camGame.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+</script>
+</body>
+</html>
