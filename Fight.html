@@ -784,7 +784,7 @@
     // --- NETWORK & LOOP ---
     let p1, p2, shots = [], shake = 0;
     let gameMode = 'local'; // 'local', 'host', 'client'
-    let net = { peer: null, conn: null, id: null };
+    let net = { peer: null, conn: null, id: null, lastInputStr: "", lastStateTime: 0 };
     let inputState = { l:false, r:false, j:false, b:false, a:false, s1:false, s2:false, s3:false };
     
     // Prefix for Peer IDs to ensure uniqueness on the public server while allowing short codes
@@ -816,16 +816,13 @@
 
         // --- NETWORK SYNC ---
         if(gameMode === 'client') {
-             // Client Logic: Send Input, Receive State, Render only
-             if(net.conn && net.conn.open) net.conn.send({ t:'i', d: activeInput });
+             // Client Logic: Send Input ONLY if changed (Throttling)
+             const inputStr = JSON.stringify(activeInput);
+             if(net.conn && net.conn.open && inputStr !== net.lastInputStr) {
+                 net.conn.send({ t:'i', d: activeInput });
+                 net.lastInputStr = inputStr;
+             }
              
-             // Interpolate visuals for smoothness if needed, but for now strict state sync
-             // Render Update based on received data happens in net.conn.on('data')
-             
-             // Update cooldown UI for client
-             const setCD = (id,v) => { document.getElementById(id).style.display = v>0?'flex':'none'; document.getElementById(id).innerText = Math.ceil(v/60); };
-             setCD('cd-s1', p2.cooldowns.s1); setCD('cd-s2', p2.cooldowns.s2); setCD('cd-s3', p2.cooldowns.s3);
-
              // Client visual only updates
              p1.animate(); p2.animate();
              particles = particles.filter(p => p.update());
@@ -906,13 +903,17 @@
         renderer.setRenderTarget(renderTarget); renderer.render(sceneGame, camGame);
         renderer.setRenderTarget(null); renderer.render(sceneScreen, camScreen);
 
-        // Send State to Client
+        // Send State to Client (Throttled to 20fps)
         if(gameMode === 'host' && net.conn && net.conn.open) {
-            const state = {
-                p1: { x:p1.x, y:p1.y, hp:p1.hp, s:p1.stamina, cd:p1.cooldowns, st:p1.state, f:p1.facingRight, r:p1.root.rotation.y },
-                p2: { x:p2.x, y:p2.y, hp:p2.hp, s:p2.stamina, cd:p2.cooldowns, st:p2.state, f:p2.facingRight, r:p2.root.rotation.y }
-            };
-            net.conn.send({ t:'s', d: state });
+            const now = Date.now();
+            if(now - net.lastStateTime > 50) {
+                const state = {
+                    p1: { x:p1.x, y:p1.y, hp:p1.hp, s:p1.stamina, cd:p1.cooldowns, st:p1.state, f:p1.facingRight, r:p1.root.rotation.y },
+                    p2: { x:p2.x, y:p2.y, hp:p2.hp, s:p2.stamina, cd:p2.cooldowns, st:p2.state, f:p2.facingRight, r:p2.root.rotation.y }
+                };
+                net.conn.send({ t:'s', d: state });
+                net.lastStateTime = now;
+            }
         }
     }
 
@@ -1023,9 +1024,17 @@
 
         get('join-status').innerText = "CONNECTING...";
         net.peer = new Peer();
+        
+        // Timeout check
+        const failTimeout = setTimeout(() => {
+            get('join-status').innerText = "FAILED. TRY AGAIN.";
+            if(net.peer) net.peer.destroy();
+        }, 5000);
+
         net.peer.on('open', (myId) => {
             const conn = net.peer.connect(targetId);
             conn.on('open', () => {
+                clearTimeout(failTimeout);
                 net.conn = conn;
                 get('join-status').innerText = "CONNECTED!";
                 setTimeout(() => { get('join-screen').classList.add('hidden'); init('client'); }, 1000);
@@ -1044,9 +1053,9 @@
                     updateStamUI('p2', p2.stamina, p2.maxStamina, p2.tired);
                 }
             });
-            conn.on('error', (err) => { get('join-status').innerText = "FAILED: " + err; });
+            conn.on('error', (err) => { clearTimeout(failTimeout); get('join-status').innerText = "FAILED: " + err; });
         });
-        net.peer.on('error', (err) => { get('join-status').innerText = "NET ERROR: " + err; });
+        net.peer.on('error', (err) => { clearTimeout(failTimeout); get('join-status').innerText = "NET ERROR: " + err; });
     };
 
     window.addEventListener('resize', () => {
