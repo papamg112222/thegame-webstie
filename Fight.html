@@ -297,7 +297,7 @@
 
 <div id="join-screen" class="screen-overlay hidden">
     <p style="color: #888;">ENTER HOST CODE:</p>
-    <input type="text" class="code-input" id="join-input" maxlength="10" placeholder="CODE">
+    <input type="text" class="code-input" id="join-input" maxlength="4" placeholder="0000">
     <div class="status-msg" id="join-status"></div>
     <button class="menu-btn" id="connect-btn">CONNECT</button>
     <button class="menu-btn btn-secondary" id="join-cancel">CANCEL</button>
@@ -786,6 +786,9 @@
     let gameMode = 'local'; // 'local', 'host', 'client'
     let net = { peer: null, conn: null, id: null };
     let inputState = { l:false, r:false, j:false, b:false, a:false, s1:false, s2:false, s3:false };
+    
+    // Prefix for Peer IDs to ensure uniqueness on the public server while allowing short codes
+    const PREFIX = "pxl_v1_";
 
     function init(mode) {
         gameMode = mode;
@@ -972,11 +975,28 @@
     // Host Logic
     get('host-btn').onclick = () => {
         get('local-screen').classList.add('hidden'); get('host-screen').classList.remove('hidden');
-        net.peer = new Peer();
+        
+        // Generate random 4 digit code
+        const code = Math.floor(1000 + Math.random() * 9000).toString();
+        const fullId = PREFIX + code;
+
+        net.peer = new Peer(fullId);
+        
         net.peer.on('open', (id) => {
-            get('host-code').innerText = id;
+            get('host-code').innerText = code;
             get('host-status').innerText = "NETWORK READY. WAITING...";
         });
+        
+        net.peer.on('error', (err) => {
+             // Simple collision handling: if ID taken, just try again (rare with random 4 digits but good to catch)
+             if(err.type === 'unavailable-id') {
+                 get('host-status').innerText = "ID COLLISION. RETRYING...";
+                 setTimeout(() => get('host-btn').click(), 500);
+             } else {
+                 get('host-status').innerText = "NET ERROR: " + err; 
+             }
+        });
+
         net.peer.on('connection', (conn) => {
             net.conn = conn;
             get('host-status').innerText = "PLAYER CONNECTED! STARTING...";
@@ -994,12 +1014,17 @@
     get('join-cancel').onclick = () => { get('join-screen').classList.add('hidden'); get('local-screen').classList.remove('hidden'); };
     
     get('connect-btn').onclick = () => {
-        const id = get('join-input').value;
-        if(!id) return;
+        const inputCode = get('join-input').value;
+        if(!inputCode || inputCode.length !== 4) {
+             get('join-status').innerText = "ENTER 4 DIGIT CODE";
+             return;
+        }
+        const targetId = PREFIX + inputCode;
+
         get('join-status').innerText = "CONNECTING...";
         net.peer = new Peer();
         net.peer.on('open', (myId) => {
-            const conn = net.peer.connect(id);
+            const conn = net.peer.connect(targetId);
             conn.on('open', () => {
                 net.conn = conn;
                 get('join-status').innerText = "CONNECTED!";
