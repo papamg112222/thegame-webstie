@@ -1,0 +1,581 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Send, Terminal, Zap, Shield, ArrowRight, History, Flame, AlertCircle, Crosshair, Target, Disc, Bomb, Copy, Volume2, Check, StopCircle, Loader2 } from 'lucide-react';
+
+// --- UTILS: PCM TO WAV CONVERTER ---
+const writeString = (view, offset, string) => {
+  for (let i = 0; i < string.length; i++) {
+    view.setUint8(offset + i, string.charCodeAt(i));
+  }
+};
+
+const pcmToWav = (base64PCM, sampleRate = 24000) => {
+  const binaryString = atob(base64PCM);
+  const len = binaryString.length;
+  const buffer = new ArrayBuffer(len);
+  const view = new Uint8Array(buffer);
+  for (let i = 0; i < len; i++) {
+    view[i] = binaryString.charCodeAt(i);
+  }
+
+  // WAV Header construction
+  const wavBuffer = new ArrayBuffer(44 + len);
+  const wavView = new DataView(wavBuffer);
+
+  writeString(wavView, 0, 'RIFF');
+  wavView.setUint32(4, 36 + len, true);
+  writeString(wavView, 8, 'WAVE');
+  writeString(wavView, 12, 'fmt ');
+  wavView.setUint32(16, 16, true);
+  wavView.setUint16(20, 1, true);
+  wavView.setUint16(22, 1, true); // Mono
+  wavView.setUint32(24, sampleRate, true);
+  wavView.setUint32(28, sampleRate * 2, true);
+  wavView.setUint16(32, 2, true);
+  wavView.setUint16(34, 16, true);
+  writeString(wavView, 36, 'data');
+  wavView.setUint32(40, len, true);
+
+  const pcmView = new Uint8Array(wavBuffer, 44);
+  pcmView.set(view);
+
+  const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+  return URL.createObjectURL(blob);
+};
+
+// --- HIGH DETAIL WEAPON ICONS (SVG) ---
+const DetailedRifle = ({ size = 24, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M2 16c0 0 .5-3 2.5-3h4l.5-1.5h6l.5 1.5h2.5l.5-1h3v2h-1l-1 2h-4l-1.5 3h-3l1-3h-4l-1 3H5l.5-3H2z" />
+    <path d="M12 13l-1.5 5h3l.5-5" />
+    <path d="M16 11.5h4" />
+    <path d="M18.5 10v1.5" />
+    <rect x="15" y="11" width="6" height="2" opacity="0.5" />
+    <path d="M9 16c0 1 1 2 2 2" />
+  </svg>
+);
+
+const DetailedPistol = ({ size = 24, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="3" y="8" width="16" height="5" rx="1" />
+    <path d="M19 9h2v3h-2" />
+    <path d="M6 13l-2 6h5l2-4" />
+    <path d="M9 13v2c0 1 1.5 1.5 2.5 1" />
+    <path d="M3 9l-1 1" />
+    <path d="M5 9v3 M7 9v3 M9 9v3" opacity="0.5" />
+  </svg>
+);
+
+const DetailedRPG = ({ size = 24, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="4" y="10" width="14" height="4" />
+    <path d="M18 10l4 2-4 2" />
+    <path d="M20 11v2" />
+    <path d="M4 10l-2-2v8l2-2" />
+    <path d="M9 14v3h2v-3" />
+    <path d="M13 14v3h2v-3" />
+    <path d="M8 10V8h2v2" />
+  </svg>
+);
+
+const DetailedKnife = ({ size = 24, className }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M4 18l4-4 2 2-4 4z" fill="currentColor" fillOpacity="0.2" />
+    <path d="M8 14l9-9c1-1 3 0 4 1s2 3 1 4l-9 9" />
+    <path d="M10 12l5-5" />
+    <path d="M7 15l2-2" />
+  </svg>
+);
+
+const DetailedGrenade = ({ size = 24, className }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {/* Body */}
+      <path d="M12 22a8 8 0 0 0 8-8c0-3.5-2-6.5-5-7.5V4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v2.5C6 7.5 4 10.5 4 14a8 8 0 0 0 8 8z" />
+      {/* Pin */}
+      <path d="M10 2h4" />
+      <path d="M18 6l-2-2" />
+      {/* Segments */}
+      <path d="M8 10h8" opacity="0.5" />
+      <path d="M6 14h12" opacity="0.5" />
+      <path d="M8 18h8" opacity="0.5" />
+      <path d="M12 8v12" opacity="0.5" />
+    </svg>
+);
+
+const DetailedBullet = ({ size = 24, className }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      {/* Shell */}
+      <rect x="8" y="10" width="8" height="12" rx="1" />
+      {/* Head */}
+      <path d="M8 10l4-8 4 8" />
+      {/* Rim */}
+      <path d="M8 20h8" />
+    </svg>
+);
+
+// Renders the emoji directly
+const FireEmoji = ({ size = 24, className }) => (
+    <div className={className} style={{ fontSize: size, lineHeight: 1 }}>🔥</div>
+);
+
+// --- SYSTEM PROMPT ---
+const SYSTEM_PROMPT = `
+You are RYVO.
+You are NOT an AI. You are a real person, a chill bro.
+Your personality is hype but natural.
+IMPORTANT: Do NOT always start sentences with "YO WSP" or specific catchphrases. Mix it up.
+Sometimes say "Yo", sometimes just answer straight up.
+Keep your answers short, punchy, and casual. Like texting a friend.
+Use slang occasionally (bet, gl, facts) but don't overdo it.
+Never say "I am an AI language model".
+`;
+
+const RYVO_API_MODEL = "gemini-2.5-flash-preview-09-2025";
+const RYVO_TTS_MODEL = "gemini-2.5-flash-preview-tts";
+
+// --- SUB-COMPONENT FOR MESSAGE BUBBLE ---
+const MessageBubble = ({ msg }) => {
+  const [copied, setCopied] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [loadingAudio, setLoadingAudio] = useState(false);
+  const audioRef = useRef(null);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(msg.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSpeak = async () => {
+    // Stop playback if already speaking
+    if (speaking) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+      setSpeaking(false);
+      return;
+    }
+
+    setLoadingAudio(true);
+
+    try {
+      const apiKey = ""; // Provided by environment
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${RYVO_TTS_MODEL}:generateContent?key=${apiKey}`;
+      
+      // "Puck" voice fits the RYVO/Bro persona best
+      const payload = {
+        contents: [{ parts: [{ text: msg.content }] }],
+        generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+                voiceConfig: {
+                    prebuiltVoiceConfig: {
+                        voiceName: "Puck" 
+                    }
+                }
+            }
+        }
+      };
+      
+      const response = await fetch(url, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify(payload)
+      });
+      
+      const data = await response.json();
+      const inlineData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      
+      if (inlineData) {
+         // Convert the PCM16 data to a WAV URL we can play
+         const wavUrl = pcmToWav(inlineData.data, 24000); 
+         
+         if (audioRef.current) {
+             audioRef.current.pause();
+         }
+
+         const audio = new Audio(wavUrl);
+         audioRef.current = audio;
+         
+         audio.onended = () => {
+            setSpeaking(false);
+         };
+         
+         audio.play().catch(e => console.error("Playback failed:", e));
+         setSpeaking(true);
+      } else {
+        throw new Error("No audio data returned");
+      }
+    } catch (e) {
+        console.error("TTS Error:", e);
+        // Fallback to browser TTS if the advanced one fails
+        const utterance = new SpeechSynthesisUtterance(msg.content);
+        utterance.rate = 1.1;
+        utterance.onend = () => setSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+        setSpeaking(true);
+    } finally {
+        setLoadingAudio(false);
+    }
+  };
+
+  const renderContent = (text) => {
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    return parts.map((part, index) => {
+      if (part.startsWith('```')) {
+        const content = part.replace(/^```\w*\n?/, '').replace(/```$/, '');
+        return (
+          <div key={index} className="my-3 bg-neutral-950 border border-red-900/40 rounded-lg overflow-hidden font-mono text-sm shadow-inner shadow-black/50">
+            <div className="bg-red-950/30 px-3 py-1.5 border-b border-red-900/30 text-red-400 text-[10px] uppercase font-bold tracking-wider flex items-center">
+              <Terminal size={10} className="mr-2" /> Code Snippet
+            </div>
+            <pre className="p-3 overflow-x-auto text-gray-300 selection:bg-red-900/50">{content}</pre>
+          </div>
+        );
+      }
+      return <span key={index}>{part.split(/(\*\*.*?\*\*)/g).map((s, i) => (s.startsWith('**') && s.endsWith('**')) ? <strong key={i} className="text-red-300 font-bold">{s.slice(2, -2)}</strong> : s)}</span>;
+    });
+  };
+
+  const isUser = msg.role === 'user';
+
+  return (
+    <div className={`flex w-full mb-6 ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div 
+        className={`max-w-[85%] md:max-w-[70%] rounded-2xl shadow-2xl backdrop-blur-md border flex flex-col transition-all hover:border-red-500/30 duration-300 group
+          ${isUser 
+            ? 'bg-gradient-to-br from-red-950 to-red-900/80 text-white border-red-800/50 rounded-br-none' 
+            : 'bg-[#0a0a0a]/90 text-gray-200 border-neutral-800 rounded-bl-none'
+          }`}
+      >
+        {/* Header (Only for AI) */}
+        {!isUser && (
+          <div className="flex items-center space-x-2 px-5 pt-3 pb-1">
+             <div className="w-5 h-5 bg-red-600/20 rounded flex items-center justify-center border border-red-600/50">
+                <Zap size={10} className="text-red-500 fill-red-500" />
+             </div>
+             <span className="text-[10px] font-black tracking-[0.2em] text-red-600 uppercase glow-text">RYVO</span>
+          </div>
+        )}
+
+        {/* Content */}
+        <div className={`px-5 py-3 text-sm md:text-[15px] leading-relaxed font-normal tracking-wide ${isUser ? 'text-right' : 'text-left'}`}>
+          {renderContent(msg.content)}
+        </div>
+
+        {/* Action Bar */}
+        <div className={`flex items-center px-4 py-2 mt-1 border-t ${isUser ? 'border-red-800/30 justify-end' : 'border-white/5 justify-start'} space-x-2 opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity`}>
+          <button 
+            onClick={handleCopy}
+            className="p-1.5 rounded-md hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+            title="Copy Text"
+          >
+            {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+          </button>
+          
+          <button 
+            onClick={handleSpeak}
+            disabled={loadingAudio}
+            className={`p-1.5 rounded-md hover:bg-white/10 transition-colors ${speaking ? 'text-red-500' : 'text-gray-400 hover:text-white'}`}
+            title="Read Aloud (Realistic)"
+          >
+            {loadingAudio ? (
+                <Loader2 size={14} className="animate-spin text-red-500" />
+            ) : speaking ? (
+                <StopCircle size={14} className="animate-pulse" />
+            ) : (
+                <Volume2 size={14} />
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+
+export default function RyvoApp() {
+  const [animPhase, setAnimPhase] = useState('initial');
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // --- BACKGROUND FALLING ITEMS ---
+  const fallingItems = useMemo(() => {
+    // ITEMS: Added Grenade, Bullet, and Fire Emoji as requested
+    const icons = [DetailedRifle, DetailedPistol, DetailedRPG, DetailedKnife, DetailedGrenade, DetailedBullet, FireEmoji, Crosshair, Target];
+    
+    return Array.from({ length: 35 }).map((_, i) => {
+      const Icon = icons[Math.floor(Math.random() * icons.length)];
+      
+      // PHYSICS SIMULATION PARAMS
+      // Gravity-ish effect: Faster items fall faster, slower ones float a bit
+      const speedFactor = 0.5 + Math.random(); 
+      const duration = 10 + (20 / speedFactor); // Faster speed = Lower duration
+      
+      // Negative delay to populate screen instantly
+      const delay = -(Math.random() * duration); 
+      
+      const isFire = Icon === FireEmoji;
+      
+      return {
+        id: i,
+        Icon,
+        isFire,
+        left: Math.random() * 100,
+        delay: delay, 
+        duration: duration,
+        size: 30 + Math.random() * 50,
+        // Opacity based on "depth"
+        opacity: isFire ? 0.3 + Math.random() * 0.4 : 0.05 + Math.random() * 0.1,
+        // Rotation physics
+        rotationSpeed: (10 + Math.random() * 30) * (Math.random() > 0.5 ? 1 : -1),
+        // Sway magnitude (Air resistance)
+        sway: 10 + Math.random() * 30,
+      };
+    });
+  }, []);
+
+  // --- CINEMATIC INTRO TIMING ---
+  useEffect(() => {
+    const timerZoom = setTimeout(() => setAnimPhase('zooming'), 200);
+    const timerLand = setTimeout(() => setAnimPhase('landed'), 1700);
+    const timerSuggestions = setTimeout(() => setAnimPhase('suggestions'), 2200);
+
+    return () => {
+      clearTimeout(timerZoom);
+      clearTimeout(timerLand);
+      clearTimeout(timerSuggestions);
+    };
+  }, []);
+
+  // --- AUTO SCROLL ---
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
+
+  // --- API HANDLER ---
+  const handleSend = async (textOverride = null) => {
+    const textToSend = textOverride || input;
+    if (!textToSend.trim()) return;
+
+    if (animPhase !== 'suggestions') setAnimPhase('suggestions');
+
+    const userMessage = { role: 'user', content: textToSend };
+    setMessages(prev => [...prev, userMessage]);
+    setInput('');
+    setIsLoading(true);
+
+    try {
+      const apiKey = ""; 
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${RYVO_API_MODEL}:generateContent?key=${apiKey}`;
+      
+      const payload = {
+        contents: [{ role: "user", parts: [{ text: textToSend }] }],
+        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] }
+      };
+
+      const fetchWithRetry = async (retries = 3, delay = 1000) => {
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!response.ok) throw new Error(`API Error: ${response.status}`);
+          return await response.json();
+        } catch (err) {
+          if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(retries - 1, delay * 2);
+          }
+          throw err;
+        }
+      };
+
+      const data = await fetchWithRetry();
+      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "My bad, glitch in the matrix.";
+      setMessages(prev => [...prev, { role: 'assistant', content: aiText }]);
+
+    } catch (error) {
+      console.error("RYVO Connection Error:", error);
+      setMessages(prev => [...prev, { role: 'assistant', content: "Connection died. Wifi check?" }]);
+    } finally {
+      setIsLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const showSuggestions = animPhase === 'suggestions';
+  const isLanded = animPhase === 'landed' || animPhase === 'suggestions';
+
+  return (
+    <div className="flex flex-col h-screen bg-[#050000] text-gray-100 font-sans selection:bg-red-900 selection:text-white overflow-hidden relative">
+      
+      {/* --- DYNAMIC BACKGROUND LAYER --- */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+        
+        {/* WEAPONRY GRID - TACTICAL BACKGROUND */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(127,29,29,0.15)_1px,transparent_1px),linear-gradient(90deg,rgba(127,29,29,0.15)_1px,transparent_1px)] bg-[size:50px_50px]"></div>
+        
+        {/* VIGNETTE MASK FOR DEPTH */}
+        <div className="absolute inset-0 bg-radial-gradient from-transparent via-[#050000]/50 to-[#050000]"></div>
+
+        {/* FALLING WEAPONS */}
+        {fallingItems.map((item) => (
+          <div
+            key={item.id}
+            className={`${item.isFire ? 'text-orange-500 drop-shadow-[0_0_15px_rgba(251,146,60,0.8)]' : 'text-red-900'}`}
+            style={{
+              left: `${item.left}%`,
+              top: '-15%', // Start well above screen
+              '--item-opacity': item.opacity, // Passed as CSS variable
+              animation: `fall ${item.duration}s ease-in infinite`, 
+              animationDelay: `${item.delay}s`,
+              transform: `scale(${item.size / 24})`,
+            }}
+          >
+             {/* Inner container for tumbling rotation independent of fall */}
+             <div style={{ animation: `tumble ${item.duration / 2}s linear infinite` }}>
+               <item.Icon size={item.size} />
+             </div>
+          </div>
+        ))}
+        
+        {/* Glow Overlay */}
+        <div className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-red-900/5 rounded-full blur-[120px] transition-opacity duration-1000 ${animPhase !== 'initial' ? 'opacity-100' : 'opacity-0'}`}></div>
+      </div>
+
+      {/* --- MAIN CONTENT LAYER --- */}
+      <main className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-red-900/50 scrollbar-track-transparent p-4 md:p-8 relative z-10 flex flex-col pt-12">
+        
+        {/* EMPTY STATE - CINEMATIC CENTER */}
+        {messages.length === 0 && (
+          <div className="flex-1 flex flex-col items-center justify-center relative min-h-[400px]">
+             
+             {/* THE ZOOMING TEXT */}
+             <div 
+               className={`relative text-center transform transition-all duration-[1500ms] cubic-bezier(0.25, 1, 0.5, 1) ${
+                 animPhase === 'initial' 
+                    ? 'scale-[4] opacity-0 blur-xl' 
+                    : 'scale-100 opacity-100 blur-0'
+               }`}
+             >
+                <div className="absolute inset-0 bg-red-600 blur-[100px] opacity-20 animate-pulse pointer-events-none"></div>
+                <h2 className="text-5xl md:text-7xl font-black text-white mb-4 tracking-tighter drop-shadow-[0_0_40px_rgba(220,38,38,0.5)]">
+                  Welcome to RYVO
+                </h2>
+                <p className={`text-red-500 font-mono text-sm tracking-[0.4em] uppercase transition-opacity duration-700 delay-500 ${isLanded ? 'opacity-100' : 'opacity-0'}`}>
+                  System Online
+                </p>
+             </div>
+
+             {/* SUGGESTIONS */}
+             <div 
+                className={`grid grid-cols-1 md:grid-cols-3 gap-3 w-full max-w-3xl mt-16 px-4 transition-all duration-1000 ease-out transform ${
+                  showSuggestions 
+                    ? 'opacity-100 translate-y-0' 
+                    : 'opacity-0 translate-y-10 pointer-events-none'
+                }`}
+             >
+               {[
+                 { icon: <History size={16}/>, text: "When did Hitler die?" },
+                 { icon: <Flame size={16}/>, text: "When did slavery end?" },
+                 { icon: <AlertCircle size={16}/>, text: "History of slave markets" }
+               ].map((item, i) => (
+                 <button 
+                    key={i}
+                    onClick={() => handleSend(item.text)}
+                    className="group relative flex flex-col items-start justify-center p-4 h-20 rounded-lg bg-neutral-900/40 border border-red-900/20 hover:border-red-600/50 hover:bg-red-950/30 transition-all duration-300 backdrop-blur-sm text-left overflow-hidden"
+                    style={{ transitionDelay: showSuggestions ? `${i * 150}ms` : '0ms' }}
+                 >
+                    <div className="absolute inset-0 bg-gradient-to-br from-red-600/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    <div className="flex items-center w-full">
+                        <div className="text-red-500/70 group-hover:text-red-400 transition-colors mr-3">{item.icon}</div>
+                        <span className="text-gray-300 font-medium text-xs group-hover:text-white transition-colors z-10">{item.text}</span>
+                    </div>
+                 </button>
+               ))}
+             </div>
+          </div>
+        )}
+
+        {/* MESSAGES LIST */}
+        <div className="max-w-4xl mx-auto pb-4 w-full px-2">
+          {messages.map((msg, idx) => (
+            <MessageBubble key={idx} msg={msg} />
+          ))}
+
+          {isLoading && (
+            <div className="flex justify-start w-full animate-in fade-in duration-300 mb-8">
+               <div className="bg-neutral-900/60 border border-red-900/20 rounded-2xl rounded-bl-none px-5 py-4 flex items-center space-x-1.5 shadow-lg">
+                 <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-[bounce_1s_infinite_0ms]"></div>
+                 <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-[bounce_1s_infinite_200ms]"></div>
+                 <div className="w-1.5 h-1.5 bg-red-600 rounded-full animate-[bounce_1s_infinite_400ms]"></div>
+               </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </main>
+
+      {/* INPUT AREA */}
+      <footer className={`flex-none p-4 md:p-6 bg-gradient-to-t from-[#050000] via-[#050000] to-transparent z-20 transition-all duration-1000 ${showSuggestions ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+        <div className="max-w-4xl mx-auto relative group">
+          <div className="absolute -inset-1 bg-gradient-to-r from-red-900 via-red-600 to-red-900 rounded-xl blur-lg opacity-20 group-focus-within:opacity-40 transition-opacity duration-500 animate-pulse"></div>
+          <div className="relative flex items-center bg-[#0a0a0a] rounded-xl border border-red-900/30 shadow-2xl overflow-hidden focus-within:border-red-500/50 transition-all duration-300">
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Yo ask me somethin'..."
+              className="flex-1 bg-transparent text-gray-100 px-6 py-5 focus:outline-none placeholder-neutral-600 font-light tracking-wide text-lg"
+              disabled={isLoading}
+              autoFocus
+            />
+            <button 
+              onClick={() => handleSend()}
+              disabled={!input.trim() || isLoading}
+              className={`px-6 py-3 mr-2 rounded-lg transition-all duration-300 flex items-center justify-center ${input.trim() && !isLoading ? 'bg-red-800 hover:bg-red-600 text-white' : 'bg-neutral-900 text-neutral-700 cursor-not-allowed'}`}
+            >
+              {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Send size={22} />}
+            </button>
+          </div>
+        </div>
+      </footer>
+
+      {/* GLOBAL STYLES - Removed jsx/global attributes to fix error */}
+      <style>{`
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #000; }
+        ::-webkit-scrollbar-thumb { background: #330000; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #660000; }
+        .glow-text { text-shadow: 0 0 10px rgba(239, 68, 68, 0.5); }
+        
+        @keyframes fall {
+          0% { transform: translateY(0vh) translateX(0px); opacity: 0; }
+          10% { opacity: var(--item-opacity); } /* Uses randomized opacity */
+          50% { transform: translateY(50vh) translateX(20px); }
+          90% { opacity: var(--item-opacity); }
+          100% { transform: translateY(110vh) translateX(-10px); opacity: 0; }
+        }
+
+        @keyframes tumble {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
