@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Chemistry Simulation</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -25,6 +25,7 @@
             color: white;
             margin: 0;
             padding: 0;
+            touch-action: none; /* Prevent scrolling on interactive areas */
         }
 
         /* --- APP VIEWS --- */
@@ -43,6 +44,7 @@
             z-index: 100;
             overflow-y: auto;
             font-family: 'Montserrat', sans-serif; /* Game uses Montserrat */
+            -webkit-overflow-scrolling: touch;
         }
 
         /* --- MENU CANVAS --- */
@@ -224,6 +226,8 @@
             justify-content: center;
             gap: 0.5rem;
             height: 100px;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
 
         .chem-btn::before {
@@ -238,7 +242,7 @@
             transition: 0.5s;
         }
 
-        .chem-btn:hover {
+        .chem-btn:hover, .chem-btn:active {
             background: var(--glass-hover);
             border-color: rgba(255, 255, 255, 0.3);
             transform: translateY(-4px);
@@ -311,6 +315,7 @@
             font-family: 'Montserrat', sans-serif;
             width: 400px;
             max-width: 90vw;
+            user-select: none;
         }
         #gas-laws-view .game-menu-btn:hover { background: #ff7a7f; }
 
@@ -386,6 +391,9 @@
         @media (max-width: 600px) {
             #gas-laws-view h1.rainbow-title { font-size: 2.5rem; letter-spacing: 3px; }
             #gas-laws-view .game-menu-btn { font-size: 1.2rem; padding: 12px 60px; }
+            .button-grid { grid-template-columns: 1fr; }
+            .chem-btn { flex-direction: row; justify-content: flex-start; height: auto; padding: 1rem; }
+            .btn-icon { margin-bottom: 0; margin-right: 1rem; }
         }
     </style>
     <!-- Icons -->
@@ -439,20 +447,23 @@
             </div>
             
             <!-- Footer Menu -->
-            <div class="mt-8 flex items-center gap-8 z-20">
+            <div class="mt-8 flex flex-wrap justify-center items-center gap-4 sm:gap-8 z-20">
                 <!-- Online Counter -->
                 <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-md">
                     <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
                         <span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
                     </span>
-                    <span id="online-count" class="text-xs font-mono text-green-400">1 Online</span>
+                    <span id="online-count" class="text-xs font-mono text-green-400 whitespace-nowrap">Connecting...</span>
                 </div>
 
-                <div class="h-4 w-px bg-white/10"></div> <!-- Separator -->
+                <div class="hidden sm:block h-4 w-px bg-white/10"></div> <!-- Separator -->
 
-                <button onclick="openModal('about')" class="footer-link text-slate-400 hover:text-cyan-400 text-sm font-light tracking-widest uppercase transition-all duration-300">About</button>
-                <button onclick="openContact()" class="footer-link text-slate-400 hover:text-purple-400 text-sm font-light tracking-widest uppercase transition-all duration-300">Contact</button>
-                <button onclick="launchGasGame()" class="footer-link text-slate-400 hover:text-pink-400 text-sm font-light tracking-widest uppercase transition-all duration-300">More</button>
+                <div class="flex gap-6">
+                    <button onclick="openModal('about')" class="footer-link text-slate-400 hover:text-cyan-400 text-sm font-light tracking-widest uppercase transition-all duration-300">About</button>
+                    <button onclick="openContact()" class="footer-link text-slate-400 hover:text-purple-400 text-sm font-light tracking-widest uppercase transition-all duration-300">Contact</button>
+                    <button onclick="launchGasGame()" class="footer-link text-slate-400 hover:text-pink-400 text-sm font-light tracking-widest uppercase transition-all duration-300">More</button>
+                </div>
             </div>
 
             <div class="mt-6 text-slate-500 text-xs font-light opacity-60">
@@ -516,7 +527,12 @@
     </div>
 
     <!-- MOCK AUTH AND APP SCRIPT -->
-    <script>
+    <script type="module">
+        // Import Firebase for REAL-TIME COUNTER ONLY
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
         // --- AUTH STATE & UI HANDLING ---
         const authContainer = document.getElementById('auth-container');
         const loginModal = document.getElementById('login-modal');
@@ -528,6 +544,7 @@
         const passwordInput = document.getElementById('auth-password');
         
         // --- GLOBAL STATE ---
+        // Load user from LocalStorage (Simulates "Remember Me")
         let currentUser = JSON.parse(localStorage.getItem('chem_user_session')) || null;
         let isLoginMode = true;
         
@@ -543,10 +560,60 @@
             renderButtons();
         }
 
-        // --- ONLINE COUNTER (ACCURATE) ---
-        // Since there is no backend server, the only accurate count is 1 (You).
+        // --- REAL-TIME ONLINE COUNTER (FIRESTORE) ---
+        // Note: Auth for counter is anonymous/background. Auth for UI is "Mock".
         const onlineCountEl = document.getElementById('online-count');
-        if(onlineCountEl) onlineCountEl.innerText = "1 Online";
+        
+        const initCounter = async () => {
+            try {
+                if (typeof __firebase_config === 'undefined') {
+                    if(onlineCountEl) onlineCountEl.innerText = "1 Online (Demo)";
+                    return; 
+                }
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+                // Sign in anonymously to access DB
+                await signInAnonymously(auth);
+                const userId = auth.currentUser.uid;
+
+                // Presence Heartbeat Logic
+                // We write to a doc every 10s. We count docs updated in last 20s.
+                const presenceRef = collection(db, 'artifacts', appId, 'public', 'data', 'presence');
+                
+                // 1. Start Heartbeat
+                const heartbeat = async () => {
+                    await setDoc(doc(presenceRef, userId), {
+                        last_seen: Date.now()
+                    });
+                };
+                heartbeat();
+                setInterval(heartbeat, 10000); // 10s beat
+
+                // 2. Listen for Counts
+                onSnapshot(query(presenceRef), (snapshot) => {
+                    const now = Date.now();
+                    let count = 0;
+                    snapshot.forEach(doc => {
+                        const data = doc.data();
+                        // Count if active in last 60 seconds (generous window)
+                        if (data.last_seen && (now - data.last_seen < 60000)) {
+                            count++;
+                        }
+                    });
+                    if(onlineCountEl) onlineCountEl.innerText = `${count} Online`;
+                });
+
+            } catch (e) {
+                console.warn("Counter Init Failed (Likely Config Missing):", e);
+                if(onlineCountEl) onlineCountEl.innerText = "1 Online";
+            }
+        };
+        initCounter();
+
 
         // --- UI RENDER FUNCTIONS ---
         function renderUser(user) {
@@ -654,6 +721,20 @@
             return { valid: true };
         }
 
+        // --- NAME HEURISTIC CHECK (Gibberish Detector) ---
+        function isNameGibberish(email) {
+            const localPart = email.split('@')[0].toLowerCase();
+            const fakePatterns = [
+                'asdasd', 'asdf', 'qwer', 'zxcv', 'uiop', 'hjkl', 
+                '1234', 'test', 'admin', 'user', 'guest', 'temp',
+                'noreply', 'unknown', 'null', 'undefined'
+            ];
+            if (fakePatterns.some(pattern => localPart.includes(pattern))) return true;
+            if (/(.)\1{3,}/.test(localPart)) return true;
+            if (localPart.length < 3) return true;
+            return false;
+        }
+
         // --- MOCK LOGIN LOGIC ---
         authSubmitBtn.addEventListener('click', () => {
             const email = emailInput.value.trim();
@@ -661,7 +742,7 @@
             
             authError.classList.add('hidden');
 
-            // 1. Validate Email
+            // 1. Validate Email Format
             const emailCheck = isValidEmail(email);
             if (!emailCheck.valid) {
                 authError.innerHTML = emailCheck.msg;
@@ -669,7 +750,14 @@
                 return;
             }
 
-            // 2. Validate Password
+            // 2. Validate "Real Name" (Gibberish Check)
+            if (isNameGibberish(email)) {
+                authError.innerText = "We can not find that in our system.";
+                authError.classList.remove('hidden');
+                return;
+            }
+
+            // 3. Validate Password
             if (password.length < 6) {
                 authError.innerText = "Password must be at least 6 characters long.";
                 authError.classList.remove('hidden');
@@ -701,12 +789,14 @@
             idleInterval = setInterval(timerIncrement, 60000); 
             window.addEventListener('mousemove', resetCount);
             window.addEventListener('keypress', resetCount);
+            window.addEventListener('touchstart', resetCount); // Added for mobile
         }
 
         function stopIdleTimer() {
             clearInterval(idleInterval);
             window.removeEventListener('mousemove', resetCount);
             window.removeEventListener('keypress', resetCount);
+            window.removeEventListener('touchstart', resetCount);
         }
 
         function resetCount() { idleTime = 0; }
@@ -720,20 +810,20 @@
         }
 
         // --- UTILITIES ---
-        function openModal(type) {
+        window.openModal = function(type) {
             const modal = document.getElementById(`${type}-modal`);
             if(!modal) return;
             modal.classList.remove('hidden');
             setTimeout(() => { modal.classList.remove('opacity-0'); document.getElementById(`${type}-content`).classList.remove('scale-95'); }, 10);
         }
-        function closeModal(type) {
+        window.closeModal = function(type) {
             const modal = document.getElementById(`${type}-modal`);
             if(!modal) return;
             modal.classList.add('opacity-0');
             setTimeout(() => { modal.classList.add('hidden'); }, 300);
         }
-        function handleOutsideClick(e, id) { if(e.target.id === id) closeModal(id.replace('-modal','')); }
-        function openContact() { window.location.href = "https://line.me/ti/p/~Bom_trendy"; }
+        window.handleOutsideClick = function(e, id) { if(e.target.id === id) window.closeModal(id.replace('-modal','')); }
+        window.openContact = function() { window.location.href = "https://line.me/ti/p/~Bom_trendy"; }
 
         // --- CANVAS PARTICLES ---
         const canvas = document.getElementById('chem-canvas');
@@ -751,7 +841,22 @@
             }
             window.addEventListener('resize', resizeApp);
             resizeApp();
-            window.addEventListener('mousemove', (e) => { mouse.x = e.x; mouse.y = e.y; });
+            
+            // Mouse & Touch Handling
+            const updateMouse = (x, y) => { mouse.x = x; mouse.y = y; };
+            
+            window.addEventListener('mousemove', (e) => updateMouse(e.x, e.y));
+            
+            // Mobile Touch Events
+            window.addEventListener('touchstart', (e) => {
+                if(e.touches.length > 0) updateMouse(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            window.addEventListener('touchmove', (e) => {
+                // e.preventDefault(); // Optional: prevent scroll on canvas
+                if(e.touches.length > 0) updateMouse(e.touches[0].clientX, e.touches[0].clientY);
+            });
+            window.addEventListener('touchend', () => updateMouse(null, null));
+
 
             class Particle {
                 constructor() { this.init(true); }
@@ -805,7 +910,7 @@
         }
 
         // --- GAS LAWS GAME LOGIC ---
-        function launchGasGame() {
+        window.launchGasGame = function() {
             document.getElementById('app-main-menu').style.display = 'none';
             document.getElementById('gas-laws-view').style.display = 'block';
             document.body.style.backgroundColor = '#1a0a3a';
@@ -817,7 +922,7 @@
             }
         }
 
-        function exitGasGame() {
+        window.exitGasGame = function() {
             document.getElementById('gas-laws-view').style.display = 'none';
             document.getElementById('app-main-menu').style.display = 'block';
             document.body.style.backgroundColor = '#0f172a';
@@ -858,7 +963,7 @@
         }
 
         const gameModes = ['boyle', 'charles', 'gayLussac', 'avogadro', 'memberPage'];
-        function showGameMode(mode) {
+        window.showGameMode = function(mode) {
             document.getElementById('gasMainMenu').style.display = 'none';
             gameModes.forEach(m => document.getElementById(m).style.display = (m === mode ? 'flex' : 'none'));
             if(mode === 'boyle') initBoyle();
@@ -866,7 +971,7 @@
             if(mode === 'gayLussac') initGayLussac();
             if(mode === 'avogadro') initAvogadro();
         }
-        function returnToGameMenu() {
+        window.returnToGameMenu = function() {
             gameModes.forEach(m => document.getElementById(m).style.display = 'none');
             document.getElementById('gasMainMenu').style.display = 'flex';
         }
@@ -979,7 +1084,10 @@
         
         const incBtn = document.getElementById('increaseMoleculeBtn');
         if(incBtn) {
-            incBtn.addEventListener('mousedown', () => {
+            incBtn.addEventListener('mousedown', startAvo);
+            incBtn.addEventListener('touchstart', startAvo); // Touch support for game
+            function startAvo(e) {
+                e.preventDefault(); // Stop default touch actions
                 avoInterval = setInterval(() => {
                     molCount++;
                     document.getElementById('avogadroCount').innerText = molCount;
@@ -997,8 +1105,9 @@
                         }, 500);
                     }
                 }, 50);
-            });
+            }
             incBtn.addEventListener('mouseup', () => clearInterval(avoInterval));
+            incBtn.addEventListener('touchend', () => clearInterval(avoInterval));
         }
         const newBtn = document.getElementById('getNewOneBtn');
         if(newBtn) newBtn.onclick = initAvogadro;
