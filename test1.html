@@ -1984,16 +1984,16 @@
         stoichSim.req = requestAnimationFrame(stoichLoop);
     }
 
-  // ==========================================
-    // Game 4: SOLUBILITY (FINAL ULTRA: Ice, Boiling, Steam & Salt)
+ // ==========================================
+    // Game 4: SOLUBILITY (ULTRA: Detailed Crystals, Ice, Boiling, Steam)
     // ==========================================
     let solubilitySim = { 
         req: null, 
-        particles: [],      // Salt
+        particles: [],      // Salt Crystals
         bubbles: [],        // Boiling bubbles
-        steam: [],          // Steam/Smoke
+        steam: [],          // Steam particles
         isPouring: false,
-        temp: 25,           // Default temp
+        temp: 25,           
         dissolvedMass: 0,
         solidMass: 0
     };
@@ -2014,15 +2014,14 @@
         const beakerHeight = Math.min(350, canvas.height * 0.6);
         const liquidLevel = 0.7; 
 
-        // 3. Initialize Ambient Bubbles
+        // 3. Initialize Background Bubbles
         solubilitySim.bubbles = [];
         for(let i=0; i<50; i++) {
             solubilitySim.bubbles.push({
                 x: centerX + (Math.random() - 0.5) * (beakerWidth - 30),
                 y: centerY + (Math.random() * beakerHeight/2),
                 r: Math.random() * 3 + 1,
-                speed: Math.random() * 1 + 0.5,
-                offset: Math.random() * 100
+                speed: Math.random() * 1 + 0.5
             });
         }
         solubilitySim.steam = [];
@@ -2031,23 +2030,43 @@
         function render() {
             if(!document.getElementById('solubility-canvas')) return; 
 
-            // Get current slider temp
+            // Get Settings
             const slider = document.getElementById('sol-temp-slider');
+            const selector = document.getElementById('salt-selector');
+            const saltType = selector ? selector.value : 'NaCl';
+            
             if(slider) {
                 solubilitySim.temp = parseInt(slider.value);
                 document.getElementById('sol-temp-display').innerText = solubilitySim.temp + "°C";
             }
 
+            // Determine Physics State
             const isFrozen = solubilitySim.temp <= 0;
             const isBoiling = solubilitySim.temp >= 90;
-            const heatFactor = Math.max(0.1, solubilitySim.temp / 20); // Speed multiplier
+            const heatFactor = Math.max(0.1, solubilitySim.temp / 20);
+
+            // Determine Crystal Look based on Salt Type
+            let crystalColor = '#ffffff';
+            let crystalShadow = '#cbd5e1';
+            let crystalShape = 'square'; // square, hex, diamond
+
+            if (saltType === 'PbI2') {
+                crystalColor = '#fbbf24'; // Gold
+                crystalShadow = '#b45309';
+                crystalShape = 'hex';
+            } else if (saltType === 'CuSO4') {
+                crystalColor = '#38bdf8'; // Blue
+                crystalShadow = '#0284c7';
+                crystalShape = 'diamond';
+            }
 
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // --- A. Draw Background Glow ---
             const gradient = ctx.createRadialGradient(centerX, centerY, 50, centerX, centerY, beakerHeight);
-            if(isFrozen) gradient.addColorStop(0, 'rgba(200, 240, 255, 0.2)'); // Icy Glow
-            else if(isBoiling) gradient.addColorStop(0, 'rgba(255, 100, 100, 0.15)'); // Hot Glow
+            if(isFrozen) gradient.addColorStop(0, 'rgba(200, 240, 255, 0.2)');
+            else if(isBoiling) gradient.addColorStop(0, 'rgba(255, 100, 100, 0.15)');
+            else if(saltType === 'CuSO4') gradient.addColorStop(0, 'rgba(56, 189, 248, 0.15)'); // Blue glow for copper
             else gradient.addColorStop(0, 'rgba(6, 182, 212, 0.1)');
             gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = gradient;
@@ -2068,110 +2087,96 @@
             ctx.lineTo(bRight, liquidTop);
             ctx.closePath();
             
-            // Color Logic
             if(isFrozen) {
-                // Ice Appearance
-                ctx.fillStyle = "rgba(200, 245, 255, 0.85)"; // Solid Ice
+                ctx.fillStyle = "rgba(200, 245, 255, 0.85)"; 
                 ctx.fill();
-                // Ice Texture (Scratches)
-                ctx.strokeStyle = "rgba(255,255,255,0.5)";
+                // Ice scratches
+                ctx.strokeStyle = "rgba(255,255,255,0.4)";
                 ctx.lineWidth = 1;
-                for(let k=0; k<10; k++) {
-                    ctx.beginPath();
+                for(let k=0; k<5; k++) {
                     let ix = centerX + (Math.random()-0.5)*(beakerWidth-40);
                     let iy = liquidTop + Math.random()*(beakerHeight*liquidLevel);
-                    ctx.moveTo(ix, iy);
-                    ctx.lineTo(ix + Math.random()*20, iy + Math.random()*20);
-                    ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(ix, iy); ctx.lineTo(ix+10, iy+10); ctx.stroke();
                 }
             } else {
-                // Liquid Appearance
                 const count = solubilitySim.particles.length;
                 const opacity = Math.min(0.4 + (count/500), 0.9);
-                // Shift color slightly red if boiling
-                if(isBoiling) ctx.fillStyle = `rgba(${6 + count/2}, ${182 - count/4}, ${212 - count/4}, ${opacity})`; 
-                else ctx.fillStyle = `rgba(6, 182, 212, ${opacity})`; 
+                // Liquid color changes based on salt
+                let baseR = 6, baseG = 182, baseB = 212;
+                if(saltType === 'CuSO4') { baseR=14; baseG=165; baseB=233; } // Blue liquid
+                if(saltType === 'PbI2') { baseR=253; baseG=224; baseB=71; } // Yellowish tint if dissolved
+
+                if(isBoiling) ctx.fillStyle = `rgba(${baseR+20}, ${baseG-20}, ${baseB-20}, ${opacity})`; 
+                else ctx.fillStyle = `rgba(${baseR}, ${baseG}, ${baseB}, ${opacity})`; 
                 ctx.fill();
             }
             
-            // Meniscus / Ice Top
+            // Meniscus
             ctx.beginPath();
             ctx.ellipse(centerX, liquidTop, (beakerWidth - 10)/2, 8, 0, 0, Math.PI*2);
-            ctx.fillStyle = isFrozen ? "rgba(255, 255, 255, 0.9)" : "rgba(165, 243, 252, 0.5)"; 
+            ctx.fillStyle = isFrozen ? "rgba(255, 255, 255, 0.9)" : "rgba(255, 255, 255, 0.3)"; 
             ctx.fill();
             ctx.restore();
 
-            // --- C. Bubbles (Boiling Effect) ---
+            // --- C. Bubbles (Boiling) ---
             if (!isFrozen) {
-                ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
+                ctx.fillStyle = "rgba(255, 255, 255, 0.2)";
                 solubilitySim.bubbles.forEach(b => {
-                    // Speed depends on Temperature
                     let currentSpeed = b.speed * heatFactor; 
-                    if(isBoiling) currentSpeed *= 1.5; // Extra fast at 100C
+                    if(isBoiling) currentSpeed *= 1.8; 
 
                     b.y -= currentSpeed;
-                    
-                    // Jitter x if boiling
-                    if(isBoiling) b.x += (Math.random() - 0.5) * 2;
+                    if(isBoiling) b.x += (Math.random() - 0.5) * 3; // Violent shake
 
-                    // Reset bubble
                     if(b.y < liquidTop) {
                         b.y = bBottom - 10;
                         b.x = centerX + (Math.random() - 0.5) * (beakerWidth - 40);
                     }
-                    
                     ctx.beginPath();
-                    ctx.arc(b.x, b.y, b.r * (1 + heatFactor/10), 0, Math.PI*2);
+                    ctx.arc(b.x, b.y, b.r * (1 + heatFactor/5), 0, Math.PI*2);
                     ctx.fill();
                 });
             }
 
-            // --- D. STEAM / SMOKE (If Hot) ---
+            // --- D. STEAM (Hot) ---
             if (solubilitySim.temp > 80) {
-                // Spawn steam
-                if(Math.random() > 0.7) {
+                if(Math.random() > 0.6) {
                     solubilitySim.steam.push({
                         x: centerX + (Math.random() - 0.5) * (beakerWidth - 40),
                         y: liquidTop - 5,
-                        r: Math.random() * 5 + 2,
-                        vx: (Math.random() - 0.5) * 1,
-                        vy: -1 - Math.random(),
+                        r: Math.random() * 6 + 2,
+                        vx: (Math.random() - 0.5) * 1.5,
+                        vy: -2 - Math.random(),
                         life: 1.0
                     });
                 }
-                
-                // Draw steam
                 solubilitySim.steam.forEach((s, idx) => {
-                    s.x += s.vx;
-                    s.y += s.vy;
-                    s.r += 0.1; // Expand
-                    s.life -= 0.01; // Fade
-                    
-                    if(s.life <= 0) {
-                        solubilitySim.steam.splice(idx, 1);
-                    } else {
+                    s.x += s.vx; s.y += s.vy; s.r += 0.15; s.life -= 0.015;
+                    if(s.life <= 0) solubilitySim.steam.splice(idx, 1);
+                    else {
                         ctx.beginPath();
                         ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
-                        ctx.fillStyle = `rgba(255, 255, 255, ${s.life * 0.3})`;
+                        ctx.fillStyle = `rgba(255, 255, 255, ${s.life * 0.2})`;
                         ctx.fill();
                     }
                 });
-            } else {
-                solubilitySim.steam = []; // Clear steam if cooled down
-            }
+            } else { solubilitySim.steam = []; }
 
-            // --- E. SALT PARTICLES (Physics) ---
+            // --- E. DETAILED CRYSTAL PARTICLES ---
             let dissolved = 0;
             let solid = 0;
 
+            // Spawn
             if (solubilitySim.isPouring) {
-                for(let i=0; i<2; i++) {
+                for(let i=0; i<3; i++) { // 3 particles per frame
                     solubilitySim.particles.push({
                         x: centerX + (Math.random() - 0.5) * 40, 
-                        y: centerY - beakerHeight/2 - 50,         
-                        r: Math.random() * 2 + 2,
+                        y: centerY - beakerHeight/2 - 60,         
+                        size: Math.random() * 4 + 3, // Size
                         vx: (Math.random() - 0.5) * 2,
-                        vy: Math.random() * 2 + 2,
+                        vy: Math.random() * 3 + 2,
+                        angle: Math.random() * Math.PI, // Rotation angle
+                        vAngle: (Math.random() - 0.5) * 0.2, // Rotation speed
                         state: 'falling'
                     });
                 }
@@ -2180,60 +2185,53 @@
             for (let i = 0; i < solubilitySim.particles.length; i++) {
                 let p = solubilitySim.particles[i];
                 
-                // Gravity
-                if(p.state === 'falling') p.vy += 0.2; 
+                // Physics
+                if(p.state === 'falling') {
+                    p.vy += 0.2; // Gravity
+                    p.angle += p.vAngle; // Spin
+                }
                 p.y += p.vy;
                 p.x += p.vx;
 
-                // Hit Liquid/Ice Surface
+                // Hit Surface
                 if (p.state === 'falling' && p.y > liquidTop) {
                     if (isFrozen) {
-                        // ICE COLLISION: Stop on surface
-                        p.y = liquidTop + (Math.random() * 2); // Sit on top
-                        p.vy = 0;
-                        p.vx *= 0.5; // Slide a bit
+                        p.y = liquidTop - 2; 
+                        p.vy = 0; p.vx *= 0.6; p.vAngle = 0;
                         p.state = 'frozen_on_top';
                     } else {
-                        // WATER: Sink and dissolve
                         p.state = 'dissolved';
                         p.vy *= 0.1; 
                     }
                 }
 
-                // If Frozen on top
                 if (p.state === 'frozen_on_top') {
-                    p.vx *= 0.9; // Friction
-                    // If ice melts, they fall
-                    if (!isFrozen) p.state = 'dissolved';
+                    p.vx *= 0.9;
+                    if (!isFrozen) p.state = 'dissolved'; // Melt -> fall
                 }
 
-                // If In Liquid
+                // In Liquid
                 if (p.state === 'dissolved' || p.state === 'precipitate') {
-                    // Check if it should freeze now? (Optional: entrapment)
                     if(isFrozen && p.state === 'dissolved') {
-                         p.vx = 0; p.vy = 0; // Freeze in place
+                         p.vx = 0; p.vy = 0; // Freeze in block
                     } else if (!isFrozen) {
-                        // Regular Physics
-                        p.vy *= 0.9; 
-                        p.vx *= 0.9;
-                        
-                        // Boiling agitation
+                        p.vy *= 0.9; p.vx *= 0.9;
+                        p.angle += p.vAngle * 0.1; // Slow spin in water
+
                         if(isBoiling) {
-                            p.vy -= 0.5; // Updraft
-                            p.x += (Math.random()-0.5)*3;
-                            p.y += (Math.random()-0.5)*3;
+                            p.vy -= 0.8; // Strong Updraft
+                            p.x += (Math.random()-0.5)*4;
+                            p.y += (Math.random()-0.5)*4;
                         } else {
-                            // Sinking
-                            p.y += 0.5; 
+                            p.y += 0.5; // Sink
                         }
 
-                        // Bounds
+                        // Walls
                         if (p.x < bLeft + 10) p.x = bLeft + 10;
                         if (p.x > bRight - 10) p.x = bRight - 10;
-
-                        // Hit Bottom
-                        if (p.y > bBottom - 10) {
-                            p.y = bBottom - 10;
+                        // Bottom
+                        if (p.y > bBottom - 8) {
+                            p.y = bBottom - 8;
                             p.vy = 0;
                             p.state = 'precipitate'; 
                         }
@@ -2243,24 +2241,51 @@
                 if (p.state === 'dissolved') dissolved++;
                 if (p.state === 'precipitate') solid++;
 
-                // Draw Particle
+                // --- DRAW DETAILED CRYSTAL ---
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.angle);
+
+                ctx.fillStyle = crystalColor;
+                ctx.shadowColor = crystalShadow;
+                ctx.shadowBlur = 5;
+
+                // Draw specific shape
                 ctx.beginPath();
-                ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-                ctx.fillStyle = "white";
+                if (crystalShape === 'square') {
+                    ctx.rect(-p.size/2, -p.size/2, p.size, p.size);
+                } else if (crystalShape === 'diamond') {
+                    ctx.moveTo(0, -p.size);
+                    ctx.lineTo(p.size, 0);
+                    ctx.lineTo(0, p.size);
+                    ctx.lineTo(-p.size, 0);
+                } else if (crystalShape === 'hex') {
+                    for (let s = 0; s < 6; s++) {
+                        ctx.lineTo(p.size * Math.cos(s * 2 * Math.PI / 6), p.size * Math.sin(s * 2 * Math.PI / 6));
+                    }
+                }
+                ctx.closePath();
                 ctx.fill();
+                
+                // Add internal shine (detail)
+                ctx.fillStyle = "rgba(255,255,255,0.4)";
+                ctx.beginPath();
+                ctx.arc(-p.size*0.3, -p.size*0.3, p.size*0.2, 0, Math.PI*2);
+                ctx.fill();
+
+                ctx.restore();
             }
 
-            // --- F. Draw Beaker Glass ---
+            // --- F. Draw Glass ---
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+            ctx.shadowBlur = 0; // Remove particle shadow for glass
             
-            // Rim
             ctx.beginPath();
             ctx.ellipse(centerX, centerY - beakerHeight/2, beakerWidth/2, 10, 0, 0, Math.PI*2);
             ctx.stroke();
             
-            // Body
             ctx.beginPath();
             ctx.moveTo(centerX - beakerWidth/2, centerY - beakerHeight/2);
             ctx.lineTo(centerX - beakerWidth/2, centerY + beakerHeight/2 - 30);
@@ -2281,15 +2306,15 @@
             document.getElementById('ion-count').innerText = (dissolved * 0.1).toFixed(1);
             document.getElementById('solid-count').innerText = (solid * 0.1).toFixed(1);
             
-            const limit = solubilitySim.temp * 2; // Solubility increases with temp
-            const satPct = limit > 0 ? Math.min((dissolved / limit) * 100, 100) : 0;
+            const limit = solubilitySim.temp * 2; 
+            const satPct = limit > 0 ? Math.min((dissolved / limit) * 100, 100) : 100;
             const bar = document.getElementById('saturation-bar');
             const status = document.getElementById('saturation-status');
             
             if (bar) bar.style.width = `${satPct}%`;
             if (status) {
                 if(isFrozen) {
-                     status.innerText = "FROZEN";
+                     status.innerText = "FROZEN SOLID";
                      status.className = "text-[9px] text-cyan-200 font-bold uppercase";
                 } else if (solid > 5) {
                     status.innerText = "SUPERSATURATED";
@@ -2322,10 +2347,7 @@
         solubilitySim.isPouring = false;
         if(document.getElementById('solubility-canvas')) initSolubilityGame();
     };
-    window.updateSolubilityParams = function() {
-        // Handled inside render loop now for real-time physics
-    };
-
+    window.updateSolubilityParams = function() {};
     // ==========================================
     // 8. ELECTROCHEMISTRY
     // ==========================================
