@@ -2640,61 +2640,62 @@
         stoichSim.req = requestAnimationFrame(stoichLoop);
     }
 
- // ==========================================
-    // GAME 9: EXO-ENDO CALORIMETER (Complete Sim)
+// ==========================================
+    // GAME 9: THERMO LAB (ULTRA REALISTIC + BUG FIX)
     // ==========================================
     let energySim = {
         cvs: null, ctx: null,
         graphCvs: null, graphCtx: null,
         req: null,
-        mode: 'exo', // 'exo' or 'endo'
-        state: 'idle', // 'idle', 'reacting', 'done'
+        mode: 'exo',       // 'exo' (release) or 'endo' (absorb)
+        state: 'idle',     // 'idle', 'reacting', 'done'
         temp: 25,
         targetTemp: 25,
-        mass: 100, // g
+        mass: 100,         
         particles: [],
         catalyst: false,
-        progress: 0, // 0 to 100
-        time: 0
+        progress: 0,       // 0 to 100%
+        animTime: 0
     };
 
     function initEnergyGame() {
-        // Setup Main Canvas
         const c = document.getElementById('energy-canvas');
-        if(!c) return;
+        const g = document.getElementById('energy-graph-canvas');
+        if(!c || !g) return;
+
         energySim.cvs = c;
         energySim.ctx = c.getContext('2d');
-        c.width = c.parentElement.clientWidth;
-        c.height = c.parentElement.clientHeight;
-
-        // Setup Graph Canvas
-        const g = document.getElementById('energy-graph-canvas');
         energySim.graphCvs = g;
         energySim.graphCtx = g.getContext('2d');
-        g.width = g.parentElement.clientWidth;
-        g.height = g.parentElement.clientHeight;
 
-        // Reset State
-        resetEnergySim();
-        
-        // Loop
-        if(energySim.req) cancelAnimationFrame(energySim.req);
-        energyLoop();
+        // FIX: Force resize after a short delay to ensure the div is visible
+        setTimeout(() => {
+            resizeEnergyCanvases();
+            resetEnergySim();
+            if(energySim.req) cancelAnimationFrame(energySim.req);
+            energyLoop();
+        }, 100);
 
-        // Listeners
-        window.addEventListener('resize', () => {
-            if(energySim.cvs) {
-                energySim.cvs.width = energySim.cvs.parentElement.clientWidth;
-                energySim.cvs.height = energySim.cvs.parentElement.clientHeight;
-                energySim.graphCvs.width = energySim.graphCvs.parentElement.clientWidth;
-                energySim.graphCvs.height = energySim.graphCvs.parentElement.clientHeight;
-            }
-        });
+        window.removeEventListener('resize', resizeEnergyCanvases);
+        window.addEventListener('resize', resizeEnergyCanvases);
     }
 
-    // Call this from existing HTML buttons via setEnergy() mapping
-    function setEnergy(t) { setEnergyMode(t); } 
+    function resizeEnergyCanvases() {
+        if(energySim.cvs) {
+            const rect = energySim.cvs.parentElement.getBoundingClientRect();
+            energySim.cvs.width = rect.width;
+            energySim.cvs.height = rect.height;
+        }
+        if(energySim.graphCvs) {
+            const rectG = energySim.graphCvs.parentElement.getBoundingClientRect();
+            energySim.graphCvs.width = rectG.width;
+            energySim.graphCvs.height = rectG.height;
+        }
+    }
 
+    // HTML Button Mappings
+    function setEnergy(t) { setEnergyMode(t); } 
+    
     function resetEnergySim() {
         energySim.state = 'idle';
         energySim.temp = 25;
@@ -2702,8 +2703,14 @@
         energySim.progress = 0;
         energySim.particles = [];
         energySim.catalyst = false;
-        document.getElementById('cat-label').classList.add('hidden');
-        document.getElementById('heat-flow-arrows').style.opacity = '0';
+        
+        // UI Updates
+        const catLabel = document.getElementById('cat-label');
+        if(catLabel) catLabel.classList.add('hidden');
+        
+        const arrows = document.getElementById('heat-flow-arrows');
+        if(arrows) arrows.style.opacity = '0';
+        
         updateCalcDisplay();
     }
 
@@ -2716,121 +2723,206 @@
     function addCatalyst() {
         if(energySim.state !== 'idle') return;
         energySim.catalyst = true;
-        document.getElementById('cat-label').classList.remove('hidden');
+        const catLabel = document.getElementById('cat-label');
+        if(catLabel) catLabel.classList.remove('hidden');
         playPopSound();
     }
 
     function startReaction() {
-        if(energySim.state !== 'idle') { resetEnergySim(); return; } // Toggle reset
+        if(energySim.state !== 'idle') { resetEnergySim(); return; }
         energySim.state = 'reacting';
         
-        // Init Particles
-        for(let i=0; i<40; i++) {
+        // Spawn Particles (Bubbles/Sparks)
+        energySim.particles = [];
+        for(let i=0; i<60; i++) {
             energySim.particles.push({
-                x: energySim.cvs.width/2, 
-                y: energySim.cvs.height - 50,
-                vx: (Math.random()-0.5)*4,
-                vy: (Math.random()-0.5)*4,
-                r: Math.random()*3+2,
-                color: energySim.mode === 'exo' ? '#f87171' : '#60a5fa'
+                x: Math.random() * 100, // Relative %
+                y: 100,                 // Start at bottom
+                speed: Math.random() * 2 + 1,
+                size: Math.random() * 3 + 1,
+                wobble: Math.random() * Math.PI * 2
             });
         }
-        
-        // Show Heat Flow
+
+        // Show Heat Flow UI (Arrows)
         const flowDiv = document.getElementById('heat-flow-arrows');
-        flowDiv.innerHTML = '';
-        flowDiv.style.opacity = '1';
-        
-        const icon = energySim.mode === 'exo' ? 'ph-arrow-fat-lines-out' : 'ph-arrow-fat-lines-in';
-        const color = energySim.mode === 'exo' ? 'text-red-500' : 'text-blue-500';
-        // Create 4 arrows
-        for(let i=0; i<4; i++) {
-             const arrow = document.createElement('i');
-             arrow.className = `absolute ph-fill ${icon} ${color} text-4xl animate-pulse`;
-             // Position them roughly
-             if(i===0) arrow.style.top = '20%'; 
-             if(i===1) arrow.style.bottom = '20%';
-             if(i===2) arrow.style.left = '20%';
-             if(i===3) arrow.style.right = '20%';
-             flowDiv.appendChild(arrow);
+        if(flowDiv) {
+            flowDiv.innerHTML = '';
+            flowDiv.style.opacity = '1';
+            
+            const icon = energySim.mode === 'exo' ? 'ph-arrow-fat-lines-out' : 'ph-arrow-fat-lines-in';
+            const color = energySim.mode === 'exo' ? 'text-red-500' : 'text-blue-400';
+            
+            // Create pulsing arrows
+            const positions = [
+                {top:'10%', left:'50%'}, {bottom:'10%', left:'50%'},
+                {top:'50%', left:'10%'}, {top:'50%', right:'10%'}
+            ];
+            
+            positions.forEach(pos => {
+                const i = document.createElement('i');
+                i.className = `absolute ph-fill ${icon} ${color} text-4xl animate-pulse drop-shadow-lg`;
+                Object.assign(i.style, pos);
+                flowDiv.appendChild(i);
+            });
         }
     }
 
+    // --- MAIN RENDER LOOP ---
     function energyLoop() {
         if(!document.getElementById('energy-canvas')) return;
         const ctx = energySim.ctx;
         const w = energySim.cvs.width;
         const h = energySim.cvs.height;
-        
-        ctx.clearRect(0,0,w,h);
-        energySim.time += 0.05;
+        energySim.animTime += 0.05;
 
-        // --- 1. SIMULATION LOGIC ---
+        // 1. Physics Update
         if(energySim.state === 'reacting') {
-            // Progress logic
-            let speed = energySim.catalyst ? 1.0 : 0.4;
-            energySim.progress += speed;
+            // Speed up if catalyst is added
+            let rate = energySim.catalyst ? 1.5 : 0.5;
+            energySim.progress += rate;
             
-            // Temp interpolation
+            // Interpolate Temp
             const tDiff = energySim.targetTemp - 25;
-            const currentT = 25 + (tDiff * (energySim.progress/100));
-            energySim.temp = currentT;
+            // Easing function for smoother temp change
+            const ease = 1 - Math.pow(1 - (energySim.progress / 100), 3); 
+            energySim.temp = 25 + (tDiff * ease);
 
             if(energySim.progress >= 100) {
                 energySim.state = 'done';
                 energySim.progress = 100;
-                document.getElementById('heat-flow-arrows').style.opacity = '0';
+                const arrows = document.getElementById('heat-flow-arrows');
+                if(arrows) arrows.style.opacity = '0';
             }
         }
 
-        // --- 2. DRAW BEAKER ---
-        const bx = w/2; const by = h/2 + 20;
-        const bw = 140; const bh = 180;
+        // 2. Clear Screen
+        ctx.clearRect(0,0,w,h);
+
+        // --- DRAW BEAKER (REALISTIC GLASS) ---
+        const cx = w/2; 
+        const cy = h/2 + 40;
+        const bW = 160; 
+        const bH = 220;
         
-        // Liquid
-        const fillH = bh * 0.7;
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(bx-bw/2, by-bh/2 + (bh-fillH));
-        ctx.lineTo(bx-bw/2, by+bh/2-15);
-        ctx.quadraticCurveTo(bx-bw/2, by+bh/2, bx, by+bh/2);
-        ctx.quadraticCurveTo(bx+bw/2, by+bh/2, bx+bw/2, by+bh/2-15);
-        ctx.lineTo(bx+bw/2, by-bh/2 + (bh-fillH));
-        ctx.closePath();
-        
-        // Color changes with temp
-        // Cold (blue) -> Room (clearish) -> Hot (Red)
-        // Map temp 5 -> 85
-        const tNorm = (energySim.temp - 5) / 80; // 0 to 1
-        const r = Math.floor(60 + tNorm * 180);
-        const b = Math.floor(240 - tNorm * 180);
-        ctx.fillStyle = `rgba(${r}, 100, ${b}, 0.6)`;
-        ctx.fill();
-        
-        // Bubbles if reacting
-        if(energySim.state === 'reacting') {
-            energySim.particles.forEach(p => {
-                p.y += p.vy; p.x += p.vx;
-                // Boundaries
-                if(p.x < bx-bw/2 + 10 || p.x > bx+bw/2 - 10) p.vx *= -1;
-                if(p.y < by-bh/2 + (bh-fillH) || p.y > by+bh/2 - 10) p.vy *= -1;
-                
-                ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
-                ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.fill();
-            });
+        // Liquid Style
+        // Cold = Blue/Cyan, Hot = Red/Orange
+        let r, g, bColor;
+        if(energySim.temp > 25) { // Heating up
+            const ratio = (energySim.temp - 25) / 60; // 0 to 1
+            r = 255; 
+            g = Math.floor(100 - (ratio * 50)); 
+            bColor = Math.floor(100 - (ratio * 100));
+        } else { // Cooling down
+            const ratio = (25 - energySim.temp) / 20;
+            r = Math.floor(100 - (ratio * 100));
+            g = Math.floor(200 + (ratio * 55));
+            bColor = 255;
         }
         
+        const liquidColor = `rgba(${r}, ${g}, ${bColor}, 0.7)`;
+        const glowColor = `rgba(${r}, ${g}, ${bColor}, 0.3)`;
+
+        // Liquid Level
+        const fillP = 0.75; 
+        const liquidTop = cy - (bH/2) + (bH * (1-fillP));
+        const liquidBottom = cy + bH/2 - 15;
+
+        // A. Liquid Body (Gradient)
+        const lGrad = ctx.createLinearGradient(cx, liquidTop, cx, liquidBottom);
+        lGrad.addColorStop(0, liquidColor);
+        lGrad.addColorStop(1, `rgba(${r-50}, ${g-50}, ${bColor-50}, 0.9)`); // Darker bottom
+
+        ctx.save();
+        ctx.beginPath();
+        // Shape of liquid inside beaker
+        ctx.moveTo(cx - bW/2 + 5, liquidTop);
+        ctx.lineTo(cx - bW/2 + 10, liquidBottom);
+        ctx.quadraticCurveTo(cx, liquidBottom + 15, cx + bW/2 - 10, liquidBottom);
+        ctx.lineTo(cx + bW/2 - 5, liquidTop);
+        ctx.closePath();
+        
+        // Fill Liquid
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = lGrad;
+        ctx.fill();
+        ctx.shadowBlur = 0; // Reset shadow
         ctx.restore();
 
-        // Beaker Outline
-        ctx.lineWidth = 5;
-        ctx.strokeStyle = "rgba(255,255,255,0.3)";
+        // B. Bubbles / Particles
+        if (energySim.state === 'reacting' || energySim.state === 'done') {
+            ctx.save();
+            // Clip to liquid area so bubbles don't fly out
+            ctx.beginPath();
+            ctx.moveTo(cx - bW/2 + 5, liquidTop);
+            ctx.lineTo(cx - bW/2 + 10, liquidBottom);
+            ctx.quadraticCurveTo(cx, liquidBottom + 15, cx + bW/2 - 10, liquidBottom);
+            ctx.lineTo(cx + bW/2 - 5, liquidTop);
+            ctx.clip();
+
+            energySim.particles.forEach(p => {
+                // Animate
+                p.y -= p.speed;
+                p.wobble += 0.1;
+                const xPos = cx - bW/2 + 10 + (p.x/100)*(bW-20) + Math.sin(p.wobble)*2;
+                const yPos = liquidBottom - (100-p.y)/100 * (liquidBottom - liquidTop);
+                
+                // Recycle
+                if(yPos < liquidTop) {
+                    if (energySim.state === 'reacting') {
+                        p.y = 100; // Reset to bottom
+                        p.x = Math.random() * 100;
+                    } 
+                } else {
+                    // Draw
+                    ctx.beginPath();
+                    ctx.arc(xPos, yPos, p.size, 0, Math.PI*2);
+                    ctx.fillStyle = "rgba(255,255,255,0.4)";
+                    ctx.fill();
+                }
+            });
+            ctx.restore();
+        }
+
+        // C. Liquid Surface (Meniscus)
         ctx.beginPath();
-        ctx.moveTo(bx-bw/2, by-bh/2);
-        ctx.lineTo(bx-bw/2, by+bh/2-15);
-        ctx.quadraticCurveTo(bx-bw/2, by+bh/2, bx, by+bh/2);
-        ctx.quadraticCurveTo(bx+bw/2, by+bh/2, bx+bw/2, by+bh/2-15);
-        ctx.lineTo(bx+bw/2, by-bh/2);
+        ctx.ellipse(cx, liquidTop, (bW/2)-5, 10, 0, 0, Math.PI*2);
+        ctx.fillStyle = `rgba(${r+50}, ${g+50}, ${bColor+50}, 0.5)`; // Lighter top
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255,255,255,0.2)`;
+        ctx.stroke();
+
+        // D. Beaker Glass (Front Reflection)
+        ctx.beginPath();
+        ctx.moveTo(cx - bW/2, cy - bH/2);
+        ctx.lineTo(cx - bW/2 + 5, cy + bH/2 - 20);
+        ctx.quadraticCurveTo(cx, cy + bH/2, cx + bW/2 - 5, cy + bH/2 - 20);
+        ctx.lineTo(cx + bW/2, cy - bH/2);
+        
+        // Glass Gradient
+        const gGrad = ctx.createLinearGradient(cx - bW/2, cy, cx + bW/2, cy);
+        gGrad.addColorStop(0, "rgba(255,255,255,0.2)");
+        gGrad.addColorStop(0.1, "rgba(255,255,255,0.05)");
+        gGrad.addColorStop(0.9, "rgba(255,255,255,0.05)");
+        gGrad.addColorStop(1, "rgba(255,255,255,0.2)");
+        
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = gGrad;
+        ctx.lineCap = "round";
+        ctx.stroke();
+
+        // Rim
+        ctx.beginPath();
+        ctx.ellipse(cx, cy - bH/2, bW/2, 10, 0, 0, Math.PI*2);
+        ctx.stroke();
+
+        // Highlights (The "Polish" factor)
+        ctx.beginPath();
+        ctx.moveTo(cx - bW/2 + 15, cy - bH/2 + 30);
+        ctx.lineTo(cx - bW/2 + 20, cy + bH/2 - 40);
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(255,255,255,0.15)";
         ctx.stroke();
 
         // --- 3. DRAW GRAPH ---
@@ -2843,68 +2935,95 @@
     }
 
     function drawEnergyGraph() {
+        if(!energySim.graphCtx) return;
         const ctx = energySim.graphCtx;
         const w = energySim.graphCvs.width;
         const h = energySim.graphCvs.height;
-        
+
         ctx.clearRect(0,0,w,h);
-        
-        // Axes
-        ctx.strokeStyle = "#94a3b8"; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.moveTo(30, 10); ctx.lineTo(30, h-20); ctx.lineTo(w-10, h-20); ctx.stroke();
-        
-        // Reaction Path
-        // Start Y (Reactants)
-        const yReact = h/2;
-        // End Y (Products) -> Lower for Exo, Higher for Endo
-        const yProd = energySim.mode === 'exo' ? h - 40 : 40;
-        // Peak Y (Activation)
-        let yPeak = 20;
-        if(energySim.catalyst) yPeak = yReact - 30; // Lower peak
-        
+
+        // Draw Axes
+        ctx.strokeStyle = "#64748b";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(30, yReact);
-        // Curve to peak
-        ctx.bezierCurveTo(w/3, yReact, w/3, yPeak, w/2, yPeak);
-        // Curve to product
-        ctx.bezierCurveTo(w*2/3, yPeak, w*2/3, yProd, w-20, yProd);
-        
-        ctx.strokeStyle = energySim.mode === 'exo' ? "#f87171" : "#60a5fa";
-        ctx.lineWidth = 4;
+        ctx.moveTo(30, 20); ctx.lineTo(30, h-20); ctx.lineTo(w-20, h-20);
         ctx.stroke();
+
+        // Labels
+        ctx.fillStyle = "#94a3b8";
+        ctx.font = "10px monospace";
+        ctx.fillText("Energy", 35, 30);
+        ctx.fillText("Reaction Progress", w/2 - 40, h-5);
+
+        // Curve Calculation
+        const startY = h/2; // Reactants
+        const endY = energySim.mode === 'exo' ? h - 50 : 50; // Products
         
-        // Progress Dot
+        // Activation Energy Peak
+        let peakH = 40; 
+        if (energySim.catalyst) peakH = 80; // Lower energy barrier (higher y value on canvas)
+        
+        const peakY = startY - peakH; // Canvas Y goes down
+
+        ctx.beginPath();
+        ctx.moveTo(30, startY);
+        // Bezier Curve: Start -> Peak -> End
+        ctx.bezierCurveTo(w*0.4, startY, w*0.4, peakY, w*0.5, peakY);
+        ctx.bezierCurveTo(w*0.6, peakY, w*0.6, endY, w-30, endY);
+
+        // Glow Effect
+        const lineColor = energySim.mode === 'exo' ? '#f87171' : '#60a5fa';
+        ctx.strokeStyle = lineColor;
+        ctx.lineWidth = 4;
+        ctx.shadowColor = lineColor;
+        ctx.shadowBlur = 10;
+        ctx.stroke();
+        ctx.shadowBlur = 0; // Reset
+
+        // Progress Ball
         if(energySim.state === 'reacting' || energySim.state === 'done') {
             const pct = energySim.progress / 100;
-            // Simple linear interpolation of x
-            const px = 30 + (w-50) * pct;
-            // Very rough approximation of y on curve
-            let py = yReact;
-            if(pct < 0.5) py = yReact + (yPeak - yReact) * (pct * 2); // Up
-            else py = yPeak + (yProd - yPeak) * ((pct - 0.5) * 2); // Down
+            // Approximate position on curve (Simplified linear interp for X, complex for Y)
+            const x = 30 + (w-60) * pct;
             
-            ctx.beginPath(); ctx.arc(px, py, 6, 0, Math.PI*2);
-            ctx.fillStyle = "white"; ctx.fill();
+            // Simplified Y calculation based on phases
+            let y;
+            if (pct < 0.5) { // Going up hill
+                const t = pct * 2; // 0 to 1
+                // Quadratic Ease Out
+                y = startY + (peakY - startY) * (1 - Math.pow(1 - t, 2)); 
+            } else { // Going down hill
+                const t = (pct - 0.5) * 2; // 0 to 1
+                // Quadratic Ease In
+                y = peakY + (endY - peakY) * (t * t);
+            }
+
+            ctx.fillStyle = "#fbbf24"; // Gold ball
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI*2);
+            ctx.fill();
         }
-        
-        // Labels
-        ctx.fillStyle = "#fff"; ctx.font = "10px Arial";
-        ctx.fillText("Reactants", 35, yReact - 5);
-        ctx.fillText("Products", w-60, yProd - 5);
     }
 
     function updateCalcDisplay() {
-        // Update Thermometer Visual
-        const tHeightPct = Math.min(100, Math.max(0, (energySim.temp + 10) / 110 * 100)); // -10 to 100 range
-        document.getElementById('thermo-liquid').style.height = `${tHeightPct}%`;
-        document.getElementById('thermo-val').innerText = energySim.temp.toFixed(1) + "°C";
+        const tHeightPct = Math.min(100, Math.max(0, (energySim.temp + 10) / 110 * 100)); 
+        const liquidEl = document.getElementById('thermo-liquid');
+        if(liquidEl) liquidEl.style.height = `${tHeightPct}%`;
+        
+        const textEl = document.getElementById('thermo-val');
+        if(textEl) textEl.innerText = energySim.temp.toFixed(1) + "°C";
 
         // Calc Q
         const dT = energySim.temp - 25;
-        document.getElementById('calc-dt').innerText = (dT > 0 ? "+" : "") + dT.toFixed(1) + "°C";
+        const dtEl = document.getElementById('calc-dt');
+        if(dtEl) {
+            dtEl.innerText = (dT > 0 ? "+" : "") + dT.toFixed(1) + "°C";
+            dtEl.style.color = dT > 0 ? '#f87171' : (dT < 0 ? '#60a5fa' : '#fbbf24');
+        }
         
-        const q = energySim.mass * 4.18 * dT; // Joules
-        document.getElementById('calc-q').innerText = q.toFixed(0) + " J";
+        const q = energySim.mass * 4.18 * dT; 
+        const qEl = document.getElementById('calc-q');
+        if(qEl) qEl.innerText = q.toFixed(0) + " J";
     }
     
     // ==========================================
