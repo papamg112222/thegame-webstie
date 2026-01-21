@@ -1383,12 +1383,12 @@
         return false;
     }
 
-    function openGame(gameId) {
+   function openGame(gameId) {
         // Reset Views
         document.getElementById('app-main-menu').style.display = 'none';
         document.querySelectorAll('.app-view').forEach(el => el.style.display = 'none');
         
-        // Find View
+        // Find View & Show it
         const view = document.getElementById(gameId);
         if (view) view.style.display = 'flex';
 
@@ -1399,11 +1399,13 @@
         if (gameId === 'game-atom') initAtomGame();
         if (gameId === 'game-periodic') initPeriodicTable();
         if (gameId === 'game-bond') checkBond();
-        if (gameId === 'game-stoich') initStoichGame(); // NEW STOICHIOMETRY (Previously Solubility)
+        
+        // >>>>> THIS IS THE CRITICAL LINE <<<<<
+        if (gameId === 'game-battery') initStoichGame(); 
+        
         if (gameId === 'game-gas') initMiniGas();
-        if (gameId === 'game-equil') initElectroGame(); // Galvanic Cell
+        if (gameId === 'game-equil') initElectroGame(); 
         if (gameId === 'game-ph') initPhGame();
-        // game-battery & game-energy & game-organic don't need init, just simple JS
     }
 
     function returnToMenu() {
@@ -1810,7 +1812,7 @@
     }
 
   // ==========================================
-// 6. GAME: STOICHIOMETRY (Logic for game-battery)
+// 6. GAME: STOICHIOMETRY (Fixed & Bulletproofed)
 // ==========================================
 let stoichSim = { 
     canvas: null, ctx: null, req: null, 
@@ -1845,8 +1847,12 @@ class StoichParticle {
             // Normal Brownian motion
             this.x += this.vx;
             this.y += this.vy;
-            if(this.x < 15 || this.x > stoichSim.width - 15) this.vx *= -1;
-            if(this.y < 15 || this.y > stoichSim.height - 15) this.vy *= -1;
+            
+            // Safety bounce (keep inside bounds)
+            if(this.x < 10) { this.x = 10; this.vx = Math.abs(this.vx); }
+            if(this.x > stoichSim.width - 10) { this.x = stoichSim.width - 10; this.vx = -Math.abs(this.vx); }
+            if(this.y < 10) { this.y = 10; this.vy = Math.abs(this.vy); }
+            if(this.y > stoichSim.height - 10) { this.y = stoichSim.height - 10; this.vy = -Math.abs(this.vy); }
         }
     }
 
@@ -1855,30 +1861,26 @@ class StoichParticle {
         ctx.translate(this.x, this.y);
         
         if (this.type === 'A') { 
-            // H2 Molecule (Two small white circles)
+            // H2 (White)
             ctx.fillStyle = 'rgba(255,255,255,0.9)';
             ctx.shadowColor = 'rgba(255,255,255,0.5)';
             ctx.shadowBlur = 5;
             ctx.beginPath(); ctx.arc(-5, 0, 5, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(5, 0, 5, 0, Math.PI*2); ctx.fill();
         } else if (this.type === 'B') {
-            // O2 Molecule (Two larger red circles)
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.9)'; // Red
+            // O2 (Red)
+            ctx.fillStyle = 'rgba(239, 68, 68, 0.9)'; 
             ctx.shadowColor = 'rgba(239, 68, 68, 0.5)';
             ctx.shadowBlur = 8;
             ctx.beginPath(); ctx.arc(-7, 0, 7, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(7, 0, 7, 0, Math.PI*2); ctx.fill();
         } else if (this.type === 'P') {
-            // H2O Molecule (Mickey mouse shape)
+            // H2O (Molecule)
             ctx.shadowColor = 'rgba(16, 185, 129, 0.5)';
             ctx.shadowBlur = 10;
-            
-            // Oxygen atom (Center)
-            ctx.fillStyle = '#ef4444'; 
+            ctx.fillStyle = '#ef4444'; // Oxygen
             ctx.beginPath(); ctx.arc(0, 2, 9, 0, Math.PI*2); ctx.fill();
-            
-            // Hydrogen atoms (Ears)
-            ctx.fillStyle = 'white'; 
+            ctx.fillStyle = 'white'; // Hydrogens
             ctx.beginPath(); ctx.arc(-8, -7, 5, 0, Math.PI*2); ctx.fill();
             ctx.beginPath(); ctx.arc(8, -7, 5, 0, Math.PI*2); ctx.fill();
         }
@@ -1891,12 +1893,29 @@ function initStoichGame() {
     if(!stoichSim.canvas) return;
     stoichSim.ctx = stoichSim.canvas.getContext('2d');
     
-    // Fit canvas to parent container
-    const parent = stoichSim.canvas.parentElement;
-    stoichSim.width = parent.clientWidth;
-    stoichSim.height = parent.clientHeight;
-    stoichSim.canvas.width = stoichSim.width;
-    stoichSim.canvas.height = stoichSim.height;
+    // Robust Resize Function
+    const resizeCanvas = () => {
+        const parent = stoichSim.canvas.parentElement;
+        if(parent) {
+            stoichSim.width = parent.clientWidth;
+            stoichSim.height = parent.clientHeight;
+            stoichSim.canvas.width = stoichSim.width;
+            stoichSim.canvas.height = stoichSim.height;
+        }
+    };
+
+    // Run resize immediately
+    resizeCanvas();
+    
+    // Run resize AGAIN after a short delay (fixes 0-width issue if called during transition)
+    setTimeout(() => {
+        resizeCanvas();
+        resetStoichGame();
+    }, 50);
+
+    // Attach listener for window resize
+    window.removeEventListener('resize', resizeCanvas); // Prevent duplicates
+    window.addEventListener('resize', resizeCanvas);
 
     resetStoichGame();
     if(stoichSim.req) cancelAnimationFrame(stoichSim.req);
@@ -1912,9 +1931,11 @@ function updateStoichInputs() {
     document.getElementById('stoich-val-a').innerText = stoichSim.molesA + " mol";
     document.getElementById('stoich-val-b').innerText = stoichSim.molesB + " mol";
     
-    spawnStoichParticles(); 
+    // Important: Only spawn if width is valid, otherwise wait for the loop to fix it
+    if(stoichSim.width > 0) {
+        spawnStoichParticles(); 
+    }
     
-    // Reset Result UI
     document.getElementById('limiting-box').style.opacity = '0';
     document.getElementById('limiting-box').classList.add('translate-y-4');
     document.getElementById('yield-box').style.opacity = '0';
@@ -1923,18 +1944,22 @@ function updateStoichInputs() {
 
 function spawnStoichParticles() {
     stoichSim.particles = [];
-    // Spawn A (Hydrogen) Left side
+    // If width is 0, these will spawn off screen, but the loop will fix bounds
+    const spawnW = stoichSim.width || 300; 
+    const spawnH = stoichSim.height || 300;
+
+    // Spawn A (Hydrogen) Left
     for(let i=0; i<stoichSim.molesA; i++) {
         stoichSim.particles.push(new StoichParticle('A', 
-            Math.random() * (stoichSim.width * 0.3) + 30, 
-            Math.random() * (stoichSim.height - 60) + 30
+            Math.random() * (spawnW * 0.3) + 30, 
+            Math.random() * (spawnH - 60) + 30
         ));
     }
-    // Spawn B (Oxygen) Right side
+    // Spawn B (Oxygen) Right
     for(let i=0; i<stoichSim.molesB; i++) {
         stoichSim.particles.push(new StoichParticle('B', 
-            Math.random() * (stoichSim.width * 0.3) + (stoichSim.width * 0.7) - 30, 
-            Math.random() * (stoichSim.height - 60) + 30
+            Math.random() * (spawnW * 0.3) + (spawnW * 0.7) - 30, 
+            Math.random() * (spawnH - 60) + 30
         ));
     }
 }
@@ -1944,45 +1969,39 @@ function startStoichReaction() {
     stoichSim.state = 'reacting';
     
     // Equation: 2 H2 + 1 O2 -> 2 H2O
-    let limitingReagent = "";
+    let possibleH = stoichSim.molesA / 2;
+    let possibleO = stoichSim.molesB / 1;
+    let actualRxn = Math.min(possibleH, possibleO);
     
-    // 1 mole O2 needs 2 moles H2
-    let possibleReactionsH = stoichSim.molesA / 2;
-    let possibleReactionsO = stoichSim.molesB / 1;
-    let actualReactions = Math.min(possibleReactionsH, possibleReactionsO);
-    
-    let productCount = actualReactions * 2; // 2 H2O per reaction
-    let leftOverA = stoichSim.molesA - (actualReactions * 2);
-    let leftOverB = stoichSim.molesB - (actualReactions * 1);
+    let productCount = actualRxn * 2;
+    let leftOverA = stoichSim.molesA - (actualRxn * 2);
+    let leftOverB = stoichSim.molesB - (actualRxn * 1);
 
-    if (possibleReactionsH < possibleReactionsO) limitingReagent = "Hydrogen (H₂)";
-    else if (possibleReactionsO < possibleReactionsH) limitingReagent = "Oxygen (O₂)";
-    else limitingReagent = "None (Perfect Ratio)";
+    let limitingReagent = possibleH < possibleO ? "Hydrogen (H₂)" : (possibleO < possibleH ? "Oxygen (O₂)" : "None (Perfect Ratio)");
 
-    // 1. Converge Phase
+    // 1. Converge
     stoichSim.particles.forEach(p => {
         p.targetX = stoichSim.width / 2 + (Math.random()-0.5)*100;
         p.targetY = stoichSim.height / 2 + (Math.random()-0.5)*100;
     });
 
-    // 2. Reaction Phase
+    // 2. React
     setTimeout(() => {
-        // Flash Effect
-        stoichSim.ctx.fillStyle = 'white';
+        stoichSim.ctx.fillStyle = 'rgba(255,255,255,0.8)';
         stoichSim.ctx.fillRect(0,0,stoichSim.width, stoichSim.height);
         
         if (typeof playPopSound === 'function') playPopSound();
         
         stoichSim.particles = [];
 
-        // Add Products (explode from center)
+        // Products
         for(let i=0; i<productCount; i++) {
             let p = new StoichParticle('P', stoichSim.width/2, stoichSim.height/2);
             p.vx *= 3; p.vy *= 3; 
             stoichSim.particles.push(p);
         }
 
-        // Add Leftovers (explode from center)
+        // Leftovers
         for(let i=0; i<leftOverA; i++) {
             let p = new StoichParticle('A', stoichSim.width/2, stoichSim.height/2);
             p.vx *= 4; p.vy *= 4;
@@ -1996,7 +2015,7 @@ function startStoichReaction() {
 
         stoichSim.state = 'done';
 
-        // Update Text UI
+        // UI
         document.getElementById('stoich-limiting-display').innerText = limitingReagent;
         document.getElementById('limiting-box').style.opacity = '1';
         document.getElementById('limiting-box').classList.remove('translate-y-4');
@@ -2016,9 +2035,23 @@ function resetStoichGame() {
 }
 
 function stoichLoop() {
-    // Check if the BATTERY container is visible
+    // Check using offsetParent (Standard way to check visibility)
+    // If game-battery is hidden, offsetParent is null
     const container = document.getElementById('game-battery'); 
-    if(container && container.style.display !== 'none') {
+    
+    if (container && container.offsetParent !== null) {
+        // SELF-HEALING: If width is 0 (bugged init), fix it immediately
+        if (stoichSim.width === 0 || stoichSim.canvas.width === 0) {
+            const parent = stoichSim.canvas.parentElement;
+            if (parent.clientWidth > 0) {
+                stoichSim.width = parent.clientWidth;
+                stoichSim.height = parent.clientHeight;
+                stoichSim.canvas.width = stoichSim.width;
+                stoichSim.canvas.height = stoichSim.height;
+                resetStoichGame(); // Restart to fix particle positions
+            }
+        }
+
         stoichSim.ctx.clearRect(0, 0, stoichSim.width, stoichSim.height);
         stoichSim.particles.forEach(p => {
             p.update();
