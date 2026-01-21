@@ -1984,10 +1984,17 @@
         stoichSim.req = requestAnimationFrame(stoichLoop);
     }
 
+   // ==========================================
+    // Game 4: SOLUBILITY (UPDATED: Fully Working Beaker & Pouring)
     // ==========================================
-    // Game 7: SOLUBILITY (UPDATED: Fixes missing beaker)
-    // ==========================================
-    let solubilitySim = { req: null, particles: [] };
+    let solubilitySim = { 
+        req: null, 
+        particles: [], 
+        isPouring: false,
+        pourInterval: null,
+        dissolvedMass: 0,
+        solidMass: 0
+    };
 
     function initSolubilityGame() {
         const canvas = document.getElementById('solubility-canvas');
@@ -2000,30 +2007,20 @@
 
         // 2. Beaker Settings (Center of Screen)
         const centerX = canvas.width / 2;
-        const centerY = canvas.height / 2 + 40; // Shift down slightly
+        const centerY = canvas.height / 2 + 40;
         const beakerWidth = Math.min(280, canvas.width * 0.5);
         const beakerHeight = Math.min(350, canvas.height * 0.6);
         const liquidLevel = 0.7; // 70% full
 
-        // 3. Initialize Bubbles for effect
-        if(solubilitySim.particles.length === 0) {
-            for(let i=0; i<30; i++) {
-                solubilitySim.particles.push({
-                    x: centerX + (Math.random() - 0.5) * (beakerWidth - 20),
-                    y: centerY + (Math.random() * beakerHeight/2),
-                    r: Math.random() * 3,
-                    speed: Math.random() * 1 + 0.5
-                });
-            }
-        }
-
-        // 4. Render Loop
+        // 3. Render Loop
         function render() {
+            if(!document.getElementById('solubility-canvas')) return; // Stop if view changed
+
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
             // --- A. Draw Background Glow ---
             const gradient = ctx.createRadialGradient(centerX, centerY, 50, centerX, centerY, beakerHeight);
-            gradient.addColorStop(0, 'rgba(6, 182, 212, 0.1)'); // Cyan glow
+            gradient.addColorStop(0, 'rgba(6, 182, 212, 0.1)'); 
             gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -2031,7 +2028,6 @@
             // --- B. Draw Liquid ---
             ctx.save();
             ctx.beginPath();
-            // Start bottom left inside beaker
             const bLeft = centerX - beakerWidth/2 + 5;
             const bRight = centerX + beakerWidth/2 - 5;
             const bBottom = centerY + beakerHeight/2 - 10;
@@ -2039,42 +2035,98 @@
             
             ctx.moveTo(bLeft, liquidTop);
             ctx.lineTo(bLeft, bBottom - 20);
-            ctx.quadraticCurveTo(bLeft, bBottom, centerX, bBottom); // Bottom curve
+            ctx.quadraticCurveTo(bLeft, bBottom, centerX, bBottom); 
             ctx.quadraticCurveTo(bRight, bBottom, bRight, bBottom - 20);
             ctx.lineTo(bRight, liquidTop);
             ctx.closePath();
             
-            ctx.fillStyle = "rgba(6, 182, 212, 0.4)"; // Water color
+            // Color based on saturation (visual feedback)
+            const count = solubilitySim.particles.length;
+            const opacity = Math.min(0.4 + (count/500), 0.9);
+            ctx.fillStyle = `rgba(6, 182, 212, ${opacity})`; 
             ctx.fill();
             
-            // Liquid Top Surface (Meniscus)
+            // Meniscus
             ctx.beginPath();
             ctx.ellipse(centerX, liquidTop, (beakerWidth - 10)/2, 8, 0, 0, Math.PI*2);
-            ctx.fillStyle = "rgba(165, 243, 252, 0.5)"; // Lighter top
+            ctx.fillStyle = "rgba(165, 243, 252, 0.5)"; 
             ctx.fill();
             ctx.restore();
 
-            // --- C. Draw Bubbles ---
-            ctx.fillStyle = "rgba(255, 255, 255, 0.3)";
-            solubilitySim.particles.forEach(p => {
-                p.y -= p.speed;
-                // Reset bubble if it goes above liquid
-                if(p.y < liquidTop) {
-                    p.y = bBottom - 10;
-                    p.x = centerX + (Math.random() - 0.5) * (beakerWidth - 30);
+            // --- C. Physics & Drawing Particles ---
+            let dissolved = 0;
+            let solid = 0;
+
+            // Handle Pouring (Spawn particles)
+            if (solubilitySim.isPouring) {
+                // Add 2 particles per frame while holding
+                for(let i=0; i<2; i++) {
+                    solubilitySim.particles.push({
+                        x: centerX + (Math.random() - 0.5) * 40, // Spawn at top center
+                        y: centerY - beakerHeight/2 - 50,         // Above beaker
+                        r: Math.random() * 2 + 2,
+                        vx: (Math.random() - 0.5) * 2,
+                        vy: Math.random() * 2 + 2,
+                        state: 'falling'
+                    });
                 }
+            }
+
+            // Update Loop
+            for (let i = 0; i < solubilitySim.particles.length; i++) {
+                let p = solubilitySim.particles[i];
+                
+                // Gravity
+                p.vy += 0.2; 
+                p.y += p.vy;
+                p.x += p.vx;
+
+                // Hit Liquid Surface
+                if (p.state === 'falling' && p.y > liquidTop) {
+                    p.state = 'dissolved';
+                    p.vy *= 0.1; // Slow down in water
+                }
+
+                // In Liquid Physics
+                if (p.state === 'dissolved' || p.state === 'precipitate') {
+                    p.vy *= 0.9; // Drag
+                    p.vx *= 0.9;
+                    
+                    // Brownian Motion (Jitter)
+                    p.x += (Math.random() - 0.5) * 1;
+                    p.y += (Math.random() - 0.5) * 1;
+
+                    // Bounds checking (Side walls)
+                    if (p.x < bLeft + 10) p.x = bLeft + 10;
+                    if (p.x > bRight - 10) p.x = bRight - 10;
+
+                    // Hit Bottom
+                    if (p.y > bBottom - 10) {
+                        p.y = bBottom - 10;
+                        p.vy = 0;
+                        p.state = 'precipitate'; // Settled at bottom
+                    }
+                }
+
+                // Count stats
+                if (p.state === 'dissolved') dissolved++;
+                if (p.state === 'precipitate') solid++;
+
+                // Draw Particle
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+                if (p.state === 'precipitate') ctx.fillStyle = "white"; // Solid at bottom
+                else ctx.fillStyle = "rgba(255, 255, 255, 0.8)"; // Falling/Dissolved
                 ctx.fill();
-            });
+            }
 
-            // --- D. Draw Beaker Glass (Outline) ---
+            // --- D. Draw Beaker Glass ---
             ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
             
-            ctx.beginPath();
             // Rim
+            ctx.beginPath();
             ctx.ellipse(centerX, centerY - beakerHeight/2, beakerWidth/2, 10, 0, 0, Math.PI*2);
             ctx.stroke();
             
@@ -2082,37 +2134,69 @@
             ctx.beginPath();
             ctx.moveTo(centerX - beakerWidth/2, centerY - beakerHeight/2);
             ctx.lineTo(centerX - beakerWidth/2, centerY + beakerHeight/2 - 30);
-            // Bottom Rounded Corners
             ctx.quadraticCurveTo(centerX - beakerWidth/2, centerY + beakerHeight/2, centerX, centerY + beakerHeight/2);
             ctx.quadraticCurveTo(centerX + beakerWidth/2, centerY + beakerHeight/2, centerX + beakerWidth/2, centerY + beakerHeight/2 - 30);
             ctx.lineTo(centerX + beakerWidth/2, centerY - beakerHeight/2);
             ctx.stroke();
 
-            // Glass Highlights (Reflection)
-            ctx.lineWidth = 2;
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
-            ctx.beginPath();
-            ctx.moveTo(centerX - beakerWidth/2 + 15, centerY - beakerHeight/2 + 20);
-            ctx.lineTo(centerX - beakerWidth/2 + 15, centerY + beakerHeight/2 - 40);
-            ctx.stroke();
+            // --- E. Update DOM Counters ---
+            // We update DOM less frequently to save performance, or just do it here
+            document.getElementById('ion-count').innerText = (dissolved * 0.1).toFixed(1);
+            document.getElementById('solid-count').innerText = (solid * 0.1).toFixed(1);
+            
+            // Update Saturation Bar Logic
+            const limit = 50; // Arbitrary solubility limit
+            const satPct = Math.min((dissolved / limit) * 100, 100);
+            const bar = document.getElementById('saturation-bar');
+            const status = document.getElementById('saturation-status');
+            
+            if (bar) bar.style.width = `${satPct}%`;
+            if (status) {
+                if (solid > 5) {
+                    status.innerText = "SUPERSATURATED";
+                    status.className = "text-[9px] text-red-400 font-bold uppercase animate-pulse";
+                    if (bar) bar.className = "h-full bg-red-500 w-0 transition-all duration-300";
+                } else if (satPct >= 100) {
+                    status.innerText = "SATURATED";
+                    status.className = "text-[9px] text-yellow-400 font-bold uppercase";
+                    if (bar) bar.className = "h-full bg-yellow-400 w-0 transition-all duration-300";
+                } else {
+                    status.innerText = "UNSATURATED";
+                    status.className = "text-[9px] text-green-400 font-bold uppercase";
+                    if (bar) bar.className = "h-full bg-cyan-500 w-0 transition-all duration-300";
+                }
+            }
 
-            // Loop
             solubilitySim.req = requestAnimationFrame(render);
         }
 
-        // Start the loop
+        // Start Loop
         if(solubilitySim.req) cancelAnimationFrame(solubilitySim.req);
         render();
     }
 
-    // Window functions hook
-    window.resetSolubilitySim = function() { 
-        if(document.getElementById('solubility-canvas')) initSolubilityGame(); 
+    // --- Button Handlers ---
+    window.startPouringSalt = function() {
+        solubilitySim.isPouring = true;
     };
-    // Keep placeholder functions to prevent errors with existing HTML buttons
-    window.updateSolubilityParams = function() {}; 
-    window.startPouringSalt = function() {}; 
-    window.stopPouringSalt = function() {};
+
+    window.stopPouringSalt = function() {
+        solubilitySim.isPouring = false;
+    };
+
+    window.resetSolubilitySim = function() {
+        solubilitySim.particles = [];
+        solubilitySim.dissolvedMass = 0;
+        solubilitySim.solidMass = 0;
+        solubilitySim.isPouring = false;
+        // Re-init to clear canvas
+        if(document.getElementById('solubility-canvas')) initSolubilityGame();
+    };
+
+    // Keep placeholder for slider to prevent error
+    window.updateSolubilityParams = function() {
+        // Future logic: temperature affects solubility limit
+    };
 
     // ==========================================
     // 8. ELECTROCHEMISTRY
