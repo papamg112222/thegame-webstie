@@ -991,7 +991,9 @@
 
     <!-- Scripts -->
 <script>
-        // === AUTH & DATABASE LOGIC ===
+        // ==========================================
+        // 1. AUTHENTICATION & DATABASE
+        // ==========================================
         let currentUser = JSON.parse(sessionStorage.getItem('chem_current_user'));
         const authContainer = document.getElementById('auth-container');
         let isLoginMode = true;
@@ -1083,7 +1085,9 @@
             }
         });
 
-        // === GLOBAL NAVIGATION ===
+        // ==========================================
+        // 2. GLOBAL NAVIGATION & UTILS
+        // ==========================================
         function checkAccess(featureId) {
             if (featureId === 'game-atom') return true;
             if (currentUser) return true;
@@ -1098,10 +1102,12 @@
             view.style.display = 'flex';
             
             checkAccess(gameId);
+            // Init Logic for specific games
             if(gameId === 'game-atom') initAtomGame(); 
             if(gameId === 'game-periodic') initPeriodicTable();
             if(gameId === 'game-gas') initMiniGas();
-            if(gameId === 'game-ph') initPhGame(); // NEW pH INIT
+            if(gameId === 'game-ph') initPhGame();       // New pH
+            if(gameId === 'game-equil') initElectroGame(); // New Electro (Replaces Equilibrium)
         }
 
         function returnToMenu() {
@@ -1109,15 +1115,25 @@
             document.getElementById('app-main-menu').style.display = 'flex';
             document.getElementById('feature-lock-overlay').classList.add('hidden');
             
+            // Stop Loops
             cancelAnimationFrame(gasAnimId);
             if(miniGasReq) cancelAnimationFrame(miniGasReq);
-            if(phReq) cancelAnimationFrame(phReq); // Stop pH loop
+            if(phReq) cancelAnimationFrame(phReq); 
+            if(electroInterval) clearInterval(electroInterval);
+
+            // Restart BG Particles
             initAppParticles(); animateApp();
         }
 
         function openContact() { window.location.href = 'https://line.me/ti/p/~Bom_trendy'; }
+        
+        window.openModal = function(id) { const el = document.getElementById(id+'-modal'); if(!el) return; el.classList.remove('hidden'); setTimeout(()=>{ el.classList.remove('opacity-0'); document.getElementById(id+'-content').classList.remove('scale-95'); },10); }
+        window.closeModal = function(id) { const el = document.getElementById(id+'-modal'); el.classList.add('opacity-0'); document.getElementById(id+'-content').classList.add('scale-95'); setTimeout(()=>el.classList.add('hidden'),300); }
+        window.handleOutsideClick = function(e, id) { if(e.target.id==id) closeModal(id.replace('-modal','')); }
 
-        // === BACKGROUND PARTICLES ===
+        // ==========================================
+        // 3. BACKGROUND PARTICLES
+        // ==========================================
         const canvas = document.getElementById('chem-canvas');
         const ctx = canvas.getContext('2d');
         let width, height, particles = [], explosions = [];
@@ -1191,12 +1207,9 @@
         }
         initAppParticles(); animateApp();
 
-        // === UTILS ===
-        window.openModal = function(id) { const el = document.getElementById(id+'-modal'); if(!el) return; el.classList.remove('hidden'); setTimeout(()=>{ el.classList.remove('opacity-0'); document.getElementById(id+'-content').classList.remove('scale-95'); },10); }
-        window.closeModal = function(id) { const el = document.getElementById(id+'-modal'); el.classList.add('opacity-0'); document.getElementById(id+'-content').classList.add('scale-95'); setTimeout(()=>el.classList.add('hidden'),300); }
-        window.handleOutsideClick = function(e, id) { if(e.target.id==id) closeModal(id.replace('-modal','')); }
-
-        // === 1. ATOM GAME ===
+        // ==========================================
+        // 4. GAME: ATOM BUILDER
+        // ==========================================
         let atomData = { p: 0, n: 0, e: 0 };
         const atomElements = ["?", "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne"];
         const atomNames = ["Vacuum", "Hydrogen", "Helium", "Lithium", "Beryllium", "Boron", "Carbon", "Nitrogen", "Oxygen", "Fluorine", "Neon"];
@@ -1255,7 +1268,9 @@
             document.removeEventListener('mouseup', endDrag); document.removeEventListener('touchend', endDrag);
         }
 
-        // === 2. PERIODIC TABLE (FULL 118 ELEMENTS) ===
+        // ==========================================
+        // 5. GAME: PERIODIC TABLE (FULL 118)
+        // ==========================================
         const periodicData = [
             {z:1,s:"H",n:"Hydrogen",g:1,p:1,ie:1312,en:2.2,ea:73,eo:0,r:53},{z:2,s:"He",n:"Helium",g:18,p:1,ie:2372,en:null,ea:-48,eo:null,r:31},
             {z:3,s:"Li",n:"Lithium",g:1,p:2,ie:520,en:0.98,ea:60,eo:-3.04,r:167},{z:4,s:"Be",n:"Beryllium",g:2,p:2,ie:899,en:1.57,ea:0,eo:-1.85,r:112},
@@ -1371,61 +1386,106 @@
             });
         }
 
-        // === 3-6. VARIOUS GAMES (Bond, Stoich, Gas, Equil) ===
-        function checkBond() {
-            const e1 = document.getElementById('bond-el1').value, e2 = document.getElementById('bond-el2').value;
-            const res = document.getElementById('bond-result');
-            let html = "";
-            if((e1=='metal' && e2=='nonmetal') || (e1=='nonmetal' && e2=='metal')) html = `<div class="mt-2 text-pink-400 font-bold">Ionic Bond</div>`;
-            else if(e1=='nonmetal' && e2=='nonmetal') html = `<div class="mt-2 text-cyan-400 font-bold">Covalent Bond</div>`;
-            else html = `<div class="text-slate-400">Metallic / Alloy</div>`;
-            res.innerHTML = html;
-        }
-        function updateBurger() {
-            const b = parseInt(document.querySelector('#game-stoich input:nth-of-type(1)').value);
-            const m = parseInt(document.querySelector('#game-stoich input:nth-of-type(2)').value);
-            document.getElementById('bread-val').innerText = b; document.getElementById('meat-val').innerText = m;
-            document.getElementById('burger-out').innerText = Math.min(b, m);
-            document.getElementById('limit-out').innerText = b < m ? "Bread" : m < b ? "Meat" : "None";
-        }
-        
-        let miniGasReq, miniGasParticles = [], miniGasTemp = 10;
-        function initMiniGas() {
-            const container = document.getElementById('mini-balloon'); container.innerHTML = ''; miniGasParticles = [];
-            miniGasTemp = parseInt(document.querySelector('#game-gas input').value) || 10;
-            const clip = document.createElement('div'); 
-            clip.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;overflow:hidden;border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;';
-            container.appendChild(clip);
-            for(let i=0; i<15; i++) {
-                const p = document.createElement('div'); p.className = 'absolute rounded-full bg-yellow-300 shadow-[0_0_5px_yellow]';
-                p.style.width='6px'; p.style.height='6px'; clip.appendChild(p);
-                miniGasParticles.push({ el:p, x:30+Math.random()*20, y:40+Math.random()*20, vx:(Math.random()-0.5)*4, vy:(Math.random()-0.5)*4 });
-            }
-            updateGas(miniGasTemp); if(miniGasReq) cancelAnimationFrame(miniGasReq); loopMiniGas();
-        }
-        function updateGas(v) {
-            miniGasTemp = parseInt(v); document.getElementById('mini-temp-display').innerText = v;
-            const factor = 1 + (v/100)*1.8; 
-            const b = document.getElementById('mini-balloon'); if(b) { b.style.width = `${80*factor}px`; b.style.height = `${100*factor}px`; }
-        }
-        function loopMiniGas() {
-            if(document.getElementById('game-gas').style.display !== 'none') {
-                const speed = 0.8 + (miniGasTemp/25); const dims = document.getElementById('mini-balloon').getBoundingClientRect();
-                miniGasParticles.forEach(p => {
-                    p.vy += 0.15; p.x += p.vx*speed; p.y += p.vy*speed;
-                    if(p.x < 5) { p.x=5; p.vx*=-1; } if(p.x > parseFloat(document.getElementById('mini-balloon').style.width)-10) { p.x=parseFloat(document.getElementById('mini-balloon').style.width)-10; p.vx*=-1; }
-                    if(p.y > parseFloat(document.getElementById('mini-balloon').style.height)-10) { p.y=parseFloat(document.getElementById('mini-balloon').style.height)-10; p.vy*=-0.9; if(miniGasTemp>5) p.vy -= Math.random()*miniGasTemp/40; }
-                    p.el.style.left = `${p.x}px`; p.el.style.top = `${p.y}px`;
-                });
-            }
-            miniGasReq = requestAnimationFrame(loopMiniGas);
-        }
-        function shiftEquil(v) {
-            let bar = document.getElementById('equil-bar'); let w = parseFloat(bar.style.width) || 50;
-            w = Math.max(10, Math.min(90, w + v)); bar.style.width = w + '%';
+        // ==========================================
+        // 6. GAME: ELECTROCHEMISTRY LAB (REPLACES EQUILIBRIUM)
+        // ==========================================
+        let electroInterval;
+
+        function initElectroGame() { 
+            updateElectroGame(); // Start the simulation immediately
         }
 
-        // === 7. pH ALCHEMIST 3D: THE FIXED LOGIC ===
+        function updateElectroGame() {
+            const m1 = document.getElementById('electro-m1');
+            const m2 = document.getElementById('electro-m2');
+            
+            // Get Voltages (Reduction Potentials)
+            const e1 = parseFloat(m1.options[m1.selectedIndex].dataset.e);
+            const e2 = parseFloat(m2.options[m2.selectedIndex].dataset.e);
+            
+            // Update labels on the metal bars
+            document.getElementById('metal-label-1').innerText = m1.value;
+            document.getElementById('metal-label-2').innerText = m2.value;
+
+            // Calculate Voltage: Cathode (Higher E) - Anode (Lower E)
+            let voltage, flowDirection;
+
+            if (e2 > e1) {
+                // Right is Cathode, Left is Anode
+                voltage = e2 - e1;
+                flowDirection = 'right';
+            } else {
+                // Left is Cathode, Right is Anode
+                voltage = e1 - e2;
+                flowDirection = 'left';
+            }
+
+            // If same metal, 0V
+            if(m1.value === m2.value) voltage = 0;
+
+            // Update Text
+            document.getElementById('cell-voltage').innerText = voltage.toFixed(2) + ' V';
+
+            // Update Needle Rotation
+            const angle = Math.min(voltage * 30, 60); 
+            const needle = document.getElementById('voltmeter-needle');
+            const rotation = (flowDirection === 'right' && voltage > 0) ? angle : -angle;
+            needle.style.transform = `rotate(${rotation}deg)`;
+
+            // Update Arrow Animation
+            const arrow = document.getElementById('flow-arrow');
+            if(voltage === 0) {
+                arrow.style.opacity = 0;
+            } else {
+                arrow.style.opacity = 1;
+                arrow.className = `ph-fill ph-arrow-${flowDirection} text-3xl text-yellow-400 animate-pulse`;
+            }
+
+            // Update Equation
+            const eqBox = document.getElementById('redox-equation');
+            if (voltage === 0) {
+                eqBox.innerText = "No Reaction (Same Metal)";
+                stopElectrons();
+            } else {
+                // Determine Anode/Cathode text
+                const anode = flowDirection === 'right' ? m1.value : m2.value;
+                const cathode = flowDirection === 'right' ? m2.value : m1.value;
+                eqBox.innerText = `${anode}(s) + ${cathode}²⁺(aq) → ${anode}²⁺(aq) + ${cathode}(s)`;
+                animateElectrons(flowDirection);
+            }
+        }
+
+        function animateElectrons(direction) {
+            const stream = document.getElementById('electron-stream');
+            stream.innerHTML = ''; // Clear old electrons
+            clearInterval(electroInterval);
+
+            const createElectron = () => {
+                const el = document.createElement('div');
+                el.className = 'absolute top-0 w-2 h-2 bg-yellow-400 rounded-full shadow-[0_0_5px_yellow]';
+                el.style.left = direction === 'right' ? '0%' : '100%';
+                stream.appendChild(el);
+
+                let pos = direction === 'right' ? 0 : 100;
+                const interval = setInterval(() => {
+                    if (direction === 'right') pos += 2; else pos -= 2;
+                    el.style.left = pos + '%';
+                    if (pos > 100 || pos < 0) { clearInterval(interval); el.remove(); }
+                }, 20);
+            };
+
+            createElectron();
+            electroInterval = setInterval(createElectron, 500); 
+        }
+
+        function stopElectrons() {
+            clearInterval(electroInterval);
+            document.getElementById('electron-stream').innerHTML = '';
+        }
+
+        // ==========================================
+        // 7. GAME: pH ALCHEMIST 3D (FIXED DRAG & SNAP)
+        // ==========================================
         let phState = { val: 7.00, volume: 40, isPouring: false };
         let phReq, phParticles = [];
         let activeItem = null;
@@ -1503,7 +1563,7 @@
 
         function checkPouringInteraction(item) {
             const itemRect = item.getBoundingClientRect();
-            const beaker = document.querySelector('#game-ph .w-40') || document.querySelector('#game-ph .md\\:w-52'); // Handle responsive classes
+            const beaker = document.querySelector('#game-ph .w-40') || document.querySelector('#game-ph .md\\:w-52');
             if(!beaker) return;
             const bRect = beaker.getBoundingClientRect();
 
@@ -1603,7 +1663,25 @@
             phReq = requestAnimationFrame(animatePhParticles);
         }
 
-        // === 8-10. OTHER GAMES (Battery, Energy, Organic) ===
+        // ==========================================
+        // 8-10. OTHER GAMES (Bond, Stoich, Gas, etc.)
+        // ==========================================
+        function checkBond() {
+            const e1 = document.getElementById('bond-el1').value, e2 = document.getElementById('bond-el2').value;
+            const res = document.getElementById('bond-result');
+            let html = "";
+            if((e1=='metal' && e2=='nonmetal') || (e1=='nonmetal' && e2=='metal')) html = `<div class="mt-2 text-pink-400 font-bold">Ionic Bond</div>`;
+            else if(e1=='nonmetal' && e2=='nonmetal') html = `<div class="mt-2 text-cyan-400 font-bold">Covalent Bond</div>`;
+            else html = `<div class="text-slate-400">Metallic / Alloy</div>`;
+            res.innerHTML = html;
+        }
+        function updateBurger() {
+            const b = parseInt(document.querySelector('#game-stoich input:nth-of-type(1)').value);
+            const m = parseInt(document.querySelector('#game-stoich input:nth-of-type(2)').value);
+            document.getElementById('bread-val').innerText = b; document.getElementById('meat-val').innerText = m;
+            document.getElementById('burger-out').innerText = Math.min(b, m);
+            document.getElementById('limit-out').innerText = b < m ? "Bread" : m < b ? "Meat" : "None";
+        }
         function setBattery(a, c) { document.getElementById('volt-disp').innerText = Math.abs(c-a).toFixed(2) + ' V'; }
         function setEnergy(t) {
             const p = document.getElementById('energy-path'), s = document.getElementById('energy-status');
@@ -1616,7 +1694,9 @@
             else { r.innerText="Wrong."; r.className="mt-2 h-6 text-red-400 font-bold"; }
         }
 
-        // === GAS LAWS GAME INTEGRATION ===
+        // ==========================================
+        // GAS LAWS GAME INTEGRATION
+        // ==========================================
         let gasAnimId; const gasCanvas = document.getElementById('particleCanvas'); const gCtx_bg = gasCanvas.getContext('2d'); let gasParticles = [];
         function launchGasLawsGame() { document.getElementById('app-main-menu').style.display = 'none'; document.getElementById('gas-laws-view').style.display = 'block'; checkAccess('game-gas-laws'); resizeGasBg(); window.addEventListener('resize', resizeGasBg); initGasParticles(); animateGasBg(); }
         function returnToGasMenu() { document.querySelectorAll('.gas-mode-screen').forEach(el => el.style.display = 'none'); document.getElementById('gasMainMenu').style.display = 'flex'; cancelBoyleAnim(); cancelGayLussacAnim(); }
@@ -1639,5 +1719,38 @@
         let avoCount = 0; let avoInterval;
         function initAvogadro() { avoCount = 0; document.getElementById('avogadroCount').innerText=0; const b = document.getElementById('avogadroBalloon'); b.style.transform = 'scale(0.5)'; b.style.opacity='1'; b.style.display='block'; document.getElementById('getNewOneBtn').style.display='none'; document.getElementById('increaseMoleculeBtn').style.display='inline-block'; const btn = document.getElementById('increaseMoleculeBtn'); const add = () => { if(avoCount > 100) { b.classList.add('pop'); setTimeout(()=>{ b.style.display='none'; document.getElementById('getNewOneBtn').style.display='inline-block'; btn.style.display='none'; }, 300); clearInterval(avoInterval); return; } avoCount++; document.getElementById('avogadroCount').innerText = avoCount; b.style.transform = `scale(${0.5 + avoCount/100})`; }; btn.onmousedown = () => avoInterval = setInterval(add, 50); btn.onmouseup = () => clearInterval(avoInterval); btn.ontouchstart = (e) => { e.preventDefault(); avoInterval = setInterval(add, 50); }; btn.ontouchend = () => clearInterval(avoInterval); }
         function resetAvogadro() { document.getElementById('avogadroBalloon').classList.remove('pop'); initAvogadro(); }
+
+        // --- Mini Gas Logic ---
+        let miniGasReq, miniGasParticles = [], miniGasTemp = 10;
+        function initMiniGas() {
+            const container = document.getElementById('mini-balloon'); container.innerHTML = ''; miniGasParticles = [];
+            miniGasTemp = parseInt(document.querySelector('#game-gas input').value) || 10;
+            const clip = document.createElement('div'); 
+            clip.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;overflow:hidden;border-radius:50% 50% 50% 50% / 60% 60% 40% 40%;';
+            container.appendChild(clip);
+            for(let i=0; i<15; i++) {
+                const p = document.createElement('div'); p.className = 'absolute rounded-full bg-yellow-300 shadow-[0_0_5px_yellow]';
+                p.style.width='6px'; p.style.height='6px'; clip.appendChild(p);
+                miniGasParticles.push({ el:p, x:30+Math.random()*20, y:40+Math.random()*20, vx:(Math.random()-0.5)*4, vy:(Math.random()-0.5)*4 });
+            }
+            updateGas(miniGasTemp); if(miniGasReq) cancelAnimationFrame(miniGasReq); loopMiniGas();
+        }
+        function updateGas(v) {
+            miniGasTemp = parseInt(v); document.getElementById('mini-temp-display').innerText = v;
+            const factor = 1 + (v/100)*1.8; 
+            const b = document.getElementById('mini-balloon'); if(b) { b.style.width = `${80*factor}px`; b.style.height = `${100*factor}px`; }
+        }
+        function loopMiniGas() {
+            if(document.getElementById('game-gas').style.display !== 'none') {
+                const speed = 0.8 + (miniGasTemp/25); const dims = document.getElementById('mini-balloon').getBoundingClientRect();
+                miniGasParticles.forEach(p => {
+                    p.vy += 0.15; p.x += p.vx*speed; p.y += p.vy*speed;
+                    if(p.x < 5) { p.x=5; p.vx*=-1; } if(p.x > parseFloat(document.getElementById('mini-balloon').style.width)-10) { p.x=parseFloat(document.getElementById('mini-balloon').style.width)-10; p.vx*=-1; }
+                    if(p.y > parseFloat(document.getElementById('mini-balloon').style.height)-10) { p.y=parseFloat(document.getElementById('mini-balloon').style.height)-10; p.vy*=-0.9; if(miniGasTemp>5) p.vy -= Math.random()*miniGasTemp/40; }
+                    p.el.style.left = `${p.x}px`; p.el.style.top = `${p.y}px`;
+                });
+            }
+            miniGasReq = requestAnimationFrame(loopMiniGas);
+        }
 
     </script>
