@@ -1263,16 +1263,20 @@
     // ==========================================
     // 1. AUTHENTICATION & DATABASE SYSTEM
     // ==========================================
+    // Retrieves user from current session (if any)
     let currentUser = JSON.parse(sessionStorage.getItem('chem_current_user'));
     const authContainer = document.getElementById('auth-container');
     let isLoginMode = true;
 
+    // Initialize LocalStorage Database if empty
     if (!localStorage.getItem('chem_db')) {
         localStorage.setItem('chem_db', JSON.stringify([]));
     }
 
+    // Render the Top Right Auth Button
     function renderAuth() {
         if (currentUser) {
+            // User is logged in: Show Name and Logout
             document.getElementById('feature-lock-overlay').classList.add('hidden');
             authContainer.innerHTML = `
                 <div class="flex items-center gap-2">
@@ -1283,6 +1287,7 @@
                     <button onclick="logout()" class="text-xs text-red-400 ml-2 hover:text-red-300 transition-colors">LOGOUT</button>
                 </div>`;
         } else {
+            // User is guest: Show Login/Signup
             authContainer.innerHTML = `
                 <button onclick="openAuthModal(true)" class="auth-btn">Log In</button>
                 <button onclick="openAuthModal(false)" class="auth-btn primary">Sign Up</button>`;
@@ -1290,6 +1295,7 @@
     }
     renderAuth();
 
+    // Logout Function
     window.logout = function() {
         sessionStorage.removeItem('chem_current_user');
         currentUser = null;
@@ -1297,6 +1303,7 @@
         returnToMenu();
     }
 
+    // Modal Controls
     window.openAuthModal = function(login) {
         isLoginMode = login;
         updateAuthModalUI();
@@ -1305,6 +1312,7 @@
         document.getElementById('auth-error').classList.add('hidden');
         document.getElementById('auth-email').value = '';
         document.getElementById('auth-password').value = '';
+        // Animation
         setTimeout(() => {
             el.classList.remove('opacity-0');
             document.getElementById('login-content').classList.remove('scale-95');
@@ -1317,6 +1325,7 @@
         document.getElementById('auth-switch-mode').innerText = isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Sign In";
     }
 
+    // Event Listeners for Auth
     document.getElementById('auth-switch-mode').addEventListener('click', () => {
         isLoginMode = !isLoginMode;
         updateAuthModalUI();
@@ -1342,6 +1351,7 @@
         const db = JSON.parse(localStorage.getItem('chem_db'));
 
         if (isLoginMode) {
+            // LOGIN LOGIC
             const user = db.find(u => u.email === email && u.pass === pass);
             if (user) {
                 currentUser = user;
@@ -1353,6 +1363,7 @@
                 errDiv.classList.remove('hidden');
             }
         } else {
+            // SIGNUP LOGIC
             const existing = db.find(u => u.email === email);
             if (existing) {
                 errDiv.innerText = "This account already exists.";
@@ -1378,51 +1389,67 @@
     // 2. GLOBAL NAVIGATION & UTILITY FUNCTIONS
     // ==========================================
     
+    // Check if user has rights to view feature
     function checkAccess(featureId) {
+        // Atom builder is always free
         if (featureId === 'game-atom') return true;
+        // Other games require login
         if (currentUser) return true;
         
+        // Show lock screen if not logged in
         document.getElementById('feature-lock-overlay').classList.remove('hidden');
         return false;
     }
 
+    // Main Game Switcher
     function openGame(gameId) {
+        // Hide Main Menu
         document.getElementById('app-main-menu').style.display = 'none';
+        
+        // Hide all other views
         document.querySelectorAll('.app-view').forEach(el => el.style.display = 'none');
         
+        // Show selected view
         const view = document.getElementById(gameId);
         if (view) view.style.display = 'flex';
 
+        // Check Permissions
         checkAccess(gameId);
 
+        // --- SPECIFIC GAME INITIALIZATION ---
         if (gameId === 'game-atom') initAtomGame();
         if (gameId === 'game-periodic') initPeriodicTable();
-        if (gameId === 'game-bond') checkBond();
-        if (gameId === 'game-stoich') initStoichGame(); // UPDATED FUNCTION
+        if (gameId === 'game-bond') checkBond(); // Reset bond UI
+        if (gameId === 'game-stoich') initSolubilityGame(); // *** NEW SOLUBILITY LOGIC ***
         if (gameId === 'game-gas') initMiniGas();
-        if (gameId === 'game-equil') initElectroGame();
+        if (gameId === 'game-equil') initElectroGame(); // *** FIXED ELECTRO LOGIC ***
         if (gameId === 'game-ph') initPhGame();
     }
 
+    // Return to Main Menu & Cleanup
     function returnToMenu() {
         document.querySelectorAll('.app-view').forEach(el => el.style.display = 'none');
         document.getElementById('app-main-menu').style.display = 'flex';
         document.getElementById('feature-lock-overlay').classList.add('hidden');
 
+        // Stop all animation loops to save battery/performance
         cancelAnimationFrame(gasAnimId);
         if (miniGasReq) cancelAnimationFrame(miniGasReq);
         if (phReq) cancelAnimationFrame(phReq);
         if (electroInterval) clearInterval(electroInterval);
-        if (stoichSim.req) cancelAnimationFrame(stoichSim.req); // UPDATED
+        if (solSim.req) cancelAnimationFrame(solSim.req);
 
+        // Restart Main Background Particles
         initAppParticles();
         animateApp();
     }
 
+    // External Link
     function openContact() {
         window.location.href = 'https://line.me/ti/p/~Bom_trendy';
     }
 
+    // Modal Helpers
     window.openModal = function(id) {
         const el = document.getElementById(id + '-modal');
         if (!el) return;
@@ -1566,7 +1593,7 @@
     animateApp();
 
     // ==========================================
-    // 4. GAME: ATOM BUILDER 
+    // 4. GAME: ATOM BUILDER (Drag & Drop)
     // ==========================================
     let atomData = { p: 0, n: 0, e: 0 };
     const atomElements = ["?", "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne"];
@@ -1807,271 +1834,223 @@
     }
 
     // ==========================================
-    // 6. GAME: STOICHIOMETRY (Limiting Reagents)
+    // 6. GAME: SOLUBILITY & PRECIPITATION (REPLACES STOICH)
     // ==========================================
-    let stoichSim = { 
-        canvas: null, ctx: null, req: null, 
-        particles: [], 
-        width: 0, height: 0,
-        molesA: 4, molesB: 3, 
-        state: 'idle' // idle, reacting, done
+    let solSim = {
+        canvas: null, ctx: null, req: null, particles: [], isPouring: false, width: 0, height: 0,
+        // Physical Parameters
+        temp: 25, saltType: 'NaCl', solubilityLimit: 0, currentDissolved: 0, currentSolid: 0,
+        // Visual Configs
+        beaker: { x: 0, y: 0, w: 0, h: 0, waterY: 0 }
     };
 
-    class StoichParticle {
-        constructor(type, x, y) {
-            this.type = type; // 'A' (H2), 'B' (O2), 'P' (H2O)
-            this.x = x; 
-            this.y = y;
-            this.vx = (Math.random() - 0.5) * 2;
-            this.vy = (Math.random() - 0.5) * 2;
-            this.targetX = null;
-            this.targetY = null;
-            this.merged = false;
-            this.scale = 1;
-        }
+    const SALT_DATA = {
+        'NaCl': { color: '#ffffff', baseSol: 300, tempCoeff: 1.5, name: 'NaCl' },
+        'PbI2': { color: '#facc15', baseSol: 50, tempCoeff: 4.0, name: 'PbI₂' },
+        'CuSO4': { color: '#38bdf8', baseSol: 150, tempCoeff: 2.0, name: 'CuSO₄' }
+    };
 
-        update() {
-            if (this.targetX !== null) {
-                // Move towards target (reaction center or trash)
-                const dx = this.targetX - this.x;
-                const dy = this.targetY - this.y;
-                this.x += dx * 0.05;
-                this.y += dy * 0.05;
-                if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
-                    this.targetX = null; // Arrived
+    function initSolubilityGame() {
+        solSim.canvas = document.getElementById('solubility-canvas');
+        if (!solSim.canvas) return;
+        solSim.ctx = solSim.canvas.getContext('2d');
+        resizeSolubilitySim();
+        window.addEventListener('resize', resizeSolubilitySim);
+        resetSolubilitySim();
+        solLoop();
+    }
+
+    function resizeSolubilitySim() {
+        if (!solSim.canvas) return;
+        const parent = solSim.canvas.parentElement;
+        solSim.width = solSim.canvas.width = parent.clientWidth;
+        solSim.height = solSim.canvas.height = parent.clientHeight;
+        solSim.beaker.w = Math.min(400, solSim.width * 0.6);
+        solSim.beaker.h = solSim.height * 0.6;
+        solSim.beaker.x = (solSim.width - solSim.beaker.w) / 2;
+        solSim.beaker.y = solSim.height * 0.85;
+        solSim.beaker.waterY = solSim.beaker.y - (solSim.beaker.h * 0.8);
+    }
+
+    function resetSolubilitySim() {
+        solSim.particles = [];
+        solSim.currentDissolved = 0;
+        solSim.currentSolid = 0;
+        updateSolubilityParams();
+    }
+
+    function updateSolubilityParams() {
+        const slider = document.getElementById('sol-temp-slider');
+        const selector = document.getElementById('salt-selector');
+        solSim.temp = parseInt(slider.value);
+        solSim.saltType = selector.value;
+        document.getElementById('sol-temp-display').innerText = solSim.temp + "°C";
+        const data = SALT_DATA[solSim.saltType];
+        solSim.solubilityLimit = Math.floor(data.baseSol + (solSim.temp * data.tempCoeff));
+
+        // Precipitation logic
+        let dissolvedCount = solSim.particles.filter(p => p.state === 'dissolved').length;
+        if (dissolvedCount > solSim.solubilityLimit) {
+            let excess = dissolvedCount - solSim.solubilityLimit;
+            for (let p of solSim.particles) {
+                if (excess <= 0) break;
+                if (p.state === 'dissolved') {
+                    p.state = 'falling_solid';
+                    p.vx = 0;
+                    p.vy = 1 + Math.random();
+                    excess--;
                 }
-            } else {
-                // Brownian motion
-                this.x += this.vx;
-                this.y += this.vy;
-                
-                // Bounce off walls
-                if(this.x < 20 || this.x > stoichSim.width - 20) this.vx *= -1;
-                if(this.y < 20 || this.y > stoichSim.height - 20) this.vy *= -1;
+            }
+        } else {
+            // Re-dissolve logic
+            let capacity = solSim.solubilityLimit - dissolvedCount;
+            for (let p of solSim.particles) {
+                if (capacity <= 0) break;
+                if (p.state === 'solid') {
+                    p.state = 'dissolved';
+                    p.vy = (Math.random() - 0.5) * 2;
+                    capacity--;
+                }
             }
         }
+    }
 
-        draw(ctx) {
-            ctx.save();
-            ctx.translate(this.x, this.y);
-            
-            if (this.type === 'A') { 
-                // H2: Two small white circles
-                ctx.fillStyle = 'white';
-                ctx.shadowBlur = 5; ctx.shadowColor = 'white';
-                ctx.beginPath(); ctx.arc(-6, 0, 6, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(6, 0, 6, 0, Math.PI*2); ctx.fill();
-            } else if (this.type === 'B') {
-                // O2: Two larger red circles
-                ctx.fillStyle = '#ef4444';
-                ctx.shadowBlur = 8; ctx.shadowColor = '#ef4444';
-                ctx.beginPath(); ctx.arc(-8, 0, 8, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(8, 0, 8, 0, Math.PI*2); ctx.fill();
-            } else if (this.type === 'P') {
-                // H2O: Mickey Mouse shape
-                ctx.fillStyle = '#ef4444'; // O
-                ctx.shadowBlur = 10; ctx.shadowColor = '#10b981';
-                ctx.beginPath(); ctx.arc(0, 2, 10, 0, Math.PI*2); ctx.fill();
-                ctx.fillStyle = 'white'; // H
-                ctx.beginPath(); ctx.arc(-8, -8, 6, 0, Math.PI*2); ctx.fill();
-                ctx.beginPath(); ctx.arc(8, -8, 6, 0, Math.PI*2); ctx.fill();
+    function startPouringSalt() { solSim.isPouring = true; }
+    function stopPouringSalt() { solSim.isPouring = false; }
+
+    function spawnParticles() {
+        const data = SALT_DATA[solSim.saltType];
+        const spawnX = solSim.width / 2 + (Math.random() - 0.5) * 40;
+        const spawnY = solSim.height * 0.1;
+        solSim.particles.push({
+            x: spawnX,
+            y: spawnY,
+            vx: (Math.random() - 0.5),
+            vy: 2 + Math.random() * 3,
+            r: 2 + Math.random(),
+            color: data.color,
+            state: 'falling_air'
+        });
+    }
+
+    function solLoop() {
+        if (document.getElementById('game-stoich').style.display === 'none') return;
+        solSim.ctx.clearRect(0, 0, solSim.width, solSim.height);
+        drawBeaker(true);
+
+        if (solSim.isPouring) {
+            for (let i = 0; i < 3; i++) spawnParticles();
+        }
+
+        let dissolvedCount = solSim.particles.filter(p => p.state === 'dissolved').length;
+        let solidCount = 0;
+
+        solSim.particles.forEach(p => {
+            if (p.state === 'falling_air') {
+                p.y += p.vy;
+                p.x += p.vx;
+                if (p.y >= solSim.beaker.waterY) {
+                    p.state = 'falling_water';
+                    p.vy *= 0.3;
+                }
+            } else if (p.state === 'falling_water' || p.state === 'falling_solid') {
+                p.y += p.vy;
+                p.x += (Math.random() - 0.5);
+                if (p.state === 'falling_water') {
+                    if (dissolvedCount < solSim.solubilityLimit) {
+                        p.state = 'dissolved';
+                        dissolvedCount++;
+                    } else {
+                        p.state = 'falling_solid';
+                    }
+                }
+                if (p.y >= solSim.beaker.y - p.r) {
+                    p.y = solSim.beaker.y - p.r;
+                    p.state = 'solid';
+                }
+            } else if (p.state === 'dissolved') {
+                const speed = 0.5 + (solSim.temp / 50);
+                p.x += (Math.random() - 0.5) * speed * 2;
+                p.y += (Math.random() - 0.5) * speed * 2;
+                if (p.x < solSim.beaker.x) p.x = solSim.beaker.x;
+                if (p.x > solSim.beaker.x + solSim.beaker.w) p.x = solSim.beaker.x + solSim.beaker.w;
+                if (p.y < solSim.beaker.waterY) p.y = solSim.beaker.waterY;
+                if (p.y > solSim.beaker.y) p.y = solSim.beaker.y;
+            } else if (p.state === 'solid') {
+                solidCount++;
             }
+
+            solSim.ctx.fillStyle = p.color;
+            const radius = p.state === 'dissolved' ? p.r * 0.6 : p.r;
+            solSim.ctx.beginPath();
+            solSim.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+            solSim.ctx.fill();
+        });
+
+        drawBeaker(false);
+
+        // Stats UI
+        solSim.currentDissolved = dissolvedCount;
+        solSim.currentSolid = solidCount;
+        document.getElementById('ion-count').innerText = Math.floor(dissolvedCount / 10);
+        document.getElementById('solid-count').innerText = Math.floor(solidCount / 10);
+        
+        // Saturation Bar
+        const satPercent = Math.min(100, (dissolvedCount / solSim.solubilityLimit) * 100);
+        const bar = document.getElementById('saturation-bar');
+        bar.style.width = satPercent + '%';
+        const statusLabel = document.getElementById('saturation-status');
+        if (satPercent >= 100) {
+            bar.classList.remove('bg-cyan-500'); bar.classList.add('bg-red-500');
+            statusLabel.innerText = "SATURATED (PRECIPITATING)";
+            statusLabel.classList.replace('text-green-400', 'text-red-400');
+        } else {
+            bar.classList.add('bg-cyan-500'); bar.classList.remove('bg-red-500');
+            statusLabel.innerText = "UNSATURATED";
+            statusLabel.classList.replace('text-red-400', 'text-green-400');
+        }
+
+        solSim.req = requestAnimationFrame(solLoop);
+    }
+
+    function drawBeaker(isBack) {
+        const ctx = solSim.ctx;
+        const b = solSim.beaker;
+        if (isBack) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
+            if (solSim.saltType === 'CuSO4') ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
+            ctx.fillRect(b.x, b.waterY, b.w, b.h * 0.8);
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(b.x, b.waterY);
+            ctx.lineTo(b.x + b.w, b.waterY);
+            ctx.stroke();
+            ctx.restore();
+        } else {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+            ctx.lineWidth = 4;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(b.x, b.y - b.h);
+            ctx.lineTo(b.x, b.y);
+            ctx.lineTo(b.x + b.w, b.y);
+            ctx.lineTo(b.x + b.w, b.y - b.h);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 10;
+            ctx.beginPath();
+            ctx.moveTo(b.x + 10, b.y - 20);
+            ctx.lineTo(b.x + 10, b.y - b.h + 20);
+            ctx.stroke();
             ctx.restore();
         }
     }
 
-    function initStoichGame() {
-        stoichSim.canvas = document.getElementById('stoich-canvas');
-        if(!stoichSim.canvas) return;
-        stoichSim.ctx = stoichSim.canvas.getContext('2d');
-        stoichSim.width = stoichSim.canvas.parentElement.clientWidth;
-        stoichSim.height = stoichSim.canvas.parentElement.clientHeight;
-        stoichSim.canvas.width = stoichSim.width;
-        stoichSim.canvas.height = stoichSim.height;
-
-        resetStoichGame();
-        stoichLoop();
-    }
-
-    function updateStoichInputs() {
-        if(stoichSim.state === 'reacting') return; 
-        stoichSim.molesA = parseInt(document.getElementById('stoich-slider-a').value);
-        stoichSim.molesB = parseInt(document.getElementById('stoich-slider-b').value);
-        
-        document.getElementById('stoich-val-a').innerText = stoichSim.molesA + " mol";
-        document.getElementById('stoich-val-b').innerText = stoichSim.molesB + " mol";
-        
-        spawnStoichParticles(false); // Update visuals without animation
-        
-        // Reset results display
-        document.getElementById('stoich-limiting-display').innerText = "--";
-        document.getElementById('stoich-limiting-display').className = "text-yellow-400 font-bold text-sm";
-        document.getElementById('stoich-yield-display').innerText = "--";
-    }
-
-    function spawnStoichParticles(animate = true) {
-        stoichSim.particles = [];
-        
-        // Spawn A (Left side)
-        for(let i=0; i<stoichSim.molesA; i++) {
-            stoichSim.particles.push(new StoichParticle('A', 
-                Math.random() * (stoichSim.width * 0.4) + 20, 
-                Math.random() * (stoichSim.height - 40) + 20
-            ));
-        }
-
-        // Spawn B (Right side)
-        for(let i=0; i<stoichSim.molesB; i++) {
-            stoichSim.particles.push(new StoichParticle('B', 
-                Math.random() * (stoichSim.width * 0.4) + (stoichSim.width * 0.6) - 20, 
-                Math.random() * (stoichSim.height - 40) + 20
-            ));
-        }
-    }
-
-    function startStoichReaction() {
-        if(stoichSim.state === 'reacting') return;
-        stoichSim.state = 'reacting';
-        
-        // 1. Calculate Math
-        // Reaction: 2 H2 + 1 O2 -> 2 H2O
-        // Ratio: 2 : 1
-        const requiredA = stoichSim.molesB * 2;
-        const requiredB = stoichSim.molesA / 2;
-
-        let limiting = "";
-        let productMoles = 0;
-        let leftOverA = 0;
-        let leftOverB = 0;
-
-        if (stoichSim.molesA < requiredA) {
-            // A is limiting
-            limiting = "Hydrogen (H₂)";
-            productMoles = stoichSim.molesA; // 2 H2 make 2 H2O
-            leftOverB = stoichSim.molesB - (stoichSim.molesA / 2);
-        } else {
-            // B is limiting (or equal)
-            limiting = "Oxygen (O₂)";
-            if(stoichSim.molesA === requiredA) limiting = "None (Perfect)";
-            productMoles = stoichSim.molesB * 2; // 1 O2 makes 2 H2O
-            leftOverA = stoichSim.molesA - (stoichSim.molesB * 2);
-        }
-
-        // Update UI Text
-        document.getElementById('stoich-limiting-display').innerText = limiting;
-        document.getElementById('stoich-limiting-display').className = "text-yellow-400 font-bold text-sm animate-pulse";
-        
-        setTimeout(() => {
-             document.getElementById('stoich-yield-display').innerText = productMoles + " mol H₂O";
-             playPopSound();
-        }, 1500);
-
-        // 2. Animate Conversion
-        // Gather Reactants to center
-        stoichSim.particles.forEach(p => {
-            p.targetX = stoichSim.width / 2 + (Math.random()-0.5)*50;
-            p.targetY = stoichSim.height / 2 + (Math.random()-0.5)*50;
-            p.vx *= 5; p.vy *= 5; // Speed up
-        });
-
-        // After 1 second, replace particles with products/leftovers
-        setTimeout(() => {
-            stoichSim.particles = [];
-            
-            // Add Products (Center)
-            for(let i=0; i<productMoles; i++) {
-                const p = new StoichParticle('P', stoichSim.width/2, stoichSim.height/2);
-                p.vx = (Math.random()-0.5) * 5;
-                p.vy = (Math.random()-0.5) * 5;
-                stoichSim.particles.push(p);
-            }
-
-            // Add Leftover A (Left corner)
-            for(let i=0; i<leftOverA; i++) {
-                stoichSim.particles.push(new StoichParticle('A', 
-                    Math.random()*100 + 20, 
-                    stoichSim.height - 50 + Math.random()*20
-                ));
-            }
-             // Add Leftover B (Right corner)
-            for(let i=0; i<leftOverB; i++) {
-                stoichSim.particles.push(new StoichParticle('B', 
-                    stoichSim.width - 100 + Math.random()*20, 
-                    stoichSim.height - 50 + Math.random()*20
-                ));
-            }
-
-            stoichSim.state = 'done';
-        }, 1000);
-    }
-
-    function resetStoichGame() {
-        stoichSim.state = 'idle';
-        updateStoichInputs();
-    }
-
-    function stoichLoop() {
-        if(document.getElementById('game-stoich').style.display === 'none') return;
-        
-        stoichSim.ctx.fillStyle = 'rgba(15, 23, 42, 0.3)'; // Trail effect
-        stoichSim.ctx.fillRect(0, 0, stoichSim.width, stoichSim.height);
-
-        stoichSim.particles.forEach(p => {
-            p.update();
-            p.draw(stoichSim.ctx);
-        });
-
-        stoichSim.req = requestAnimationFrame(stoichLoop);
-    }
-
     // ==========================================
-    // 9. MINI GAMES & UTILS
-    // ==========================================
-    function checkBond() {
-        const e1 = document.getElementById('bond-el1').value,
-              e2 = document.getElementById('bond-el2').value;
-        const res = document.getElementById('bond-result');
-        let html = "";
-        if ((e1 == 'metal' && e2 == 'nonmetal') || (e1 == 'nonmetal' && e2 == 'metal')) 
-            html = `<div class="mt-2 text-pink-400 font-bold">Ionic Bond</div>`;
-        else if (e1 == 'nonmetal' && e2 == 'nonmetal') 
-            html = `<div class="mt-2 text-cyan-400 font-bold">Covalent Bond</div>`;
-        else 
-            html = `<div class="text-slate-400">Metallic / Alloy</div>`;
-        res.innerHTML = html;
-    }
-
-    function setBattery(a, c) {
-        document.getElementById('volt-disp').innerText = Math.abs(c - a).toFixed(2) + ' V';
-    }
-
-    function setEnergy(t) {
-        const p = document.getElementById('energy-path'),
-              s = document.getElementById('energy-status');
-        if (t == 'exo') {
-            p.setAttribute('d', 'M 20 50 Q 150 10 280 120');
-            s.innerText = "Exothermic";
-            s.className = "text-red-400 font-bold min-h-[1.5rem]";
-        } else {
-            p.setAttribute('d', 'M 20 120 Q 150 10 280 50');
-            s.innerText = "Endothermic";
-            s.className = "text-blue-400 font-bold min-h-[1.5rem]";
-        }
-    }
-
-    function checkOrganic(c) {
-        const r = document.getElementById('organic-res');
-        if (c) {
-            r.innerText = "Correct! Benzene.";
-            r.className = "mt-2 h-6 text-lime-300 font-bold";
-        } else {
-            r.innerText = "Wrong.";
-            r.className = "mt-2 h-6 text-red-400 font-bold";
-        }
-    }
-
-    // ==========================================
-    // 7. GAME: ELECTROCHEMISTRY
+    // 7. GAME: ELECTROCHEMISTRY (FIXED)
     // ==========================================
     let electroInterval;
     function initElectroGame() { updateElectroGame(); }
@@ -2356,6 +2335,51 @@
         phReq = requestAnimationFrame(animatePhParticles);
     }
 
+    // ==========================================
+    // 9. MINI GAMES & UTILS (Bond, Battery, Organic, etc.)
+    // ==========================================
+    function checkBond() {
+        const e1 = document.getElementById('bond-el1').value,
+              e2 = document.getElementById('bond-el2').value;
+        const res = document.getElementById('bond-result');
+        let html = "";
+        if ((e1 == 'metal' && e2 == 'nonmetal') || (e1 == 'nonmetal' && e2 == 'metal')) 
+            html = `<div class="mt-2 text-pink-400 font-bold">Ionic Bond</div>`;
+        else if (e1 == 'nonmetal' && e2 == 'nonmetal') 
+            html = `<div class="mt-2 text-cyan-400 font-bold">Covalent Bond</div>`;
+        else 
+            html = `<div class="text-slate-400">Metallic / Alloy</div>`;
+        res.innerHTML = html;
+    }
+
+    function setBattery(a, c) {
+        document.getElementById('volt-disp').innerText = Math.abs(c - a).toFixed(2) + ' V';
+    }
+
+    function setEnergy(t) {
+        const p = document.getElementById('energy-path'),
+              s = document.getElementById('energy-status');
+        if (t == 'exo') {
+            p.setAttribute('d', 'M 20 50 Q 150 10 280 120');
+            s.innerText = "Exothermic";
+            s.className = "text-red-400 font-bold min-h-[1.5rem]";
+        } else {
+            p.setAttribute('d', 'M 20 120 Q 150 10 280 50');
+            s.innerText = "Endothermic";
+            s.className = "text-blue-400 font-bold min-h-[1.5rem]";
+        }
+    }
+
+    function checkOrganic(c) {
+        const r = document.getElementById('organic-res');
+        if (c) {
+            r.innerText = "Correct! Benzene.";
+            r.className = "mt-2 h-6 text-lime-300 font-bold";
+        } else {
+            r.innerText = "Wrong.";
+            r.className = "mt-2 h-6 text-red-400 font-bold";
+        }
+    }
 
     // ==========================================
     // 10. GAS LAWS (FULL & MINI)
