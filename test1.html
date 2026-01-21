@@ -1383,29 +1383,36 @@
         return false;
     }
 
-   function openGame(gameId) {
-        // Reset Views
+    function openGame(gameId) {
+        // 1. Reset Views
         document.getElementById('app-main-menu').style.display = 'none';
         document.querySelectorAll('.app-view').forEach(el => el.style.display = 'none');
         
-        // Find View & Show it
+        // 2. Show the Target View immediately
         const view = document.getElementById(gameId);
-        if (view) view.style.display = 'flex';
+        if (view) {
+            view.style.display = 'flex';
+            void view.offsetWidth; // Force reflow
+        }
 
-        // Auth Check
+        // 3. Auth Check
         checkAccess(gameId);
 
-        // --- CORRECT GAME INITIALIZERS ---
+        // 4. Game Initializers
         if (gameId === 'game-atom') initAtomGame();
         if (gameId === 'game-periodic') initPeriodicTable();
         if (gameId === 'game-bond') checkBond();
-        
-        // >>>>> THIS IS THE CRITICAL LINE <<<<<
-        if (gameId === 'game-battery') initStoichGame(); 
-        
+        if (gameId === 'game-stoich') initSolubilityGame(); 
         if (gameId === 'game-gas') initMiniGas();
         if (gameId === 'game-equil') initElectroGame(); 
         if (gameId === 'game-ph') initPhGame();
+
+        // Game 8: Stoichiometry (Limiting Reagents) - FORCE INIT
+        if (gameId === 'game-battery') {
+            setTimeout(() => {
+                initStoichGame();
+            }, 50);
+        }
     }
 
     function returnToMenu() {
@@ -1413,12 +1420,12 @@
         document.getElementById('app-main-menu').style.display = 'flex';
         document.getElementById('feature-lock-overlay').classList.add('hidden');
 
-        // Stop all animations
         cancelAnimationFrame(gasAnimId);
         if (miniGasReq) cancelAnimationFrame(miniGasReq);
         if (phReq) cancelAnimationFrame(phReq);
         if (electroInterval) clearInterval(electroInterval);
         if (stoichSim.req) cancelAnimationFrame(stoichSim.req);
+        if (solubilitySim.req) cancelAnimationFrame(solubilitySim.req);
 
         initAppParticles();
         animateApp();
@@ -1672,7 +1679,7 @@
     }
 
     // ==========================================
-    // 5. GAME: PERIODIC TABLE (FIXED: 118 Elements)
+    // 5. GAME: PERIODIC TABLE (FULL 118 DATA)
     // ==========================================
     const periodicData = [
         {z:1,s:"H",n:"Hydrogen",g:1,p:1,ie:1312,en:2.2,ea:73,eo:0,r:53},{z:2,s:"He",n:"Helium",g:18,p:1,ie:2372,en:null,ea:-48,eo:null,r:31},
@@ -1736,7 +1743,6 @@
         {z:117,s:"Ts",n:"Tennessine",g:17,p:7,ie:730,en:null,ea:null,eo:null,r:140},{z:118,s:"Og",n:"Oganesson",g:18,p:7,ie:860,en:null,ea:null,eo:null,r:140}
     ];
 
-    let currentPTMode = 'standard';
     function initPeriodicTable() {
         const grid = document.getElementById('periodic-grid-target');
         grid.innerHTML = '';
@@ -1759,6 +1765,7 @@
         updatePTVisuals();
     }
 
+    let currentPTMode = 'standard';
     function togglePTMode(btn, mode) {
         document.querySelectorAll('.pt-toggle-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -1811,364 +1818,150 @@
         });
     }
 
-  // ==========================================
-// 6. GAME: STOICHIOMETRY (Fixed & Bulletproofed)
-// ==========================================
-let stoichSim = { 
-    canvas: null, ctx: null, req: null, 
-    particles: [], 
-    width: 0, height: 0,
-    molesA: 4, molesB: 3, 
-    state: 'idle' 
-};
-
-class StoichParticle {
-    constructor(type, x, y) {
-        this.type = type; // 'A' (H2), 'B' (O2), 'P' (H2O)
-        this.x = x; 
-        this.y = y;
-        this.vx = (Math.random() - 0.5) * 2;
-        this.vy = (Math.random() - 0.5) * 2;
-        this.targetX = null;
-        this.targetY = null;
-    }
-
-    update() {
-        if (this.targetX !== null) {
-            // Converge towards target during reaction phase
-            const dx = this.targetX - this.x;
-            const dy = this.targetY - this.y;
-            this.x += dx * 0.08; 
-            this.y += dy * 0.08;
-            if (Math.abs(dx) < 2 && Math.abs(dy) < 2) {
-                this.targetX = null; 
-            }
-        } else {
-            // Normal Brownian motion
-            this.x += this.vx;
-            this.y += this.vy;
-            
-            // Safety bounce (keep inside bounds)
-            if(this.x < 10) { this.x = 10; this.vx = Math.abs(this.vx); }
-            if(this.x > stoichSim.width - 10) { this.x = stoichSim.width - 10; this.vx = -Math.abs(this.vx); }
-            if(this.y < 10) { this.y = 10; this.vy = Math.abs(this.vy); }
-            if(this.y > stoichSim.height - 10) { this.y = stoichSim.height - 10; this.vy = -Math.abs(this.vy); }
-        }
-    }
-
-    draw(ctx) {
-        ctx.save();
-        ctx.translate(this.x, this.y);
-        
-        if (this.type === 'A') { 
-            // H2 (White)
-            ctx.fillStyle = 'rgba(255,255,255,0.9)';
-            ctx.shadowColor = 'rgba(255,255,255,0.5)';
-            ctx.shadowBlur = 5;
-            ctx.beginPath(); ctx.arc(-5, 0, 5, 0, Math.PI*2); ctx.fill();
-            ctx.beginPath(); ctx.arc(5, 0, 5, 0, Math.PI*2); ctx.fill();
-        } else if (this.type === 'B') {
-            // O2 (Red)
-            ctx.fillStyle = 'rgba(239, 68, 68, 0.9)'; 
-            ctx.shadowColor = 'rgba(239, 68, 68, 0.5)';
-            ctx.shadowBlur = 8;
-            ctx.beginPath(); ctx.arc(-7, 0, 7, 0, Math.PI*2); ctx.fill();
-            ctx.beginPath(); ctx.arc(7, 0, 7, 0, Math.PI*2); ctx.fill();
-        } else if (this.type === 'P') {
-            // H2O (Molecule)
-            ctx.shadowColor = 'rgba(16, 185, 129, 0.5)';
-            ctx.shadowBlur = 10;
-            ctx.fillStyle = '#ef4444'; // Oxygen
-            ctx.beginPath(); ctx.arc(0, 2, 9, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = 'white'; // Hydrogens
-            ctx.beginPath(); ctx.arc(-8, -7, 5, 0, Math.PI*2); ctx.fill();
-            ctx.beginPath(); ctx.arc(8, -7, 5, 0, Math.PI*2); ctx.fill();
-        }
-        ctx.restore();
-    }
-}
-
-function initStoichGame() {
-    stoichSim.canvas = document.getElementById('stoich-canvas');
-    if(!stoichSim.canvas) return;
-    stoichSim.ctx = stoichSim.canvas.getContext('2d');
-    
-    // Robust Resize Function
-    const resizeCanvas = () => {
-        const parent = stoichSim.canvas.parentElement;
-        if(parent) {
-            stoichSim.width = parent.clientWidth;
-            stoichSim.height = parent.clientHeight;
-            stoichSim.canvas.width = stoichSim.width;
-            stoichSim.canvas.height = stoichSim.height;
-        }
+    // ==========================================
+    // 6. GAME: STOICHIOMETRY (Bulletproofed for game-battery)
+    // ==========================================
+    let stoichSim = { 
+        canvas: null, ctx: null, req: null, 
+        particles: [], 
+        width: 0, height: 0,
+        molesA: 4, molesB: 3, 
+        state: 'idle' 
     };
 
-    // Run resize immediately
-    resizeCanvas();
-    
-    // Run resize AGAIN after a short delay (fixes 0-width issue if called during transition)
-    setTimeout(() => {
-        resizeCanvas();
-        resetStoichGame();
-    }, 50);
-
-    // Attach listener for window resize
-    window.removeEventListener('resize', resizeCanvas); // Prevent duplicates
-    window.addEventListener('resize', resizeCanvas);
-
-    resetStoichGame();
-    if(stoichSim.req) cancelAnimationFrame(stoichSim.req);
-    stoichLoop();
-}
-
-function updateStoichInputs() {
-    if(stoichSim.state === 'reacting') return; 
-    
-    stoichSim.molesA = parseInt(document.getElementById('stoich-slider-a').value);
-    stoichSim.molesB = parseInt(document.getElementById('stoich-slider-b').value);
-    
-    document.getElementById('stoich-val-a').innerText = stoichSim.molesA + " mol";
-    document.getElementById('stoich-val-b').innerText = stoichSim.molesB + " mol";
-    
-    // Important: Only spawn if width is valid, otherwise wait for the loop to fix it
-    if(stoichSim.width > 0) {
-        spawnStoichParticles(); 
-    }
-    
-    document.getElementById('limiting-box').style.opacity = '0';
-    document.getElementById('limiting-box').classList.add('translate-y-4');
-    document.getElementById('yield-box').style.opacity = '0';
-    document.getElementById('yield-box').classList.add('translate-y-4');
-}
-
-function spawnStoichParticles() {
-    stoichSim.particles = [];
-    // If width is 0, these will spawn off screen, but the loop will fix bounds
-    const spawnW = stoichSim.width || 300; 
-    const spawnH = stoichSim.height || 300;
-
-    // Spawn A (Hydrogen) Left
-    for(let i=0; i<stoichSim.molesA; i++) {
-        stoichSim.particles.push(new StoichParticle('A', 
-            Math.random() * (spawnW * 0.3) + 30, 
-            Math.random() * (spawnH - 60) + 30
-        ));
-    }
-    // Spawn B (Oxygen) Right
-    for(let i=0; i<stoichSim.molesB; i++) {
-        stoichSim.particles.push(new StoichParticle('B', 
-            Math.random() * (spawnW * 0.3) + (spawnW * 0.7) - 30, 
-            Math.random() * (spawnH - 60) + 30
-        ));
-    }
-}
-
-function startStoichReaction() {
-    if(stoichSim.state === 'reacting' || stoichSim.state === 'done') return;
-    stoichSim.state = 'reacting';
-    
-    // Equation: 2 H2 + 1 O2 -> 2 H2O
-    let possibleH = stoichSim.molesA / 2;
-    let possibleO = stoichSim.molesB / 1;
-    let actualRxn = Math.min(possibleH, possibleO);
-    
-    let productCount = actualRxn * 2;
-    let leftOverA = stoichSim.molesA - (actualRxn * 2);
-    let leftOverB = stoichSim.molesB - (actualRxn * 1);
-
-    let limitingReagent = possibleH < possibleO ? "Hydrogen (H₂)" : (possibleO < possibleH ? "Oxygen (O₂)" : "None (Perfect Ratio)");
-
-    // 1. Converge
-    stoichSim.particles.forEach(p => {
-        p.targetX = stoichSim.width / 2 + (Math.random()-0.5)*100;
-        p.targetY = stoichSim.height / 2 + (Math.random()-0.5)*100;
-    });
-
-    // 2. React
-    setTimeout(() => {
-        stoichSim.ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        stoichSim.ctx.fillRect(0,0,stoichSim.width, stoichSim.height);
-        
-        if (typeof playPopSound === 'function') playPopSound();
-        
-        stoichSim.particles = [];
-
-        // Products
-        for(let i=0; i<productCount; i++) {
-            let p = new StoichParticle('P', stoichSim.width/2, stoichSim.height/2);
-            p.vx *= 3; p.vy *= 3; 
-            stoichSim.particles.push(p);
+    class StoichParticle {
+        constructor(type, x, y) {
+            this.type = type; 
+            this.x = x; 
+            this.y = y;
+            this.vx = (Math.random() - 0.5) * 1.5;
+            this.vy = (Math.random() - 0.5) * 1.5;
+            this.targetX = null;
+            this.targetY = null;
         }
 
-        // Leftovers
-        for(let i=0; i<leftOverA; i++) {
-            let p = new StoichParticle('A', stoichSim.width/2, stoichSim.height/2);
-            p.vx *= 4; p.vy *= 4;
-            stoichSim.particles.push(p);
-        }
-        for(let i=0; i<leftOverB; i++) {
-            let p = new StoichParticle('B', stoichSim.width/2, stoichSim.height/2);
-            p.vx *= 4; p.vy *= 4;
-            stoichSim.particles.push(p);
-        }
-
-        stoichSim.state = 'done';
-
-        // UI
-        document.getElementById('stoich-limiting-display').innerText = limitingReagent;
-        document.getElementById('limiting-box').style.opacity = '1';
-        document.getElementById('limiting-box').classList.remove('translate-y-4');
-        
-        setTimeout(() => {
-             document.getElementById('stoich-yield-display').innerText = productCount + " mol H₂O";
-             document.getElementById('yield-box').style.opacity = '1';
-             document.getElementById('yield-box').classList.remove('translate-y-4');
-        }, 800);
-
-    }, 1000);
-}
-
-function resetStoichGame() {
-    stoichSim.state = 'idle';
-    updateStoichInputs();
-}
-
-function stoichLoop() {
-    // Check using offsetParent (Standard way to check visibility)
-    // If game-battery is hidden, offsetParent is null
-    const container = document.getElementById('game-battery'); 
-    
-    if (container && container.offsetParent !== null) {
-        // SELF-HEALING: If width is 0 (bugged init), fix it immediately
-        if (stoichSim.width === 0 || stoichSim.canvas.width === 0) {
-            const parent = stoichSim.canvas.parentElement;
-            if (parent.clientWidth > 0) {
-                stoichSim.width = parent.clientWidth;
-                stoichSim.height = parent.clientHeight;
-                stoichSim.canvas.width = stoichSim.width;
-                stoichSim.canvas.height = stoichSim.height;
-                resetStoichGame(); // Restart to fix particle positions
+        update() {
+            if (this.targetX !== null) {
+                const dx = this.targetX - this.x;
+                const dy = this.targetY - this.y;
+                this.x += dx * 0.1; 
+                this.y += dy * 0.1;
+                if (Math.abs(dx) < 1 && Math.abs(dy) < 1) this.targetX = null;
+            } else {
+                this.x += this.vx;
+                this.y += this.vy;
+                if(this.x <= 10) { this.x = 10; this.vx *= -1; }
+                if(this.x >= stoichSim.width - 10) { this.x = stoichSim.width - 10; this.vx *= -1; }
+                if(this.y <= 10) { this.y = 10; this.vy *= -1; }
+                if(this.y >= stoichSim.height - 10) { this.y = stoichSim.height - 10; this.vy *= -1; }
             }
         }
 
-        stoichSim.ctx.clearRect(0, 0, stoichSim.width, stoichSim.height);
-        stoichSim.particles.forEach(p => {
-            p.update();
-            p.draw(stoichSim.ctx);
-        });
+        draw(ctx) {
+            ctx.save();
+            ctx.translate(this.x, this.y);
+            if (this.type === 'A') { 
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowColor = 'rgba(255,255,255,0.5)';
+                ctx.shadowBlur = 4;
+                ctx.beginPath(); ctx.arc(-4, 0, 4, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(4, 0, 4, 0, Math.PI*2); ctx.fill();
+            } else if (this.type === 'B') { 
+                ctx.fillStyle = '#ef4444'; 
+                ctx.shadowColor = 'rgba(239, 68, 68, 0.5)';
+                ctx.shadowBlur = 6;
+                ctx.beginPath(); ctx.arc(-6, 0, 6, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(6, 0, 6, 0, Math.PI*2); ctx.fill();
+            } else if (this.type === 'P') { 
+                ctx.shadowColor = 'rgba(16, 185, 129, 0.5)';
+                ctx.shadowBlur = 8;
+                ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(0, 2, 8, 0, Math.PI*2); ctx.fill(); 
+                ctx.fillStyle = 'white'; ctx.beginPath(); ctx.arc(-7, -6, 4, 0, Math.PI*2); ctx.fill(); 
+                ctx.beginPath(); ctx.arc(7, -6, 4, 0, Math.PI*2); ctx.fill(); 
+            }
+            ctx.restore();
+        }
     }
-    stoichSim.req = requestAnimationFrame(stoichLoop);
-}
 
-// Ensure the openGame function correctly initializes this
-// Add this line to your existing openGame(gameId) function:
-// if (gameId === 'game-battery') initStoichGame();
     function initStoichGame() {
         stoichSim.canvas = document.getElementById('stoich-canvas');
         if(!stoichSim.canvas) return;
         stoichSim.ctx = stoichSim.canvas.getContext('2d');
-        stoichSim.width = stoichSim.canvas.parentElement.clientWidth;
-        stoichSim.height = stoichSim.canvas.parentElement.clientHeight;
-        stoichSim.canvas.width = stoichSim.width;
-        stoichSim.canvas.height = stoichSim.height;
-
+        resizeStoichCanvas();
         resetStoichGame();
+        if(stoichSim.req) cancelAnimationFrame(stoichSim.req);
         stoichLoop();
+        window.removeEventListener('resize', resizeStoichCanvas);
+        window.addEventListener('resize', resizeStoichCanvas);
+    }
+
+    function resizeStoichCanvas() {
+        const parent = stoichSim.canvas.parentElement;
+        if (parent) {
+            const rect = parent.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                stoichSim.width = rect.width;
+                stoichSim.height = rect.height;
+                stoichSim.canvas.width = rect.width;
+                stoichSim.canvas.height = rect.height;
+            }
+        }
     }
 
     function updateStoichInputs() {
         if(stoichSim.state === 'reacting') return; 
         stoichSim.molesA = parseInt(document.getElementById('stoich-slider-a').value);
         stoichSim.molesB = parseInt(document.getElementById('stoich-slider-b').value);
-        
         document.getElementById('stoich-val-a').innerText = stoichSim.molesA + " mol";
         document.getElementById('stoich-val-b').innerText = stoichSim.molesB + " mol";
-        
-        spawnStoichParticles(); 
-        
-        document.getElementById('stoich-limiting-display').innerText = "--";
-        document.getElementById('stoich-yield-display').innerText = "--";
+        if (stoichSim.width > 0) spawnStoichParticles(); 
         document.getElementById('limiting-box').style.opacity = '0';
+        document.getElementById('limiting-box').classList.add('translate-y-4');
         document.getElementById('yield-box').style.opacity = '0';
+        document.getElementById('yield-box').classList.add('translate-y-4');
     }
 
     function spawnStoichParticles() {
         stoichSim.particles = [];
-        // Spawn A (Left)
-        for(let i=0; i<stoichSim.molesA; i++) {
-            stoichSim.particles.push(new StoichParticle('A', 
-                Math.random() * (stoichSim.width * 0.4) + 20, 
-                Math.random() * (stoichSim.height - 40) + 20
-            ));
-        }
-        // Spawn B (Right)
-        for(let i=0; i<stoichSim.molesB; i++) {
-            stoichSim.particles.push(new StoichParticle('B', 
-                Math.random() * (stoichSim.width * 0.4) + (stoichSim.width * 0.6) - 20, 
-                Math.random() * (stoichSim.height - 40) + 20
-            ));
-        }
+        const w = stoichSim.width || 300; 
+        const h = stoichSim.height || 300;
+        for(let i=0; i<stoichSim.molesA; i++) stoichSim.particles.push(new StoichParticle('A', Math.random()*(w*0.35)+20, Math.random()*(h-40)+20));
+        for(let i=0; i<stoichSim.molesB; i++) stoichSim.particles.push(new StoichParticle('B', Math.random()*(w*0.35)+(w*0.6)-20, Math.random()*(h-40)+20));
     }
 
     function startStoichReaction() {
-        if(stoichSim.state === 'reacting') return;
+        if(stoichSim.state === 'reacting' || stoichSim.state === 'done') return;
         stoichSim.state = 'reacting';
-        
-        // 2 H2 + 1 O2 -> 2 H2O
-        const requiredA = stoichSim.molesB * 2;
-        let limiting = "";
-        let productMoles = 0;
-        let leftOverA = 0;
-        let leftOverB = 0;
+        let possibleH = stoichSim.molesA / 2;
+        let possibleO = stoichSim.molesB / 1;
+        let actualRxn = Math.min(possibleH, possibleO);
+        let productCount = actualRxn * 2;
+        let leftOverA = stoichSim.molesA - (actualRxn * 2);
+        let leftOverB = stoichSim.molesB - (actualRxn * 1);
+        let limitingReagent = possibleH < possibleO ? "Hydrogen (H₂)" : (possibleO < possibleH ? "Oxygen (O₂)" : "None (Perfect Ratio)");
 
-        if (stoichSim.molesA < requiredA) {
-            // A is limiting
-            limiting = "Hydrogen (H₂)";
-            productMoles = stoichSim.molesA; // 2 H2 make 2 H2O
-            leftOverB = stoichSim.molesB - (stoichSim.molesA / 2);
-        } else {
-            // B is limiting
-            limiting = "Oxygen (O₂)";
-            if(stoichSim.molesA === requiredA) limiting = "None (Perfect)";
-            productMoles = stoichSim.molesB * 2; // 1 O2 makes 2 H2O
-            leftOverA = stoichSim.molesA - (stoichSim.molesB * 2);
-        }
-
-        // Update UI
-        document.getElementById('stoich-limiting-display').innerText = limiting;
-        document.getElementById('limiting-box').style.opacity = '1';
-        document.getElementById('limiting-box').classList.remove('translate-y-4');
-        
-        setTimeout(() => {
-             document.getElementById('stoich-yield-display').innerText = productMoles + " mol H₂O";
-             document.getElementById('yield-box').style.opacity = '1';
-             document.getElementById('yield-box').classList.remove('translate-y-4');
-             playPopSound();
-        }, 1500);
-
-        // Animate Convergence
         stoichSim.particles.forEach(p => {
             p.targetX = stoichSim.width / 2 + (Math.random()-0.5)*50;
             p.targetY = stoichSim.height / 2 + (Math.random()-0.5)*50;
-            p.vx *= 5; p.vy *= 5; 
         });
 
-        // Swap to products
         setTimeout(() => {
+            stoichSim.ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            stoichSim.ctx.fillRect(0,0,stoichSim.width, stoichSim.height);
+            playPopSound();
             stoichSim.particles = [];
-            // Products Center
-            for(let i=0; i<productMoles; i++) {
-                stoichSim.particles.push(new StoichParticle('P', stoichSim.width/2, stoichSim.height/2));
-            }
-            // Leftovers
-            for(let i=0; i<leftOverA; i++) {
-                stoichSim.particles.push(new StoichParticle('A', Math.random()*100 + 20, stoichSim.height - 50));
-            }
-            for(let i=0; i<leftOverB; i++) {
-                stoichSim.particles.push(new StoichParticle('B', stoichSim.width - 100, stoichSim.height - 50));
-            }
+            for(let i=0; i<productCount; i++) { let p = new StoichParticle('P', stoichSim.width/2, stoichSim.height/2); p.vx*=4; p.vy*=4; stoichSim.particles.push(p); }
+            for(let i=0; i<leftOverA; i++) { let p = new StoichParticle('A', stoichSim.width/2, stoichSim.height/2); p.vx*=5; p.vy*=5; stoichSim.particles.push(p); }
+            for(let i=0; i<leftOverB; i++) { let p = new StoichParticle('B', stoichSim.width/2, stoichSim.height/2); p.vx*=5; p.vy*=5; stoichSim.particles.push(p); }
             stoichSim.state = 'done';
+            document.getElementById('stoich-limiting-display').innerText = limitingReagent;
+            document.getElementById('limiting-box').style.opacity = '1';
+            document.getElementById('limiting-box').classList.remove('translate-y-4');
+            setTimeout(() => {
+                 document.getElementById('stoich-yield-display').innerText = productCount + " mol H₂O";
+                 document.getElementById('yield-box').style.opacity = '1';
+                 document.getElementById('yield-box').classList.remove('translate-y-4');
+            }, 800);
         }, 1000);
     }
 
@@ -2178,21 +1971,44 @@ function stoichLoop() {
     }
 
     function stoichLoop() {
-        if(document.getElementById('game-stoich').style.display === 'none') return;
-        
-        stoichSim.ctx.fillStyle = 'rgba(15, 23, 42, 0.3)';
-        stoichSim.ctx.fillRect(0, 0, stoichSim.width, stoichSim.height);
-
-        stoichSim.particles.forEach(p => {
-            p.update();
-            p.draw(stoichSim.ctx);
-        });
-
+        const container = document.getElementById('game-battery');
+        if(container && container.style.display !== 'none') {
+            if (stoichSim.width === 0 || stoichSim.canvas.width === 0) {
+                resizeStoichCanvas();
+                if (stoichSim.width > 0) spawnStoichParticles(); 
+            }
+            stoichSim.ctx.clearRect(0, 0, stoichSim.width, stoichSim.height);
+            if (stoichSim.particles.length === 0 && stoichSim.state === 'idle' && stoichSim.width > 0) spawnStoichParticles();
+            stoichSim.particles.forEach(p => { p.update(); p.draw(stoichSim.ctx); });
+        }
         stoichSim.req = requestAnimationFrame(stoichLoop);
     }
 
     // ==========================================
-    // 7. GAME: ELECTROCHEMISTRY
+    // Game 4: SOLUBILITY (Basic Implementation to prevent error)
+    // ==========================================
+    let solubilitySim = { req: null };
+    function initSolubilityGame() {
+        // Simple logic for the Solubility Lab if it exists in HTML
+        const canvas = document.getElementById('solubility-canvas');
+        if(!canvas) return;
+        // (Placeholder logic to ensure it doesn't crash)
+        const ctx = canvas.getContext('2d');
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+        ctx.fillStyle = 'white';
+        ctx.fillText("Solubility Simulation Active", 50, 50);
+    }
+    // Functions referenced in HTML must exist:
+    window.resetSolubilitySim = function() { if(document.getElementById('solubility-canvas')) initSolubilityGame(); };
+    window.updateSolubilityParams = function() {};
+    window.startPouringSalt = function() {};
+    window.stopPouringSalt = function() {};
+
+    // ==========================================
+    // 7. ELECTROCHEMISTRY
     // ==========================================
     let electroInterval;
     function initElectroGame() { updateElectroGame(); }
@@ -2216,17 +2032,9 @@ function stoichLoop() {
         if (m1.value === m2.value) voltage = 0;
 
         document.getElementById('cell-voltage').innerText = voltage.toFixed(2);
-
-        // Needle Rotation
-        const maxVoltage = 3.0;
-        const minAngle = -135;
-        const maxAngle = 135;
-        const angleRange = maxAngle - minAngle;
-        const clampedVoltage = Math.min(Math.abs(voltage), maxVoltage);
-        const rotation = minAngle + (clampedVoltage / maxVoltage) * angleRange;
+        const rotation = -135 + (Math.min(Math.abs(voltage), 3.0) / 3.0) * 270;
         document.getElementById('galvanic-needle').style.transform = `translateX(-50%) translateY(-100%) rotate(${rotation}deg)`;
 
-        // Flow Arrow
         const arrow = document.getElementById('flow-arrow');
         if (voltage === 0) {
             arrow.style.opacity = 0;
@@ -2235,7 +2043,6 @@ function stoichLoop() {
             arrow.className = `ph-fill ph-arrow-${flowDirection} text-3xl text-yellow-400 animate-pulse drop-shadow-[0_0_10px_rgba(250,204,21,0.8)] transition-all`;
         }
 
-        // Equation
         const eqBox = document.getElementById('redox-equation');
         if (voltage === 0) {
             eqBox.innerText = "No Reaction (Same Metal)";
@@ -2276,7 +2083,7 @@ function stoichLoop() {
     }
 
     // ==========================================
-    // 8. GAME: pH ALCHEMIST
+    // 8. GAME: pH DEFENDER
     // ==========================================
     let phState = { val: 7.00, volume: 40, isPouring: false };
     let phReq, phParticles = [];
@@ -2348,7 +2155,7 @@ function stoichLoop() {
 
     function checkPouringInteraction(item) {
         const itemRect = item.getBoundingClientRect();
-        const beaker = document.querySelector('#game-ph .relative.w-48') || document.querySelector('#game-ph .md\\:w-60');
+        const beaker = document.querySelector('#game-ph .perspective-1000');
         if (!beaker) return;
         const bRect = beaker.getBoundingClientRect();
         const isAbove = (itemRect.bottom < bRect.top + 100) && (itemRect.right > bRect.left && itemRect.left < bRect.right);
@@ -2479,11 +2286,11 @@ function stoichLoop() {
     }
 
     // ==========================================
-    // 9. MINI GAMES & UTILS (Bond, Battery, Organic, etc.)
+    // 9. OTHER UTILS
     // ==========================================
     function checkBond() {
-        const e1 = document.getElementById('bond-el1').value,
-              e2 = document.getElementById('bond-el2').value;
+        const e1 = document.getElementById('bond-el1').value;
+        const e2 = document.getElementById('bond-el2').value;
         const res = document.getElementById('bond-result');
         let html = "";
         if ((e1 == 'metal' && e2 == 'nonmetal') || (e1 == 'nonmetal' && e2 == 'metal')) 
@@ -2493,10 +2300,6 @@ function stoichLoop() {
         else 
             html = `<div class="text-slate-400">Metallic / Alloy</div>`;
         res.innerHTML = html;
-    }
-
-    function setBattery(a, c) {
-        document.getElementById('volt-disp').innerText = Math.abs(c - a).toFixed(2) + ' V';
     }
 
     function setEnergy(t) {
@@ -2515,17 +2318,12 @@ function stoichLoop() {
 
     function checkOrganic(c) {
         const r = document.getElementById('organic-res');
-        if (c) {
-            r.innerText = "Correct! Benzene.";
-            r.className = "mt-2 h-6 text-lime-300 font-bold";
-        } else {
-            r.innerText = "Wrong.";
-            r.className = "mt-2 h-6 text-red-400 font-bold";
-        }
+        r.innerText = c ? "Correct! Benzene." : "Wrong.";
+        r.className = c ? "mt-2 h-6 text-lime-300 font-bold" : "mt-2 h-6 text-red-400 font-bold";
     }
 
     // ==========================================
-    // 10. GAS LAWS (FULL & MINI)
+    // 10. GAS LAWS 
     // ==========================================
     let gasAnimId;
     const gasCanvas = document.getElementById('particleCanvas');
@@ -2541,14 +2339,13 @@ function stoichLoop() {
         initGasParticles();
         animateGasBg();
     }
-
     function returnToGasMenu() {
         document.querySelectorAll('.gas-mode-screen').forEach(el => el.style.display = 'none');
         document.getElementById('gasMainMenu').style.display = 'flex';
+        // Reset local animations
         cancelBoyleAnim();
         cancelGayLussacAnim();
     }
-
     function exitGasGame() {
         document.getElementById('gas-laws-view').style.display = 'none';
         document.getElementById('app-main-menu').style.display = 'flex';
@@ -2558,22 +2355,19 @@ function stoichLoop() {
         initAppParticles();
         animateApp();
     }
-
     function showGasMode(mode) {
         document.getElementById('gasMainMenu').style.display = 'none';
         document.querySelectorAll('.gas-mode-screen').forEach(s => s.style.display = 'none');
         document.getElementById(mode).style.display = 'flex';
-        if (mode === 'boyle') initBoyle();
-        if (mode === 'charles') initCharles();
-        if (mode === 'gayLussac') initGayLussac();
-        if (mode === 'avogadro') initAvogadro();
+        if(mode === 'boyle') initBoyle();
+        if(mode === 'charles') initCharles();
+        if(mode === 'gayLussac') initGayLussac();
+        if(mode === 'avogadro') initAvogadro();
     }
-
     function resizeGasBg() {
         gasCanvas.width = window.innerWidth;
         gasCanvas.height = window.innerHeight;
     }
-
     function initGasParticles() {
         gasParticles = [];
         for (let i = 0; i < 60; i++) gasParticles.push({
@@ -2585,7 +2379,6 @@ function stoichLoop() {
             color: 'rgba(255, 90, 95, 0.4)'
         });
     }
-
     function animateGasBg() {
         gCtx_bg.clearRect(0, 0, gasCanvas.width, gasCanvas.height);
         gasParticles.forEach(p => {
@@ -2600,47 +2393,35 @@ function stoichLoop() {
         });
         gasAnimId = requestAnimationFrame(animateGasBg);
     }
-
+    
+    // Gas Law Modes Implementation
     let boyleBalls = [], boyleReq;
     function initBoyle() {
-        const cvs = document.getElementById('boyleCanvas');
-        const ctx = cvs.getContext('2d');
-        cvs.width = cvs.parentElement.clientWidth;
-        cvs.height = cvs.parentElement.clientHeight;
-        boyleBalls = [];
-        for (let i = 0; i < 30; i++) boyleBalls.push({
-            x: Math.random() * cvs.width,
-            y: Math.random() * (cvs.height - 100) + 100,
-            vx: (Math.random() - 0.5) * 4,
-            vy: (Math.random() - 0.5) * 4
-        });
-
-        function loop() {
-            const slider = document.getElementById('pistonSlider');
-            const pistonY = 50 + (100 - slider.value) * 2;
-            const pressure = (150 / (cvs.height - pistonY)) * 2;
-            document.getElementById('boyle-pressure').innerText = pressure.toFixed(2);
-            document.getElementById('gaugeNeedle').style.transform = `translateX(-50%) rotate(${Math.min(pressure/3, 1) * 180 - 90}deg)`;
-            ctx.clearRect(0, 0, cvs.width, cvs.height);
-            ctx.fillStyle = '#FFD700';
-            ctx.fillRect(0, pistonY, cvs.width, 10);
-            ctx.fillStyle = 'gold';
-            boyleBalls.forEach(b => {
-                b.x += b.vx;
-                b.y += b.vy;
-                if (b.x < 0 || b.x > cvs.width) b.vx *= -1;
-                if (b.y > cvs.height) b.vy *= -1;
-                if (b.y < pistonY + 15) {
-                    b.y = pistonY + 15;
-                    b.vy = Math.abs(b.vy);
-                }
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
-                ctx.fill();
-            });
-            boyleReq = requestAnimationFrame(loop);
-        }
-        loop();
+       const cvs = document.getElementById('boyleCanvas');
+       if(!cvs) return;
+       const ctx = cvs.getContext('2d');
+       cvs.width = cvs.parentElement.clientWidth; cvs.height = cvs.parentElement.clientHeight;
+       boyleBalls = [];
+       for (let i = 0; i < 30; i++) boyleBalls.push({ x: Math.random()*cvs.width, y: Math.random()*(cvs.height-100)+100, vx:(Math.random()-0.5)*4, vy:(Math.random()-0.5)*4 });
+       function loop() {
+           const slider = document.getElementById('pistonSlider');
+           const pistonY = 50 + (100 - slider.value) * 2;
+           const pressure = (150 / (cvs.height - pistonY)) * 2;
+           document.getElementById('boyle-pressure').innerText = pressure.toFixed(2);
+           document.getElementById('gaugeNeedle').style.transform = `translateX(-50%) rotate(${Math.min(pressure/3, 1) * 180 - 90}deg)`;
+           ctx.clearRect(0, 0, cvs.width, cvs.height);
+           ctx.fillStyle = '#FFD700'; ctx.fillRect(0, pistonY, cvs.width, 10);
+           ctx.fillStyle = 'gold';
+           boyleBalls.forEach(b => {
+               b.x += b.vx; b.y += b.vy;
+               if (b.x < 0 || b.x > cvs.width) b.vx *= -1;
+               if (b.y > cvs.height) b.vy *= -1;
+               if (b.y < pistonY + 15) { b.y = pistonY + 15; b.vy = Math.abs(b.vy); }
+               ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill();
+           });
+           boyleReq = requestAnimationFrame(loop);
+       }
+       loop();
     }
     function cancelBoyleAnim() { cancelAnimationFrame(boyleReq); }
 
@@ -2657,17 +2438,11 @@ function stoichLoop() {
     let glBalls = [], glReq;
     function initGayLussac() {
         const cvs = document.getElementById('gayLussacCanvas');
+        if(!cvs) return;
         const ctx = cvs.getContext('2d');
-        cvs.width = cvs.parentElement.clientWidth;
-        cvs.height = cvs.parentElement.clientHeight;
+        cvs.width = cvs.parentElement.clientWidth; cvs.height = cvs.parentElement.clientHeight;
         glBalls = [];
-        for (let i = 0; i < 50; i++) glBalls.push({
-            x: cvs.width / 2,
-            y: cvs.height / 2,
-            vx: (Math.random() - 0.5),
-            vy: (Math.random() - 0.5)
-        });
-
+        for (let i = 0; i < 50; i++) glBalls.push({ x: cvs.width/2, y: cvs.height/2, vx:(Math.random()-0.5), vy:(Math.random()-0.5) });
         function loop() {
             const temp = parseInt(document.getElementById('gayLussacTemp').value);
             document.getElementById('gayLussacTempVal').innerText = temp;
@@ -2676,13 +2451,10 @@ function stoichLoop() {
             ctx.clearRect(0, 0, cvs.width, cvs.height);
             ctx.fillStyle = '#4a90e2';
             glBalls.forEach(b => {
-                b.x += b.vx * speedMult;
-                b.y += b.vy * speedMult;
+                b.x += b.vx * speedMult; b.y += b.vy * speedMult;
                 if (b.x < 0 || b.x > cvs.width) b.vx *= -1;
                 if (b.y < 0 || b.y > cvs.height) b.vy *= -1;
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, 4, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill();
             });
             glReq = requestAnimationFrame(loop);
         }
@@ -2699,8 +2471,8 @@ function stoichLoop() {
         b.style.opacity = '1';
         b.style.display = 'block';
         document.getElementById('getNewOneBtn').style.display = 'none';
-        document.getElementById('increaseMoleculeBtn').style.display = 'inline-block';
         const btn = document.getElementById('increaseMoleculeBtn');
+        btn.style.display = 'inline-block';
         const add = () => {
             if (avoCount > 100) {
                 b.classList.add('pop');
@@ -2721,8 +2493,8 @@ function stoichLoop() {
         btn.ontouchstart = (e) => { e.preventDefault(); avoInterval = setInterval(add, 50); };
         btn.ontouchend = () => clearInterval(avoInterval);
     }
-
-    // --- Mini Gas Logic (Grid Button) ---
+    
+    // Mini Gas (Game 5)
     let miniGasReq, miniGasParticles = [], miniGasTemp = 10;
     function initMiniGas() {
         const container = document.getElementById('mini-balloon');
@@ -2735,55 +2507,33 @@ function stoichLoop() {
         for (let i = 0; i < 15; i++) {
             const p = document.createElement('div');
             p.className = 'absolute rounded-full bg-yellow-300 shadow-[0_0_5px_yellow]';
-            p.style.width = '6px';
-            p.style.height = '6px';
+            p.style.width = '6px'; p.style.height = '6px';
             clip.appendChild(p);
             miniGasParticles.push({
-                el: p,
-                x: 30 + Math.random() * 20,
-                y: 40 + Math.random() * 20,
-                vx: (Math.random() - 0.5) * 4,
-                vy: (Math.random() - 0.5) * 4
+                el: p, x: 30 + Math.random() * 20, y: 40 + Math.random() * 20,
+                vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4
             });
         }
         updateGas(miniGasTemp);
         if (miniGasReq) cancelAnimationFrame(miniGasReq);
         loopMiniGas();
     }
-
     function updateGas(v) {
         miniGasTemp = parseInt(v);
         document.getElementById('mini-temp-display').innerText = v;
         const factor = 1 + (v / 100) * 1.8;
         const b = document.getElementById('mini-balloon');
-        if (b) {
-            b.style.width = `${80*factor}px`;
-            b.style.height = `${100*factor}px`;
-        }
+        if (b) { b.style.width = `${80*factor}px`; b.style.height = `${100*factor}px`; }
     }
-
     function loopMiniGas() {
         if (document.getElementById('game-gas').style.display !== 'none') {
             const speed = 0.8 + (miniGasTemp / 25);
             miniGasParticles.forEach(p => {
-                p.vy += 0.15;
-                p.x += p.vx * speed;
-                p.y += p.vy * speed;
-                if (p.x < 5) {
-                    p.x = 5;
-                    p.vx *= -1;
-                }
-                if (p.x > parseFloat(document.getElementById('mini-balloon').style.width) - 10) {
-                    p.x = parseFloat(document.getElementById('mini-balloon').style.width) - 10;
-                    p.vx *= -1;
-                }
-                if (p.y > parseFloat(document.getElementById('mini-balloon').style.height) - 10) {
-                    p.y = parseFloat(document.getElementById('mini-balloon').style.height) - 10;
-                    p.vy *= -0.9;
-                    if (miniGasTemp > 5) p.vy -= Math.random() * miniGasTemp / 40;
-                }
-                p.el.style.left = `${p.x}px`;
-                p.el.style.top = `${p.y}px`;
+                p.vy += 0.15; p.x += p.vx * speed; p.y += p.vy * speed;
+                if (p.x < 5) { p.x = 5; p.vx *= -1; }
+                if (p.x > parseFloat(document.getElementById('mini-balloon').style.width) - 10) { p.x = parseFloat(document.getElementById('mini-balloon').style.width) - 10; p.vx *= -1; }
+                if (p.y > parseFloat(document.getElementById('mini-balloon').style.height) - 10) { p.y = parseFloat(document.getElementById('mini-balloon').style.height) - 10; p.vy *= -0.9; }
+                p.el.style.left = `${p.x}px`; p.el.style.top = `${p.y}px`;
             });
         }
         miniGasReq = requestAnimationFrame(loopMiniGas);
