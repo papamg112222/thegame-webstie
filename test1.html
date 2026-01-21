@@ -1775,20 +1775,62 @@
         beaker: { x: 0, y: 0, w: 0, h: 0, waterY: 0 }
     };
 
+    // ==========================================
+    // 6. GAME: SOLUBILITY & PRECIPITATION (STOICHIOMETRY)
+    // ==========================================
+    
+    // --- 1. CONFIGURATION DATA ---
+    // This controls the Ion colors, sizes, and the "Recipe" (Ratio) for each salt.
     const SALT_DATA = {
-        'NaCl': { color: '#ffffff', baseSol: 300, tempCoeff: 1.5, name: 'NaCl' },
-        'PbI2': { color: '#facc15', baseSol: 50, tempCoeff: 4.0, name: 'PbI₂' },
-        'CuSO4': { color: '#38bdf8', baseSol: 150, tempCoeff: 2.0, name: 'CuSO₄' }
+        'NaCl': { 
+            name: 'Sodium Chloride',
+            cation: { sym: 'Na', charge: '+', color: '#67e8f9', r: 4, count: 1 }, // 1 Na
+            anion:  { sym: 'Cl', charge: '-', color: '#bef264', r: 6, count: 1 }, // 1 Cl
+            baseSol: 300, 
+            tempCoeff: 2.0 
+        },
+        'PbI2': { 
+            name: 'Lead(II) Iodide', 
+            cation: { sym: 'Pb', charge: '2+', color: '#94a3b8', r: 5, count: 1 }, // 1 Pb
+            anion:  { sym: 'I',  charge: '-',  color: '#facc15', r: 7, count: 2 }, // 2 I (Stoichiometry!)
+            baseSol: 60, // Low solubility (Precipitates easily)
+            tempCoeff: 3.5 
+        },
+        'CuSO4': { 
+            name: 'Copper(II) Sulfate', 
+            cation: { sym: 'Cu', charge: '2+', color: '#3b82f6', r: 5, count: 1 }, // 1 Cu
+            anion:  { sym: 'S',  charge: '2-', color: '#fca5a5', r: 7, count: 1 }, // 1 Sulfate
+            baseSol: 150, 
+            tempCoeff: 1.5 
+        }
     };
 
+    // --- 2. SIMULATION STATE ---
+    let solSim = {
+        canvas: null, ctx: null, req: null, 
+        particles: [], 
+        sedimentHeight: [], // This array tracks the "pile" of solid at the bottom
+        isPouring: false, 
+        width: 0, height: 0,
+        temp: 25, 
+        saltType: 'NaCl', 
+        solubilityLimit: 0, 
+        currentDissolved: 0, 
+        currentSolid: 0,
+        beaker: { x: 0, y: 0, w: 0, h: 0, waterY: 0 }
+    };
+
+    // --- 3. INITIALIZATION ---
     function initSolubilityGame() {
         solSim.canvas = document.getElementById('solubility-canvas');
         if (!solSim.canvas) return;
         solSim.ctx = solSim.canvas.getContext('2d');
+        
         resizeSolubilitySim();
         window.addEventListener('resize', resizeSolubilitySim);
+        
         resetSolubilitySim();
-        solLoop();
+        solLoop(); // Start the animation loop
     }
 
     function resizeSolubilitySim() {
@@ -1796,162 +1838,257 @@
         const parent = solSim.canvas.parentElement;
         solSim.width = solSim.canvas.width = parent.clientWidth;
         solSim.height = solSim.canvas.height = parent.clientHeight;
+        
+        // Define Beaker Dimensions based on screen size
         solSim.beaker.w = Math.min(400, solSim.width * 0.6);
         solSim.beaker.h = solSim.height * 0.6;
         solSim.beaker.x = (solSim.width - solSim.beaker.w) / 2;
-        solSim.beaker.y = solSim.height * 0.85;
-        solSim.beaker.waterY = solSim.beaker.y - (solSim.beaker.h * 0.8);
+        solSim.beaker.y = solSim.height * 0.85; // Bottom of beaker
+        solSim.beaker.waterY = solSim.beaker.y - (solSim.beaker.h * 0.8); // Water surface level
+        
+        // Reset the "floor" array when resized
+        resetSedimentFloor();
+    }
+
+    function resetSedimentFloor() {
+        // Create an array to track "ground level" for every 4 pixels of width
+        // This is what allows the particles to stack up in a pile
+        const gridWidth = Math.ceil(solSim.width / 4) + 1;
+        solSim.sedimentHeight = new Array(gridWidth).fill(solSim.beaker.y);
     }
 
     function resetSolubilitySim() {
         solSim.particles = [];
         solSim.currentDissolved = 0;
         solSim.currentSolid = 0;
+        resetSedimentFloor();
         updateSolubilityParams();
     }
 
-    function updateSolubilityParams() {
-        const slider = document.getElementById('sol-temp-slider');
-        const selector = document.getElementById('salt-selector');
-        solSim.temp = parseInt(slider.value);
-        solSim.saltType = selector.value;
-        document.getElementById('sol-temp-display').innerText = solSim.temp + "°C";
-        const data = SALT_DATA[solSim.saltType];
-        solSim.solubilityLimit = Math.floor(data.baseSol + (solSim.temp * data.tempCoeff));
-
-        // Precipitation logic
-        let dissolvedCount = solSim.particles.filter(p => p.state === 'dissolved').length;
-        if (dissolvedCount > solSim.solubilityLimit) {
-            let excess = dissolvedCount - solSim.solubilityLimit;
-            for (let p of solSim.particles) {
-                if (excess <= 0) break;
-                if (p.state === 'dissolved') {
-                    p.state = 'falling_solid';
-                    p.vx = 0;
-                    p.vy = 1 + Math.random();
-                    excess--;
-                }
-            }
-        } else {
-            // Re-dissolve logic
-            let capacity = solSim.solubilityLimit - dissolvedCount;
-            for (let p of solSim.particles) {
-                if (capacity <= 0) break;
-                if (p.state === 'solid') {
-                    p.state = 'dissolved';
-                    p.vy = (Math.random() - 0.5) * 2;
-                    capacity--;
-                }
-            }
-        }
-    }
+    // --- 4. GAMEPLAY LOGIC ---
 
     function startPouringSalt() { solSim.isPouring = true; }
     function stopPouringSalt() { solSim.isPouring = false; }
 
+    function updateSolubilityParams() {
+        const slider = document.getElementById('sol-temp-slider');
+        const selector = document.getElementById('salt-selector');
+        
+        solSim.temp = parseInt(slider.value);
+        solSim.saltType = selector.value;
+        
+        document.getElementById('sol-temp-display').innerText = solSim.temp + "°C";
+        
+        // Calculate Solubility Limit (Hotter = More Dissolves)
+        const data = SALT_DATA[solSim.saltType];
+        solSim.solubilityLimit = Math.floor(data.baseSol + (solSim.temp * data.tempCoeff));
+    }
+
     function spawnParticles() {
         const data = SALT_DATA[solSim.saltType];
         const spawnX = solSim.width / 2 + (Math.random() - 0.5) * 40;
-        const spawnY = solSim.height * 0.1;
+        const spawnY = solSim.height * 0.15;
+
+        // Stoichiometry Logic: 
+        // If the recipe says count: 2, we spawn 2 particles.
+        
+        // 1. Spawn Cations (Positive Ions)
+        for(let i=0; i < data.cation.count; i++) {
+            createIonParticle(spawnX, spawnY, data.cation);
+        }
+        // 2. Spawn Anions (Negative Ions)
+        for(let i=0; i < data.anion.count; i++) {
+            createIonParticle(spawnX, spawnY, data.anion);
+        }
+    }
+
+    function createIonParticle(x, y, ionData) {
         solSim.particles.push({
-            x: spawnX,
-            y: spawnY,
-            vx: (Math.random() - 0.5),
-            vy: 2 + Math.random() * 3,
-            r: 2 + Math.random(),
-            color: data.color,
+            x: x + (Math.random() - 0.5) * 15,
+            y: y + (Math.random() - 0.5) * 15,
+            vx: (Math.random() - 0.5) * 1.0,
+            vy: 2 + Math.random() * 3, // Initial fall speed
+            r: ionData.r,
+            color: ionData.color,
+            sym: ionData.charge, // Store the charge symbol (+ or -)
             state: 'falling_air'
         });
     }
 
+    // --- 5. MAIN PHYSICS LOOP ---
     function solLoop() {
+        // Pause simulation if the view is hidden to save battery
         if (document.getElementById('game-stoich').style.display === 'none') return;
+        
         solSim.ctx.clearRect(0, 0, solSim.width, solSim.height);
+        
+        // Draw Beaker Glass (Back)
         drawBeaker(true);
 
-        if (solSim.isPouring) {
-            for (let i = 0; i < 3; i++) spawnParticles();
-        }
+        // Spawn new particles if user is clicking
+        if (solSim.isPouring) spawnParticles();
 
-        let dissolvedCount = solSim.particles.filter(p => p.state === 'dissolved').length;
+        let dissolvedCount = 0;
         let solidCount = 0;
 
+        // --- PARTICLE PHYSICS UPDATE ---
         solSim.particles.forEach(p => {
+            
+            // STATE 1: Falling through Air
             if (p.state === 'falling_air') {
+                p.vy += 0.15; // Gravity
                 p.y += p.vy;
                 p.x += p.vx;
+                
+                // Hit Water Surface?
                 if (p.y >= solSim.beaker.waterY) {
                     p.state = 'falling_water';
-                    p.vy *= 0.3;
+                    p.vy *= 0.15; // Water resistance slows it down
                 }
-            } else if (p.state === 'falling_water' || p.state === 'falling_solid') {
-                p.y += p.vy;
-                p.x += (Math.random() - 0.5);
-                if (p.state === 'falling_water') {
-                    if (dissolvedCount < solSim.solubilityLimit) {
-                        p.state = 'dissolved';
-                        dissolvedCount++;
-                    } else {
-                        p.state = 'falling_solid';
+            } 
+            // STATE 2: Sinking in Water
+            else if (p.state === 'falling_water') {
+                p.y += p.vy + 0.5; // Constant sink
+                p.x += (Math.random() - 0.5) * 1.5; // Flutter
+                
+                // Dissolve Check: Is there room for more ions?
+                if (dissolvedCount < solSim.solubilityLimit) {
+                    p.state = 'dissolved';
+                    p.vx = (Math.random() - 0.5) * 2;
+                    p.vy = (Math.random() - 0.5) * 2;
+                }
+                
+                // Check Collision with Sediment Pile
+                let gridIndex = Math.floor(p.x / 4); // Map x-position to grid array
+                
+                if (gridIndex >= 0 && gridIndex < solSim.sedimentHeight.length) {
+                    let floorY = solSim.sedimentHeight[gridIndex];
+                    
+                    if (p.y >= floorY - p.r) {
+                        // Landed on pile!
+                        p.y = floorY - p.r;
+                        p.state = 'solid';
+                        
+                        // Raise the floor height at this spot (This makes the pile grow!)
+                        solSim.sedimentHeight[gridIndex] -= (p.r * 1.5);
+                        // Smooth the pile slightly
+                        if(gridIndex > 0) solSim.sedimentHeight[gridIndex-1] -= (p.r * 0.5);
+                        if(gridIndex < solSim.sedimentHeight.length-1) solSim.sedimentHeight[gridIndex+1] -= (p.r * 0.5);
                     }
                 }
-                if (p.y >= solSim.beaker.y - p.r) {
+                // Fallback: Hit bottom of beaker
+                else if (p.y >= solSim.beaker.y - p.r) {
                     p.y = solSim.beaker.y - p.r;
                     p.state = 'solid';
                 }
-            } else if (p.state === 'dissolved') {
-                const speed = 0.5 + (solSim.temp / 50);
-                p.x += (Math.random() - 0.5) * speed * 2;
-                p.y += (Math.random() - 0.5) * speed * 2;
-                if (p.x < solSim.beaker.x) p.x = solSim.beaker.x;
-                if (p.x > solSim.beaker.x + solSim.beaker.w) p.x = solSim.beaker.x + solSim.beaker.w;
-                if (p.y < solSim.beaker.waterY) p.y = solSim.beaker.waterY;
-                if (p.y > solSim.beaker.y) p.y = solSim.beaker.y;
-            } else if (p.state === 'solid') {
+            }
+            // STATE 3: Dissolved (Floating freely)
+            else if (p.state === 'dissolved') {
+                dissolvedCount++;
+                
+                // Heat makes them move faster
+                const speed = 0.5 + (solSim.temp / 30);
+                p.x += (Math.random() - 0.5) * speed;
+                p.y += (Math.random() - 0.5) * speed;
+
+                // Keep inside beaker walls
+                if (p.x < solSim.beaker.x + 5) p.x = solSim.beaker.x + 5;
+                if (p.x > solSim.beaker.x + solSim.beaker.w - 5) p.x = solSim.beaker.x + solSim.beaker.w - 5;
+                if (p.y < solSim.beaker.waterY + 5) p.y = solSim.beaker.waterY + 5;
+                if (p.y > solSim.beaker.y - 5) p.y = solSim.beaker.y - 5;
+
+                // Dynamic Equilibrium: Randomly precipitate if saturated
+                // This makes the solution look "alive"
+                if (dissolvedCount > solSim.solubilityLimit && Math.random() < 0.02) {
+                     p.state = 'falling_water'; // Start sinking again
+                }
+            }
+            // STATE 4: Solid (Sitting in the pile)
+            else if (p.state === 'solid') {
                 solidCount++;
+                // Randomly redissolve if we have room (Dynamic Equilibrium)
+                if (dissolvedCount < solSim.solubilityLimit && Math.random() < 0.005) {
+                     p.state = 'dissolved';
+                     p.y -= 5; // Pop up
+                }
             }
 
-            solSim.ctx.fillStyle = p.color;
-            const radius = p.state === 'dissolved' ? p.r * 0.6 : p.r;
+            // --- DRAW THE PARTICLE ---
             solSim.ctx.beginPath();
-            solSim.ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+            solSim.ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            solSim.ctx.fillStyle = p.color;
             solSim.ctx.fill();
+            
+            // Draw Glow if dissolved
+            if (p.state === 'dissolved') {
+                solSim.ctx.shadowBlur = 8;
+                solSim.ctx.shadowColor = p.color;
+            } else {
+                solSim.ctx.shadowBlur = 0;
+            }
+
+            // Draw Charge Symbol (+ or -) if floating
+            // (Don't draw text on the solid pile to avoid clutter)
+            if (p.state !== 'solid' && p.state !== 'falling_air') {
+                solSim.ctx.fillStyle = "rgba(0,0,0,0.7)";
+                solSim.ctx.font = "bold 9px Arial";
+                solSim.ctx.textAlign = "center";
+                solSim.ctx.textBaseline = "middle";
+                solSim.ctx.fillText(p.sym, p.x, p.y);
+            }
+            solSim.ctx.shadowBlur = 0; // Reset shadow for text
         });
 
+        // Draw Beaker Front (Rim and Reflection)
         drawBeaker(false);
 
-        // Stats UI
+        // --- UPDATE UI STATS ---
         solSim.currentDissolved = dissolvedCount;
         solSim.currentSolid = solidCount;
-        document.getElementById('ion-count').innerText = Math.floor(dissolvedCount / 10);
-        document.getElementById('solid-count').innerText = Math.floor(solidCount / 10);
         
-        // Saturation Bar
-        const satPercent = Math.min(100, (dissolvedCount / solSim.solubilityLimit) * 100);
+        // Update number counters
+        document.getElementById('ion-count').innerText = Math.floor(dissolvedCount);
+        document.getElementById('solid-count').innerText = Math.floor(solidCount);
+        
+        // Update Saturation Bar Color & Text
+        const satRatio = dissolvedCount / solSim.solubilityLimit;
         const bar = document.getElementById('saturation-bar');
-        bar.style.width = satPercent + '%';
         const statusLabel = document.getElementById('saturation-status');
-        if (satPercent >= 100) {
-            bar.classList.remove('bg-cyan-500'); bar.classList.add('bg-red-500');
-            statusLabel.innerText = "SATURATED (PRECIPITATING)";
-            statusLabel.classList.replace('text-green-400', 'text-red-400');
-        } else {
-            bar.classList.add('bg-cyan-500'); bar.classList.remove('bg-red-500');
+        
+        // Visual width cap at 100%
+        bar.style.width = Math.min(100, satRatio * 100) + '%';
+        
+        if (satRatio < 0.9) {
             statusLabel.innerText = "UNSATURATED";
-            statusLabel.classList.replace('text-red-400', 'text-green-400');
+            statusLabel.className = "text-[9px] text-green-400 font-bold uppercase";
+            bar.className = "h-full bg-gradient-to-r from-cyan-500 to-green-500 w-0 transition-all duration-300";
+        } else if (satRatio >= 0.9 && satRatio <= 1.05) {
+            statusLabel.innerText = "EQUILIBRIUM";
+            statusLabel.className = "text-[9px] text-yellow-400 font-bold uppercase";
+            bar.className = "h-full bg-gradient-to-r from-yellow-400 to-orange-500 w-0 transition-all duration-300";
+        } else {
+            statusLabel.innerText = "PRECIPITATING";
+            statusLabel.className = "text-[9px] text-red-400 font-bold uppercase animate-pulse";
+            bar.className = "h-full bg-gradient-to-r from-red-500 to-red-700 w-0 transition-all duration-300";
         }
 
         solSim.req = requestAnimationFrame(solLoop);
     }
 
+    // Helper to draw the beaker glass
     function drawBeaker(isBack) {
         const ctx = solSim.ctx;
         const b = solSim.beaker;
         if (isBack) {
             ctx.save();
-            ctx.fillStyle = 'rgba(56, 189, 248, 0.2)';
-            if (solSim.saltType === 'CuSO4') ctx.fillStyle = 'rgba(56, 189, 248, 0.4)';
+            // Water Color changes slightly based on Salt Type
+            if (solSim.saltType === 'CuSO4') ctx.fillStyle = 'rgba(56, 189, 248, 0.2)'; // Blue tint
+            else if (solSim.saltType === 'PbI2') ctx.fillStyle = 'rgba(250, 204, 21, 0.05)'; // Yellow tint
+            else ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; // Clear
+            
             ctx.fillRect(b.x, b.waterY, b.w, b.h * 0.8);
+            
+            // Water surface line
             ctx.strokeStyle = 'rgba(255,255,255,0.3)';
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -1961,15 +2098,18 @@
             ctx.restore();
         } else {
             ctx.save();
+            // Glass Outline
             ctx.strokeStyle = 'rgba(255,255,255,0.4)';
             ctx.lineWidth = 4;
             ctx.lineJoin = 'round';
             ctx.beginPath();
             ctx.moveTo(b.x, b.y - b.h);
-            ctx.lineTo(b.x, b.y);
-            ctx.lineTo(b.x + b.w, b.y);
+            ctx.lineTo(b.x, b.y); // Bottom Left
+            ctx.lineTo(b.x + b.w, b.y); // Bottom Right
             ctx.lineTo(b.x + b.w, b.y - b.h);
             ctx.stroke();
+            
+            // Reflection highlight
             ctx.strokeStyle = 'rgba(255,255,255,0.1)';
             ctx.lineWidth = 10;
             ctx.beginPath();
@@ -1979,7 +2119,6 @@
             ctx.restore();
         }
     }
-
     // ==========================================
     // 7. GAME: ELECTROCHEMISTRY (FIXED)
     // ==========================================
