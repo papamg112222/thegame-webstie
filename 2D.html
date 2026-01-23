@@ -3,9 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tactical Warfare: Tower Siege</title>
+    <title>Tactical Warfare: Peer-to-Peer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <!-- PeerJS for Serverless Multiplayer -->
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
         canvas { display: block; }
@@ -14,7 +16,7 @@
         
         /* Custom UI Styling */
         .glass-panel {
-            background: rgba(20, 20, 25, 0.9);
+            background: rgba(20, 20, 25, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
             backdrop-filter: blur(10px);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
@@ -37,6 +39,17 @@
             100% { box-shadow: 0 0 0 0 rgba(255, 50, 50, 0); }
         }
         .danger-zone { animation: pulse-red 2s infinite; }
+        
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 2s linear infinite;
+            display: inline-block;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -45,15 +58,15 @@
 <div id="menu-screen" class="absolute inset-0 flex items-center justify-center z-50 bg-gray-900 bg-opacity-95 text-white">
     <div class="glass-panel p-8 rounded-xl max-w-md w-full text-center">
         <h1 class="text-4xl font-bold mb-2 tracking-tighter text-blue-400">TACTICAL<span class="text-white">WARFARE</span></h1>
-        <p class="text-gray-400 mb-6 text-sm">2D P2P Multiplayer Shooter</p>
+        <p class="text-gray-400 mb-6 text-sm">Direct P2P Multiplayer (No Server)</p>
 
-        <!-- Login / Auth Status -->
-        <div id="auth-status" class="mb-4 text-sm text-yellow-400">Connecting to services...</div>
+        <!-- Status -->
+        <div id="connection-status" class="mb-4 text-sm text-yellow-400">Initializing Network...</div>
 
         <!-- Lobby Controls -->
-        <div id="lobby-controls" class="hidden space-y-4">
+        <div id="lobby-controls" class="space-y-4">
             <div class="flex gap-2">
-                <input type="text" id="player-name" placeholder="Enter Codename" class="flex-1 bg-gray-800 border border-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:border-blue-500">
+                <input type="text" id="player-name" placeholder="Enter Codename" class="flex-1 bg-gray-800 border border-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:border-blue-500" value="Soldier">
             </div>
             
             <div class="grid grid-cols-2 gap-4">
@@ -62,18 +75,19 @@
             </div>
 
             <div id="join-input-area" class="hidden mt-4 p-4 bg-gray-800 rounded border border-gray-700">
-                <input type="text" id="game-id-input" placeholder="Paste Operation ID" class="w-full bg-gray-900 border border-gray-600 px-3 py-2 rounded mb-2 text-white">
+                <p class="text-xs text-left text-gray-400 mb-1">Paste Friend's ID:</p>
+                <input type="text" id="game-id-input" placeholder="e.g. 5f4d3a..." class="w-full bg-gray-900 border border-gray-600 px-3 py-2 rounded mb-2 text-white font-mono">
                 <button id="btn-join-action" class="w-full bg-green-600 hover:bg-green-500 py-2 rounded font-bold">CONNECT</button>
             </div>
         </div>
 
         <!-- Waiting Room -->
         <div id="waiting-room" class="hidden mt-6 text-left">
-            <div class="bg-gray-800 p-4 rounded mb-4 border border-gray-700">
-                <p class="text-xs text-gray-500 uppercase">Operation ID (Share this)</p>
+            <div id="host-info-panel" class="bg-gray-800 p-4 rounded mb-4 border border-gray-700">
+                <p class="text-xs text-gray-500 uppercase">Your Game ID (Send to friend)</p>
                 <div class="flex items-center gap-2 mt-1">
-                    <code id="display-game-id" class="flex-1 bg-black p-2 rounded text-green-400 font-mono text-lg select-all">...</code>
-                    <button id="btn-copy" class="p-2 bg-gray-700 rounded hover:bg-gray-600"><i class="fas fa-copy"></i></button>
+                    <code id="display-game-id" class="flex-1 bg-black p-2 rounded text-green-400 font-mono text-lg select-all overflow-hidden whitespace-nowrap">Generating...</code>
+                    <button id="btn-copy" class="p-2 bg-gray-700 rounded hover:bg-gray-600 text-white"><i class="fas fa-copy"></i></button>
                 </div>
             </div>
 
@@ -83,7 +97,7 @@
                     <div class="font-bold">Glock</div>
                     <div class="text-xs text-gray-400">Agile</div>
                 </button>
-                <button class="loadout-btn bg-gray-700 p-2 rounded border border-transparent hover:border-blue-400 transition text-sm" data-gun="ar">
+                <button class="loadout-btn bg-gray-700 p-2 rounded border border-transparent hover:border-blue-400 transition text-sm border-blue-500 bg-gray-600" data-gun="ar">
                     <div class="font-bold">Rifle</div>
                     <div class="text-xs text-gray-400">Balanced</div>
                 </button>
@@ -93,14 +107,12 @@
                 </button>
             </div>
 
-            <div class="flex justify-between items-center mb-4">
-                <div>
-                    <div id="p1-status" class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-gray-500"></div> Player 1</div>
-                    <div id="p2-status" class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-gray-500"></div> Player 2</div>
-                </div>
+            <div class="bg-black bg-opacity-30 p-3 rounded mb-4">
+                <div id="p1-status" class="flex items-center gap-2 mb-1"><div class="w-2 h-2 rounded-full bg-green-500"></div> <span id="p1-name">You</span> <span class="text-xs text-gray-500">(Host)</span></div>
+                <div id="p2-status" class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div> <span id="p2-name">Waiting for connection...</span></div>
             </div>
 
-            <button id="btn-start" class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-lg font-bold text-xl disabled:opacity-50 disabled:cursor-not-allowed" disabled>DEPLOY</button>
+            <button id="btn-start" class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-lg font-bold text-xl disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-600" disabled>WAITING FOR PLAYER...</button>
         </div>
     </div>
 </div>
@@ -173,42 +185,31 @@
 <canvas id="gameCanvas"></canvas>
 
 <!-- Scripts -->
-<script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, getDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-    // --- Firebase Init ---
-    const firebaseConfig = JSON.parse(__firebase_config);
-    const app = initializeApp(firebaseConfig);
-    const auth = getAuth(app);
-    const db = getFirestore(app);
-    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app';
-    const COLLECTION_NAME = 'tactical_warfare_lobbies';
-
-    let currentUser = null;
-    let currentGameId = null;
-    let isHost = false;
-    let unsubscribeGame = null;
-
-    // --- Game State & Constants ---
+<script>
+    // --- Constants & Config ---
     const CANVAS = document.getElementById('gameCanvas');
     const CTX = CANVAS.getContext('2d');
     
-    // Constants
     const MAP_WIDTH = 2000;
     const MAP_HEIGHT = 1500;
     const TOWER_HP = 1000;
     const PLAYER_HP = 500;
     const TOWER_RANGE = 400;
     const TOWER_DMG = 250;
-    const TOWER_COOLDOWN = 2000; // ms
+    const TOWER_COOLDOWN = 2000; 
 
     const GUNS = {
         glock: { name: 'Glock 19', damage: 35, fireRate: 400, range: 600, speed: 20, color: '#facc15', spread: 0.1 },
         ar: { name: 'M4 Carbine', damage: 25, fireRate: 100, range: 800, speed: 25, color: '#60a5fa', spread: 0.15 },
         sniper: { name: 'AWP', damage: 200, fireRate: 1500, range: 1200, speed: 40, color: '#f87171', spread: 0.02 }
     };
+
+    // --- State Variables ---
+    let myPeerId = null;
+    let peer = null;
+    let conn = null; // DataConnection
+    let isHost = false;
+    let gameStarted = false;
 
     // Game Objects
     let localPlayer = {
@@ -217,353 +218,309 @@
         hp: PLAYER_HP,
         angle: 0,
         gun: 'ar',
-        team: 'blue', // or red
+        team: 'blue', 
         lastShot: 0,
-        moving: false
+        moving: false,
+        name: 'Player 1'
     };
 
-    let remotePlayer = null; // Contains x, y, hp, angle, team, etc.
-    let projectiles = []; // {x, y, vx, vy, owner, damage, color}
-    let particles = []; // Visual effects
+    let remotePlayer = {
+        x: -1000, y: -1000, // offscreen initially
+        hp: PLAYER_HP,
+        angle: 0,
+        gun: 'ar',
+        team: 'red',
+        moving: false,
+        name: 'Player 2',
+        targetX: -1000, targetY: -1000
+    };
+
+    let projectiles = [];
+    let particles = [];
+    let obstacles = [];
     let towers = {
         blue: { x: 200, y: MAP_HEIGHT/2, hp: TOWER_HP, lastFire: 0, color: '#3b82f6' },
         red: { x: MAP_WIDTH - 200, y: MAP_HEIGHT/2, hp: TOWER_HP, lastFire: 0, color: '#ef4444' }
     };
     let camera = { x: 0, y: 0 };
-    let obstacles = []; // generated procedurally
-
-    // Input State
     let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
-    
-    // --- Auth & Setup ---
-    const authStatus = document.getElementById('auth-status');
+
+    // --- UI Elements ---
+    const connectionStatus = document.getElementById('connection-status');
     const lobbyControls = document.getElementById('lobby-controls');
-
-    // Robust Auth Initialization
-    async function initAuth() {
-        try {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-        } catch (e) {
-            console.error("Auth failed:", e);
-            authStatus.innerText = "Connection Failed: " + e.message;
-            authStatus.classList.replace('text-yellow-400', 'text-red-500');
-        }
-    }
-    
-    initAuth();
-
-    onAuthStateChanged(auth, (user) => {
-        if (user) {
-            currentUser = user;
-            authStatus.innerText = "Connected as Operative " + user.uid.slice(0, 4);
-            authStatus.classList.replace('text-yellow-400', 'text-green-400');
-            lobbyControls.classList.remove('hidden');
-        } else {
-            // Re-auth if somehow logged out
-            initAuth();
-        }
-    });
-
-    // --- Lobby UI Logic ---
-    const btnCreate = document.getElementById('btn-create');
-    const btnJoinMenu = document.getElementById('btn-join-menu');
-    const joinInputArea = document.getElementById('join-input-area');
-    const btnJoinAction = document.getElementById('btn-join-action');
-    const menuScreen = document.getElementById('menu-screen');
     const waitingRoom = document.getElementById('waiting-room');
     const displayGameId = document.getElementById('display-game-id');
-    const btnCopy = document.getElementById('btn-copy');
     const btnStart = document.getElementById('btn-start');
+    const p1Name = document.getElementById('p1-name');
+    const p2Name = document.getElementById('p2-name');
+    const p2Status = document.getElementById('p2-status').querySelector('div');
+
+    // --- Initialization ---
+    // Start PeerJS immediately to be ready
+    function initPeer() {
+        connectionStatus.innerText = "Connecting to P2P Network...";
+        peer = new Peer(null, {
+            debug: 2
+        });
+
+        peer.on('open', (id) => {
+            myPeerId = id;
+            connectionStatus.innerText = "Network Ready. Select mode.";
+            connectionStatus.classList.replace('text-yellow-400', 'text-green-400');
+            console.log('My ID:', id);
+        });
+
+        peer.on('connection', (c) => {
+            // Incoming connection (I am Host)
+            if(conn && conn.open) {
+                c.close(); // Already have a player
+                return;
+            }
+            conn = c;
+            setupConnection();
+        });
+
+        peer.on('error', (err) => {
+            console.error(err);
+            connectionStatus.innerText = "Network Error: " + err.type;
+            connectionStatus.classList.replace('text-yellow-400', 'text-red-500');
+        });
+    }
+
+    initPeer();
+
+    // --- Lobby Logic ---
+    document.getElementById('btn-create').addEventListener('click', () => {
+        if(!myPeerId) return alert("Network not ready yet.");
+        isHost = true;
+        enterLobby();
+        displayGameId.innerText = myPeerId;
+        p1Name.innerText = document.getElementById('player-name').value || "Host";
+        localPlayer.name = p1Name.innerText;
+        localPlayer.team = 'blue';
+        remotePlayer.team = 'red';
+    });
+
+    document.getElementById('btn-join-menu').addEventListener('click', () => {
+        document.getElementById('join-input-area').classList.toggle('hidden');
+    });
+
+    document.getElementById('btn-join-action').addEventListener('click', () => {
+        const targetId = document.getElementById('game-id-input').value.trim();
+        if(!targetId) return;
+        if(!myPeerId) return alert("Network not ready yet.");
+        
+        isHost = false;
+        connectionStatus.innerText = "Connecting to Host...";
+        
+        // Connect to Host
+        conn = peer.connect(targetId);
+        setupConnection();
+        
+        enterLobby();
+        document.getElementById('host-info-panel').classList.add('hidden'); // Guests don't show ID
+        p1Name.innerText = document.getElementById('player-name').value || "Guest";
+        localPlayer.name = p1Name.innerText;
+        localPlayer.team = 'red';
+        remotePlayer.team = 'blue';
+    });
+
+    document.getElementById('btn-copy').addEventListener('click', () => {
+        navigator.clipboard.writeText(myPeerId);
+        const btn = document.getElementById('btn-copy');
+        btn.innerHTML = '<i class="fas fa-check"></i>';
+        setTimeout(() => btn.innerHTML = '<i class="fas fa-copy"></i>', 2000);
+    });
+
+    // Loadout Selection
     const loadoutBtns = document.querySelectorAll('.loadout-btn');
-    const gameIdInput = document.getElementById('game-id-input');
-
-    let selectedGun = 'ar';
-
-    // UI Event Listeners
     loadoutBtns.forEach(btn => {
         btn.addEventListener('click', () => {
-            loadoutBtns.forEach(b => b.classList.remove('border-blue-500', 'bg-gray-600'));
+            loadoutBtns.forEach(b => {
+                b.classList.remove('border-blue-500', 'bg-gray-600');
+                b.classList.add('border-transparent');
+            });
             btn.classList.add('border-blue-500', 'bg-gray-600');
-            selectedGun = btn.dataset.gun;
-            // Update selection in Firestore if in lobby
-            if(currentGameId) updateLobbyState();
+            btn.classList.remove('border-transparent');
+            localPlayer.gun = btn.dataset.gun;
+            // Send update if connected
+            if(conn && conn.open) {
+                sendData({ type: 'lobby_update', name: localPlayer.name, gun: localPlayer.gun });
+            }
         });
     });
 
-    btnCreate.addEventListener('click', async () => {
-        if (!currentUser) return; // Guard
-        isHost = true;
-        await createGame();
+    document.getElementById('btn-start').addEventListener('click', () => {
+        if(!isHost) return;
+        // Send Start Signal
+        sendData({ type: 'start_game', seed: Date.now() });
+        startGame(Date.now());
     });
 
-    btnJoinMenu.addEventListener('click', () => {
-        joinInputArea.classList.toggle('hidden');
-    });
-
-    btnJoinAction.addEventListener('click', async () => {
-        if (!currentUser) return; // Guard
-        const id = gameIdInput.value.trim();
-        if(!id) return;
-        isHost = false;
-        await joinGame(id);
-    });
-
-    btnCopy.addEventListener('click', () => {
-        navigator.clipboard.writeText(currentGameId);
-        btnCopy.innerHTML = '<i class="fas fa-check"></i>';
-        setTimeout(() => btnCopy.innerHTML = '<i class="fas fa-copy"></i>', 2000);
-    });
-
-    btnStart.addEventListener('click', async () => {
-        if(!isHost || !currentGameId) return;
-        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentGameId);
-        await updateDoc(gameRef, { status: 'playing', startTime: serverTimestamp() });
-    });
-
-    // --- Networking Functions ---
-
-    async function createGame() {
-        const name = document.getElementById('player-name').value || 'Host';
-        // Generate simple 6 char ID
-        const gameId = Math.random().toString(36).substring(2, 8).toUpperCase();
-        currentGameId = gameId;
-        
-        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, gameId);
-        
-        // Initial State
-        const initialData = {
-            host: { id: currentUser.uid, name, gun: selectedGun, ready: true },
-            guest: null,
-            status: 'waiting',
-            createdAt: serverTimestamp(),
-            gameState: { // Real-time game data
-                hostPos: { x: 200, y: MAP_HEIGHT/2, hp: PLAYER_HP },
-                guestPos: { x: MAP_WIDTH - 200, y: MAP_HEIGHT/2, hp: PLAYER_HP },
-                towers: { blue: TOWER_HP, red: TOWER_HP },
-                lastAction: 0
-            }
-        };
-
-        try {
-            await setDoc(gameRef, initialData);
-            enterLobbyUI(gameId);
-            subscribeToGame(gameId);
-        } catch (e) {
-            console.error("Error creating game:", e);
-            alert("Failed to create operation: " + e.message);
-        }
-    }
-
-    async function joinGame(gameId) {
-        const name = document.getElementById('player-name').value || 'Guest';
-        currentGameId = gameId;
-        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, gameId);
-        
-        try {
-            const snap = await getDoc(gameRef);
-            if(!snap.exists()) { alert("Operation ID not found."); return; }
-            
-            if(snap.data().status !== 'waiting') { alert("Operation already in progress."); return; }
-
-            await updateDoc(gameRef, {
-                guest: { id: currentUser.uid, name, gun: selectedGun, ready: true }
-            });
-
-            enterLobbyUI(gameId);
-            subscribeToGame(gameId);
-        } catch (e) {
-            console.error("Error joining game:", e);
-            alert("Failed to join operation: " + e.message);
-        }
-    }
-
-    function enterLobbyUI(id) {
+    function enterLobby() {
         lobbyControls.classList.add('hidden');
         waitingRoom.classList.remove('hidden');
-        displayGameId.innerText = id;
     }
 
-    async function updateLobbyState() {
-        if (!currentGameId) return;
-        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentGameId);
-        const field = isHost ? 'host.gun' : 'guest.gun';
-        await updateDoc(gameRef, { [field]: selectedGun });
-    }
-
-    function subscribeToGame(gameId) {
-        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, gameId);
-        
-        unsubscribeGame = onSnapshot(gameRef, (snap) => {
-            if(!snap.exists()) return;
-            const data = snap.data();
+    function setupConnection() {
+        conn.on('open', () => {
+            console.log("Connected to: " + conn.peer);
+            connectionStatus.innerText = "Connected!";
             
-            // Lobby Logic
-            const p1Status = document.getElementById('p1-status');
-            const p2Status = document.getElementById('p2-status');
-            
-            p1Status.innerHTML = `<div class="w-2 h-2 rounded-full ${data.host ? 'bg-green-500' : 'bg-gray-500'}"></div> ${data.host ? data.host.name : 'Waiting...'}`;
-            p2Status.innerHTML = `<div class="w-2 h-2 rounded-full ${data.guest ? 'bg-green-500' : 'bg-gray-500'}"></div> ${data.guest ? data.guest.name : 'Waiting...'}`;
-
-            if(isHost) {
-                btnStart.disabled = !data.guest; // Only enable if guest exists
-                if(data.guest) btnStart.innerHTML = "DEPLOY TEAM";
-                else btnStart.innerHTML = "WAITING FOR OPPONENT...";
-            } else {
-                btnStart.innerHTML = "WAITING FOR HOST...";
-                btnStart.disabled = true;
-            }
-
-            // Game Start Logic
-            if(data.status === 'playing' && document.getElementById('menu-screen').style.display !== 'none') {
-                startGame(data);
-            }
-
-            // Sync Game State (if playing)
-            if(data.status === 'playing' || data.status === 'finished') {
-                syncGameState(data);
-            }
-        }, (error) => {
-            console.error("Game sync error:", error);
-            // Don't alert aggressively on sync error, but maybe log it
+            // Send initial handshake
+            sendData({ type: 'lobby_update', name: localPlayer.name, gun: localPlayer.gun });
         });
+
+        conn.on('data', (data) => {
+            handleData(data);
+        });
+
+        conn.on('close', () => {
+            alert("Connection lost!");
+            location.reload();
+        });
+    }
+
+    function sendData(data) {
+        if(conn && conn.open) {
+            conn.send(data);
+        }
+    }
+
+    function handleData(data) {
+        if(data.type === 'lobby_update') {
+            remotePlayer.name = data.name;
+            remotePlayer.gun = data.gun;
+            p2Name.innerText = data.name;
+            p2Status.classList.replace('bg-red-500', 'bg-green-500');
+            p2Status.classList.remove('animate-pulse');
+            
+            if(isHost) {
+                btnStart.innerText = "DEPLOY TEAM";
+                btnStart.disabled = false;
+                btnStart.classList.remove('disabled:bg-gray-600');
+            } else {
+                btnStart.innerText = "WAITING FOR HOST...";
+            }
+        }
+        else if(data.type === 'start_game') {
+            startGame(data.seed);
+        }
+        else if(data.type === 'game_update') {
+            // Update Remote Player State
+            remotePlayer.targetX = data.p.x;
+            remotePlayer.targetY = data.p.y;
+            remotePlayer.hp = data.p.hp;
+            remotePlayer.angle = data.p.a;
+            remotePlayer.moving = data.p.m;
+
+            // Sync Towers (Host is authority, but for simplicity both sync hp)
+            // Ideally Host calculates tower dmg and sends it.
+            // P2P Trust model: receive remote tower HP
+            if(!isHost) {
+                 towers.blue.hp = data.t.blue;
+                 towers.red.hp = data.t.red;
+            } else {
+                // Host receives guest's view of towers? No, Host is authority.
+                // But Guest might shoot tower.
+                // Let's rely on Event Based damage for shots
+            }
+        }
+        else if(data.type === 'shot') {
+            // Remote player shot
+            // We locally spawn a bullet from them
+            // angle, gun
+            spawnBullet(remotePlayer, data.angle, data.gun);
+        }
+        else if(data.type === 'hit_tower') {
+            // Remote player says they hit a tower
+            const t = towers[data.team]; // team is color of tower
+            if(t) t.hp -= data.dmg;
+        }
+        else if(data.type === 'hit_player') {
+            // Remote player says they hit ME
+            localPlayer.hp -= data.dmg;
+        }
     }
 
     // --- Game Logic ---
 
-    function generateObstacles() {
+    function generateObstacles(seed) {
+        // Simple seeded procedural (using seed to make random seem same)
+        // Just fixed map for reliability in this demo
         obstacles = [];
         // Center Block
         obstacles.push({x: MAP_WIDTH/2 - 50, y: MAP_HEIGHT/2 - 150, w: 100, h: 300, type: 'wall'});
         // Flank Covers
         obstacles.push({x: MAP_WIDTH/2 - 400, y: MAP_HEIGHT/2 - 400, w: 200, h: 50, type: 'crate'});
         obstacles.push({x: MAP_WIDTH/2 + 200, y: MAP_HEIGHT/2 + 350, w: 200, h: 50, type: 'crate'});
-        // Random scatter
-        for(let i=0; i<15; i++) {
-            obstacles.push({
-                x: Math.random() * (MAP_WIDTH - 200) + 100,
-                y: Math.random() * (MAP_HEIGHT - 200) + 100,
-                w: 40 + Math.random()*40,
-                h: 40 + Math.random()*40,
-                type: 'rock'
-            });
-        }
+        
+        // Fixed randoms
+        const staticRocks = [
+            {x: 400, y: 400, w: 60, h: 60}, {x: 1600, y: 1100, w: 80, h: 80},
+            {x: 800, y: 200, w: 50, h: 50}, {x: 1200, y: 1300, w: 50, h: 50},
+            {x: 200, y: 1000, w: 70, h: 70}, {x: 1800, y: 500, w: 70, h: 70}
+        ];
+        staticRocks.forEach(r => obstacles.push({...r, type: 'rock'}));
     }
 
-    function startGame(data) {
-        menuScreen.style.display = 'none';
+    function startGame(seed) {
+        gameStarted = true;
+        document.getElementById('menu-screen').style.display = 'none';
         document.getElementById('hud').classList.remove('hidden');
         
-        generateObstacles();
+        generateObstacles(seed);
 
-        // Setup Local Player
-        localPlayer.team = isHost ? 'blue' : 'red';
-        localPlayer.x = isHost ? 200 : MAP_WIDTH - 200;
-        localPlayer.y = MAP_HEIGHT / 2;
+        // Positions
+        if(isHost) {
+            localPlayer.x = 200; localPlayer.y = MAP_HEIGHT/2;
+            remotePlayer.x = MAP_WIDTH - 200; remotePlayer.y = MAP_HEIGHT/2;
+        } else {
+            localPlayer.x = MAP_WIDTH - 200; localPlayer.y = MAP_HEIGHT/2;
+            remotePlayer.x = 200; remotePlayer.y = MAP_HEIGHT/2;
+        }
         localPlayer.destX = localPlayer.x;
         localPlayer.destY = localPlayer.y;
-        localPlayer.gun = isHost ? data.host.gun : data.guest.gun;
-        localPlayer.hp = PLAYER_HP;
-
-        // Setup Remote Player Info
-        remotePlayer = {
-            team: isHost ? 'red' : 'blue',
-            x: isHost ? MAP_WIDTH - 200 : 200,
-            y: MAP_HEIGHT / 2,
-            hp: PLAYER_HP,
-            gun: isHost ? data.guest.gun : data.host.gun,
-            moving: false
-        };
 
         // UI Setup
-        document.getElementById('hud-player-name').innerText = isHost ? data.host.name : data.guest.name;
+        document.getElementById('hud-player-name').innerText = localPlayer.name;
         document.getElementById('hud-weapon-name').innerText = GUNS[localPlayer.gun].name;
 
-        // Start Loop
+        // Start Loops
         requestAnimationFrame(gameLoop);
-        
-        // Start Network Sync Loop (separate from render)
-        setInterval(networkSync, 100); // 10 ticks per second
+        setInterval(networkLoop, 50); // 20 updates per second
     }
 
-    async function syncGameState(data) {
-        // Update Towers
-        towers.blue.hp = data.gameState.towers.blue;
-        towers.red.hp = data.gameState.towers.red;
-
-        // Update Remote Player
-        const remoteData = isHost ? data.gameState.guestPos : data.gameState.hostPos;
-        if(remoteData) {
-            // Lerp towards position (simple smoothing)
-            remotePlayer.targetX = remoteData.x;
-            remotePlayer.targetY = remoteData.y;
-            remotePlayer.hp = remoteData.hp;
-            remotePlayer.angle = remoteData.angle;
-            
-            // Check for shot events
-            if(remoteData.lastShot !== remotePlayer.lastShotVal) {
-                remotePlayer.lastShotVal = remoteData.lastShot;
-                fireBullet(remotePlayer, remoteData.shotAngle, remotePlayer.gun);
+    function networkLoop() {
+        if(!gameStarted) return;
+        
+        // Send my State
+        const payload = {
+            type: 'game_update',
+            p: {
+                x: Math.round(localPlayer.x),
+                y: Math.round(localPlayer.y),
+                a: parseFloat(localPlayer.angle.toFixed(2)),
+                hp: localPlayer.hp,
+                m: localPlayer.moving
             }
-        }
-        
-        // Check Win/Loss
-        if(towers.blue.hp <= 0) endGame('red');
-        if(towers.red.hp <= 0) endGame('blue');
-    }
-
-    async function networkSync() {
-        if(!currentGameId) return;
-
-        const myPos = {
-            x: Math.round(localPlayer.x),
-            y: Math.round(localPlayer.y),
-            angle: parseFloat(localPlayer.angle.toFixed(2)),
-            hp: localPlayer.hp,
-            lastShot: localPlayer.lastShot, // Timestamp of last shot
-            shotAngle: localPlayer.angle
         };
 
-        // We also calculate damage locally for simplicity in this P2P model
-        // If I am host, I write my pos to 'hostPos' and tower HP to 'towers'
-        // If I am guest, I write my pos to 'guestPos'
-        
-        const updatePayload = {};
         if(isHost) {
-            updatePayload['gameState.hostPos'] = myPos;
-            // Host is authority on tower HP (simplification)
-            updatePayload['gameState.towers'] = { blue: towers.blue.hp, red: towers.red.hp };
-        } else {
-            updatePayload['gameState.guestPos'] = myPos;
-            // Guest can update tower HP if they damage it, but let's let Host handle tower logic to avoid conflicts?
-            // Better: Everyone updates Firestore with damage events? 
-            // For this demo: Host is Master Authority. Guest sends position. 
-            // Guest calculates damage locally, sends it? 
-            // Let's stick to: Everyone sends their POS. Host calculates TOWER DAMAGE from both.
-            // Actually, simplest: Trust client. If I shoot tower, I lower its HP in DB.
-            updatePayload['gameState.towers'] = { blue: towers.blue.hp, red: towers.red.hp };
+            payload.t = { blue: towers.blue.hp, red: towers.red.hp };
         }
 
-        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentGameId);
-        try {
-            await updateDoc(gameRef, updatePayload);
-        } catch (e) {
-            // Silently fail on network jitter, but log if persistent
-        }
+        sendData(payload);
     }
 
-    // --- Input Handling ---
-    window.addEventListener('resize', resizeCanvas);
     function resizeCanvas() {
         CANVAS.width = window.innerWidth;
         CANVAS.height = window.innerHeight;
     }
+    window.addEventListener('resize', resizeCanvas);
     resizeCanvas();
 
-    // Mouse Tracking
+    // Input
     window.addEventListener('mousemove', (e) => {
         const rect = CANVAS.getBoundingClientRect();
         mouse.x = e.clientX - rect.left;
@@ -572,7 +529,6 @@
         mouse.worldY = mouse.y + camera.y;
     });
 
-    // Movement (Right Click)
     window.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         localPlayer.destX = mouse.worldX;
@@ -581,10 +537,9 @@
         createGroundMarker(mouse.worldX, mouse.worldY);
     });
 
-    // Shooting (Left Click)
     window.addEventListener('mousedown', (e) => {
-        if(e.button === 0) { // Left Click
-           tryShoot();
+        if(e.button === 0 && gameStarted && localPlayer.hp > 0) {
+            tryShoot();
         }
     });
 
@@ -593,35 +548,37 @@
         const gun = GUNS[localPlayer.gun];
         if(now - localPlayer.lastShot > gun.fireRate) {
             localPlayer.lastShot = now;
-            fireBullet(localPlayer, localPlayer.angle, localPlayer.gun);
             
-            // Recoil/Screen Shake
+            // Fire Locally
+            spawnBullet(localPlayer, localPlayer.angle, localPlayer.gun);
+            
+            // Recoil
             camera.x += (Math.random() - 0.5) * 10;
             camera.y += (Math.random() - 0.5) * 10;
+
+            // Notify Network
+            sendData({ type: 'shot', angle: localPlayer.angle, gun: localPlayer.gun });
         }
     }
 
-    function fireBullet(shooter, angle, gunType) {
+    function spawnBullet(shooter, angle, gunType) {
         const gun = GUNS[gunType];
         
-        // Muzzle Flash Particle
+        // Flash
         particles.push({
             x: shooter.x + Math.cos(angle) * 30,
             y: shooter.y + Math.sin(angle) * 30,
-            vx: 0, vy: 0,
-            life: 5, color: '#ffffaa', size: 10
+            vx: 0, vy: 0, life: 5, color: '#ffffaa', size: 10
         });
 
         const speed = gun.speed;
-        // Add slight spread
         const finalAngle = angle + (Math.random() - 0.5) * gun.spread;
         
         projectiles.push({
-            x: shooter.x,
-            y: shooter.y,
+            x: shooter.x, y: shooter.y,
             vx: Math.cos(finalAngle) * speed,
             vy: Math.sin(finalAngle) * speed,
-            owner: shooter.team, // 'blue' or 'red'
+            ownerTeam: shooter.team, 
             damage: gun.damage,
             range: gun.range,
             distTraveled: 0,
@@ -629,15 +586,15 @@
         });
     }
 
-    // --- Core Game Loop ---
     function gameLoop() {
+        if(!gameStarted) return;
         update();
         render();
         requestAnimationFrame(gameLoop);
     }
 
     function update() {
-        // 1. Move Local Player
+        // Move Local
         const dx = localPlayer.destX - localPlayer.x;
         const dy = localPlayer.destY - localPlayer.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
@@ -651,161 +608,135 @@
             localPlayer.moving = false;
         }
 
-        // Calculate Angle
         localPlayer.angle = Math.atan2(mouse.worldY - localPlayer.y, mouse.worldX - localPlayer.x);
 
-        // 2. Interpolate Remote Player
-        if(remotePlayer && remotePlayer.targetX !== undefined) {
-            remotePlayer.x += (remotePlayer.targetX - remotePlayer.x) * 0.1;
-            remotePlayer.y += (remotePlayer.targetY - remotePlayer.y) * 0.1;
-        }
+        // Move Remote (Interpolation)
+        remotePlayer.x += (remotePlayer.targetX - remotePlayer.x) * 0.1;
+        remotePlayer.y += (remotePlayer.targetY - remotePlayer.y) * 0.1;
 
-        // 3. Projectiles
+        // Projectiles
         for(let i = projectiles.length - 1; i >= 0; i--) {
             let p = projectiles[i];
-            p.x += p.vx;
-            p.y += p.vy;
+            p.x += p.vx; p.y += p.vy;
             p.distTraveled += Math.sqrt(p.vx*p.vx + p.vy*p.vy);
 
-            // Bounds/Range check
             if(p.distTraveled > p.range || p.x < 0 || p.x > MAP_WIDTH || p.y < 0 || p.y > MAP_HEIGHT) {
-                projectiles.splice(i, 1);
-                continue;
+                projectiles.splice(i, 1); continue;
             }
-            
-            // Wall Collision
+
+            // Wall check
             let hitWall = false;
             for(let obs of obstacles) {
-                 if(p.x > obs.x && p.x < obs.x + obs.w && p.y > obs.y && p.y < obs.y + obs.h) {
-                     hitWall = true;
-                     break;
-                 }
+                if(p.x > obs.x && p.x < obs.x + obs.w && p.y > obs.y && p.y < obs.y + obs.h) {
+                    hitWall = true; break;
+                }
             }
             if(hitWall) {
                 createExplosion(p.x, p.y, 5, '#888');
-                projectiles.splice(i, 1);
-                continue;
+                projectiles.splice(i, 1); continue;
             }
 
-            // Hit Detection (Client Side Prediction + Trust)
-            // Hit Enemy Player
-            // If I shot this bullet, and it hits remote player, I deal damage
-            if(p.owner === localPlayer.team) {
-                // Hit Remote Player?
-                const distToEnemy = Math.hypot(p.x - remotePlayer.x, p.y - remotePlayer.y);
-                if(distToEnemy < 25) { // Hitbox size
-                    // We don't actually deduct HP here to sync, we just show visuals.
-                    // HP sync handles real death. But for "Trust", we could update DB?
-                    // Let's rely on Firestore 'hp' sync for now, but show blood here
-                    createExplosion(p.x, p.y, 10, '#f00'); // Blood
-                    projectiles.splice(i, 1);
-                    // In a robust game, we'd RPC damage. Here, we can't easily. 
-                    // So we assume the shooter updates the victim's HP in the DB?
-                    // NO: The victim updates their own HP if they see they are hit.
-                    // BUT: Current logic relies on visual sync.
-                    // Let's make "Shooter Updates DB" for Tower, "Victim Updates Self" for Player
-                    continue;
-                }
-
-                // Hit Enemy Tower
-                const enemyTowerColor = localPlayer.team === 'blue' ? 'red' : 'blue';
-                const enemyTower = towers[enemyTowerColor];
-                const distToTower = Math.hypot(p.x - enemyTower.x, p.y - enemyTower.y);
-                if(distToTower < 60) {
-                    enemyTower.hp -= p.damage;
-                    createExplosion(p.x, p.y, 8, '#ffa500'); // Sparks
-                    projectiles.splice(i, 1);
-                    continue;
-                }
-            }
-            
-            // If I am the victim (p.owner != local), check if I got hit
-            if(p.owner !== localPlayer.team) {
-                const distToMe = Math.hypot(p.x - localPlayer.x, p.y - localPlayer.y);
-                if(distToMe < 25) {
-                    localPlayer.hp -= p.damage;
+            // Hit Checks (Only check what WE hit, send result)
+            if(p.ownerTeam === localPlayer.team) {
+                // Check if hit remote player
+                const dEnemy = Math.hypot(p.x - remotePlayer.x, p.y - remotePlayer.y);
+                if(dEnemy < 25) {
                     createExplosion(p.x, p.y, 10, '#f00');
                     projectiles.splice(i, 1);
-                    // I will sync my lower HP to DB next tick
+                    // Send Damage Event
+                    sendData({ type: 'hit_player', dmg: p.damage });
+                    continue;
+                }
+
+                // Check if hit Enemy Tower
+                const enemyTowerColor = localPlayer.team === 'blue' ? 'red' : 'blue';
+                const enemyTower = towers[enemyTowerColor];
+                const dTower = Math.hypot(p.x - enemyTower.x, p.y - enemyTower.y);
+                if(dTower < 50 && enemyTower.hp > 0) {
+                    enemyTower.hp -= p.damage;
+                    createExplosion(p.x, p.y, 8, '#ffa500');
+                    projectiles.splice(i, 1);
+                    sendData({ type: 'hit_tower', team: enemyTowerColor, dmg: p.damage });
                     continue;
                 }
             }
         }
 
-        // 4. Tower AI (Host Logic Only - simplification)
-        // Actually, let each client simulate the tower shooting AT THEM.
-        // If I am close to enemy tower, IT shoots ME.
-        const enemyTowerColor = localPlayer.team === 'blue' ? 'red' : 'blue';
-        const tower = towers[enemyTowerColor];
-        if(tower.hp > 0) {
-            const dist = Math.hypot(localPlayer.x - tower.x, localPlayer.y - tower.y);
-            if(dist < TOWER_RANGE) {
-                const now = Date.now();
-                if(now - (tower.lastFire || 0) > TOWER_COOLDOWN) {
-                    tower.lastFire = now;
-                    // Fire cannon at me
-                    fireCannon(tower, localPlayer);
-                }
-            }
+        // Tower Logic (Host handles AI shooting)
+        if(isHost) {
+            checkTowerAI(towers.blue, remotePlayer); // Blue tower shoots Red player
+            checkTowerAI(towers.red, localPlayer); // Red tower shoots Blue player
+        } else {
+            // Guest logic for their tower? No, host is authority.
+            // Wait, simpler: Each client checks tower vs THEM.
+            // If I am near enemy tower, it shoots ME.
+            // This prevents laggy shots.
+            const enemyTowerColor = localPlayer.team === 'blue' ? 'red' : 'blue';
+            checkTowerAI(towers[enemyTowerColor], localPlayer);
         }
 
-        // 5. Update Camera
-        // Keep player centered
+        // Camera
         camera.x = localPlayer.x - CANVAS.width / 2;
         camera.y = localPlayer.y - CANVAS.height / 2;
-        
-        // Clamp Camera
         camera.x = Math.max(0, Math.min(camera.x, MAP_WIDTH - CANVAS.width));
         camera.y = Math.max(0, Math.min(camera.y, MAP_HEIGHT - CANVAS.height));
+
+        // Win Check
+        if(towers.blue.hp <= 0) endGame('red');
+        if(towers.red.hp <= 0) endGame('blue');
     }
 
-    function fireCannon(tower, target) {
-        // Slow big projectile
-        const angle = Math.atan2(target.y - tower.y, target.x - tower.x);
-        projectiles.push({
-            x: tower.x,
-            y: tower.y,
-            vx: Math.cos(angle) * 15,
-            vy: Math.sin(angle) * 15,
-            owner: 'tower', // Damages player
-            damage: TOWER_DMG,
-            range: 1000,
-            distTraveled: 0,
-            color: '#000',
-            isCannon: true
-        });
+    function checkTowerAI(tower, target) {
+        if(tower.hp <= 0 || target.hp <= 0) return;
+        const dist = Math.hypot(target.x - tower.x, target.y - tower.y);
+        if(dist < TOWER_RANGE) {
+            const now = Date.now();
+            if(now - (tower.lastFire || 0) > TOWER_COOLDOWN) {
+                tower.lastFire = now;
+                // Fire cannon
+                const angle = Math.atan2(target.y - tower.y, target.x - tower.x);
+                projectiles.push({
+                    x: tower.x, y: tower.y,
+                    vx: Math.cos(angle) * 15, vy: Math.sin(angle) * 15,
+                    ownerTeam: 'tower', damage: TOWER_DMG, range: 1000,
+                    color: '#000', isCannon: true
+                });
+                // We don't sync this projectile, purely visual/local damage logic
+                // If it hits me, I take damage.
+            }
+        }
     }
 
-    // --- Rendering ---
     function render() {
-        // Clear Background
         CTX.fillStyle = '#1a1a1a';
         CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
 
         CTX.save();
         CTX.translate(-camera.x, -camera.y);
 
-        // Draw Map Background
-        drawGround();
+        // Grid
+        CTX.strokeStyle = 'rgba(255,255,255,0.03)';
+        CTX.lineWidth = 2;
+        CTX.beginPath();
+        for(let x=0; x<=MAP_WIDTH; x+=100) { CTX.moveTo(x,0); CTX.lineTo(x, MAP_HEIGHT); }
+        for(let y=0; y<=MAP_HEIGHT; y+=100) { CTX.moveTo(0,y); CTX.lineTo(MAP_WIDTH, y); }
+        CTX.stroke();
+        CTX.strokeRect(0,0, MAP_WIDTH, MAP_HEIGHT);
 
-        // Draw Shadows/Details for pseudo-3D
+        // Shadows
         CTX.shadowColor = 'rgba(0,0,0,0.5)';
         CTX.shadowBlur = 15;
         CTX.shadowOffsetY = 10;
 
-        // Obstacles
         obstacles.forEach(obs => {
-            CTX.fillStyle = '#4b5563'; // Stone gray
-            if(obs.type === 'crate') CTX.fillStyle = '#78350f'; // Wood
+            CTX.fillStyle = obs.type === 'crate' ? '#78350f' : '#4b5563';
             CTX.fillRect(obs.x, obs.y, obs.w, obs.h);
-            
-            // Detail on top
             CTX.fillStyle = 'rgba(255,255,255,0.05)';
-            CTX.fillRect(obs.x, obs.y, obs.w, obs.h*0.8); // Highlight top
+            CTX.fillRect(obs.x, obs.y, obs.w, obs.h*0.8);
         });
-        CTX.shadowBlur = 0; // Reset shadow
+        CTX.shadowBlur = 0;
 
-        // Ground Markers
+        // Particles
         renderParticles();
 
         // Towers
@@ -814,7 +745,7 @@
 
         // Players
         drawPlayer(localPlayer);
-        if(remotePlayer && remotePlayer.x) drawPlayer(remotePlayer);
+        drawPlayer(remotePlayer);
 
         // Projectiles
         projectiles.forEach(p => {
@@ -828,79 +759,46 @@
             }
             CTX.fill();
             
-            // Trail
-            CTX.beginPath();
-            CTX.moveTo(p.x, p.y);
-            CTX.lineTo(p.x - p.vx*2, p.y - p.vy*2);
-            CTX.strokeStyle = p.color;
-            CTX.lineWidth = p.isCannon ? 4 : 1;
-            CTX.stroke();
+            // Checking simple collision with local player for cannon here
+            if(p.isCannon) {
+                const distToMe = Math.hypot(p.x - localPlayer.x, p.y - localPlayer.y);
+                if(distToMe < 20) {
+                     localPlayer.hp -= p.damage;
+                     createExplosion(p.x, p.y, 10, '#f00');
+                     p.distTraveled = 9999; // kill bullet
+                }
+            }
         });
 
-        // Danger Zones (Tower Range)
+        // Danger Zones
         if(towers.red.hp > 0 && localPlayer.team === 'blue') drawRangeRing(towers.red);
         if(towers.blue.hp > 0 && localPlayer.team === 'red') drawRangeRing(towers.blue);
 
         CTX.restore();
-
         updateHUD();
-    }
-
-    function drawGround() {
-        // Simple grid for ground
-        CTX.strokeStyle = 'rgba(255,255,255,0.03)';
-        CTX.lineWidth = 2;
-        CTX.beginPath();
-        for(let x=0; x<=MAP_WIDTH; x+=100) { CTX.moveTo(x,0); CTX.lineTo(x, MAP_HEIGHT); }
-        for(let y=0; y<=MAP_HEIGHT; y+=100) { CTX.moveTo(0,y); CTX.lineTo(MAP_WIDTH, y); }
-        CTX.stroke();
-
-        // Borders
-        CTX.strokeStyle = '#333';
-        CTX.lineWidth = 10;
-        CTX.strokeRect(0,0, MAP_WIDTH, MAP_HEIGHT);
     }
 
     function drawTower(tower, color) {
         if(tower.hp <= 0) {
-            // Destroyed
             CTX.fillStyle = '#333';
-            CTX.beginPath();
-            CTX.arc(tower.x, tower.y, 40, 0, Math.PI*2);
-            CTX.fill();
+            CTX.beginPath(); CTX.arc(tower.x, tower.y, 40, 0, Math.PI*2); CTX.fill();
             return;
         }
-
-        // Base
-        CTX.shadowColor = 'rgba(0,0,0,0.6)';
-        CTX.shadowBlur = 20;
-        CTX.fillStyle = '#333';
-        CTX.beginPath();
-        CTX.arc(tower.x, tower.y, 50, 0, Math.PI*2);
-        CTX.fill();
-
-        // Core
+        CTX.shadowColor = 'rgba(0,0,0,0.6)'; CTX.shadowBlur = 20;
+        CTX.fillStyle = '#333'; CTX.beginPath(); CTX.arc(tower.x, tower.y, 50, 0, Math.PI*2); CTX.fill();
         CTX.shadowBlur = 0;
-        CTX.fillStyle = tower.color;
-        CTX.beginPath();
-        CTX.arc(tower.x, tower.y, 30, 0, Math.PI*2);
-        CTX.fill();
-
-        // HP Bar overhead
-        CTX.fillStyle = 'red';
-        CTX.fillRect(tower.x - 40, tower.y - 70, 80, 8);
-        CTX.fillStyle = '#0f0';
-        CTX.fillRect(tower.x - 40, tower.y - 70, 80 * (tower.hp/TOWER_HP), 8);
+        CTX.fillStyle = tower.color; CTX.beginPath(); CTX.arc(tower.x, tower.y, 30, 0, Math.PI*2); CTX.fill();
+        // Bar
+        CTX.fillStyle = 'red'; CTX.fillRect(tower.x - 40, tower.y - 70, 80, 8);
+        CTX.fillStyle = '#0f0'; CTX.fillRect(tower.x - 40, tower.y - 70, 80 * (tower.hp/TOWER_HP), 8);
     }
 
     function drawPlayer(p) {
-        if(p.hp <= 0) return; // Dead
-
+        if(p.hp <= 0) return;
         CTX.save();
         CTX.translate(p.x, p.y);
         CTX.rotate(p.angle);
-
-        // Legs (animation placeholder)
+        
         if(p.moving) {
             CTX.fillStyle = '#111';
             const offset = Math.sin(Date.now() / 100) * 10;
@@ -908,67 +806,37 @@
             CTX.fillRect(-10, -15 - offset, 10, 10);
         }
 
-        // Body (Shoulders)
-        CTX.shadowColor = 'rgba(0,0,0,0.5)';
-        CTX.shadowBlur = 10;
-        CTX.fillStyle = p.team === 'blue' ? '#1e3a8a' : '#991b1b'; // Darker blue/red
-        CTX.beginPath();
-        CTX.ellipse(0, 0, 20, 15, 0, 0, Math.PI*2);
-        CTX.fill();
+        CTX.shadowColor = 'rgba(0,0,0,0.5)'; CTX.shadowBlur = 10;
+        CTX.fillStyle = p.team === 'blue' ? '#1e3a8a' : '#991b1b';
+        CTX.beginPath(); CTX.ellipse(0, 0, 20, 15, 0, 0, Math.PI*2); CTX.fill();
         CTX.shadowBlur = 0;
-
-        // Helmet/Head
         CTX.fillStyle = p.team === 'blue' ? '#3b82f6' : '#ef4444';
-        CTX.beginPath();
-        CTX.arc(0, 0, 12, 0, Math.PI*2);
-        CTX.fill();
-
-        // Gun
-        CTX.fillStyle = '#111';
-        CTX.fillRect(10, -3, 30, 6); // Barrel
-
+        CTX.beginPath(); CTX.arc(0, 0, 12, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = '#111'; CTX.fillRect(10, -3, 30, 6);
         CTX.restore();
 
-        // Name & HP Bar (Non-rotated)
-        CTX.fillStyle = '#fff';
-        CTX.font = '10px Arial';
-        CTX.textAlign = 'center';
-        // CTX.fillText(p.team.toUpperCase(), p.x, p.y - 35);
-        
-        CTX.fillStyle = '#333';
-        CTX.fillRect(p.x - 20, p.y - 30, 40, 5);
+        CTX.fillStyle = '#fff'; CTX.font = '10px Arial'; CTX.textAlign = 'center';
+        CTX.fillText(p.name || '', p.x, p.y - 40);
+        CTX.fillStyle = '#333'; CTX.fillRect(p.x - 20, p.y - 30, 40, 5);
         CTX.fillStyle = p.team === localPlayer.team ? '#0f0' : '#f00';
         CTX.fillRect(p.x - 20, p.y - 30, 40 * (p.hp/PLAYER_HP), 5);
     }
 
     function drawRangeRing(tower) {
-        CTX.beginPath();
-        CTX.arc(tower.x, tower.y, TOWER_RANGE, 0, Math.PI*2);
-        CTX.lineWidth = 2;
-        CTX.strokeStyle = 'rgba(255, 0, 0, 0.2)';
-        CTX.setLineDash([10, 10]);
-        CTX.stroke();
-        CTX.setLineDash([]);
+        CTX.beginPath(); CTX.arc(tower.x, tower.y, TOWER_RANGE, 0, Math.PI*2);
+        CTX.lineWidth = 2; CTX.strokeStyle = 'rgba(255, 0, 0, 0.2)';
+        CTX.setLineDash([10, 10]); CTX.stroke(); CTX.setLineDash([]);
     }
 
     function createGroundMarker(x, y) {
-        particles.push({
-            x, y,
-            vx: 0, vy: 0,
-            life: 20, color: '#0f0', size: 5,
-            type: 'marker'
-        });
+        particles.push({x, y, vx: 0, vy: 0, life: 20, color: '#0f0', size: 5, type: 'marker'});
     }
 
     function createExplosion(x, y, count, color) {
         for(let i=0; i<count; i++) {
             particles.push({
-                x, y,
-                vx: (Math.random()-0.5)*5,
-                vy: (Math.random()-0.5)*5,
-                life: 30 + Math.random()*20,
-                color: color,
-                size: Math.random()*4 + 2
+                x, y, vx: (Math.random()-0.5)*5, vy: (Math.random()-0.5)*5,
+                life: 30 + Math.random()*20, color: color, size: Math.random()*4 + 2
             });
         }
     }
@@ -976,71 +844,41 @@
     function renderParticles() {
         for(let i=particles.length-1; i>=0; i--) {
             let p = particles[i];
-            
             if(p.type === 'marker') {
                 CTX.strokeStyle = `rgba(0, 255, 0, ${p.life/20})`;
-                CTX.beginPath();
-                CTX.arc(p.x, p.y, (20-p.life), 0, Math.PI*2);
-                CTX.stroke();
+                CTX.beginPath(); CTX.arc(p.x, p.y, (20-p.life), 0, Math.PI*2); CTX.stroke();
             } else {
-                p.x += p.vx;
-                p.y += p.vy;
-                p.life--;
-                
-                CTX.globalAlpha = p.life / 50;
-                CTX.fillStyle = p.color;
-                CTX.beginPath();
-                CTX.arc(p.x, p.y, p.size, 0, Math.PI*2);
-                CTX.fill();
+                p.x += p.vx; p.y += p.vy; p.life--;
+                CTX.globalAlpha = p.life / 50; CTX.fillStyle = p.color;
+                CTX.beginPath(); CTX.arc(p.x, p.y, p.size, 0, Math.PI*2); CTX.fill();
                 CTX.globalAlpha = 1;
             }
-
             if(p.life <= 0) particles.splice(i, 1);
         }
     }
 
-    // --- HUD Updates ---
     function updateHUD() {
-        const hudHpBar = document.getElementById('hud-hp-bar');
-        const hudHpText = document.getElementById('hud-hp-text');
-        
-        hudHpText.innerText = Math.max(0, Math.ceil(localPlayer.hp));
-        hudHpBar.style.width = `${Math.max(0, (localPlayer.hp / PLAYER_HP) * 100)}%`;
-        
+        document.getElementById('hud-hp-text').innerText = Math.max(0, Math.ceil(localPlayer.hp));
+        document.getElementById('hud-hp-bar').style.width = `${Math.max(0, (localPlayer.hp / PLAYER_HP) * 100)}%`;
         document.getElementById('host-tower-bar').style.width = `${(towers.blue.hp/TOWER_HP)*100}%`;
         document.getElementById('host-tower-hp-text').innerText = `${Math.max(0, towers.blue.hp)}/1000`;
-        
         document.getElementById('guest-tower-bar').style.width = `${(towers.red.hp/TOWER_HP)*100}%`;
         document.getElementById('guest-tower-hp-text').innerText = `${Math.max(0, towers.red.hp)}/1000`;
-
-        // Check for Game Over Logic (visual only)
-        if(localPlayer.hp <= 0) {
-            // Respawn logic or Spectate
-            // For now, just spectate/grey out
-            document.body.style.filter = "grayscale(100%)";
-        }
     }
 
     function endGame(winningTeam) {
-        // Stop Loop? Or just show overlay
         const screen = document.getElementById('end-screen');
-        const title = document.getElementById('end-title');
-        const reason = document.getElementById('end-reason');
-        
         screen.classList.remove('hidden');
+        const title = document.getElementById('end-title');
         
         if(localPlayer.team === winningTeam) {
             title.innerText = "VICTORY";
             title.className = "text-6xl font-black mb-4 uppercase text-green-500 drop-shadow-lg";
-            reason.innerText = "Enemy Base Destroyed";
         } else {
             title.innerText = "DEFEAT";
             title.className = "text-6xl font-black mb-4 uppercase text-red-500 drop-shadow-lg";
-            reason.innerText = "Base Compromised";
         }
-        
-        // Disable Controls
-        window.removeEventListener('mousedown', tryShoot);
+        gameStarted = false;
     }
 
 </script>
