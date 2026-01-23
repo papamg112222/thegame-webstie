@@ -433,7 +433,6 @@
             tagRaycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
             
             const otherMeshes = [];
-            const meshToId = new Map();
             
             for (const pid in players) {
                 if (players[pid].mesh) otherMeshes.push(players[pid].mesh);
@@ -494,8 +493,20 @@
         // --- Host Data Handling ---
         function handleDataFromClient(clientId, data) {
             if (data.type === 'update') {
-                gameState[clientId] = data.payload;
-                gameState[clientId].lastSeen = Date.now();
+                // HOST AUTHORITY: Only update position/rotation, NEVER overwrite 'isIt' status from client
+                if (gameState[clientId]) {
+                    gameState[clientId].x = data.payload.x;
+                    gameState[clientId].y = data.payload.y;
+                    gameState[clientId].z = data.payload.z;
+                    gameState[clientId].ry = data.payload.ry;
+                    gameState[clientId].username = data.payload.username;
+                    gameState[clientId].lastSeen = Date.now();
+                } else {
+                    // New player: Init state (force isIt to false initially to be safe, host decides who is IT)
+                    gameState[clientId] = data.payload;
+                    gameState[clientId].isIt = false; // Force false on join
+                    gameState[clientId].lastSeen = Date.now();
+                }
             } else if (data.type === 'tag') {
                 // Client attempting to tag someone
                 const targetId = data.targetId;
@@ -504,12 +515,15 @@
                 // Verify tagger is IT
                 if (gameState[taggerId] && gameState[taggerId].isIt) {
                      gameState[taggerId].isIt = false;
-                     gameState[targetId].isIt = true;
                      
-                     // If Host was tagged
                      if (targetId === myId) {
+                         // Host tagged
+                         gameState[myId].isIt = true;
                          localState.isIt = true;
                          updateGameUI();
+                     } else if (gameState[targetId]) {
+                         // Another client tagged
+                         gameState[targetId].isIt = true;
                      }
                 }
             }
@@ -526,6 +540,7 @@
 
             Object.keys(serverState).forEach(id => {
                 if (id === myId) {
+                    // Always obey server for IT status
                     if (serverState[id].isIt !== localState.isIt) {
                         localState.isIt = serverState[id].isIt;
                         updateGameUI();
@@ -663,7 +678,17 @@
                     };
 
                     if (isHost) {
-                        gameState[myId] = myData;
+                        // Host updates self in gameState but KEEPS authoritative isIt state
+                        if(gameState[myId]) {
+                            gameState[myId].x = myData.x;
+                            gameState[myId].y = myData.y;
+                            gameState[myId].z = myData.z;
+                            gameState[myId].ry = myData.ry;
+                            // gameState[myId].isIt remains as server logic dictates
+                        } else {
+                            gameState[myId] = myData; // Init
+                        }
+                        
                         const packet = { players: gameState, logic: serverLogic };
                         connections.forEach(c => c.send({ type: 'state', ...packet }));
                         handleStateUpdate(packet); 
