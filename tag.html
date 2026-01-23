@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Multiplayer Tag 3D - Parkour Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        
+        /* UI Layer */
+        #ui-layer { pointer-events: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 24px; }
+        
+        /* Crosshair */
+        #crosshair {
+            position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+            background: rgba(255, 255, 255, 0.9); border-radius: 50%;
+            transform: translate(-50%, -50%); border: 1.5px solid rgba(0,0,0,0.5);
+            box-shadow: 0 0 4px white;
+        }
+
+        /* Modal */
+        .modal { pointer-events: auto; background: rgba(10, 15, 30, 0.85); backdrop-filter: blur(8px); position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; z-index: 100; }
+        .hidden { display: none !important; }
+        
+        /* Status Text */
+        .tag-status {
+            font-size: 2.5rem; font-weight: 900; letter-spacing: -1px;
+            text-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            text-transform: uppercase;
+            text-align: center; width: 100%;
+            transition: all 0.3s ease;
+        }
+        .is-it { color: #ff3333; text-shadow: 0 0 20px rgba(255, 0, 0, 0.5); }
+        .not-it { color: #00e5ff; text-shadow: 0 0 20px rgba(0, 229, 255, 0.5); }
+        
+        /* Online Count */
+        #online-count {
+            position: absolute; top: 24px; right: 24px;
+            background: rgba(0, 0, 0, 0.7); color: white;
+            padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);
+            font-weight: 700; font-size: 1rem;
+            display: flex; align-items: center; gap: 8px;
+            backdrop-filter: blur(4px);
+        }
+        .online-dot { width: 8px; height: 8px; background-color: #00ff88; border-radius: 50%; display: inline-block; box-shadow: 0 0 8px #00ff88; }
+
+        /* Speech Bubble Labels */
+        .label-container { 
+            position: absolute; top: 0; left: 0; 
+            background: rgba(255, 255, 255, 0.95); color: #111;
+            font-weight: 800; font-family: 'Segoe UI', sans-serif;
+            padding: 4px 12px; border-radius: 6px;
+            pointer-events: none; 
+            transform: translate(-50%, -100%); 
+            white-space: nowrap; font-size: 13px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            transition: opacity 0.2s;
+        }
+        .label-container::after {
+            content: ''; position: absolute; bottom: -5px; left: 50%; transform: translateX(-50%);
+            border-width: 5px 5px 0; border-style: solid; border-color: rgba(255,255,255,0.95) transparent transparent transparent;
+        }
+        
+        /* Loader */
+        .loader { border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #00e5ff; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.8s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* HUD Footer */
+        .controls-hint {
+            display: flex; gap: 20px; color: rgba(255,255,255,0.6); font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+        }
+        .key { background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 4px; color: white; }
+    </style>
+</head>
+<body>
+
+    <div id="game-container"></div>
+
+    <div id="ui-layer">
+        <div id="online-count"><span class="online-dot"></span> <span id="count-val">0</span> PLAYERS</div>
+        <div id="status-text" class="tag-status hidden">Initializing System...</div>
+        <div class="controls-hint">
+            <span><span class="key">WASD</span> Move</span>
+            <span><span class="key">SPACE</span> Jump</span>
+            <span><span class="key">SHIFT</span> Sprint</span>
+            <span><span class="key">MOUSE</span> Look</span>
+        </div>
+    </div>
+
+    <div id="crosshair"></div>
+
+    <div id="start-modal" class="modal">
+        <div class="bg-gray-900/90 p-10 rounded-2xl border border-gray-700/50 shadow-2xl flex flex-col items-center gap-6 w-full max-w-md relative overflow-hidden">
+            <!-- Deco line -->
+            <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
+            
+            <h1 class="text-5xl font-black text-white tracking-tighter italic">TAG <span class="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">PRO</span></h1>
+            
+            <div id="login-step" class="w-full flex flex-col gap-4">
+                <p class="text-gray-400 text-center font-medium">Enter your codename agent.</p>
+                <input type="text" id="username-input" placeholder="Codename" class="w-full bg-black/40 text-white border border-gray-600 focus:border-blue-500 rounded-lg p-4 text-center font-bold text-lg outline-none transition-colors" maxlength="12">
+                <button id="join-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-lg transition-all shadow-lg hover:shadow-blue-500/20 transform active:scale-[0.98]">INITIALIZE LINK</button>
+            </div>
+
+            <div id="loading-indicator" class="hidden flex flex-col items-center gap-3">
+                <div class="loader"></div>
+                <p class="text-blue-300 font-mono text-sm animate-pulse">ESTABLISHING UPLINK...</p>
+            </div>
+
+            <div id="start-step" class="hidden w-full flex flex-col gap-4">
+                <div class="text-center mb-2">
+                    <p class="text-gray-400 text-sm">STATUS</p>
+                    <p class="text-green-400 font-bold tracking-widest">CONNECTED</p>
+                </div>
+                <button id="play-btn" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-lg text-xl transition-all shadow-lg hover:shadow-green-500/20 transform active:scale-[0.98]">ENTER ARENA</button>
+            </div>
+            
+            <div id="paused-step" class="hidden w-full flex flex-col gap-4">
+                <p class="text-white/20 text-center font-black text-4xl tracking-widest">PAUSED</p>
+                <button id="resume-btn" class="w-full bg-white text-black hover:bg-gray-200 font-bold py-4 rounded-lg text-xl transition-transform active:scale-[0.98]">RESUME</button>
+            </div>
+
+            <p id="error-msg" class="text-red-400 text-sm hidden text-center font-mono bg-red-900/20 p-2 rounded w-full"></p>
+        </div>
+    </div>
+
+    <div id="labels"></div>
+
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/PointerLockControls.js" crossorigin="anonymous"></script>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- Config ---
+        const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'default-tag-game';
+        const COLLECTION_NAME = 'tag_players_v2_parkour';
+        const FIREBASE_CONFIG = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        
+        // Physics Constants
+        const PLAYER_HEIGHT = 1.6;
+        const PLAYER_RADIUS = 0.4;
+        const MOVE_SPEED = 12;
+        const SPRINT_SPEED = 18;
+        const JUMP_FORCE = 15;
+        const GRAVITY = 35;
+        const TAG_DISTANCE = 2.5;
+        const SYNC_RATE = 50;
+
+        // --- Globals ---
+        let db, auth, myId = null, myUsername = "Guest", isGameReady = false;
+        let scene, camera, renderer, controls;
+        const worldObjects = []; // Array of meshes for collision
+
+        // --- Asset Generation (Procedural Textures) ---
+        function createGridTexture(size = 512, tile = 4, color1 = '#ffffff', color2 = '#f0f0f0', border = '#e0e0e0') {
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            // Background
+            ctx.fillStyle = color1;
+            ctx.fillRect(0, 0, size, size);
+            
+            // Checker nuance
+            ctx.fillStyle = color2;
+            const s = size / 2;
+            ctx.fillRect(0, 0, s, s);
+            ctx.fillRect(s, s, s, s);
+
+            // Border/Grid lines
+            ctx.strokeStyle = border;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(0, 0); ctx.lineTo(size, 0);
+            ctx.moveTo(0, 0); ctx.lineTo(0, size);
+            ctx.moveTo(size, 0); ctx.lineTo(size, size);
+            ctx.moveTo(0, size); ctx.lineTo(size, size);
+            ctx.stroke();
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        }
+
+        const floorTex = createGridTexture(512, 4, '#1a1a1a', '#222222', '#333');
+        const wallTex = createGridTexture(512, 4, '#eeeeee', '#ffffff', '#cccccc');
+        const orangeTex = createGridTexture(256, 1, '#ff6600', '#ff5500', '#cc4400');
+
+        const matFloor = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.8, metalness: 0.2 });
+        const matWall = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.1, metalness: 0.0 });
+        const matOrange = new THREE.MeshStandardMaterial({ map: orangeTex, roughness: 0.4, metalness: 0.1, emissive: 0xff4400, emissiveIntensity: 0.2 });
+
+        // --- Firebase Init ---
+        try {
+            const app = initializeApp(FIREBASE_CONFIG);
+            auth = getAuth(app);
+            db = getFirestore(app);
+        } catch (e) {
+            console.error(e);
+            document.getElementById('error-msg').innerText = "Connection Failed";
+            document.getElementById('error-msg').classList.remove('hidden');
+        }
+
+        // --- World Builder ---
+        function buildWorld() {
+            // Helper to add collider
+            function addBox(x, y, z, w, h, d, mat, rotationY = 0) {
+                const geo = new THREE.BoxGeometry(w, h, d);
+                // Adjust texture repeat
+                if (mat.map) {
+                    mat = mat.clone(); // Clone to handle specific repeat per object
+                    mat.map = mat.map.clone();
+                    mat.map.repeat.set(Math.max(1, w/2), Math.max(1, h/2));
+                    mat.map.needsUpdate = true;
+                }
+                
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y + h/2, z); // pivot at bottom
+                mesh.rotation.y = rotationY;
+                mesh.castShadow = true;
+                mesh.receiveShadow = true;
+                scene.add(mesh);
+                
+                // Add to physics world
+                // We create a Box3 for this mesh
+                const box = new THREE.Box3().setFromObject(mesh);
+                mesh.userData.box = box; // Store world AABB
+                // We also store the mesh itself for raycasting
+                worldObjects.push(mesh);
+            }
+
+            function addRamp(x, y, z, w, h, length, mat, rotationY = 0) {
+                 // Create a wedge shape
+                 const shape = new THREE.Shape();
+                 shape.moveTo(0, 0);
+                 shape.lineTo(0, h);
+                 shape.lineTo(length, 0);
+                 shape.lineTo(0, 0);
+                 
+                 const extrudeSettings = { steps: 1, depth: w, bevelEnabled: false };
+                 const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                 
+                 // Center the geometry
+                 geo.translate(-length/2, 0, -w/2);
+
+                 const mesh = new THREE.Mesh(geo, mat);
+                 mesh.position.set(x, y, z);
+                 mesh.rotation.y = rotationY;
+                 mesh.castShadow = true;
+                 mesh.receiveShadow = true;
+                 scene.add(mesh);
+                 worldObjects.push(mesh);
+            }
+
+            // 1. Floor
+            const floorGeo = new THREE.PlaneGeometry(200, 200);
+            floorTex.repeat.set(50, 50);
+            const floor = new THREE.Mesh(floorGeo, matFloor);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            // Floor is not in worldObjects list for wall collision, 
+            // but we will use a special check for y=0
+
+            // 2. Arena Walls
+            addBox(0, 0, -50, 100, 10, 2, matWall);
+            addBox(0, 0, 50, 100, 10, 2, matWall);
+            addBox(-50, 0, 0, 2, 10, 100, matWall);
+            addBox(50, 0, 0, 2, 10, 100, matWall);
+
+            // 3. Central Fortress
+            addBox(0, 0, 0, 10, 3, 10, matWall); // Base
+            addBox(0, 3, 0, 6, 2, 6, matWall);   // Top
+            addRamp(0, 0, 8, 4, 3, 6, matOrange, 0); // South Ramp
+            addRamp(0, 0, -8, 4, 3, 6, matOrange, Math.PI); // North Ramp
+
+            // 4. Parkour Steps (East)
+            addBox(20, 0, 0, 4, 1, 4, matOrange);
+            addBox(24, 0, 4, 4, 2, 4, matOrange);
+            addBox(20, 0, 8, 4, 3, 4, matOrange);
+            addBox(16, 0, 4, 4, 4, 4, matWall); // High pillar
+
+            // 5. The Maze (West)
+            addBox(-20, 0, -10, 2, 4, 10, matWall);
+            addBox(-25, 0, -5, 10, 4, 2, matWall);
+            addBox(-20, 0, 5, 2, 4, 10, matWall);
+
+            // 6. Floating Platforms (Need jumps)
+            addBox(-15, 2.5, 20, 5, 0.5, 5, matOrange);
+            addBox(-5, 3.5, 20, 5, 0.5, 5, matOrange);
+
+            // 7. Random cover
+            addBox(30, 0, -30, 3, 2, 3, matWall);
+            addBox(35, 0, -25, 3, 4, 3, matWall);
+            addBox(-35, 0, 35, 8, 2, 2, matOrange);
+        }
+
+        // --- Three.js Init ---
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x88ccff); // Bright Blue Sky
+        scene.fog = new THREE.Fog(0x88ccff, 20, 90);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('game-container').appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(50, 100, 50);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.camera.left = -60;
+        dirLight.shadow.camera.right = 60;
+        dirLight.shadow.camera.top = 60;
+        dirLight.shadow.camera.bottom = -60;
+        scene.add(dirLight);
+
+        // Build Level
+        buildWorld();
+
+        // Controls
+        controls = new THREE.PointerLockControls(camera, document.body);
+
+        // --- Humanoid Character ---
+        function createHumanoid(colorHex) {
+            const group = new THREE.Group();
+            const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.5 });
+            
+            // Head
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 0.3), mat);
+            head.position.y = 1.55; head.castShadow = true;
+            group.add(head);
+            
+            // Torso
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, 0.25), mat);
+            torso.position.y = 1.1; torso.castShadow = true;
+            group.add(torso);
+
+            // Limbs (Pivoted for animation)
+            const limbGeo = new THREE.BoxGeometry(0.12, 0.7, 0.12);
+            limbGeo.translate(0, -0.3, 0); // Pivot at top
+
+            const lArm = new THREE.Mesh(limbGeo, mat); lArm.position.set(-0.3, 1.35, 0);
+            lArm.name = 'lArm'; group.add(lArm);
+
+            const rArm = new THREE.Mesh(limbGeo, mat); rArm.position.set(0.3, 1.35, 0);
+            rArm.name = 'rArm'; group.add(rArm);
+
+            const lLeg = new THREE.Mesh(limbGeo, mat); lLeg.position.set(-0.15, 0.8, 0);
+            lLeg.name = 'lLeg'; group.add(lLeg);
+
+            const rLeg = new THREE.Mesh(limbGeo, mat); rLeg.position.set(0.15, 0.8, 0);
+            rLeg.name = 'rLeg'; group.add(rLeg);
+
+            return group;
+        }
+
+        // --- Game State & UI ---
+        const startModal = document.getElementById('start-modal');
+        const usernameInput = document.getElementById('username-input');
+        const loginStep = document.getElementById('login-step');
+        const loadingStep = document.getElementById('loading-indicator');
+        const startStep = document.getElementById('start-step');
+        const pausedStep = document.getElementById('paused-step');
+        
+        // --- Input Handling ---
+        const moveState = { fwd: false, bwd: false, left: false, right: false, sprint: false };
+        let velocity = new THREE.Vector3();
+        let canJump = false;
+
+        document.addEventListener('keydown', (e) => {
+            switch(e.code) {
+                case 'KeyW': moveState.fwd = true; break;
+                case 'KeyS': moveState.bwd = true; break;
+                case 'KeyA': moveState.left = true; break;
+                case 'KeyD': moveState.right = true; break;
+                case 'ShiftLeft': moveState.sprint = true; break;
+                case 'Space': 
+                    if (canJump) { velocity.y = JUMP_FORCE; canJump = false; }
+                    break;
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            switch(e.code) {
+                case 'KeyW': moveState.fwd = false; break;
+                case 'KeyS': moveState.bwd = false; break;
+                case 'KeyA': moveState.left = false; break;
+                case 'KeyD': moveState.right = false; break;
+                case 'ShiftLeft': moveState.sprint = false; break;
+            }
+        });
+
+        // --- Auth & Start ---
+        document.getElementById('join-btn').addEventListener('click', async () => {
+            const name = usernameInput.value.trim();
+            if(!name) return;
+            myUsername = name;
+            loginStep.classList.add('hidden');
+            loadingStep.classList.remove('hidden');
+            
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch(e) { 
+                console.error(e);
+                document.getElementById('error-msg').innerText = "Auth Error";
+                document.getElementById('error-msg').classList.remove('hidden');
+            }
+        });
+
+        onAuthStateChanged(auth, async (user) => {
+            if (user && !myId) {
+                myId = user.uid;
+                loadingStep.classList.add('hidden');
+                startStep.classList.remove('hidden');
+                
+                // Spawn Logic
+                camera.position.set(0, 5, 30);
+                
+                setupNet();
+                await updateMyPos();
+                animate();
+                isGameReady = true;
+            }
+        });
+
+        document.getElementById('play-btn').addEventListener('click', () => isGameReady && controls.lock());
+        document.getElementById('resume-btn').addEventListener('click', () => isGameReady && controls.lock());
+
+        controls.addEventListener('lock', () => {
+            startModal.classList.add('hidden');
+            document.getElementById('status-text').classList.remove('hidden');
+        });
+        controls.addEventListener('unlock', () => {
+            startModal.classList.remove('hidden');
+            if(isGameReady) {
+                loginStep.classList.add('hidden');
+                startStep.classList.add('hidden');
+                pausedStep.classList.remove('hidden');
+            }
+        });
+
+        // --- Networking ---
+        const players = {};
+        const localState = { isIt: false };
+        let lastSync = 0;
+
+        function setupNet() {
+            const col = collection(db, 'artifacts', APP_ID, 'public', 'data', COLLECTION_NAME);
+            onSnapshot(col, (snap) => {
+                const now = Date.now();
+                const activeIds = new Set();
+                let someoneIsIt = false;
+
+                snap.forEach(d => {
+                    const data = d.data();
+                    const id = d.id;
+                    if (now - data.lastSeen > 10000) return;
+                    activeIds.add(id);
+                    if (data.isIt) someoneIsIt = true;
+
+                    if (id === myId) {
+                        if (localState.isIt !== data.isIt) {
+                            localState.isIt = data.isIt;
+                            updateUI();
+                        }
+                    } else {
+                        updatePlayer(id, data);
+                    }
+                });
+
+                Object.keys(players).forEach(id => {
+                    if(!activeIds.has(id)) removePlayer(id);
+                });
+
+                document.getElementById('count-val').innerText = activeIds.size;
+
+                // Game Logic: Auto assign IT
+                if (!someoneIsIt && activeIds.size > 0 && myId) {
+                     const ids = Array.from(activeIds).sort();
+                     if (ids[0] === myId && !localState.isIt) {
+                         localState.isIt = true;
+                         updateUI();
+                     }
+                }
+            });
+        }
+
+        function updatePlayer(id, data) {
+            let p = players[id];
+            if (!p) {
+                const mesh = createHumanoid(data.isIt ? 0xff3333 : 0x00ff88);
+                scene.add(mesh);
+                const label = document.createElement('div');
+                label.className = 'label-container';
+                label.innerText = data.username;
+                document.getElementById('labels').appendChild(label);
+                p = players[id] = { mesh, label, targetPos: new THREE.Vector3(), targetRot: 0, animOff: Math.random()*10 };
+            }
+            p.data = data;
+            p.targetPos.set(data.x, data.y, data.z);
+            p.targetRot = data.ry;
+
+            const color = data.isIt ? 0xff3333 : 0x00ff88;
+            p.mesh.traverse(c => { if(c.isMesh) c.material.color.setHex(color); });
+        }
+
+        function removePlayer(id) {
+            if(players[id]) {
+                scene.remove(players[id].mesh);
+                players[id].label.remove();
+                delete players[id];
+            }
+        }
+
+        async function updateMyPos() {
+            if(!myId) return;
+            try {
+                await setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', COLLECTION_NAME, myId), {
+                    x: camera.position.x,
+                    y: camera.position.y - PLAYER_HEIGHT + 0.1, // Foot position
+                    z: camera.position.z,
+                    ry: camera.rotation.y,
+                    isIt: localState.isIt,
+                    lastSeen: Date.now(),
+                    username: myUsername
+                });
+            } catch(e) {}
+        }
+
+        function updateUI() {
+            const el = document.getElementById('status-text');
+            if (localState.isIt) {
+                el.innerText = "YOU ARE IT!";
+                el.className = "tag-status is-it";
+            } else {
+                el.innerText = "SURVIVE";
+                el.className = "tag-status not-it";
+            }
+        }
+
+        // --- Physics & Collision ---
+        const raycaster = new THREE.Raycaster();
+        const downVec = new THREE.Vector3(0, -1, 0);
+
+        function checkWallCollision(newPos) {
+            // Simplified Cylinder/AABB check
+            const playerBox = new THREE.Box3();
+            const min = new THREE.Vector3(newPos.x - 0.3, newPos.y - 1.5, newPos.z - 0.3);
+            const max = new THREE.Vector3(newPos.x + 0.3, newPos.y + 0.5, newPos.z + 0.3);
+            playerBox.set(min, max);
+
+            for (const obj of worldObjects) {
+                // If the object has a Box3, use intersectsBox
+                if (obj.userData.box && playerBox.intersectsBox(obj.userData.box)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function getFloorHeight(pos) {
+            // Cast ray down from slightly above player feet
+            raycaster.set(new THREE.Vector3(pos.x, pos.y + 1, pos.z), downVec);
+            const intersects = raycaster.intersectObjects(worldObjects);
+            
+            if (intersects.length > 0) {
+                // We found something below us
+                return intersects[0].point.y;
+            }
+            return 0; // Default floor
+        }
+
+        // --- Main Loop ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (!controls || !scene) return;
+
+            const dt = Math.min(clock.getDelta(), 0.1); // Cap delta time
+            const now = Date.now();
+
+            if (controls.isLocked) {
+                const speed = moveState.sprint ? SPRINT_SPEED : MOVE_SPEED;
+                
+                // 1. Apply Gravity
+                velocity.y -= GRAVITY * dt;
+
+                // 2. Input Direction
+                const direction = new THREE.Vector3();
+                direction.z = Number(moveState.fwd) - Number(moveState.bwd);
+                direction.x = Number(moveState.right) - Number(moveState.left);
+                direction.normalize();
+
+                // 3. Horizontal Movement with Collision
+                // We move X and Z separately to allow sliding along walls
+                
+                // X Axis
+                const oldX = camera.position.x;
+                if (moveState.left || moveState.right) {
+                     controls.moveRight(direction.x * speed * dt);
+                }
+                if (checkWallCollision(camera.position)) {
+                    camera.position.x = oldX; // Revert if hit
+                }
+
+                // Z Axis
+                const oldZ = camera.position.z;
+                if (moveState.fwd || moveState.bwd) {
+                    controls.moveForward(direction.z * speed * dt);
+                }
+                if (checkWallCollision(camera.position)) {
+                    camera.position.z = oldZ; // Revert if hit
+                }
+
+                // 4. Vertical Movement & Floor Snap
+                camera.position.y += velocity.y * dt;
+                
+                // Check floor height at new position
+                const groundY = getFloorHeight(camera.position);
+                
+                // If we are falling and hit ground (or slightly below/above due to slopes)
+                if (camera.position.y < groundY + PLAYER_HEIGHT) {
+                    // Snap to floor
+                    camera.position.y = groundY + PLAYER_HEIGHT;
+                    velocity.y = Math.max(0, velocity.y); // Stop falling
+                    canJump = true;
+                }
+
+                // 5. Arena Boundaries
+                if (camera.position.x < -48) camera.position.x = -48;
+                if (camera.position.x > 48) camera.position.x = 48;
+                if (camera.position.z < -48) camera.position.z = -48;
+                if (camera.position.z > 48) camera.position.z = 48;
+                
+                // Sync
+                if (now - lastSync > SYNC_RATE) {
+                    updateMyPos();
+                    lastSync = now;
+                }
+
+                // Tag Logic
+                if (localState.isIt) {
+                     const myPos = new THREE.Vector3(camera.position.x, camera.position.y - 1, camera.position.z);
+                     for (const pid in players) {
+                         if (myPos.distanceTo(players[pid].mesh.position) < TAG_DISTANCE) {
+                             // Tag!
+                             localState.isIt = false;
+                             updateUI();
+                             updateMyPos();
+                             setDoc(doc(db, 'artifacts', APP_ID, 'public', 'data', COLLECTION_NAME, pid), { isIt: true }, { merge: true });
+                             break;
+                         }
+                     }
+                }
+            }
+
+            // Render Others
+            for (const pid in players) {
+                const p = players[pid];
+                
+                // Lerp Pos
+                const oldPos = p.mesh.position.clone();
+                p.mesh.position.lerp(p.targetPos, 0.2);
+                p.mesh.rotation.y = p.targetRot;
+
+                // Animate Limbs
+                const moveDist = p.mesh.position.distanceTo(oldPos);
+                const isMoving = moveDist > 0.01;
+                const t = now * 0.01;
+                
+                const lArm = p.mesh.getObjectByName('lArm');
+                const rArm = p.mesh.getObjectByName('rArm');
+                const lLeg = p.mesh.getObjectByName('lLeg');
+                const rLeg = p.mesh.getObjectByName('rLeg');
+
+                if (isMoving) {
+                    const ang = Math.sin(t + p.animOff) * 1.2;
+                    if(lLeg) lLeg.rotation.x = ang;
+                    if(rLeg) rLeg.rotation.x = -ang;
+                    if(lArm) lArm.rotation.x = -ang;
+                    if(rArm) rArm.rotation.x = ang;
+                } else {
+                    if(lLeg) lLeg.rotation.x = 0;
+                    if(rLeg) rLeg.rotation.x = 0;
+                    if(lArm) lArm.rotation.x = 0;
+                    if(rArm) rArm.rotation.x = 0;
+                }
+
+                // Labels
+                const pos = p.mesh.position.clone();
+                pos.y += 2.2;
+                pos.project(camera);
+                const x = (pos.x * .5 + .5) * window.innerWidth;
+                const y = (pos.y * -.5 + .5) * window.innerHeight;
+
+                if (pos.z > 1 || Math.abs(x) > window.innerWidth + 100 || Math.abs(y) > window.innerHeight + 100) {
+                    p.label.style.opacity = 0;
+                } else {
+                    p.label.style.opacity = 1;
+                    p.label.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+    </script>
+</body>
+</html>
