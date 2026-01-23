@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Tactical Warfare: Expanded Arsenal</title>
+    <title>Tactical Warfare: Homing Defense</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -696,11 +696,47 @@
         // Bullets
         for(let i=bullets.length-1; i>=0; i--) {
             let b = bullets[i];
+
+            // --- MISSILE HOMING LOGIC ---
+            if(b.isCannon && !localPlayer.dead) {
+                const speed = 14; 
+                const turnSpeed = 0.08; 
+
+                const dx = localPlayer.x - b.x;
+                const dy = localPlayer.y - b.y;
+                const targetAngle = Math.atan2(dy, dx);
+                const currentAngle = Math.atan2(b.vy, b.vx);
+
+                let diff = targetAngle - currentAngle;
+                // Normalize angle
+                if (diff > Math.PI) diff -= 2 * Math.PI;
+                if (diff < -Math.PI) diff += 2 * Math.PI;
+
+                // Clamp turn
+                const turn = Math.max(-turnSpeed, Math.min(turnSpeed, diff));
+                const newAngle = currentAngle + turn;
+
+                b.vx = Math.cos(newAngle) * speed;
+                b.vy = Math.sin(newAngle) * speed;
+                
+                // Missile Exhaust Trail
+                if(Math.random() > 0.3) {
+                    particles.push({
+                        x: b.x - b.vx*1.5, y: b.y - b.vy*1.5, // Spawn behind missile
+                        vx: (Math.random()-0.5)*2, vy: (Math.random()-0.5)*2,
+                        life: 0.5, color: Math.random()>0.5 ? '#f59e0b' : '#ef4444', size: 4, decay: 0.08
+                    });
+                }
+            }
+
             b.x += b.vx * dt * 60; b.y += b.vy * dt * 60;
             b.dist += Math.hypot(b.vx, b.vy) * dt * 60;
             if(b.dist > b.range) { bullets.splice(i,1); continue; }
             
-            if(b.isCannon) spawnParticles(b.x, b.y, 1, '#555', 0.5);
+            if(b.isCannon) {
+                // Smoke trail only (Fire added in homing logic)
+                if(Math.random() > 0.5) spawnParticles(b.x, b.y, 1, '#555', 0.2);
+            }
 
             // Wall Collision
             let hitWall = false;
@@ -764,7 +800,7 @@
                     bullets.push({
                         x: enemyTower.x, y: enemyTower.y,
                         vx: Math.cos(a) * 14, vy: Math.sin(a) * 14,
-                        owner: 'tower', range: 1000, dmg: CANNON_DMG, color: '#111', size: 12, isCannon: true, dist:0
+                        owner: 'tower', range: 1500, dmg: CANNON_DMG, color: '#111', size: 12, isCannon: true, dist:0
                     });
                     spawnParticles(enemyTower.x, enemyTower.y, 20, '#ffaa00', 5);
                 }
