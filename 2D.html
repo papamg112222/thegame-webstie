@@ -62,6 +62,34 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             z-index: 40; backdrop-filter: blur(5px);
         }
+
+        /* Chat UI */
+        #chat-container {
+            position: absolute; bottom: 20px; left: 20px; width: 350px; 
+            display: flex; flex-direction: column; gap: 8px; z-index: 50;
+            pointer-events: auto;
+        }
+        #chat-messages {
+            height: 200px; overflow-y: auto; 
+            display: flex; flex-direction: column; justify-content: flex-end;
+            text-shadow: 1px 1px 2px black;
+            mask-image: linear-gradient(to top, black 80%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to top, black 80%, transparent 100%);
+        }
+        .chat-msg { margin-bottom: 4px; font-size: 14px; font-family: 'Inter', sans-serif; word-wrap: break-word; }
+        .chat-msg .name { font-weight: bold; margin-right: 5px; }
+        #chat-input-wrapper {
+            position: relative; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+        }
+        #chat-input-wrapper.active { opacity: 1; pointer-events: auto; }
+        #chat-input {
+            width: 100%; background: rgba(0,0,0,0.7); border: 1px solid #444; 
+            color: white; padding: 8px 12px; border-radius: 6px; outline: none;
+        }
+        
+        /* Custom Scrollbar for Chat */
+        #chat-messages::-webkit-scrollbar { width: 4px; }
+        #chat-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
     </style>
 </head>
 <body>
@@ -140,6 +168,14 @@
     </div>
 </div>
 
+<!-- Chat UI -->
+<div id="chat-container">
+    <div id="chat-messages"></div>
+    <div id="chat-input-wrapper">
+        <input type="text" id="chat-input" placeholder="Type a message..." maxlength="100" autocomplete="off">
+    </div>
+</div>
+
 <!-- HUD -->
 <div id="hud" class="hidden pointer-events-none absolute inset-0 p-6 flex flex-col justify-between z-20">
     <div class="flex justify-between items-start w-full">
@@ -190,6 +226,7 @@
         <div class="text-right opacity-60 text-[10px] font-mono space-y-1">
             <div><span class="bg-gray-700 px-1 rounded text-white font-bold">R-CLICK</span> MOVE</div>
             <div><span class="bg-gray-700 px-1 rounded text-white font-bold">L-CLICK</span> FIRE</div>
+            <div><span class="bg-gray-700 px-1 rounded text-white font-bold">/</span> CHAT</div>
         </div>
     </div>
 </div>
@@ -225,7 +262,7 @@
     const TOWER_MAX_HP = 1500;
     const PLAYER_MAX_HP = 500;
     const GAME_DURATION = 180; 
-    const RESPAWN_TIME = 10; // seconds
+    const RESPAWN_TIME = 10; 
 
     // --- Assets ---
     const COLORS = {
@@ -237,13 +274,15 @@
         wallTop: '#403d39',
         wallSide: '#252422',
         dirt: '#3d342b',
-        bush: '#1a331a'
+        bush: '#1a331a',
+        concrete: '#333333',
+        road: '#2b231d'
     };
 
     const GUNS = {
         glock: { name: 'GLOCK 19', dmg: 45, rate: 350, speed: 22, spread: 0.08, color: '#d4d4d8', length: 14, width: 4, trail: '#ffff00' },
         ar: { name: 'M4A1 CARBINE', dmg: 32, rate: 100, speed: 28, spread: 0.12, color: '#71717a', length: 28, width: 4, trail: '#ffaa00' },
-        sniper: { name: 'AWP .338', dmg: 100, rate: 5000, speed: 50, spread: 0.001, color: '#52525b', length: 42, width: 5, trail: '#ffffff' } // 5s reload, 100 dmg
+        sniper: { name: 'AWP .338', dmg: 100, rate: 5000, speed: 50, spread: 0.001, color: '#52525b', length: 42, width: 5, trail: '#ffffff' } 
     };
     const CANNON_DMG = 250;
 
@@ -261,7 +300,9 @@
     let camera = { x: 0, y: 0, shake: 0 };
     let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
     let towers = { blue: { x: 0, y: 0, hp: TOWER_MAX_HP }, red: { x: 0, y: 0, hp: TOWER_MAX_HP } };
-    let groundDetails = []; // Mud, bushes
+    let groundDetails = []; 
+    let roads = [];
+    let isChatting = false;
 
     // --- Init ---
     function init() {
@@ -294,6 +335,36 @@
             send({ type: 'start', seed });
             startGame(seed);
         };
+
+        // Chat Listeners
+        window.addEventListener('keydown', (e) => {
+            if(e.key === '/') {
+                e.preventDefault();
+                if(!isChatting) {
+                    isChatting = true;
+                    document.getElementById('chat-input-wrapper').classList.add('active');
+                    document.getElementById('chat-input').focus();
+                }
+            } else if(e.key === 'Escape') {
+                if(isChatting) {
+                    isChatting = false;
+                    document.getElementById('chat-input-wrapper').classList.remove('active');
+                    document.getElementById('chat-input').blur();
+                }
+            } else if(e.key === 'Enter') {
+                if(isChatting) {
+                    const msg = document.getElementById('chat-input').value.trim();
+                    if(msg) {
+                        send({ type: 'chat', name: localPlayer.name, text: msg, team: localPlayer.team });
+                        addChatMessage(localPlayer.name, msg, localPlayer.team);
+                        document.getElementById('chat-input').value = '';
+                    }
+                    isChatting = false;
+                    document.getElementById('chat-input-wrapper').classList.remove('active');
+                    document.getElementById('chat-input').blur();
+                }
+            }
+        });
     }
 
     // --- Networking ---
@@ -352,17 +423,36 @@
             } else if(data.type === 'start') startGame(data.seed);
             else if(data.type === 'update') handleGameUpdate(data);
             else if(data.type === 'event') handleGameEvent(data);
+            else if(data.type === 'chat') addChatMessage(data.name, data.text, data.team);
         });
         conn.on('close', () => { alert("Connection Lost"); location.reload(); });
     }
 
     function send(data) { if(conn && conn.open) conn.send(data); }
 
+    function addChatMessage(name, text, team) {
+        const box = document.getElementById('chat-messages');
+        const div = document.createElement('div');
+        div.className = 'chat-msg';
+        const color = team === 'blue' ? '#60a5fa' : '#f87171';
+        div.innerHTML = `<span class="name" style="color:${color}">${name}:</span><span style="color:white">${text}</span>`;
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
+
     // --- Game Logic ---
     function generateMap(seed) {
         walls = [];
         groundDetails = [];
+        roads = [];
         
+        // Base Floors (Concrete Pads)
+        groundDetails.push({ x: 200, y: MAP_H/2, size: 250, type: 'concrete' });
+        groundDetails.push({ x: MAP_W - 200, y: MAP_H/2, size: 250, type: 'concrete' });
+
+        // Roads (Dirt Paths) - Main Lane
+        roads.push({ x: 0, y: MAP_H/2 - 60, w: MAP_W, h: 120 });
+
         // Borders
         walls.push({ x: -100, y: -100, w: MAP_W+200, h: 100 });
         walls.push({ x: -100, y: MAP_H, w: MAP_W+200, h: 100 });
@@ -387,11 +477,19 @@
         }
         
         // Ground Details (Mud & Bushes)
-        for(let i=0; i<30; i++) {
+        for(let i=0; i<40; i++) {
             groundDetails.push({
                 x: r(i+20) * MAP_W, y: r(i+21) * MAP_H,
                 size: 50 + r(i+22) * 100,
                 type: r(i+23) > 0.6 ? 'bush' : 'mud'
+            });
+        }
+        // Craters
+        for(let i=0; i<10; i++) {
+            groundDetails.push({
+                x: r(i+50) * MAP_W, y: r(i+51) * MAP_H,
+                size: 40 + r(i+52) * 40,
+                type: 'crater'
             });
         }
 
@@ -472,7 +570,7 @@
         document.getElementById('game-timer').innerText = `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
 
         // Local Player Logic
-        if(!localPlayer.dead) {
+        if(!localPlayer.dead && !isChatting) { // Disable move while chat
             const dx = localPlayer.destX - localPlayer.x;
             const dy = localPlayer.destY - localPlayer.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
@@ -497,21 +595,22 @@
                 send({ type: 'event', kind: 'died' });
             }
         } else {
-            // Respawn Logic
-            let remaining = Math.ceil((localPlayer.respawnTick - Date.now()) / 1000);
-            if(remaining < 0) remaining = 0;
-            document.getElementById('respawn-timer').innerText = remaining;
-            
-            if(Date.now() > localPlayer.respawnTick) {
-                // Respawn
-                localPlayer.dead = false;
-                localPlayer.hp = PLAYER_MAX_HP;
-                const sp = getSpawnPoint(localPlayer.team);
-                localPlayer.x = sp.x; localPlayer.y = sp.y;
-                localPlayer.destX = sp.x; localPlayer.destY = sp.y;
-                document.getElementById('respawn-overlay').classList.add('hidden');
-                document.body.style.filter = "none";
-                send({ type: 'event', kind: 'respawned' });
+            if(localPlayer.dead) {
+                // Respawn Logic
+                let remaining = Math.ceil((localPlayer.respawnTick - Date.now()) / 1000);
+                if(remaining < 0) remaining = 0;
+                document.getElementById('respawn-timer').innerText = remaining;
+                
+                if(Date.now() > localPlayer.respawnTick) {
+                    localPlayer.dead = false;
+                    localPlayer.hp = PLAYER_MAX_HP;
+                    const sp = getSpawnPoint(localPlayer.team);
+                    localPlayer.x = sp.x; localPlayer.y = sp.y;
+                    localPlayer.destX = sp.x; localPlayer.destY = sp.y;
+                    document.getElementById('respawn-overlay').classList.add('hidden');
+                    document.body.style.filter = "none";
+                    send({ type: 'event', kind: 'respawned' });
+                }
             }
         }
 
@@ -554,7 +653,6 @@
             if(hit) { bullets.splice(i,1); continue; }
 
             if(b.owner === localPlayer.team) {
-                // FIXED COLLISION LOGIC: Increased hitbox radius to 40
                 if(!remotePlayer.dead && Math.hypot(b.x - remotePlayer.x, b.y - remotePlayer.y) < 40) {
                     spawnBlood(b.x, b.y);
                     spawnDamageNumber(b.x, b.y, b.dmg);
@@ -634,13 +732,33 @@
         CTX.fillStyle = COLORS.grassLight;
         for(let i=0; i<MAP_W; i+=100) for(let j=0; j<MAP_H; j+=100) if((i+j)%200===0) CTX.fillRect(i,j,100,100);
         
-        // Draw Ground Details
+        // Roads
+        roads.forEach(r => {
+            CTX.fillStyle = COLORS.road;
+            CTX.fillRect(r.x, r.y, r.w, r.h);
+            CTX.strokeStyle = '#3d322b';
+            CTX.lineWidth = 4;
+            CTX.beginPath(); CTX.moveTo(r.x, r.y); CTX.lineTo(r.x+r.w, r.y); CTX.stroke();
+            CTX.beginPath(); CTX.moveTo(r.x, r.y+r.h); CTX.lineTo(r.x+r.w, r.y+r.h); CTX.stroke();
+        });
+
+        // Ground Details
         groundDetails.forEach(g => {
-            CTX.fillStyle = g.type === 'bush' ? COLORS.bush : COLORS.dirt;
-            CTX.beginPath(); CTX.arc(g.x, g.y, g.size, 0, Math.PI*2); CTX.fill();
-            if(g.type === 'bush') {
-                CTX.fillStyle = '#142a14'; // Bush detail
-                CTX.beginPath(); CTX.arc(g.x+10, g.y-10, g.size/2, 0, Math.PI*2); CTX.fill();
+            if(g.type === 'concrete') {
+                CTX.fillStyle = COLORS.concrete;
+                CTX.beginPath(); CTX.arc(g.x, g.y, g.size/2, 0, Math.PI*2); CTX.fill();
+                CTX.strokeStyle = '#444'; CTX.lineWidth = 2; CTX.stroke();
+            } else if(g.type === 'crater') {
+                CTX.fillStyle = '#1a1512';
+                CTX.beginPath(); CTX.arc(g.x, g.y, g.size/2, 0, Math.PI*2); CTX.fill();
+                CTX.shadowColor = 'rgba(0,0,0,0.8)'; CTX.shadowBlur = 10; CTX.stroke(); CTX.shadowBlur=0;
+            } else {
+                CTX.fillStyle = g.type === 'bush' ? COLORS.bush : COLORS.dirt;
+                CTX.beginPath(); CTX.arc(g.x, g.y, g.size, 0, Math.PI*2); CTX.fill();
+                if(g.type === 'bush') {
+                    CTX.fillStyle = '#142a14'; // Bush detail
+                    CTX.beginPath(); CTX.arc(g.x+10, g.y-10, g.size/2, 0, Math.PI*2); CTX.fill();
+                }
             }
         });
 
@@ -776,7 +894,7 @@
     }
 
     // --- Input ---
-    window.addEventListener('mousedown', (e) => { if(gameActive && !localPlayer.dead && e.button === 0) tryShoot(); });
+    window.addEventListener('mousedown', (e) => { if(gameActive && !localPlayer.dead && e.button === 0 && !isChatting) tryShoot(); });
     window.addEventListener('mousemove', (e) => {
         const r = CANVAS.getBoundingClientRect();
         mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
@@ -784,7 +902,9 @@
     });
     window.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        localPlayer.destX = mouse.worldX; localPlayer.destY = mouse.worldY;
+        if(!isChatting) {
+            localPlayer.destX = mouse.worldX; localPlayer.destY = mouse.worldY;
+        }
     });
 
     function tryShoot() {
