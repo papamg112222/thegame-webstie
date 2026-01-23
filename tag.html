@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Multiplayer Tag 3D - Lobby Edition</title>
+    <title>Multiplayer Tag 3D - Instant Action</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
@@ -23,14 +23,6 @@
         /* Modal */
         .modal { pointer-events: auto; background: rgba(10, 15, 30, 0.98); backdrop-filter: blur(8px); position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; z-index: 100; }
         .hidden { display: none !important; }
-        
-        /* Lobby Overlay */
-        #lobby-overlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85); display: flex; flex-direction: column;
-            align-items: center; justify-content: center; z-index: 50;
-            pointer-events: none;
-        }
         
         /* Status Text */
         .tag-status {
@@ -92,22 +84,6 @@
         </div>
     </div>
 
-    <!-- Lobby Overlay (Inside Game) -->
-    <div id="lobby-overlay" class="hidden">
-        <h1 class="text-6xl font-black text-white italic mb-4">LOBBY</h1>
-        <div class="bg-black/50 p-6 rounded-xl border border-white/20 text-center min-w-[300px]">
-            <p id="lobby-status" class="text-2xl font-bold text-blue-400 mb-2">WAITING FOR HOST</p>
-            <p id="lobby-timer" class="text-6xl font-mono text-white font-bold mb-4">30</p>
-            <p class="text-gray-400 text-sm">Players Connected: <span id="lobby-count">1</span></p>
-        </div>
-        <!-- Host Controls -->
-        <div id="host-controls" class="mt-8 hidden pointer-events-auto">
-            <button id="btn-start-countdown" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-full text-xl shadow-lg transition transform hover:scale-105">
-                START COUNTDOWN
-            </button>
-        </div>
-    </div>
-
     <div id="crosshair"></div>
 
     <!-- Initial Setup Modal -->
@@ -139,7 +115,7 @@
                     <button id="btn-copy" class="bg-gray-700 hover:bg-gray-600 text-white px-4 rounded font-bold">COPY</button>
                 </div>
                 <div class="text-sm text-gray-500 animate-pulse mt-2">Share this ID with friends</div>
-                <button id="btn-host-start" class="btn-primary mt-4">OPEN LOBBY</button>
+                <button id="btn-host-start" class="btn-primary mt-4">START GAME</button>
             </div>
 
             <!-- Step 3: Join Input -->
@@ -233,7 +209,7 @@
                 mesh.userData.box = new THREE.Box3().setFromObject(mesh);
                 worldObjects.push(mesh);
             }
-            // Floor - CRITICAL FIX: Add to worldObjects for collision detection!
+            // Floor
             const floorGeo = new THREE.PlaneGeometry(200, 200);
             floorTex.repeat.set(50, 50);
             const floor = new THREE.Mesh(floorGeo, matFloor);
@@ -289,13 +265,6 @@
             hostDisplay: document.getElementById('host-id-display'),
             gameLayer: document.getElementById('ui-layer'),
             stepClientReady: document.getElementById('step-client-ready'),
-            lobby: {
-                overlay: document.getElementById('lobby-overlay'),
-                status: document.getElementById('lobby-status'),
-                timer: document.getElementById('lobby-timer'),
-                count: document.getElementById('lobby-count'),
-                controls: document.getElementById('host-controls')
-            }
         };
 
         document.getElementById('btn-next').onclick = () => {
@@ -349,22 +318,9 @@
         document.getElementById('resume-btn').onclick = () => {
             if(isGameReady) controls.lock();
         };
-        
-        // Host Start Countdown
-        document.getElementById('btn-start-countdown').onclick = () => {
-            if (isHost) {
-                serverLogic.status = 'countdown';
-                serverLogic.timer = 30; // 30 seconds
-                // Reset positions? Maybe later.
-            }
-        };
 
         controls.addEventListener('lock', () => {
             document.getElementById('start-modal').classList.add('hidden');
-            if (globalStatus !== 'lobby') {
-                // If in game, hide lobby overlay
-                ui.lobby.overlay.classList.add('hidden');
-            }
         });
         controls.addEventListener('unlock', () => {
             if(isGameReady) {
@@ -384,13 +340,13 @@
         const localState = { isIt: false };
         let gameState = {}; // Player States
         
-        // Server Logic (Host Only)
+        // Server Logic (Host Only) - Simplified for Instant Action
         let serverLogic = {
-            status: 'lobby', // 'lobby', 'countdown', 'playing'
-            timer: 30,
+            status: 'playing', 
+            timer: 0,
             itPlayerId: null
         };
-        let globalStatus = 'lobby'; // Client view of status
+        let globalStatus = 'playing';
 
         function generateId() {
             return Math.random().toString(36).substring(2, 6) + Math.random().toString(36).substring(2, 6);
@@ -399,12 +355,19 @@
         function initHost() {
             isHost = true;
             myId = "host";
+            localState.isIt = true; // Host starts as IT immediately
+            
             peer = new Peer(generateId());
             
             peer.on('open', (id) => {
                 ui.loading.classList.add('hidden');
                 ui.stepHost.classList.remove('hidden');
                 ui.hostDisplay.value = id;
+                
+                // Set initial host state so clients know host is IT
+                gameState[myId] = {
+                    x: 0, y: 5, z: 30, ry: 0, isIt: true, username: myUsername, lastSeen: Date.now()
+                };
             });
 
             peer.on('connection', (conn) => {
@@ -421,9 +384,6 @@
                 ui.error.innerText = "Connection Error: " + err.type;
                 ui.error.classList.remove('hidden');
             });
-            
-            // Show Lobby Controls for Host
-            ui.lobby.controls.classList.remove('hidden');
         }
 
         function initClient(hostId) {
@@ -437,7 +397,6 @@
                 conn.on('open', () => {
                     hostConnection = conn;
                     ui.loading.classList.add('hidden');
-                    // Show ready button instead of starting immediately to prevent pointer lock errors
                     ui.stepClientReady.classList.remove('hidden');
                     
                     conn.on('data', (data) => {
@@ -459,12 +418,15 @@
         function startGame() {
             camera.position.set(0, 5, 30);
             isGameReady = true;
-            // Removed manual hide of modal here. We rely on the controls 'lock' event to hide it.
-            // This ensures resume works correctly and we don't end up in broken state.
+            document.getElementById('start-modal').classList.add('hidden');
             ui.gameLayer.classList.remove('hidden');
-            ui.lobby.overlay.classList.remove('hidden'); // Start in lobby
             controls.lock();
             animate();
+            
+            // Sync initial state if host
+            if(isHost) {
+                 updateGameUI();
+            }
         }
 
         // Host Logic: Receive updates from clients
@@ -483,22 +445,8 @@
             // Update Global Logic
             globalStatus = logic.status;
             
-            // Update Lobby UI
-            document.getElementById('lobby-count').innerText = Object.keys(serverState).length + (isHost ? 1 : 0); // approx
-            
-            if (logic.status === 'lobby') {
-                ui.lobby.overlay.classList.remove('hidden');
-                ui.lobby.status.innerText = "WAITING FOR HOST";
-                ui.lobby.status.className = "text-2xl font-bold text-blue-400 mb-2";
-                ui.lobby.timer.innerText = "30";
-            } else if (logic.status === 'countdown') {
-                ui.lobby.overlay.classList.remove('hidden');
-                ui.lobby.status.innerText = "INTERMISSION";
-                ui.lobby.status.className = "text-2xl font-bold text-yellow-400 mb-2";
-                ui.lobby.timer.innerText = Math.ceil(logic.timer);
-            } else if (logic.status === 'playing') {
-                ui.lobby.overlay.classList.add('hidden');
-            }
+            // Update Online Count
+            document.getElementById('count-val').innerText = Object.keys(serverState).length + (isHost ? 1 : 0);
 
             // Sync Players
             const activeIds = new Set();
@@ -525,7 +473,6 @@
             });
             
             if (serverState[myId] && serverState[myId].isIt) someoneIsIt = true;
-            document.getElementById('count-val').innerText = activeIds.size + 1;
         }
 
         // --- Player Rendering ---
@@ -613,38 +560,6 @@
             const dt = Math.min(clock.getDelta(), 0.1);
             const now = Date.now();
 
-            // Host Game Loop for Timer
-            if (isHost && now - lastSync > 50) {
-                // Timer Logic
-                if (serverLogic.status === 'countdown') {
-                    serverLogic.timer -= (now - lastSync) / 1000;
-                    if (serverLogic.timer <= 0) {
-                        serverLogic.status = 'playing';
-                        serverLogic.timer = 0;
-                        
-                        // Randomizer Logic
-                        const allIds = [myId, ...Object.keys(gameState)];
-                        // Reset everyone
-                        localState.isIt = false;
-                        for(let id of Object.keys(gameState)) gameState[id].isIt = false;
-                        
-                        // Pick random IT (if more than 2 people, or just random if 1/2)
-                        // Prompt said "if more than 2 people", but for game to work we need an IT.
-                        // We will randomize if >= 2 players.
-                        if (allIds.length >= 2) {
-                            const r = Math.floor(Math.random() * allIds.length);
-                            const pickedId = allIds[r];
-                            if (pickedId === myId) localState.isIt = true;
-                            else gameState[pickedId].isIt = true;
-                            console.log("Randomly picked IT:", pickedId);
-                        } else {
-                            // If solo, just make self IT for fun
-                             localState.isIt = true;
-                        }
-                    }
-                }
-            }
-
             if(controls.isLocked) {
                 velocity.y -= GRAVITY * dt;
                 const spd = moveState.sprint ? SPRINT_SPEED : MOVE_SPEED;
@@ -684,8 +599,8 @@
                     if (isHost) {
                         gameState[myId] = myData;
                         
-                        // Tag Logic (Only if playing)
-                        if (serverLogic.status === 'playing' && localState.isIt) {
+                        // Tag Logic
+                        if (localState.isIt) {
                              const myPos = new THREE.Vector3(myData.x, myData.y, myData.z);
                              for (const pid in gameState) {
                                  if (pid === myId) continue;
