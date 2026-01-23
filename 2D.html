@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tactical Warfare: Tower Siege</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        canvas { display: block; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .pointer-events-auto { pointer-events: auto; }
+        
+        /* Custom UI Styling */
+        .glass-panel {
+            background: rgba(20, 20, 25, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+        
+        .health-bar-container {
+            width: 100%; height: 6px; background: #333; border-radius: 3px; overflow: hidden; margin-top: 4px;
+        }
+        .health-bar-fill { height: 100%; transition: width 0.2s; }
+        
+        /* Disable context menu for right click move */
+        canvas { -webkit-touch-callout: none; -webkit-user-select: none; -khtml-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none; outline: none; }
+
+        .hidden { display: none !important; }
+        
+        /* Animations */
+        @keyframes pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 50, 50, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(255, 50, 50, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 50, 50, 0); }
+        }
+        .danger-zone { animation: pulse-red 2s infinite; }
+    </style>
+</head>
+<body>
+
+<!-- Setup & Menu UI -->
+<div id="menu-screen" class="absolute inset-0 flex items-center justify-center z-50 bg-gray-900 bg-opacity-95 text-white">
+    <div class="glass-panel p-8 rounded-xl max-w-md w-full text-center">
+        <h1 class="text-4xl font-bold mb-2 tracking-tighter text-blue-400">TACTICAL<span class="text-white">WARFARE</span></h1>
+        <p class="text-gray-400 mb-6 text-sm">2D P2P Multiplayer Shooter</p>
+
+        <!-- Login / Auth Status -->
+        <div id="auth-status" class="mb-4 text-sm text-yellow-400">Connecting to services...</div>
+
+        <!-- Lobby Controls -->
+        <div id="lobby-controls" class="hidden space-y-4">
+            <div class="flex gap-2">
+                <input type="text" id="player-name" placeholder="Enter Codename" class="flex-1 bg-gray-800 border border-gray-700 text-white px-4 py-2 rounded focus:outline-none focus:border-blue-500">
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <button id="btn-create" class="bg-blue-600 hover:bg-blue-500 py-3 rounded font-bold transition">CREATE OP</button>
+                <button id="btn-join-menu" class="bg-gray-700 hover:bg-gray-600 py-3 rounded font-bold transition">JOIN OP</button>
+            </div>
+
+            <div id="join-input-area" class="hidden mt-4 p-4 bg-gray-800 rounded border border-gray-700">
+                <input type="text" id="game-id-input" placeholder="Paste Operation ID" class="w-full bg-gray-900 border border-gray-600 px-3 py-2 rounded mb-2 text-white">
+                <button id="btn-join-action" class="w-full bg-green-600 hover:bg-green-500 py-2 rounded font-bold">CONNECT</button>
+            </div>
+        </div>
+
+        <!-- Waiting Room -->
+        <div id="waiting-room" class="hidden mt-6 text-left">
+            <div class="bg-gray-800 p-4 rounded mb-4 border border-gray-700">
+                <p class="text-xs text-gray-500 uppercase">Operation ID (Share this)</p>
+                <div class="flex items-center gap-2 mt-1">
+                    <code id="display-game-id" class="flex-1 bg-black p-2 rounded text-green-400 font-mono text-lg select-all">...</code>
+                    <button id="btn-copy" class="p-2 bg-gray-700 rounded hover:bg-gray-600"><i class="fas fa-copy"></i></button>
+                </div>
+            </div>
+
+            <h3 class="text-lg font-bold mb-2">Select Loadout</h3>
+            <div class="grid grid-cols-3 gap-2 mb-6">
+                <button class="loadout-btn bg-gray-700 p-2 rounded border border-transparent hover:border-blue-400 transition text-sm" data-gun="glock">
+                    <div class="font-bold">Glock</div>
+                    <div class="text-xs text-gray-400">Agile</div>
+                </button>
+                <button class="loadout-btn bg-gray-700 p-2 rounded border border-transparent hover:border-blue-400 transition text-sm" data-gun="ar">
+                    <div class="font-bold">Rifle</div>
+                    <div class="text-xs text-gray-400">Balanced</div>
+                </button>
+                <button class="loadout-btn bg-gray-700 p-2 rounded border border-transparent hover:border-blue-400 transition text-sm" data-gun="sniper">
+                    <div class="font-bold">Sniper</div>
+                    <div class="text-xs text-gray-400">Heavy</div>
+                </button>
+            </div>
+
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <div id="p1-status" class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-gray-500"></div> Player 1</div>
+                    <div id="p2-status" class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-gray-500"></div> Player 2</div>
+                </div>
+            </div>
+
+            <button id="btn-start" class="w-full bg-green-600 hover:bg-green-500 py-4 rounded-lg font-bold text-xl disabled:opacity-50 disabled:cursor-not-allowed" disabled>DEPLOY</button>
+        </div>
+    </div>
+</div>
+
+<!-- In-Game HUD -->
+<div id="hud" class="hidden pointer-events-none absolute inset-0 p-4">
+    <!-- Top Bar -->
+    <div class="flex justify-between items-start">
+        <!-- Team Blue (Host) -->
+        <div class="glass-panel p-3 rounded-lg w-64 pointer-events-auto">
+            <div class="flex justify-between text-sm mb-1">
+                <span class="text-blue-400 font-bold">BLUE BASE</span>
+                <span id="host-tower-hp-text">1000/1000</span>
+            </div>
+            <div class="health-bar-container"><div id="host-tower-bar" class="health-bar-fill bg-blue-500" style="width: 100%"></div></div>
+        </div>
+
+        <!-- Timer/Status -->
+        <div class="glass-panel px-6 py-2 rounded-full font-mono text-xl font-bold text-white">
+            <span id="game-status-text">ENGAGE</span>
+        </div>
+
+        <!-- Team Red (Guest) -->
+        <div class="glass-panel p-3 rounded-lg w-64 pointer-events-auto">
+            <div class="flex justify-between text-sm mb-1">
+                <span class="text-red-400 font-bold">RED BASE</span>
+                <span id="guest-tower-hp-text">1000/1000</span>
+            </div>
+            <div class="health-bar-container"><div id="guest-tower-bar" class="health-bar-fill bg-red-500" style="width: 100%"></div></div>
+        </div>
+    </div>
+
+    <!-- Bottom Player Stats -->
+    <div class="absolute bottom-6 left-6 pointer-events-auto">
+        <div class="glass-panel p-4 rounded-lg w-72">
+            <div class="flex items-center gap-4 mb-2">
+                <div class="w-12 h-12 bg-gray-800 rounded-full flex items-center justify-center border-2 border-gray-600">
+                    <i class="fas fa-crosshairs text-xl text-gray-400"></i>
+                </div>
+                <div>
+                    <h2 id="hud-player-name" class="font-bold text-lg leading-none">Soldier</h2>
+                    <span id="hud-weapon-name" class="text-xs text-gray-400 uppercase tracking-wider">Assault Rifle</span>
+                </div>
+            </div>
+            <div class="space-y-2">
+                <div>
+                    <div class="flex justify-between text-xs text-gray-400 uppercase"><span>Integrity</span> <span id="hud-hp-text">500</span></div>
+                    <div class="health-bar-container"><div id="hud-hp-bar" class="health-bar-fill bg-green-500" style="width: 100%"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls Hint -->
+    <div class="absolute bottom-6 right-6 text-right text-white opacity-50 text-sm">
+        <p><span class="font-bold text-yellow-400">R-CLICK</span> MOVE</p>
+        <p><span class="font-bold text-yellow-400">L-CLICK</span> SHOOT</p>
+    </div>
+</div>
+
+<!-- Victory/Defeat Screen -->
+<div id="end-screen" class="hidden absolute inset-0 flex items-center justify-center z-50 bg-black bg-opacity-80">
+    <div class="glass-panel p-10 rounded-2xl text-center transform scale-110">
+        <h1 id="end-title" class="text-6xl font-black mb-4 uppercase text-white drop-shadow-lg">VICTORY</h1>
+        <p id="end-reason" class="text-xl text-gray-300 mb-8">Enemy Command Post Neutralized</p>
+        <button onclick="location.reload()" class="bg-white text-black px-8 py-3 rounded-full font-bold hover:bg-gray-200 transition">RETURN TO BASE</button>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<!-- Scripts -->
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, getDoc, deleteDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- Firebase Init ---
+    const firebaseConfig = JSON.parse(__firebase_config);
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app';
+    const COLLECTION_NAME = 'tactical_warfare_lobbies';
+
+    let currentUser = null;
+    let currentGameId = null;
+    let isHost = false;
+    let unsubscribeGame = null;
+
+    // --- Game State & Constants ---
+    const CANVAS = document.getElementById('gameCanvas');
+    const CTX = CANVAS.getContext('2d');
+    
+    // Constants
+    const MAP_WIDTH = 2000;
+    const MAP_HEIGHT = 1500;
+    const TOWER_HP = 1000;
+    const PLAYER_HP = 500;
+    const TOWER_RANGE = 400;
+    const TOWER_DMG = 250;
+    const TOWER_COOLDOWN = 2000; // ms
+
+    const GUNS = {
+        glock: { name: 'Glock 19', damage: 35, fireRate: 400, range: 600, speed: 20, color: '#facc15', spread: 0.1 },
+        ar: { name: 'M4 Carbine', damage: 25, fireRate: 100, range: 800, speed: 25, color: '#60a5fa', spread: 0.15 },
+        sniper: { name: 'AWP', damage: 200, fireRate: 1500, range: 1200, speed: 40, color: '#f87171', spread: 0.02 }
+    };
+
+    // Game Objects
+    let localPlayer = {
+        x: 0, y: 0, 
+        destX: 0, destY: 0,
+        hp: PLAYER_HP,
+        angle: 0,
+        gun: 'ar',
+        team: 'blue', // or red
+        lastShot: 0,
+        moving: false
+    };
+
+    let remotePlayer = null; // Contains x, y, hp, angle, team, etc.
+    let projectiles = []; // {x, y, vx, vy, owner, damage, color}
+    let particles = []; // Visual effects
+    let towers = {
+        blue: { x: 200, y: MAP_HEIGHT/2, hp: TOWER_HP, lastFire: 0, color: '#3b82f6' },
+        red: { x: MAP_WIDTH - 200, y: MAP_HEIGHT/2, hp: TOWER_HP, lastFire: 0, color: '#ef4444' }
+    };
+    let camera = { x: 0, y: 0 };
+    let obstacles = []; // generated procedurally
+
+    // Input State
+    let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
+    
+    // --- Auth & Setup ---
+    const authStatus = document.getElementById('auth-status');
+    const lobbyControls = document.getElementById('lobby-controls');
+
+    // Robust Auth Initialization
+    async function initAuth() {
+        try {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        } catch (e) {
+            console.error("Auth failed:", e);
+            authStatus.innerText = "Connection Failed: " + e.message;
+            authStatus.classList.replace('text-yellow-400', 'text-red-500');
+        }
+    }
+    
+    initAuth();
+
+    onAuthStateChanged(auth, (user) => {
+        if (user) {
+            currentUser = user;
+            authStatus.innerText = "Connected as Operative " + user.uid.slice(0, 4);
+            authStatus.classList.replace('text-yellow-400', 'text-green-400');
+            lobbyControls.classList.remove('hidden');
+        } else {
+            // Re-auth if somehow logged out
+            initAuth();
+        }
+    });
+
+    // --- Lobby UI Logic ---
+    const btnCreate = document.getElementById('btn-create');
+    const btnJoinMenu = document.getElementById('btn-join-menu');
+    const joinInputArea = document.getElementById('join-input-area');
+    const btnJoinAction = document.getElementById('btn-join-action');
+    const menuScreen = document.getElementById('menu-screen');
+    const waitingRoom = document.getElementById('waiting-room');
+    const displayGameId = document.getElementById('display-game-id');
+    const btnCopy = document.getElementById('btn-copy');
+    const btnStart = document.getElementById('btn-start');
+    const loadoutBtns = document.querySelectorAll('.loadout-btn');
+    const gameIdInput = document.getElementById('game-id-input');
+
+    let selectedGun = 'ar';
+
+    // UI Event Listeners
+    loadoutBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            loadoutBtns.forEach(b => b.classList.remove('border-blue-500', 'bg-gray-600'));
+            btn.classList.add('border-blue-500', 'bg-gray-600');
+            selectedGun = btn.dataset.gun;
+            // Update selection in Firestore if in lobby
+            if(currentGameId) updateLobbyState();
+        });
+    });
+
+    btnCreate.addEventListener('click', async () => {
+        if (!currentUser) return; // Guard
+        isHost = true;
+        await createGame();
+    });
+
+    btnJoinMenu.addEventListener('click', () => {
+        joinInputArea.classList.toggle('hidden');
+    });
+
+    btnJoinAction.addEventListener('click', async () => {
+        if (!currentUser) return; // Guard
+        const id = gameIdInput.value.trim();
+        if(!id) return;
+        isHost = false;
+        await joinGame(id);
+    });
+
+    btnCopy.addEventListener('click', () => {
+        navigator.clipboard.writeText(currentGameId);
+        btnCopy.innerHTML = '<i class="fas fa-check"></i>';
+        setTimeout(() => btnCopy.innerHTML = '<i class="fas fa-copy"></i>', 2000);
+    });
+
+    btnStart.addEventListener('click', async () => {
+        if(!isHost || !currentGameId) return;
+        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentGameId);
+        await updateDoc(gameRef, { status: 'playing', startTime: serverTimestamp() });
+    });
+
+    // --- Networking Functions ---
+
+    async function createGame() {
+        const name = document.getElementById('player-name').value || 'Host';
+        // Generate simple 6 char ID
+        const gameId = Math.random().toString(36).substring(2, 8).toUpperCase();
+        currentGameId = gameId;
+        
+        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, gameId);
+        
+        // Initial State
+        const initialData = {
+            host: { id: currentUser.uid, name, gun: selectedGun, ready: true },
+            guest: null,
+            status: 'waiting',
+            createdAt: serverTimestamp(),
+            gameState: { // Real-time game data
+                hostPos: { x: 200, y: MAP_HEIGHT/2, hp: PLAYER_HP },
+                guestPos: { x: MAP_WIDTH - 200, y: MAP_HEIGHT/2, hp: PLAYER_HP },
+                towers: { blue: TOWER_HP, red: TOWER_HP },
+                lastAction: 0
+            }
+        };
+
+        try {
+            await setDoc(gameRef, initialData);
+            enterLobbyUI(gameId);
+            subscribeToGame(gameId);
+        } catch (e) {
+            console.error("Error creating game:", e);
+            alert("Failed to create operation: " + e.message);
+        }
+    }
+
+    async function joinGame(gameId) {
+        const name = document.getElementById('player-name').value || 'Guest';
+        currentGameId = gameId;
+        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, gameId);
+        
+        try {
+            const snap = await getDoc(gameRef);
+            if(!snap.exists()) { alert("Operation ID not found."); return; }
+            
+            if(snap.data().status !== 'waiting') { alert("Operation already in progress."); return; }
+
+            await updateDoc(gameRef, {
+                guest: { id: currentUser.uid, name, gun: selectedGun, ready: true }
+            });
+
+            enterLobbyUI(gameId);
+            subscribeToGame(gameId);
+        } catch (e) {
+            console.error("Error joining game:", e);
+            alert("Failed to join operation: " + e.message);
+        }
+    }
+
+    function enterLobbyUI(id) {
+        lobbyControls.classList.add('hidden');
+        waitingRoom.classList.remove('hidden');
+        displayGameId.innerText = id;
+    }
+
+    async function updateLobbyState() {
+        if (!currentGameId) return;
+        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentGameId);
+        const field = isHost ? 'host.gun' : 'guest.gun';
+        await updateDoc(gameRef, { [field]: selectedGun });
+    }
+
+    function subscribeToGame(gameId) {
+        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, gameId);
+        
+        unsubscribeGame = onSnapshot(gameRef, (snap) => {
+            if(!snap.exists()) return;
+            const data = snap.data();
+            
+            // Lobby Logic
+            const p1Status = document.getElementById('p1-status');
+            const p2Status = document.getElementById('p2-status');
+            
+            p1Status.innerHTML = `<div class="w-2 h-2 rounded-full ${data.host ? 'bg-green-500' : 'bg-gray-500'}"></div> ${data.host ? data.host.name : 'Waiting...'}`;
+            p2Status.innerHTML = `<div class="w-2 h-2 rounded-full ${data.guest ? 'bg-green-500' : 'bg-gray-500'}"></div> ${data.guest ? data.guest.name : 'Waiting...'}`;
+
+            if(isHost) {
+                btnStart.disabled = !data.guest; // Only enable if guest exists
+                if(data.guest) btnStart.innerHTML = "DEPLOY TEAM";
+                else btnStart.innerHTML = "WAITING FOR OPPONENT...";
+            } else {
+                btnStart.innerHTML = "WAITING FOR HOST...";
+                btnStart.disabled = true;
+            }
+
+            // Game Start Logic
+            if(data.status === 'playing' && document.getElementById('menu-screen').style.display !== 'none') {
+                startGame(data);
+            }
+
+            // Sync Game State (if playing)
+            if(data.status === 'playing' || data.status === 'finished') {
+                syncGameState(data);
+            }
+        }, (error) => {
+            console.error("Game sync error:", error);
+            // Don't alert aggressively on sync error, but maybe log it
+        });
+    }
+
+    // --- Game Logic ---
+
+    function generateObstacles() {
+        obstacles = [];
+        // Center Block
+        obstacles.push({x: MAP_WIDTH/2 - 50, y: MAP_HEIGHT/2 - 150, w: 100, h: 300, type: 'wall'});
+        // Flank Covers
+        obstacles.push({x: MAP_WIDTH/2 - 400, y: MAP_HEIGHT/2 - 400, w: 200, h: 50, type: 'crate'});
+        obstacles.push({x: MAP_WIDTH/2 + 200, y: MAP_HEIGHT/2 + 350, w: 200, h: 50, type: 'crate'});
+        // Random scatter
+        for(let i=0; i<15; i++) {
+            obstacles.push({
+                x: Math.random() * (MAP_WIDTH - 200) + 100,
+                y: Math.random() * (MAP_HEIGHT - 200) + 100,
+                w: 40 + Math.random()*40,
+                h: 40 + Math.random()*40,
+                type: 'rock'
+            });
+        }
+    }
+
+    function startGame(data) {
+        menuScreen.style.display = 'none';
+        document.getElementById('hud').classList.remove('hidden');
+        
+        generateObstacles();
+
+        // Setup Local Player
+        localPlayer.team = isHost ? 'blue' : 'red';
+        localPlayer.x = isHost ? 200 : MAP_WIDTH - 200;
+        localPlayer.y = MAP_HEIGHT / 2;
+        localPlayer.destX = localPlayer.x;
+        localPlayer.destY = localPlayer.y;
+        localPlayer.gun = isHost ? data.host.gun : data.guest.gun;
+        localPlayer.hp = PLAYER_HP;
+
+        // Setup Remote Player Info
+        remotePlayer = {
+            team: isHost ? 'red' : 'blue',
+            x: isHost ? MAP_WIDTH - 200 : 200,
+            y: MAP_HEIGHT / 2,
+            hp: PLAYER_HP,
+            gun: isHost ? data.guest.gun : data.host.gun,
+            moving: false
+        };
+
+        // UI Setup
+        document.getElementById('hud-player-name').innerText = isHost ? data.host.name : data.guest.name;
+        document.getElementById('hud-weapon-name').innerText = GUNS[localPlayer.gun].name;
+
+        // Start Loop
+        requestAnimationFrame(gameLoop);
+        
+        // Start Network Sync Loop (separate from render)
+        setInterval(networkSync, 100); // 10 ticks per second
+    }
+
+    async function syncGameState(data) {
+        // Update Towers
+        towers.blue.hp = data.gameState.towers.blue;
+        towers.red.hp = data.gameState.towers.red;
+
+        // Update Remote Player
+        const remoteData = isHost ? data.gameState.guestPos : data.gameState.hostPos;
+        if(remoteData) {
+            // Lerp towards position (simple smoothing)
+            remotePlayer.targetX = remoteData.x;
+            remotePlayer.targetY = remoteData.y;
+            remotePlayer.hp = remoteData.hp;
+            remotePlayer.angle = remoteData.angle;
+            
+            // Check for shot events
+            if(remoteData.lastShot !== remotePlayer.lastShotVal) {
+                remotePlayer.lastShotVal = remoteData.lastShot;
+                fireBullet(remotePlayer, remoteData.shotAngle, remotePlayer.gun);
+            }
+        }
+        
+        // Check Win/Loss
+        if(towers.blue.hp <= 0) endGame('red');
+        if(towers.red.hp <= 0) endGame('blue');
+    }
+
+    async function networkSync() {
+        if(!currentGameId) return;
+
+        const myPos = {
+            x: Math.round(localPlayer.x),
+            y: Math.round(localPlayer.y),
+            angle: parseFloat(localPlayer.angle.toFixed(2)),
+            hp: localPlayer.hp,
+            lastShot: localPlayer.lastShot, // Timestamp of last shot
+            shotAngle: localPlayer.angle
+        };
+
+        // We also calculate damage locally for simplicity in this P2P model
+        // If I am host, I write my pos to 'hostPos' and tower HP to 'towers'
+        // If I am guest, I write my pos to 'guestPos'
+        
+        const updatePayload = {};
+        if(isHost) {
+            updatePayload['gameState.hostPos'] = myPos;
+            // Host is authority on tower HP (simplification)
+            updatePayload['gameState.towers'] = { blue: towers.blue.hp, red: towers.red.hp };
+        } else {
+            updatePayload['gameState.guestPos'] = myPos;
+            // Guest can update tower HP if they damage it, but let's let Host handle tower logic to avoid conflicts?
+            // Better: Everyone updates Firestore with damage events? 
+            // For this demo: Host is Master Authority. Guest sends position. 
+            // Guest calculates damage locally, sends it? 
+            // Let's stick to: Everyone sends their POS. Host calculates TOWER DAMAGE from both.
+            // Actually, simplest: Trust client. If I shoot tower, I lower its HP in DB.
+            updatePayload['gameState.towers'] = { blue: towers.blue.hp, red: towers.red.hp };
+        }
+
+        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', COLLECTION_NAME, currentGameId);
+        try {
+            await updateDoc(gameRef, updatePayload);
+        } catch (e) {
+            // Silently fail on network jitter, but log if persistent
+        }
+    }
+
+    // --- Input Handling ---
+    window.addEventListener('resize', resizeCanvas);
+    function resizeCanvas() {
+        CANVAS.width = window.innerWidth;
+        CANVAS.height = window.innerHeight;
+    }
+    resizeCanvas();
+
+    // Mouse Tracking
+    window.addEventListener('mousemove', (e) => {
+        const rect = CANVAS.getBoundingClientRect();
+        mouse.x = e.clientX - rect.left;
+        mouse.y = e.clientY - rect.top;
+        mouse.worldX = mouse.x + camera.x;
+        mouse.worldY = mouse.y + camera.y;
+    });
+
+    // Movement (Right Click)
+    window.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        localPlayer.destX = mouse.worldX;
+        localPlayer.destY = mouse.worldY;
+        localPlayer.moving = true;
+        createGroundMarker(mouse.worldX, mouse.worldY);
+    });
+
+    // Shooting (Left Click)
+    window.addEventListener('mousedown', (e) => {
+        if(e.button === 0) { // Left Click
+           tryShoot();
+        }
+    });
+
+    function tryShoot() {
+        const now = Date.now();
+        const gun = GUNS[localPlayer.gun];
+        if(now - localPlayer.lastShot > gun.fireRate) {
+            localPlayer.lastShot = now;
+            fireBullet(localPlayer, localPlayer.angle, localPlayer.gun);
+            
+            // Recoil/Screen Shake
+            camera.x += (Math.random() - 0.5) * 10;
+            camera.y += (Math.random() - 0.5) * 10;
+        }
+    }
+
+    function fireBullet(shooter, angle, gunType) {
+        const gun = GUNS[gunType];
+        
+        // Muzzle Flash Particle
+        particles.push({
+            x: shooter.x + Math.cos(angle) * 30,
+            y: shooter.y + Math.sin(angle) * 30,
+            vx: 0, vy: 0,
+            life: 5, color: '#ffffaa', size: 10
+        });
+
+        const speed = gun.speed;
+        // Add slight spread
+        const finalAngle = angle + (Math.random() - 0.5) * gun.spread;
+        
+        projectiles.push({
+            x: shooter.x,
+            y: shooter.y,
+            vx: Math.cos(finalAngle) * speed,
+            vy: Math.sin(finalAngle) * speed,
+            owner: shooter.team, // 'blue' or 'red'
+            damage: gun.damage,
+            range: gun.range,
+            distTraveled: 0,
+            color: gun.color
+        });
+    }
+
+    // --- Core Game Loop ---
+    function gameLoop() {
+        update();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function update() {
+        // 1. Move Local Player
+        const dx = localPlayer.destX - localPlayer.x;
+        const dy = localPlayer.destY - localPlayer.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const speed = 4;
+
+        if(dist > speed) {
+            localPlayer.x += (dx/dist) * speed;
+            localPlayer.y += (dy/dist) * speed;
+            localPlayer.moving = true;
+        } else {
+            localPlayer.moving = false;
+        }
+
+        // Calculate Angle
+        localPlayer.angle = Math.atan2(mouse.worldY - localPlayer.y, mouse.worldX - localPlayer.x);
+
+        // 2. Interpolate Remote Player
+        if(remotePlayer && remotePlayer.targetX !== undefined) {
+            remotePlayer.x += (remotePlayer.targetX - remotePlayer.x) * 0.1;
+            remotePlayer.y += (remotePlayer.targetY - remotePlayer.y) * 0.1;
+        }
+
+        // 3. Projectiles
+        for(let i = projectiles.length - 1; i >= 0; i--) {
+            let p = projectiles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.distTraveled += Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+
+            // Bounds/Range check
+            if(p.distTraveled > p.range || p.x < 0 || p.x > MAP_WIDTH || p.y < 0 || p.y > MAP_HEIGHT) {
+                projectiles.splice(i, 1);
+                continue;
+            }
+            
+            // Wall Collision
+            let hitWall = false;
+            for(let obs of obstacles) {
+                 if(p.x > obs.x && p.x < obs.x + obs.w && p.y > obs.y && p.y < obs.y + obs.h) {
+                     hitWall = true;
+                     break;
+                 }
+            }
+            if(hitWall) {
+                createExplosion(p.x, p.y, 5, '#888');
+                projectiles.splice(i, 1);
+                continue;
+            }
+
+            // Hit Detection (Client Side Prediction + Trust)
+            // Hit Enemy Player
+            // If I shot this bullet, and it hits remote player, I deal damage
+            if(p.owner === localPlayer.team) {
+                // Hit Remote Player?
+                const distToEnemy = Math.hypot(p.x - remotePlayer.x, p.y - remotePlayer.y);
+                if(distToEnemy < 25) { // Hitbox size
+                    // We don't actually deduct HP here to sync, we just show visuals.
+                    // HP sync handles real death. But for "Trust", we could update DB?
+                    // Let's rely on Firestore 'hp' sync for now, but show blood here
+                    createExplosion(p.x, p.y, 10, '#f00'); // Blood
+                    projectiles.splice(i, 1);
+                    // In a robust game, we'd RPC damage. Here, we can't easily. 
+                    // So we assume the shooter updates the victim's HP in the DB?
+                    // NO: The victim updates their own HP if they see they are hit.
+                    // BUT: Current logic relies on visual sync.
+                    // Let's make "Shooter Updates DB" for Tower, "Victim Updates Self" for Player
+                    continue;
+                }
+
+                // Hit Enemy Tower
+                const enemyTowerColor = localPlayer.team === 'blue' ? 'red' : 'blue';
+                const enemyTower = towers[enemyTowerColor];
+                const distToTower = Math.hypot(p.x - enemyTower.x, p.y - enemyTower.y);
+                if(distToTower < 60) {
+                    enemyTower.hp -= p.damage;
+                    createExplosion(p.x, p.y, 8, '#ffa500'); // Sparks
+                    projectiles.splice(i, 1);
+                    continue;
+                }
+            }
+            
+            // If I am the victim (p.owner != local), check if I got hit
+            if(p.owner !== localPlayer.team) {
+                const distToMe = Math.hypot(p.x - localPlayer.x, p.y - localPlayer.y);
+                if(distToMe < 25) {
+                    localPlayer.hp -= p.damage;
+                    createExplosion(p.x, p.y, 10, '#f00');
+                    projectiles.splice(i, 1);
+                    // I will sync my lower HP to DB next tick
+                    continue;
+                }
+            }
+        }
+
+        // 4. Tower AI (Host Logic Only - simplification)
+        // Actually, let each client simulate the tower shooting AT THEM.
+        // If I am close to enemy tower, IT shoots ME.
+        const enemyTowerColor = localPlayer.team === 'blue' ? 'red' : 'blue';
+        const tower = towers[enemyTowerColor];
+        if(tower.hp > 0) {
+            const dist = Math.hypot(localPlayer.x - tower.x, localPlayer.y - tower.y);
+            if(dist < TOWER_RANGE) {
+                const now = Date.now();
+                if(now - (tower.lastFire || 0) > TOWER_COOLDOWN) {
+                    tower.lastFire = now;
+                    // Fire cannon at me
+                    fireCannon(tower, localPlayer);
+                }
+            }
+        }
+
+        // 5. Update Camera
+        // Keep player centered
+        camera.x = localPlayer.x - CANVAS.width / 2;
+        camera.y = localPlayer.y - CANVAS.height / 2;
+        
+        // Clamp Camera
+        camera.x = Math.max(0, Math.min(camera.x, MAP_WIDTH - CANVAS.width));
+        camera.y = Math.max(0, Math.min(camera.y, MAP_HEIGHT - CANVAS.height));
+    }
+
+    function fireCannon(tower, target) {
+        // Slow big projectile
+        const angle = Math.atan2(target.y - tower.y, target.x - tower.x);
+        projectiles.push({
+            x: tower.x,
+            y: tower.y,
+            vx: Math.cos(angle) * 15,
+            vy: Math.sin(angle) * 15,
+            owner: 'tower', // Damages player
+            damage: TOWER_DMG,
+            range: 1000,
+            distTraveled: 0,
+            color: '#000',
+            isCannon: true
+        });
+    }
+
+    // --- Rendering ---
+    function render() {
+        // Clear Background
+        CTX.fillStyle = '#1a1a1a';
+        CTX.fillRect(0, 0, CANVAS.width, CANVAS.height);
+
+        CTX.save();
+        CTX.translate(-camera.x, -camera.y);
+
+        // Draw Map Background
+        drawGround();
+
+        // Draw Shadows/Details for pseudo-3D
+        CTX.shadowColor = 'rgba(0,0,0,0.5)';
+        CTX.shadowBlur = 15;
+        CTX.shadowOffsetY = 10;
+
+        // Obstacles
+        obstacles.forEach(obs => {
+            CTX.fillStyle = '#4b5563'; // Stone gray
+            if(obs.type === 'crate') CTX.fillStyle = '#78350f'; // Wood
+            CTX.fillRect(obs.x, obs.y, obs.w, obs.h);
+            
+            // Detail on top
+            CTX.fillStyle = 'rgba(255,255,255,0.05)';
+            CTX.fillRect(obs.x, obs.y, obs.w, obs.h*0.8); // Highlight top
+        });
+        CTX.shadowBlur = 0; // Reset shadow
+
+        // Ground Markers
+        renderParticles();
+
+        // Towers
+        drawTower(towers.blue, 'blue');
+        drawTower(towers.red, 'red');
+
+        // Players
+        drawPlayer(localPlayer);
+        if(remotePlayer && remotePlayer.x) drawPlayer(remotePlayer);
+
+        // Projectiles
+        projectiles.forEach(p => {
+            CTX.beginPath();
+            if(p.isCannon) {
+                CTX.fillStyle = '#000';
+                CTX.arc(p.x, p.y, 8, 0, Math.PI*2);
+            } else {
+                CTX.fillStyle = p.color;
+                CTX.arc(p.x, p.y, 3, 0, Math.PI*2);
+            }
+            CTX.fill();
+            
+            // Trail
+            CTX.beginPath();
+            CTX.moveTo(p.x, p.y);
+            CTX.lineTo(p.x - p.vx*2, p.y - p.vy*2);
+            CTX.strokeStyle = p.color;
+            CTX.lineWidth = p.isCannon ? 4 : 1;
+            CTX.stroke();
+        });
+
+        // Danger Zones (Tower Range)
+        if(towers.red.hp > 0 && localPlayer.team === 'blue') drawRangeRing(towers.red);
+        if(towers.blue.hp > 0 && localPlayer.team === 'red') drawRangeRing(towers.blue);
+
+        CTX.restore();
+
+        updateHUD();
+    }
+
+    function drawGround() {
+        // Simple grid for ground
+        CTX.strokeStyle = 'rgba(255,255,255,0.03)';
+        CTX.lineWidth = 2;
+        CTX.beginPath();
+        for(let x=0; x<=MAP_WIDTH; x+=100) { CTX.moveTo(x,0); CTX.lineTo(x, MAP_HEIGHT); }
+        for(let y=0; y<=MAP_HEIGHT; y+=100) { CTX.moveTo(0,y); CTX.lineTo(MAP_WIDTH, y); }
+        CTX.stroke();
+
+        // Borders
+        CTX.strokeStyle = '#333';
+        CTX.lineWidth = 10;
+        CTX.strokeRect(0,0, MAP_WIDTH, MAP_HEIGHT);
+    }
+
+    function drawTower(tower, color) {
+        if(tower.hp <= 0) {
+            // Destroyed
+            CTX.fillStyle = '#333';
+            CTX.beginPath();
+            CTX.arc(tower.x, tower.y, 40, 0, Math.PI*2);
+            CTX.fill();
+            return;
+        }
+
+        // Base
+        CTX.shadowColor = 'rgba(0,0,0,0.6)';
+        CTX.shadowBlur = 20;
+        CTX.fillStyle = '#333';
+        CTX.beginPath();
+        CTX.arc(tower.x, tower.y, 50, 0, Math.PI*2);
+        CTX.fill();
+
+        // Core
+        CTX.shadowBlur = 0;
+        CTX.fillStyle = tower.color;
+        CTX.beginPath();
+        CTX.arc(tower.x, tower.y, 30, 0, Math.PI*2);
+        CTX.fill();
+
+        // HP Bar overhead
+        CTX.fillStyle = 'red';
+        CTX.fillRect(tower.x - 40, tower.y - 70, 80, 8);
+        CTX.fillStyle = '#0f0';
+        CTX.fillRect(tower.x - 40, tower.y - 70, 80 * (tower.hp/TOWER_HP), 8);
+    }
+
+    function drawPlayer(p) {
+        if(p.hp <= 0) return; // Dead
+
+        CTX.save();
+        CTX.translate(p.x, p.y);
+        CTX.rotate(p.angle);
+
+        // Legs (animation placeholder)
+        if(p.moving) {
+            CTX.fillStyle = '#111';
+            const offset = Math.sin(Date.now() / 100) * 10;
+            CTX.fillRect(-10, 5 + offset, 10, 10);
+            CTX.fillRect(-10, -15 - offset, 10, 10);
+        }
+
+        // Body (Shoulders)
+        CTX.shadowColor = 'rgba(0,0,0,0.5)';
+        CTX.shadowBlur = 10;
+        CTX.fillStyle = p.team === 'blue' ? '#1e3a8a' : '#991b1b'; // Darker blue/red
+        CTX.beginPath();
+        CTX.ellipse(0, 0, 20, 15, 0, 0, Math.PI*2);
+        CTX.fill();
+        CTX.shadowBlur = 0;
+
+        // Helmet/Head
+        CTX.fillStyle = p.team === 'blue' ? '#3b82f6' : '#ef4444';
+        CTX.beginPath();
+        CTX.arc(0, 0, 12, 0, Math.PI*2);
+        CTX.fill();
+
+        // Gun
+        CTX.fillStyle = '#111';
+        CTX.fillRect(10, -3, 30, 6); // Barrel
+
+        CTX.restore();
+
+        // Name & HP Bar (Non-rotated)
+        CTX.fillStyle = '#fff';
+        CTX.font = '10px Arial';
+        CTX.textAlign = 'center';
+        // CTX.fillText(p.team.toUpperCase(), p.x, p.y - 35);
+        
+        CTX.fillStyle = '#333';
+        CTX.fillRect(p.x - 20, p.y - 30, 40, 5);
+        CTX.fillStyle = p.team === localPlayer.team ? '#0f0' : '#f00';
+        CTX.fillRect(p.x - 20, p.y - 30, 40 * (p.hp/PLAYER_HP), 5);
+    }
+
+    function drawRangeRing(tower) {
+        CTX.beginPath();
+        CTX.arc(tower.x, tower.y, TOWER_RANGE, 0, Math.PI*2);
+        CTX.lineWidth = 2;
+        CTX.strokeStyle = 'rgba(255, 0, 0, 0.2)';
+        CTX.setLineDash([10, 10]);
+        CTX.stroke();
+        CTX.setLineDash([]);
+    }
+
+    function createGroundMarker(x, y) {
+        particles.push({
+            x, y,
+            vx: 0, vy: 0,
+            life: 20, color: '#0f0', size: 5,
+            type: 'marker'
+        });
+    }
+
+    function createExplosion(x, y, count, color) {
+        for(let i=0; i<count; i++) {
+            particles.push({
+                x, y,
+                vx: (Math.random()-0.5)*5,
+                vy: (Math.random()-0.5)*5,
+                life: 30 + Math.random()*20,
+                color: color,
+                size: Math.random()*4 + 2
+            });
+        }
+    }
+
+    function renderParticles() {
+        for(let i=particles.length-1; i>=0; i--) {
+            let p = particles[i];
+            
+            if(p.type === 'marker') {
+                CTX.strokeStyle = `rgba(0, 255, 0, ${p.life/20})`;
+                CTX.beginPath();
+                CTX.arc(p.x, p.y, (20-p.life), 0, Math.PI*2);
+                CTX.stroke();
+            } else {
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+                
+                CTX.globalAlpha = p.life / 50;
+                CTX.fillStyle = p.color;
+                CTX.beginPath();
+                CTX.arc(p.x, p.y, p.size, 0, Math.PI*2);
+                CTX.fill();
+                CTX.globalAlpha = 1;
+            }
+
+            if(p.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    // --- HUD Updates ---
+    function updateHUD() {
+        const hudHpBar = document.getElementById('hud-hp-bar');
+        const hudHpText = document.getElementById('hud-hp-text');
+        
+        hudHpText.innerText = Math.max(0, Math.ceil(localPlayer.hp));
+        hudHpBar.style.width = `${Math.max(0, (localPlayer.hp / PLAYER_HP) * 100)}%`;
+        
+        document.getElementById('host-tower-bar').style.width = `${(towers.blue.hp/TOWER_HP)*100}%`;
+        document.getElementById('host-tower-hp-text').innerText = `${Math.max(0, towers.blue.hp)}/1000`;
+        
+        document.getElementById('guest-tower-bar').style.width = `${(towers.red.hp/TOWER_HP)*100}%`;
+        document.getElementById('guest-tower-hp-text').innerText = `${Math.max(0, towers.red.hp)}/1000`;
+
+        // Check for Game Over Logic (visual only)
+        if(localPlayer.hp <= 0) {
+            // Respawn logic or Spectate
+            // For now, just spectate/grey out
+            document.body.style.filter = "grayscale(100%)";
+        }
+    }
+
+    function endGame(winningTeam) {
+        // Stop Loop? Or just show overlay
+        const screen = document.getElementById('end-screen');
+        const title = document.getElementById('end-title');
+        const reason = document.getElementById('end-reason');
+        
+        screen.classList.remove('hidden');
+        
+        if(localPlayer.team === winningTeam) {
+            title.innerText = "VICTORY";
+            title.className = "text-6xl font-black mb-4 uppercase text-green-500 drop-shadow-lg";
+            reason.innerText = "Enemy Base Destroyed";
+        } else {
+            title.innerText = "DEFEAT";
+            title.className = "text-6xl font-black mb-4 uppercase text-red-500 drop-shadow-lg";
+            reason.innerText = "Base Compromised";
+        }
+        
+        // Disable Controls
+        window.removeEventListener('mousedown', tryShoot);
+    }
+
+</script>
+</body>
+</html>
