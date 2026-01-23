@@ -12,7 +12,7 @@
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Inter:wght@400;600;800&display=swap');
 
         body { margin: 0; overflow: hidden; background-color: #0f0f11; font-family: 'Inter', sans-serif; user-select: none; color: white; }
-        canvas { display: block; }
+        canvas { display: block; background-color: #0f0f11; }
         
         /* UI Layer */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
@@ -163,8 +163,9 @@
         </div>
 
         <!-- Timer/Score -->
-        <div class="glass-panel px-8 py-2 rounded-b-xl border-t-0 border-white/10">
-            <span class="font-mono text-2xl font-bold tracking-widest text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">00:00</span>
+        <div class="glass-panel px-8 py-2 rounded-b-xl border-t-0 border-white/10 text-center">
+            <div class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Operation Time</div>
+            <span id="game-timer" class="font-mono text-3xl font-bold tracking-widest text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">03:00</span>
         </div>
 
         <!-- Red Team (Right) -->
@@ -223,17 +224,18 @@
 
 <script>
     // --- Configuration ---
-    const PEER_PREFIX = "tactical-warfare-v1-"; // Unique namespace
+    const PEER_PREFIX = "tactical-warfare-v1-"; 
     const CANVAS = document.getElementById('gameCanvas');
-    const CTX = CANVAS.getContext('2d', { alpha: false }); // Optimize
+    const CTX = CANVAS.getContext('2d'); // Removed alpha:false for compatibility
     
     // Core Game Config
     const MAP_W = 2500;
     const MAP_H = 1800;
     const TOWER_MAX_HP = 1500;
     const PLAYER_MAX_HP = 500;
+    const GAME_DURATION = 180; // 3 minutes in seconds
 
-    // --- Asset Generation (Procedural) ---
+    // --- Asset Generation ---
     const COLORS = {
         bg: '#121214',
         grid: '#1a1a1e',
@@ -258,6 +260,7 @@
     let gameActive = false;
     let lastTime = 0;
     let gameCode = "";
+    let timeLeft = GAME_DURATION;
 
     // Entities
     let localPlayer = { x: 0, y: 0, destX: 0, destY: 0, angle: 0, hp: PLAYER_MAX_HP, gun: 'ar', team: 'blue', moving: false, name: 'You' };
@@ -265,7 +268,7 @@
     
     let bullets = [];
     let particles = [];
-    let decals = []; // Blood, scorch marks
+    let decals = [];
     let damageNumbers = [];
     let walls = [];
     let camera = { x: 0, y: 0, shake: 0 };
@@ -277,6 +280,10 @@
         resize();
         window.addEventListener('resize', resize);
         
+        // Initial draw to prevent black screen flash
+        CTX.fillStyle = COLORS.bg;
+        CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
+
         // UI Bindings
         document.getElementById('btn-create-mode').onclick = setupHost;
         document.getElementById('btn-join-mode').onclick = () => {
@@ -285,7 +292,6 @@
         };
         document.getElementById('btn-connect').onclick = joinGame;
         
-        // Gun Selection
         document.querySelectorAll('.loadout-btn').forEach(btn => {
             btn.onclick = () => {
                 document.querySelectorAll('.loadout-btn').forEach(b => {
@@ -306,9 +312,8 @@
         };
     }
 
-    // --- PeerJS Logic (4-Digit Code) ---
+    // --- PeerJS Logic ---
     function setupHost() {
-        // Generate 4 digit code
         gameCode = Math.floor(1000 + Math.random() * 9000).toString();
         const fullId = PEER_PREFIX + gameCode;
         
@@ -326,12 +331,12 @@
         peer = new Peer(fullId);
         peer.on('open', (id) => console.log('Host Ready:', id));
         peer.on('connection', (c) => {
-            if(conn) { c.close(); return; } // Only 1 player
+            if(conn) { c.close(); return; }
             conn = c;
             setupConnection();
         });
         peer.on('error', (err) => {
-            alert("Connection Error (ID might be taken, try again): " + err);
+            alert("Connection Error (ID might be taken): " + err);
             location.reload();
         });
     }
@@ -339,14 +344,13 @@
     function joinGame() {
         const code = document.getElementById('game-code-input').value;
         if(code.length !== 4) return alert("Enter 4-digit code");
-        
         const fullId = PEER_PREFIX + code;
         
         localPlayer.name = document.getElementById('player-name').value || "CLIENT";
         localPlayer.team = 'red';
         remotePlayer.team = 'blue';
 
-        peer = new Peer(); // Random ephemeral ID for client
+        peer = new Peer();
         peer.on('open', () => {
             conn = peer.connect(fullId);
             setupConnection();
@@ -400,30 +404,21 @@
 
     // --- Game Logic ---
     function generateMap(seed) {
-        // Procedural Generation based on seed (mock)
         walls = [];
-        // Borders
-        walls.push({ x: -100, y: -100, w: MAP_W+200, h: 100 }); // Top
-        walls.push({ x: -100, y: MAP_H, w: MAP_W+200, h: 100 }); // Bottom
-        walls.push({ x: -100, y: 0, w: 100, h: MAP_H }); // Left
-        walls.push({ x: MAP_W, y: 0, w: 100, h: MAP_H }); // Right
-
-        // Center Structure
+        walls.push({ x: -100, y: -100, w: MAP_W+200, h: 100 });
+        walls.push({ x: -100, y: MAP_H, w: MAP_W+200, h: 100 });
+        walls.push({ x: -100, y: 0, w: 100, h: MAP_H });
+        walls.push({ x: MAP_W, y: 0, w: 100, h: MAP_H });
         walls.push({ x: MAP_W/2 - 50, y: MAP_H/2 - 200, w: 100, h: 400 });
-        
-        // Flank Covers
         walls.push({ x: 500, y: 400, w: 200, h: 50 });
         walls.push({ x: 500, y: 400, w: 50, h: 200 });
-        
         walls.push({ x: MAP_W-700, y: MAP_H-600, w: 200, h: 50 });
         walls.push({ x: MAP_W-550, y: MAP_H-600, w: 50, h: 200 });
 
-        // Random Scatter
         const r = (n) => {
             const x = Math.sin(seed * n) * 10000;
             return x - Math.floor(x);
         };
-        
         for(let i=0; i<12; i++) {
             walls.push({
                 x: 200 + r(i) * (MAP_W-400),
@@ -433,15 +428,14 @@
             });
         }
 
-        // Towers
         towers.blue = { x: 250, y: MAP_H/2, hp: TOWER_MAX_HP, color: COLORS.blue };
         towers.red = { x: MAP_W - 250, y: MAP_H/2, hp: TOWER_MAX_HP, color: COLORS.red };
     }
 
     function startGame(seed) {
         generateMap(seed);
+        timeLeft = GAME_DURATION;
         
-        // Spawns
         if(isHost) {
             localPlayer.x = 350; localPlayer.y = MAP_H/2;
             remotePlayer.x = MAP_W - 350; remotePlayer.y = MAP_H/2;
@@ -461,21 +455,23 @@
         lastTime = performance.now();
         requestAnimationFrame(gameLoop);
         
-        // Network Sync Loop (20Hz)
+        // Network Sync (Host controls time)
         setInterval(() => {
             if(!gameActive) return;
-            send({
+            const payload = {
                 type: 'update',
                 x: Math.round(localPlayer.x),
                 y: Math.round(localPlayer.y),
                 a: parseFloat(localPlayer.angle.toFixed(2)),
                 hp: localPlayer.hp,
                 m: localPlayer.moving
-            });
+            };
+            // Host sends time sync
+            if(isHost) payload.t = Math.ceil(timeLeft);
+            send(payload);
         }, 50);
     }
 
-    // --- Core Loop ---
     function gameLoop(now) {
         if(!gameActive) return;
         const dt = (now - lastTime) / 1000;
@@ -487,13 +483,27 @@
     }
 
     function update(dt) {
-        // 1. Movement
+        // Timer Logic
+        if(isHost) {
+            timeLeft -= dt;
+            if(timeLeft <= 0) {
+                timeLeft = 0;
+                endGame('timeout');
+            }
+        }
+        
+        // HUD Timer Update
+        const m = Math.floor(timeLeft / 60);
+        const s = Math.floor(timeLeft % 60);
+        document.getElementById('game-timer').innerText = `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+
+        // Movement
         const dx = localPlayer.destX - localPlayer.x;
         const dy = localPlayer.destY - localPlayer.y;
         const dist = Math.sqrt(dx*dx + dy*dy);
         
         if(dist > 5) {
-            localPlayer.x += (dx/dist) * 250 * dt; // Speed
+            localPlayer.x += (dx/dist) * 250 * dt;
             localPlayer.y += (dy/dist) * 250 * dt;
             localPlayer.moving = true;
         } else {
@@ -506,10 +516,9 @@
         remotePlayer.x += (remotePlayer.targetX - remotePlayer.x) * 10 * dt;
         remotePlayer.y += (remotePlayer.targetY - remotePlayer.y) * 10 * dt;
 
-        // 2. Camera (Smooth + Lookahead + Shake)
+        // Camera
         const targetCamX = localPlayer.x - CANVAS.width/2 + (Math.cos(localPlayer.angle) * 150);
         const targetCamY = localPlayer.y - CANVAS.height/2 + (Math.sin(localPlayer.angle) * 150);
-        
         camera.x += (targetCamX - camera.x) * 5 * dt;
         camera.y += (targetCamY - camera.y) * 5 * dt;
         
@@ -517,38 +526,31 @@
             camera.x += (Math.random()-0.5) * camera.shake;
             camera.y += (Math.random()-0.5) * camera.shake;
             camera.shake *= 0.9;
-            if(camera.shake < 0.5) camera.shake = 0;
         }
-
-        // Clamp Camera
         camera.x = Math.max(-100, Math.min(camera.x, MAP_W - CANVAS.width + 100));
         camera.y = Math.max(-100, Math.min(camera.y, MAP_H - CANVAS.height + 100));
 
-        // 3. Bullets
+        // Bullets
         for(let i=bullets.length-1; i>=0; i--) {
             let b = bullets[i];
-            b.x += b.vx * dt * 60; // Normalize speed
+            b.x += b.vx * dt * 60;
             b.y += b.vy * dt * 60;
             b.dist += Math.hypot(b.vx, b.vy) * dt * 60;
 
             if(b.dist > b.range) { bullets.splice(i,1); continue; }
 
-            // Wall Hit
             let hit = false;
             for(let w of walls) {
                 if(b.x > w.x && b.x < w.x+w.w && b.y > w.y && b.y < w.y+w.h) {
                     hit = true;
-                    // Spark Particles
                     spawnParticles(b.x, b.y, 5, '#ffffaa', 2);
                     break;
                 }
             }
             if(hit) { bullets.splice(i,1); continue; }
 
-            // Player Hit (Check Local Logic Only)
-            // If I shot, I check if I hit enemy
+            // Collision Logic
             if(b.owner === localPlayer.team) {
-                // Hit Enemy
                 if(Math.hypot(b.x - remotePlayer.x, b.y - remotePlayer.y) < 25) {
                     spawnBlood(b.x, b.y);
                     spawnDamageNumber(b.x, b.y, b.dmg);
@@ -556,7 +558,6 @@
                     bullets.splice(i,1);
                     continue;
                 }
-                // Hit Tower
                 const targetTower = localPlayer.team === 'blue' ? towers.red : towers.blue;
                 if(targetTower.hp > 0 && Math.hypot(b.x - targetTower.x, b.y - targetTower.y) < 50) {
                     spawnParticles(b.x, b.y, 8, '#f59e0b', 3);
@@ -567,66 +568,57 @@
             }
         }
 
-        // 4. Tower Logic (Simple AI)
-        // Check if I am near enemy tower
+        // Tower AI
         const enemyTower = localPlayer.team === 'blue' ? towers.red : towers.blue;
         if(enemyTower.hp > 0) {
             const d = Math.hypot(localPlayer.x - enemyTower.x, localPlayer.y - enemyTower.y);
-            if(d < TOWER_RANGE) {
+            if(d < 500) { // Range
                 if(Date.now() - (enemyTower.lastFire || 0) > 1500) {
                     enemyTower.lastFire = Date.now();
-                    // Tower Shoots Me
                     const a = Math.atan2(localPlayer.y - enemyTower.y, localPlayer.x - enemyTower.x);
                     bullets.push({
                         x: enemyTower.x, y: enemyTower.y,
                         vx: Math.cos(a) * 15, vy: Math.sin(a) * 15,
                         owner: 'tower', range: 1000, dmg: 100, color: '#fff', size: 6
                     });
-                    // Visual Muzzle flash on tower
                     spawnParticles(enemyTower.x, enemyTower.y, 20, '#ffaa00', 5);
                 }
             }
         }
 
-        // 5. Particles & Numbers
         updateParticles(dt);
         
-        // HUD
+        // HUD Stats
         document.getElementById('blue-bar').style.width = (towers.blue.hp/TOWER_MAX_HP*100) + '%';
         document.getElementById('blue-hp-text').innerText = Math.max(0, towers.blue.hp);
         document.getElementById('red-bar').style.width = (towers.red.hp/TOWER_MAX_HP*100) + '%';
         document.getElementById('red-hp-text').innerText = Math.max(0, towers.red.hp);
         document.getElementById('hud-hp-bar').style.width = (localPlayer.hp/PLAYER_MAX_HP*100) + '%';
         
-        if((towers.blue.hp <= 0 || towers.red.hp <= 0) && gameActive) endGame();
-        if(localPlayer.hp <= 0 && gameActive) { 
-            document.body.style.filter = "grayscale(1)"; // Dead effect
-        }
+        if((towers.blue.hp <= 0 || towers.red.hp <= 0) && gameActive) endGame('destruction');
+        if(localPlayer.hp <= 0 && gameActive) document.body.style.filter = "grayscale(1)";
     }
 
-    // --- Networking Handlers ---
     function handleGameUpdate(d) {
         remotePlayer.targetX = d.x;
         remotePlayer.targetY = d.y;
         remotePlayer.angle = d.a;
         remotePlayer.hp = d.hp;
         remotePlayer.moving = d.m;
+        // Sync Time from Host
+        if(d.t !== undefined) timeLeft = d.t;
     }
 
     function handleGameEvent(d) {
         if(d.kind === 'shot') {
             const gun = GUNS[d.gun];
-            // Spawn remote bullet
             bullets.push({
                 x: remotePlayer.x + Math.cos(d.a)*30, 
                 y: remotePlayer.y + Math.sin(d.a)*30,
                 vx: Math.cos(d.a + (Math.random()-0.5)*gun.spread) * gun.speed,
                 vy: Math.sin(d.a + (Math.random()-0.5)*gun.spread) * gun.speed,
                 owner: remotePlayer.team,
-                range: gun.range * 20, // rough conversion
-                dmg: gun.dmg,
-                color: gun.color,
-                size: 3
+                range: gun.range * 20, dmg: gun.dmg, color: gun.color, size: 3
             });
             spawnParticles(remotePlayer.x + Math.cos(d.a)*30, remotePlayer.y + Math.sin(d.a)*30, 5, '#ffff00', 2);
         } else if(d.kind === 'hit_player') {
@@ -635,19 +627,20 @@
         } else if(d.kind === 'hit_tower') {
             towers[d.team].hp -= d.dmg;
             spawnDamageNumber(towers[d.team].x, towers[d.team].y, d.dmg);
+        } else if(d.kind === 'game_over') {
+             // Remote end game signal
+             endGameDisplay(d.winner, d.reason);
         }
     }
 
-    // --- Rendering (The 1000x Polish) ---
     function draw() {
-        // Clear
         CTX.fillStyle = COLORS.bg;
         CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
 
         CTX.save();
         CTX.translate(-Math.floor(camera.x), -Math.floor(camera.y));
 
-        // 1. Floor Pattern (Grid + Noise)
+        // Floor
         CTX.fillStyle = COLORS.grid;
         CTX.lineWidth = 2;
         CTX.beginPath();
@@ -656,61 +649,37 @@
         CTX.strokeStyle = '#1e1e24';
         CTX.stroke();
 
-        // 2. Decals (Blood/Scorch) - Drawn underneath everything
         decals.forEach(d => {
             CTX.globalAlpha = d.alpha;
             CTX.fillStyle = d.color;
-            CTX.beginPath();
-            CTX.arc(d.x, d.y, d.size, 0, Math.PI*2);
-            CTX.fill();
+            CTX.beginPath(); CTX.arc(d.x, d.y, d.size, 0, Math.PI*2); CTX.fill();
         });
         CTX.globalAlpha = 1;
 
-        // 3. Walls (Faux 3D)
         walls.forEach(w => {
-            // Side Face (Darker)
-            CTX.fillStyle = COLORS.wallSide;
-            CTX.fillRect(w.x, w.y + w.h, w.w, 30); // 30px height simulation
-
-            // Top Face
-            CTX.fillStyle = COLORS.wallTop;
-            CTX.fillRect(w.x, w.y, w.w, w.h);
-            
-            // Highlight Edge
-            CTX.fillStyle = 'rgba(255,255,255,0.05)';
-            CTX.fillRect(w.x, w.y, w.w, 4);
+            CTX.fillStyle = COLORS.wallSide; CTX.fillRect(w.x, w.y + w.h, w.w, 30);
+            CTX.fillStyle = COLORS.wallTop; CTX.fillRect(w.x, w.y, w.w, w.h);
+            CTX.fillStyle = 'rgba(255,255,255,0.05)'; CTX.fillRect(w.x, w.y, w.w, 4);
         });
 
-        // 4. Towers
         drawTower(towers.blue, 'blue');
         drawTower(towers.red, 'red');
-
-        // 5. Players
         drawPlayer(localPlayer);
         drawPlayer(remotePlayer);
 
-        // 6. Bullets (Glowing)
         CTX.shadowBlur = 10;
         bullets.forEach(b => {
-            CTX.shadowColor = b.color;
-            CTX.fillStyle = b.color;
-            CTX.beginPath();
-            CTX.arc(b.x, b.y, b.size || 3, 0, Math.PI*2);
-            CTX.fill();
+            CTX.shadowColor = b.color; CTX.fillStyle = b.color;
+            CTX.beginPath(); CTX.arc(b.x, b.y, b.size || 3, 0, Math.PI*2); CTX.fill();
         });
         CTX.shadowBlur = 0;
 
-        // 7. Particles
         particles.forEach(p => {
-            CTX.fillStyle = p.color;
-            CTX.globalAlpha = p.life;
-            CTX.beginPath();
-            CTX.arc(p.x, p.y, p.size, 0, Math.PI*2);
-            CTX.fill();
+            CTX.fillStyle = p.color; CTX.globalAlpha = p.life;
+            CTX.beginPath(); CTX.arc(p.x, p.y, p.size, 0, Math.PI*2); CTX.fill();
         });
         CTX.globalAlpha = 1;
 
-        // 8. Damage Numbers
         CTX.font = "bold 20px 'Inter'";
         CTX.textAlign = "center";
         damageNumbers.forEach(n => {
@@ -718,28 +687,16 @@
             CTX.fillText(n.val, n.x, n.y - (1-n.life)*30);
         });
 
-        // 9. Lighting / Fog of War (Simple Vignette)
-        // CTX.globalCompositeOperation = 'multiply';
-        // But for performance in canvas, simple radial overlay is better
-        // Let's skip heavy lighting for fps, just subtle vignette
         CTX.restore();
     }
 
     function drawTower(t, color) {
-        const c = t.color;
-        // Base
         CTX.fillStyle = '#27272a';
         CTX.beginPath(); CTX.arc(t.x, t.y, 60, 0, Math.PI*2); CTX.fill();
-        // Core
-        CTX.shadowColor = c;
-        CTX.shadowBlur = 30;
-        CTX.fillStyle = c;
+        CTX.shadowColor = t.color; CTX.shadowBlur = 30; CTX.fillStyle = t.color;
         CTX.beginPath(); CTX.arc(t.x, t.y, 30, 0, Math.PI*2); CTX.fill();
         CTX.shadowBlur = 0;
-        
-        // Ring
-        CTX.strokeStyle = 'rgba(255,255,255,0.2)';
-        CTX.lineWidth = 3;
+        CTX.strokeStyle = 'rgba(255,255,255,0.2)'; CTX.lineWidth = 3;
         CTX.beginPath(); CTX.arc(t.x, t.y, 45, 0, Math.PI*2); CTX.stroke();
     }
 
@@ -748,44 +705,25 @@
         CTX.save();
         CTX.translate(p.x, p.y);
         CTX.rotate(p.angle);
-
-        // Feet (Animate)
         if(p.moving) {
             const shift = Math.sin(Date.now()/100) * 8;
             CTX.fillStyle = '#000';
             CTX.beginPath(); CTX.arc(5, 10+shift, 6, 0, Math.PI*2); CTX.fill();
             CTX.beginPath(); CTX.arc(5, -10-shift, 6, 0, Math.PI*2); CTX.fill();
         }
-
-        // Body
-        CTX.fillStyle = p.team === 'blue' ? '#1e40af' : '#991b1b'; // Vest
+        CTX.fillStyle = p.team === 'blue' ? '#1e40af' : '#991b1b';
         CTX.beginPath(); CTX.roundRect(-15, -12, 25, 24, 5); CTX.fill();
-
-        // Head
-        CTX.fillStyle = p.team === 'blue' ? '#60a5fa' : '#f87171'; // Helmet
+        CTX.fillStyle = p.team === 'blue' ? '#60a5fa' : '#f87171';
         CTX.beginPath(); CTX.arc(0, 0, 11, 0, Math.PI*2); CTX.fill();
-
-        // Arms & Gun
-        CTX.fillStyle = '#18181b'; // Arms
-        CTX.beginPath(); CTX.arc(10, 8, 5, 0, Math.PI*2); CTX.fill(); // Right Hand
-        CTX.beginPath(); CTX.arc(15, -5, 5, 0, Math.PI*2); CTX.fill(); // Left Hand
-        
-        // Gun
-        CTX.fillStyle = '#000';
-        CTX.fillRect(10, 4, GUNS[p.gun].length || 30, 6);
-
+        CTX.fillStyle = '#18181b';
+        CTX.beginPath(); CTX.arc(10, 8, 5, 0, Math.PI*2); CTX.fill();
+        CTX.beginPath(); CTX.arc(15, -5, 5, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = '#000'; CTX.fillRect(10, 4, GUNS[p.gun].length || 30, 6);
         CTX.restore();
-
-        // Nameplate
-        CTX.fillStyle = 'rgba(0,0,0,0.5)';
-        CTX.fillRect(p.x-30, p.y-50, 60, 16);
-        CTX.fillStyle = '#fff';
-        CTX.font = 'bold 10px Inter';
-        CTX.textAlign = 'center';
+        CTX.fillStyle = 'rgba(0,0,0,0.5)'; CTX.fillRect(p.x-30, p.y-50, 60, 16);
+        CTX.fillStyle = '#fff'; CTX.font = 'bold 10px Inter'; CTX.textAlign = 'center';
         CTX.fillText(p.name, p.x, p.y-38);
-        // HP Line
-        CTX.fillStyle = '#22c55e';
-        CTX.fillRect(p.x-30, p.y-34, 60 * (p.hp/PLAYER_MAX_HP), 3);
+        CTX.fillStyle = '#22c55e'; CTX.fillRect(p.x-30, p.y-34, 60 * (p.hp/PLAYER_MAX_HP), 3);
     }
 
     // --- Inputs ---
@@ -805,71 +743,49 @@
         e.preventDefault();
         localPlayer.destX = mouse.worldX;
         localPlayer.destY = mouse.worldY;
-        // Marker
         particles.push({x: mouse.worldX, y: mouse.worldY, vx:0, vy:0, life:1, size:10, color:'#22c55e'});
     });
 
     function tryShoot() {
         const gun = GUNS[localPlayer.gun];
-        // Rate limit logic needed (omitted for brevity, assume click spam for now or add cooldown)
         if(Date.now() - (localPlayer.lastShot || 0) < 60000/gun.rate) return;
         localPlayer.lastShot = Date.now();
-
-        // Bullet Logic
         const spread = (Math.random()-0.5) * gun.spread;
         const angle = localPlayer.angle + spread;
-        
         bullets.push({
             x: localPlayer.x + Math.cos(localPlayer.angle)*30,
             y: localPlayer.y + Math.sin(localPlayer.angle)*30,
             vx: Math.cos(angle) * gun.speed,
             vy: Math.sin(angle) * gun.speed,
-            range: gun.range * 20, // rough conversion
-            dmg: gun.dmg,
-            color: gun.color,
-            owner: localPlayer.team
+            range: gun.range * 20, dmg: gun.dmg, color: gun.color, owner: localPlayer.team
         });
-
         camera.shake = 5;
-        // Shell Casing Particle
         const shellAngle = localPlayer.angle + Math.PI/2;
         particles.push({
             x: localPlayer.x, y: localPlayer.y,
             vx: Math.cos(shellAngle)*5, vy: Math.sin(shellAngle)*5,
             life: 0.5, size: 2, color: '#fbbf24', decay: 0.02
         });
-        
-        // Muzzle Flash
         spawnParticles(localPlayer.x + Math.cos(localPlayer.angle)*40, localPlayer.y + Math.sin(localPlayer.angle)*40, 3, '#fff', 3);
-
         send({ type: 'event', kind: 'shot', gun: localPlayer.gun, a: angle });
     }
 
-    // --- Particle System ---
     function spawnParticles(x, y, count, color, speed) {
         for(let i=0; i<count; i++) {
             particles.push({
                 x: x, y: y,
                 vx: (Math.random()-0.5) * 10 * speed,
                 vy: (Math.random()-0.5) * 10 * speed,
-                life: 1.0,
-                color: color,
-                size: Math.random() * 3,
-                decay: 0.05 + Math.random()*0.05
+                life: 1.0, color: color, size: Math.random() * 3, decay: 0.05 + Math.random()*0.05
             });
         }
     }
 
     function spawnBlood(x, y) {
-        // Active particles
         spawnParticles(x, y, 10, '#dc2626', 1);
-        // Permanent Decal
         decals.push({
-            x: x + (Math.random()-0.5)*20,
-            y: y + (Math.random()-0.5)*20,
-            size: 5 + Math.random()*10,
-            color: '#7f1d1d',
-            alpha: 0.8
+            x: x + (Math.random()-0.5)*20, y: y + (Math.random()-0.5)*20,
+            size: 5 + Math.random()*10, color: '#7f1d1d', alpha: 0.8
         });
         if(decals.length > 50) decals.shift();
     }
@@ -879,18 +795,15 @@
     }
 
     function updateParticles(dt) {
-        // Sparks/Smoke
         for(let i=particles.length-1; i>=0; i--) {
             let p = particles[i];
             p.x += p.vx; p.y += p.vy;
             p.life -= p.decay;
             if(p.life <= 0) particles.splice(i,1);
         }
-        // Damage Numbers
         for(let i=damageNumbers.length-1; i>=0; i--) {
             let n = damageNumbers[i];
-            n.y -= 1; // float up
-            n.life -= 0.02;
+            n.y -= 1; n.life -= 0.02;
             if(n.life <= 0) damageNumbers.splice(i,1);
         }
     }
@@ -898,14 +811,55 @@
     function resize() {
         CANVAS.width = window.innerWidth;
         CANVAS.height = window.innerHeight;
+        // Re-draw background if needed
+        CTX.fillStyle = COLORS.bg;
+        CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
     }
 
-    function endGame() {
+    // Determine Winner Logic
+    function endGame(reason) {
+        if(!gameActive) return;
+        gameActive = false;
+        
+        let winner = 'draw';
+        let winReasonText = "MISSION ENDED";
+
+        if(reason === 'timeout') {
+            winReasonText = "TIME LIMIT REACHED";
+            if(towers.blue.hp > towers.red.hp) winner = 'blue';
+            else if(towers.red.hp > towers.blue.hp) winner = 'red';
+            else winner = 'draw';
+        } else {
+            winReasonText = "TARGET DESTROYED";
+            if(towers.blue.hp <= 0 && towers.red.hp > 0) winner = 'red';
+            else if(towers.red.hp <= 0 && towers.blue.hp > 0) winner = 'blue';
+            else winner = 'draw';
+        }
+
+        endGameDisplay(winner, winReasonText);
+        
+        // Broadcast result so client sees same thing
+        send({ type: 'event', kind: 'game_over', winner: winner, reason: winReasonText });
+    }
+
+    function endGameDisplay(winner, reasonText) {
         gameActive = false;
         document.getElementById('end-screen').classList.remove('hidden');
-        const won = (localPlayer.team === 'blue' && towers.red.hp <= 0) || (localPlayer.team === 'red' && towers.blue.hp <= 0);
-        document.getElementById('end-title').innerText = won ? "VICTORY" : "DEFEAT";
-        document.getElementById('end-title').className = won ? "text-8xl font-black italic tracking-tighter mb-2 text-green-500" : "text-8xl font-black italic tracking-tighter mb-2 text-red-500";
+        const title = document.getElementById('end-title');
+        const reason = document.getElementById('end-reason');
+        
+        reason.innerText = reasonText;
+
+        if(winner === localPlayer.team) {
+            title.innerText = "VICTORY";
+            title.className = "text-8xl font-black italic tracking-tighter mb-2 text-green-500";
+        } else if(winner === 'draw') {
+            title.innerText = "DRAW";
+            title.className = "text-8xl font-black italic tracking-tighter mb-2 text-yellow-500";
+        } else {
+            title.innerText = "DEFEAT";
+            title.className = "text-8xl font-black italic tracking-tighter mb-2 text-red-500";
+        }
     }
 
     init();
