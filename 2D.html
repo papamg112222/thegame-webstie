@@ -6,7 +6,6 @@
     <title>Tactical Warfare: Peer-to-Peer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-    <!-- PeerJS for Serverless Multiplayer -->
     <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&family=Inter:wght@400;600;800&display=swap');
@@ -14,11 +13,9 @@
         body { margin: 0; overflow: hidden; background-color: #050a05; font-family: 'Inter', sans-serif; user-select: none; color: white; }
         canvas { display: block; background-color: #0f180f; cursor: crosshair; }
         
-        /* UI Layer */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
         .pointer-events-auto { pointer-events: auto; }
         
-        /* Glassmorphism Panels */
         .glass-panel {
             background: rgba(10, 15, 10, 0.9);
             border: 1px solid rgba(100, 255, 100, 0.1);
@@ -42,14 +39,12 @@
         }
         .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
 
-        /* HUD Bars */
         .health-bar-container {
             width: 100%; height: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; margin-top: 6px;
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
         }
         .health-bar-fill { height: 100%; transition: width 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
         
-        /* Animations */
         @keyframes pulse-scan {
             0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
             70% { box-shadow: 0 0 0 15px rgba(34, 197, 94, 0); }
@@ -59,17 +54,21 @@
 
         input::placeholder { color: #555; }
         .font-mono { font-family: 'JetBrains Mono', monospace; }
-
         .hidden { display: none !important; }
+
+        /* Respawn Overlay */
+        #respawn-overlay {
+            position: absolute; inset: 0; background: rgba(20, 0, 0, 0.6); 
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 40; backdrop-filter: blur(5px);
+        }
     </style>
 </head>
 <body>
 
 <!-- Menu UI -->
 <div id="menu-screen" class="absolute inset-0 flex items-center justify-center z-50 bg-black bg-opacity-90">
-    <!-- Background Grid Effect -->
     <div class="absolute inset-0 opacity-10" style="background-image: radial-gradient(#3f3 1px, transparent 1px); background-size: 30px 30px;"></div>
-
     <div class="glass-panel p-10 rounded-2xl max-w-md w-full text-center relative z-10 border-t border-gray-700">
         <div class="mb-8">
             <h1 class="text-5xl font-black mb-1 tracking-tighter italic bg-clip-text text-transparent bg-gradient-to-r from-green-500 to-emerald-200">TACTICAL<span class="text-gray-500">WARFARE</span></h1>
@@ -79,7 +78,6 @@
         <div id="main-menu-state">
             <div class="space-y-4">
                 <input type="text" id="player-name" placeholder="OPERATIVE NAME" class="w-full bg-gray-900 border border-gray-700 text-white px-4 py-4 rounded-lg font-bold text-center focus:outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 transition placeholder-gray-600 uppercase tracking-wider">
-                
                 <div class="grid grid-cols-2 gap-4">
                     <button id="btn-create-mode" class="btn-primary py-4 rounded-xl font-bold text-sm tracking-wide flex flex-col items-center justify-center gap-1">
                         <i class="fas fa-server text-xl"></i> HOST OP
@@ -89,8 +87,6 @@
                     </button>
                 </div>
             </div>
-            
-            <!-- Join Input Slide-down -->
             <div id="join-input-area" class="hidden mt-4 pt-4 border-t border-gray-700">
                 <p class="text-xs text-left text-gray-500 mb-2 font-bold uppercase">Enter 4-Digit Access Code</p>
                 <div class="flex gap-2">
@@ -100,7 +96,6 @@
             </div>
         </div>
 
-        <!-- Lobby State -->
         <div id="lobby-state" class="hidden text-left">
             <div class="bg-gray-900 p-6 rounded-xl mb-6 border border-gray-800 relative overflow-hidden group">
                 <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition"><i class="fas fa-fingerprint text-6xl"></i></div>
@@ -126,7 +121,7 @@
                 <button class="loadout-btn relative overflow-hidden bg-gray-800 p-3 rounded-lg border border-gray-700 hover:border-gray-500 transition group" data-gun="sniper">
                     <div class="absolute inset-0 bg-red-500 opacity-0 group-hover:opacity-5 transition"></div>
                     <div class="font-bold text-sm text-red-400">HEAVY</div>
-                    <div class="text-[10px] text-gray-400 mt-1">Long Range</div>
+                    <div class="text-[10px] text-gray-400 mt-1">1-Shot / Slow</div>
                 </button>
             </div>
 
@@ -140,17 +135,14 @@
                     <span id="p2-lobby-name" class="font-bold text-gray-500">SEARCHING...</span>
                 </div>
             </div>
-
             <button id="btn-launch" class="w-full bg-gray-700 text-gray-400 py-4 rounded-xl font-bold text-lg tracking-widest transition cursor-not-allowed" disabled>AWAITING CONNECTION</button>
         </div>
     </div>
 </div>
 
 <!-- HUD -->
-<div id="hud" class="hidden pointer-events-none absolute inset-0 p-6 flex flex-col justify-between">
-    <!-- Top Bar -->
+<div id="hud" class="hidden pointer-events-none absolute inset-0 p-6 flex flex-col justify-between z-20">
     <div class="flex justify-between items-start w-full">
-        <!-- Blue Team (Left) -->
         <div class="glass-panel px-4 py-3 rounded-br-2xl border-l-4 border-blue-600 w-80 pointer-events-auto transform skew-x-[-10deg] origin-top-left">
             <div class="transform skew-x-[10deg]">
                 <div class="flex justify-between text-xs font-bold tracking-widest mb-2">
@@ -162,14 +154,10 @@
                 </div>
             </div>
         </div>
-
-        <!-- Timer/Score -->
         <div class="glass-panel px-8 py-2 rounded-b-xl border-t-0 border-white/10 text-center">
             <div class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Operation Time</div>
             <span id="game-timer" class="font-mono text-3xl font-bold tracking-widest text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.5)]">03:00</span>
         </div>
-
-        <!-- Red Team (Right) -->
         <div class="glass-panel px-4 py-3 rounded-bl-2xl border-r-4 border-red-600 w-80 pointer-events-auto transform skew-x-[10deg] origin-top-right">
             <div class="transform skew-x-[-10deg]">
                 <div class="flex justify-between text-xs font-bold tracking-widest mb-2">
@@ -182,10 +170,7 @@
             </div>
         </div>
     </div>
-
-    <!-- Bottom Info -->
     <div class="flex items-end justify-between">
-        <!-- Player Stats -->
         <div class="glass-panel p-5 rounded-tr-3xl border-l-4 border-emerald-500 pointer-events-auto min-w-[300px]">
             <div class="flex items-center gap-5">
                 <div class="w-16 h-16 bg-gray-800 rounded-lg border border-gray-600 flex items-center justify-center relative overflow-hidden">
@@ -202,8 +187,6 @@
                 </div>
             </div>
         </div>
-        
-        <!-- Controls -->
         <div class="text-right opacity-60 text-[10px] font-mono space-y-1">
             <div><span class="bg-gray-700 px-1 rounded text-white font-bold">R-CLICK</span> MOVE</div>
             <div><span class="bg-gray-700 px-1 rounded text-white font-bold">L-CLICK</span> FIRE</div>
@@ -211,7 +194,15 @@
     </div>
 </div>
 
-<!-- Game Over Overlay -->
+<!-- Respawn Overlay -->
+<div id="respawn-overlay" class="hidden">
+    <div class="text-center">
+        <h2 class="text-red-500 font-black text-6xl mb-2 animate-pulse">CRITICAL INJURY</h2>
+        <div class="text-white font-mono text-xl tracking-widest">RESPAWN IN <span id="respawn-timer" class="text-yellow-400 font-bold text-2xl">10</span>s</div>
+    </div>
+</div>
+
+<!-- Game Over -->
 <div id="end-screen" class="hidden absolute inset-0 bg-black/90 z-50 flex items-center justify-center backdrop-blur-sm">
     <div class="text-center">
         <h1 id="end-title" class="text-8xl font-black italic tracking-tighter mb-2 drop-shadow-[0_0_30px_rgba(255,255,255,0.2)]">VICTORY</h1>
@@ -224,19 +215,19 @@
 <canvas id="gameCanvas"></canvas>
 
 <script>
-    // --- Configuration ---
+    // --- Config ---
     const PEER_PREFIX = "tactical-warfare-v1-"; 
     const CANVAS = document.getElementById('gameCanvas');
     const CTX = CANVAS.getContext('2d');
     
-    // Core Game Config
     const MAP_W = 2500;
     const MAP_H = 1800;
     const TOWER_MAX_HP = 1500;
     const PLAYER_MAX_HP = 500;
     const GAME_DURATION = 180; 
+    const RESPAWN_TIME = 10; // seconds
 
-    // --- Asset Generation ---
+    // --- Assets ---
     const COLORS = {
         bg: '#0a1a0a',
         grassDark: '#0f220f',
@@ -248,24 +239,17 @@
     };
 
     const GUNS = {
-        glock: { name: 'GLOCK 19', dmg: 45, rate: 350, speed: 22, spread: 0.08, color: '#d4d4d8', length: 14, width: 4 },
-        ar: { name: 'M4A1 CARBINE', dmg: 32, rate: 90, speed: 28, spread: 0.12, color: '#71717a', length: 28, width: 4 },
-        sniper: { name: 'AWP .338', dmg: 250, rate: 1400, speed: 45, spread: 0.005, color: '#52525b', length: 42, width: 5 }
+        glock: { name: 'GLOCK 19', dmg: 45, rate: 350, speed: 22, spread: 0.08, color: '#d4d4d8', length: 14, width: 4, trail: '#ffff00' },
+        ar: { name: 'M4A1 CARBINE', dmg: 32, rate: 100, speed: 28, spread: 0.12, color: '#71717a', length: 28, width: 4, trail: '#ffaa00' },
+        sniper: { name: 'AWP .338', dmg: 100, rate: 5000, speed: 50, spread: 0.001, color: '#52525b', length: 42, width: 5, trail: '#ffffff' } // 5s reload, 100 dmg
     };
+    const CANNON_DMG = 250;
 
     // --- State ---
-    let myPeerId = null;
-    let peer = null;
-    let conn = null;
-    let isHost = false;
-    let gameActive = false;
-    let lastTime = 0;
-    let gameCode = "";
-    let timeLeft = GAME_DURATION;
-
-    // Entities
-    let localPlayer = { x: 0, y: 0, destX: 0, destY: 0, angle: 0, hp: PLAYER_MAX_HP, gun: 'ar', team: 'blue', moving: false, name: 'You', recoil: 0 };
-    let remotePlayer = { x: -500, y: -500, angle: 0, hp: PLAYER_MAX_HP, gun: 'ar', team: 'red', moving: false, name: 'Enemy', targetX: -500, targetY: -500, recoil: 0 };
+    let myPeerId, peer, conn, isHost, gameActive = false, lastTime = 0, gameCode = "", timeLeft = GAME_DURATION;
+    
+    let localPlayer = { x: 0, y: 0, destX: 0, destY: 0, angle: 0, hp: PLAYER_MAX_HP, gun: 'ar', team: 'blue', moving: false, name: 'You', recoil: 0, dead: false, respawnTick: 0 };
+    let remotePlayer = { x: -500, y: -500, angle: 0, hp: PLAYER_MAX_HP, gun: 'ar', team: 'red', moving: false, name: 'Enemy', targetX: -500, targetY: -500, recoil: 0, dead: false };
     
     let bullets = [];
     let particles = [];
@@ -276,13 +260,11 @@
     let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
     let towers = { blue: { x: 0, y: 0, hp: TOWER_MAX_HP }, red: { x: 0, y: 0, hp: TOWER_MAX_HP } };
 
-    // --- Initialization & Menu ---
+    // --- Init ---
     function init() {
         resize();
         window.addEventListener('resize', resize);
-        
-        CTX.fillStyle = COLORS.bg;
-        CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
+        CTX.fillStyle = COLORS.bg; CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
 
         document.getElementById('btn-create-mode').onclick = setupHost;
         document.getElementById('btn-join-mode').onclick = () => {
@@ -311,47 +293,36 @@
         };
     }
 
-    // --- PeerJS Logic ---
+    // --- Networking ---
     function setupHost() {
         gameCode = Math.floor(1000 + Math.random() * 9000).toString();
         const fullId = PEER_PREFIX + gameCode;
-        
         document.getElementById('main-menu-state').classList.add('hidden');
         document.getElementById('lobby-state').classList.remove('hidden');
         document.getElementById('display-code').innerText = gameCode;
         
         localPlayer.name = document.getElementById('player-name').value || "HOST";
         document.getElementById('p1-lobby-name').innerText = localPlayer.name;
-
-        isHost = true;
-        localPlayer.team = 'blue';
-        remotePlayer.team = 'red';
+        isHost = true; localPlayer.team = 'blue'; remotePlayer.team = 'red';
 
         peer = new Peer(fullId);
-        peer.on('open', (id) => console.log('Host Ready:', id));
+        peer.on('open', (id) => console.log('Host Ready'));
         peer.on('connection', (c) => {
             if(conn) { c.close(); return; }
-            conn = c;
-            setupConnection();
+            conn = c; setupConnection();
         });
-        peer.on('error', (err) => {
-            alert("Connection Error: " + err);
-            location.reload();
-        });
+        peer.on('error', (err) => { alert("Error: " + err); location.reload(); });
     }
 
     function joinGame() {
         const code = document.getElementById('game-code-input').value;
         if(code.length !== 4) return alert("Enter 4-digit code");
-        const fullId = PEER_PREFIX + code;
-        
         localPlayer.name = document.getElementById('player-name').value || "CLIENT";
-        localPlayer.team = 'red';
-        remotePlayer.team = 'blue';
+        localPlayer.team = 'red'; remotePlayer.team = 'blue';
 
         peer = new Peer();
         peer.on('open', () => {
-            conn = peer.connect(fullId);
+            conn = peer.connect(PEER_PREFIX + code);
             setupConnection();
         });
         peer.on('error', (err) => alert("Could not connect: " + err));
@@ -360,96 +331,71 @@
     function setupConnection() {
         document.getElementById('main-menu-state').classList.add('hidden');
         document.getElementById('lobby-state').classList.remove('hidden');
-        
         conn.on('open', () => {
-            console.log("Connected");
             send({ type: 'lobby_update', name: localPlayer.name, gun: localPlayer.gun });
         });
-
         conn.on('data', (data) => {
             if(data.type === 'lobby_update') {
-                remotePlayer.name = data.name;
-                remotePlayer.gun = data.gun;
+                remotePlayer.name = data.name; remotePlayer.gun = data.gun;
                 document.getElementById('p2-lobby-name').innerText = data.name;
                 if(isHost) {
                     const btn = document.getElementById('btn-launch');
-                    btn.innerText = "LAUNCH MISSION";
-                    btn.disabled = false;
+                    btn.innerText = "LAUNCH MISSION"; btn.disabled = false;
                     btn.classList.replace('bg-gray-700', 'bg-green-600');
                     btn.classList.replace('text-gray-400', 'text-white');
                     btn.classList.replace('cursor-not-allowed', 'cursor-pointer');
                     btn.classList.add('hover:bg-green-500');
-                } else {
-                    document.getElementById('btn-launch').innerText = "WAITING FOR HOST...";
-                }
-            } else if(data.type === 'start') {
-                startGame(data.seed);
-            } else if(data.type === 'update') {
-                handleGameUpdate(data);
-            } else if(data.type === 'event') {
-                handleGameEvent(data);
-            }
+                } else document.getElementById('btn-launch').innerText = "WAITING FOR HOST...";
+            } else if(data.type === 'start') startGame(data.seed);
+            else if(data.type === 'update') handleGameUpdate(data);
+            else if(data.type === 'event') handleGameEvent(data);
         });
-        
-        conn.on('close', () => {
-            alert("Connection Lost");
-            location.reload();
-        });
+        conn.on('close', () => { alert("Connection Lost"); location.reload(); });
     }
 
-    function send(data) {
-        if(conn && conn.open) conn.send(data);
-    }
+    function send(data) { if(conn && conn.open) conn.send(data); }
 
     // --- Game Logic ---
     function generateMap(seed) {
         walls = [];
-        // Borders
         walls.push({ x: -100, y: -100, w: MAP_W+200, h: 100 });
         walls.push({ x: -100, y: MAP_H, w: MAP_W+200, h: 100 });
         walls.push({ x: -100, y: 0, w: 100, h: MAP_H });
         walls.push({ x: MAP_W, y: 0, w: 100, h: MAP_H });
-        
-        // Mid Structures (Sandbags/Concrete)
-        walls.push({ x: MAP_W/2 - 60, y: MAP_H/2 - 250, w: 120, h: 500, type: 'bunker' }); // Center
-        
+        walls.push({ x: MAP_W/2 - 60, y: MAP_H/2 - 250, w: 120, h: 500, type: 'bunker' }); 
         walls.push({ x: 400, y: 400, w: 200, h: 60, type: 'sandbag' });
         walls.push({ x: 400, y: 460, w: 60, h: 150, type: 'sandbag' });
-        
         walls.push({ x: MAP_W-600, y: MAP_H-460, w: 200, h: 60, type: 'sandbag' });
         walls.push({ x: MAP_W-460, y: MAP_H-610, w: 60, h: 150, type: 'sandbag' });
-
-        const r = (n) => {
-            const x = Math.sin(seed * n) * 10000;
-            return x - Math.floor(x);
-        };
+        
+        const r = (n) => { const x = Math.sin(seed * n) * 10000; return x - Math.floor(x); };
         for(let i=0; i<15; i++) {
             walls.push({
-                x: 200 + r(i) * (MAP_W-400),
-                y: 200 + r(i+1) * (MAP_H-400),
-                w: 80 + r(i+2)*80,
-                h: 80 + r(i+3)*80,
-                type: r(i+4) > 0.5 ? 'crate' : 'bunker'
+                x: 200 + r(i) * (MAP_W-400), y: 200 + r(i+1) * (MAP_H-400),
+                w: 80 + r(i+2)*80, h: 80 + r(i+3)*80, type: r(i+4) > 0.5 ? 'crate' : 'bunker'
             });
         }
-
         towers.blue = { x: 200, y: MAP_H/2, hp: TOWER_MAX_HP, color: '#3b82f6' };
         towers.red = { x: MAP_W - 200, y: MAP_H/2, hp: TOWER_MAX_HP, color: '#ef4444' };
+    }
+
+    function getSpawnPoint(team) {
+        return team === 'blue' 
+            ? { x: 300, y: MAP_H/2 } 
+            : { x: MAP_W - 300, y: MAP_H/2 };
     }
 
     function startGame(seed) {
         generateMap(seed);
         timeLeft = GAME_DURATION;
-        
-        if(isHost) {
-            localPlayer.x = 300; localPlayer.y = MAP_H/2;
-            remotePlayer.x = MAP_W - 300; remotePlayer.y = MAP_H/2;
-        } else {
-            localPlayer.x = MAP_W - 300; localPlayer.y = MAP_H/2;
-            remotePlayer.x = 300; remotePlayer.y = MAP_H/2;
-        }
-        localPlayer.destX = localPlayer.x;
-        localPlayer.destY = localPlayer.y;
+        const sp = getSpawnPoint(localPlayer.team);
+        localPlayer.x = sp.x; localPlayer.y = sp.y;
+        localPlayer.destX = sp.x; localPlayer.destY = sp.y;
+        localPlayer.hp = PLAYER_MAX_HP; localPlayer.dead = false;
+
+        const rsp = getSpawnPoint(remotePlayer.team);
+        remotePlayer.x = rsp.x; remotePlayer.y = rsp.y;
+        remotePlayer.hp = PLAYER_MAX_HP; remotePlayer.dead = false;
 
         document.getElementById('menu-screen').classList.add('hidden');
         document.getElementById('hud').classList.remove('hidden');
@@ -468,7 +414,8 @@
                 y: Math.round(localPlayer.y),
                 a: parseFloat(localPlayer.angle.toFixed(2)),
                 hp: localPlayer.hp,
-                m: localPlayer.moving
+                m: localPlayer.moving,
+                dead: localPlayer.dead
             };
             if(isHost) payload.t = Math.ceil(timeLeft);
             send(payload);
@@ -479,7 +426,6 @@
         if(!gameActive) return;
         const dt = (now - lastTime) / 1000;
         lastTime = now;
-
         update(dt);
         draw();
         requestAnimationFrame(gameLoop);
@@ -487,20 +433,10 @@
 
     function checkCollision(x, y, r) {
         for(let w of walls) {
-            let testX = x;
-            let testY = y;
-            if (x < w.x) testX = w.x;
-            else if (x > w.x + w.w) testX = w.x + w.w;
-            if (y < w.y) testY = w.y;
-            else if (y > w.y + w.h) testY = w.y + w.h;
-
-            let distX = x - testX;
-            let distY = y - testY;
-            let distance = Math.sqrt((distX*distX) + (distY*distY));
-
-            if (distance <= r) {
-                return true;
-            }
+            let testX = Math.max(w.x, Math.min(x, w.x+w.w));
+            let testY = Math.max(w.y, Math.min(y, w.y+w.h));
+            let distX = x - testX; let distY = y - testY;
+            if((distX*distX) + (distY*distY) <= r*r) return true;
         }
         return false;
     }
@@ -508,50 +444,70 @@
     function update(dt) {
         if(isHost) {
             timeLeft -= dt;
-            if(timeLeft <= 0) {
-                timeLeft = 0;
-                endGame('timeout');
-            }
+            if(timeLeft <= 0) endGame('timeout');
         }
         
         const m = Math.floor(timeLeft / 60);
         const s = Math.floor(timeLeft % 60);
         document.getElementById('game-timer').innerText = `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
 
-        // Movement with Collision
-        const dx = localPlayer.destX - localPlayer.x;
-        const dy = localPlayer.destY - localPlayer.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        const speed = 250;
-        
-        if(dist > 5) {
-            let moveStep = speed * dt;
-            let nextX = localPlayer.x + (dx/dist) * moveStep;
-            let nextY = localPlayer.y + (dy/dist) * moveStep;
-
-            // Collision Check (Slide)
-            if(!checkCollision(nextX, localPlayer.y, 16)) localPlayer.x = nextX;
-            if(!checkCollision(localPlayer.x, nextY, 16)) localPlayer.y = nextY;
+        // Local Player Logic
+        if(!localPlayer.dead) {
+            const dx = localPlayer.destX - localPlayer.x;
+            const dy = localPlayer.destY - localPlayer.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
             
-            localPlayer.moving = true;
+            if(dist > 5) {
+                let moveStep = 250 * dt;
+                let nextX = localPlayer.x + (dx/dist) * moveStep;
+                let nextY = localPlayer.y + (dy/dist) * moveStep;
+                if(!checkCollision(nextX, localPlayer.y, 16)) localPlayer.x = nextX;
+                if(!checkCollision(localPlayer.x, nextY, 16)) localPlayer.y = nextY;
+                localPlayer.moving = true;
+            } else localPlayer.moving = false;
+            
+            localPlayer.angle = Math.atan2(mouse.worldY - localPlayer.y, mouse.worldX - localPlayer.x);
+            if(localPlayer.recoil > 0) localPlayer.recoil *= 0.8;
+
+            if(localPlayer.hp <= 0) {
+                localPlayer.dead = true;
+                localPlayer.respawnTick = Date.now() + (RESPAWN_TIME * 1000);
+                document.getElementById('respawn-overlay').classList.remove('hidden');
+                document.body.style.filter = "grayscale(1)";
+                send({ type: 'event', kind: 'died' });
+            }
         } else {
-            localPlayer.moving = false;
+            // Respawn Logic
+            let remaining = Math.ceil((localPlayer.respawnTick - Date.now()) / 1000);
+            if(remaining < 0) remaining = 0;
+            document.getElementById('respawn-timer').innerText = remaining;
+            
+            if(Date.now() > localPlayer.respawnTick) {
+                // Respawn
+                localPlayer.dead = false;
+                localPlayer.hp = PLAYER_MAX_HP;
+                const sp = getSpawnPoint(localPlayer.team);
+                localPlayer.x = sp.x; localPlayer.y = sp.y;
+                localPlayer.destX = sp.x; localPlayer.destY = sp.y;
+                document.getElementById('respawn-overlay').classList.add('hidden');
+                document.body.style.filter = "none";
+                send({ type: 'event', kind: 'respawned' });
+            }
         }
-        
-        localPlayer.angle = Math.atan2(mouse.worldY - localPlayer.y, mouse.worldX - localPlayer.x);
-        if(localPlayer.recoil > 0) localPlayer.recoil *= 0.8;
 
         // Remote Interpolation
-        remotePlayer.x += (remotePlayer.targetX - remotePlayer.x) * 10 * dt;
-        remotePlayer.y += (remotePlayer.targetY - remotePlayer.y) * 10 * dt;
-        if(remotePlayer.recoil > 0) remotePlayer.recoil *= 0.8;
+        if(!remotePlayer.dead) {
+            remotePlayer.x += (remotePlayer.targetX - remotePlayer.x) * 10 * dt;
+            remotePlayer.y += (remotePlayer.targetY - remotePlayer.y) * 10 * dt;
+            if(remotePlayer.recoil > 0) remotePlayer.recoil *= 0.8;
+        }
 
         // Camera
-        const targetCamX = localPlayer.x - CANVAS.width/2 + (Math.cos(localPlayer.angle) * 100);
-        const targetCamY = localPlayer.y - CANVAS.height/2 + (Math.sin(localPlayer.angle) * 100);
+        let camTarget = !localPlayer.dead ? localPlayer : towers[localPlayer.team]; // Watch base if dead
+        const targetCamX = camTarget.x - CANVAS.width/2;
+        const targetCamY = camTarget.y - CANVAS.height/2;
         camera.x += (targetCamX - camera.x) * 5 * dt;
         camera.y += (targetCamY - camera.y) * 5 * dt;
-        
         if(camera.shake > 0) {
             camera.x += (Math.random()-0.5) * camera.shake;
             camera.y += (Math.random()-0.5) * camera.shake;
@@ -563,24 +519,22 @@
         // Bullets
         for(let i=bullets.length-1; i>=0; i--) {
             let b = bullets[i];
-            b.x += b.vx * dt * 60;
-            b.y += b.vy * dt * 60;
+            b.x += b.vx * dt * 60; b.y += b.vy * dt * 60;
             b.dist += Math.hypot(b.vx, b.vy) * dt * 60;
-
             if(b.dist > b.range) { bullets.splice(i,1); continue; }
+            
+            if(b.isCannon) spawnParticles(b.x, b.y, 1, '#555', 0.5); // Smoke trail
 
             let hit = false;
             for(let w of walls) {
                 if(b.x > w.x && b.x < w.x+w.w && b.y > w.y && b.y < w.y+w.h) {
-                    hit = true;
-                    spawnParticles(b.x, b.y, 5, '#bbb', 2); // Dust
-                    break;
+                    hit = true; spawnParticles(b.x, b.y, 5, '#bbb', 2); break;
                 }
             }
             if(hit) { bullets.splice(i,1); continue; }
 
             if(b.owner === localPlayer.team) {
-                if(Math.hypot(b.x - remotePlayer.x, b.y - remotePlayer.y) < 25) {
+                if(!remotePlayer.dead && Math.hypot(b.x - remotePlayer.x, b.y - remotePlayer.y) < 25) {
                     spawnBlood(b.x, b.y);
                     spawnDamageNumber(b.x, b.y, b.dmg);
                     send({ type: 'event', kind: 'hit_player', dmg: b.dmg });
@@ -598,7 +552,7 @@
         }
 
         const enemyTower = localPlayer.team === 'blue' ? towers.red : towers.blue;
-        if(enemyTower.hp > 0) {
+        if(!localPlayer.dead && enemyTower.hp > 0) {
             const d = Math.hypot(localPlayer.x - enemyTower.x, localPlayer.y - enemyTower.y);
             if(d < 500) { 
                 if(Date.now() - (enemyTower.lastFire || 0) > 1500) {
@@ -606,8 +560,8 @@
                     const a = Math.atan2(localPlayer.y - enemyTower.y, localPlayer.x - enemyTower.x);
                     bullets.push({
                         x: enemyTower.x, y: enemyTower.y,
-                        vx: Math.cos(a) * 15, vy: Math.sin(a) * 15,
-                        owner: 'tower', range: 1000, dmg: 100, color: '#fff', size: 6
+                        vx: Math.cos(a) * 12, vy: Math.sin(a) * 12, // Slower cannon ball
+                        owner: 'tower', range: 1000, dmg: CANNON_DMG, color: '#111', size: 10, isCannon: true
                     });
                     spawnParticles(enemyTower.x, enemyTower.y, 20, '#ffaa00', 5);
                 }
@@ -623,15 +577,12 @@
         document.getElementById('hud-hp-bar').style.width = (localPlayer.hp/PLAYER_MAX_HP*100) + '%';
         
         if((towers.blue.hp <= 0 || towers.red.hp <= 0) && gameActive) endGame('destruction');
-        if(localPlayer.hp <= 0 && gameActive) document.body.style.filter = "grayscale(1)";
     }
 
     function handleGameUpdate(d) {
-        remotePlayer.targetX = d.x;
-        remotePlayer.targetY = d.y;
-        remotePlayer.angle = d.a;
-        remotePlayer.hp = d.hp;
-        remotePlayer.moving = d.m;
+        remotePlayer.targetX = d.x; remotePlayer.targetY = d.y;
+        remotePlayer.angle = d.a; remotePlayer.hp = d.hp;
+        remotePlayer.moving = d.m; remotePlayer.dead = d.dead;
         if(d.t !== undefined) timeLeft = d.t;
     }
 
@@ -640,85 +591,50 @@
             const gun = GUNS[d.gun];
             remotePlayer.recoil = 10;
             bullets.push({
-                x: remotePlayer.x + Math.cos(d.a)*30, 
-                y: remotePlayer.y + Math.sin(d.a)*30,
+                x: remotePlayer.x + Math.cos(d.a)*30, y: remotePlayer.y + Math.sin(d.a)*30,
                 vx: Math.cos(d.a + (Math.random()-0.5)*gun.spread) * gun.speed,
                 vy: Math.sin(d.a + (Math.random()-0.5)*gun.spread) * gun.speed,
-                owner: remotePlayer.team,
-                range: gun.range * 20, dmg: gun.dmg, color: gun.color, size: 3
+                owner: remotePlayer.team, range: gun.range * 20, dmg: gun.dmg, color: gun.trail, size: gun.width, isTracer: true
             });
             spawnParticles(remotePlayer.x + Math.cos(d.a)*30, remotePlayer.y + Math.sin(d.a)*30, 8, '#fff', 4);
         } else if(d.kind === 'hit_player') {
-            localPlayer.hp -= d.dmg;
-            camera.shake = 10;
+            localPlayer.hp -= d.dmg; camera.shake = 10;
         } else if(d.kind === 'hit_tower') {
-            towers[d.team].hp -= d.dmg;
-            spawnDamageNumber(towers[d.team].x, towers[d.team].y, d.dmg);
-        } else if(d.kind === 'game_over') {
-             endGameDisplay(d.winner, d.reason);
-        }
+            towers[d.team].hp -= d.dmg; spawnDamageNumber(towers[d.team].x, towers[d.team].y, d.dmg);
+        } else if(d.kind === 'game_over') endGameDisplay(d.winner, d.reason);
     }
 
     function draw() {
-        CTX.fillStyle = COLORS.bg;
-        CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
-
+        CTX.fillStyle = COLORS.bg; CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
         CTX.save();
         CTX.translate(-Math.floor(camera.x), -Math.floor(camera.y));
 
-        // Grass Pattern
-        CTX.fillStyle = COLORS.grassDark;
-        CTX.fillRect(0,0, MAP_W, MAP_H);
+        CTX.fillStyle = COLORS.grassDark; CTX.fillRect(0,0, MAP_W, MAP_H);
         CTX.fillStyle = COLORS.grassLight;
-        for(let i=0; i<MAP_W; i+=100) {
-            for(let j=0; j<MAP_H; j+=100) {
-                 if((i+j)%200===0) CTX.fillRect(i,j,100,100);
-            }
-        }
-        // Grid lines overlay
-        CTX.strokeStyle = 'rgba(0,0,0,0.2)';
-        CTX.lineWidth = 1;
-        CTX.beginPath();
+        for(let i=0; i<MAP_W; i+=100) for(let j=0; j<MAP_H; j+=100) if((i+j)%200===0) CTX.fillRect(i,j,100,100);
+        
+        CTX.strokeStyle = 'rgba(0,0,0,0.2)'; CTX.lineWidth = 1; CTX.beginPath();
         for(let x=0; x<=MAP_W; x+=100) { CTX.moveTo(x,0); CTX.lineTo(x, MAP_H); }
         for(let y=0; y<=MAP_H; y+=100) { CTX.moveTo(0,y); CTX.lineTo(MAP_W, y); }
         CTX.stroke();
 
         decals.forEach(d => {
-            CTX.globalAlpha = d.alpha;
-            CTX.fillStyle = d.color;
+            CTX.globalAlpha = d.alpha; CTX.fillStyle = d.color;
             CTX.beginPath(); CTX.arc(d.x, d.y, d.size, 0, Math.PI*2); CTX.fill();
         });
         CTX.globalAlpha = 1;
 
-        // Walls (Better Rendering)
         walls.forEach(w => {
-            // Shadow
-            CTX.fillStyle = 'rgba(0,0,0,0.5)';
-            CTX.fillRect(w.x+10, w.y+10, w.w, w.h);
-            
-            // Texture Color
-            let colorTop = COLORS.wallTop;
-            let colorSide = COLORS.wallSide;
-            if(w.type === 'crate') { colorTop = '#78350f'; colorSide = '#451a03'; }
-            if(w.type === 'sandbag') { colorTop = '#a3a375'; colorSide = '#6b6b47'; }
-
-            // Side Face
+            CTX.fillStyle = 'rgba(0,0,0,0.5)'; CTX.fillRect(w.x+10, w.y+10, w.w, w.h);
+            let colorTop = w.type === 'crate' ? '#78350f' : (w.type === 'sandbag' ? '#a3a375' : COLORS.wallTop);
+            let colorSide = w.type === 'crate' ? '#451a03' : (w.type === 'sandbag' ? '#6b6b47' : COLORS.wallSide);
             CTX.fillStyle = colorSide; CTX.fillRect(w.x, w.y + w.h, w.w, 20);
-            // Top Face
             CTX.fillStyle = colorTop; CTX.fillRect(w.x, w.y, w.w, w.h);
-            
-            // Detail
-            CTX.fillStyle = 'rgba(255,255,255,0.05)'; 
-            CTX.fillRect(w.x, w.y, w.w, 5); // top edge
-            
-            // X pattern for crates
+            CTX.fillStyle = 'rgba(255,255,255,0.05)'; CTX.fillRect(w.x, w.y, w.w, 5);
             if(w.type === 'crate') {
-                CTX.strokeStyle = 'rgba(0,0,0,0.2)';
-                CTX.lineWidth = 5;
-                CTX.beginPath();
+                CTX.strokeStyle = 'rgba(0,0,0,0.2)'; CTX.lineWidth = 5; CTX.beginPath();
                 CTX.moveTo(w.x, w.y); CTX.lineTo(w.x+w.w, w.y+w.h);
-                CTX.moveTo(w.x+w.w, w.y); CTX.lineTo(w.x, w.y+w.h);
-                CTX.stroke();
+                CTX.moveTo(w.x+w.w, w.y); CTX.lineTo(w.x, w.y+w.h); CTX.stroke();
             }
         });
 
@@ -727,12 +643,28 @@
         drawPlayer(localPlayer);
         drawPlayer(remotePlayer);
 
-        CTX.shadowBlur = 8;
         bullets.forEach(b => {
-            CTX.shadowColor = b.color; CTX.fillStyle = b.color;
-            CTX.beginPath(); CTX.arc(b.x, b.y, b.size || 3, 0, Math.PI*2); CTX.fill();
+            if(b.isCannon) {
+                // Detailed Cannonball
+                const grad = CTX.createRadialGradient(b.x-2, b.y-2, 1, b.x, b.y, b.size);
+                grad.addColorStop(0, '#555'); grad.addColorStop(1, '#000');
+                CTX.fillStyle = grad;
+                CTX.beginPath(); CTX.arc(b.x, b.y, b.size, 0, Math.PI*2); CTX.fill();
+                // Core Glow
+                CTX.shadowColor = '#f00'; CTX.shadowBlur = 10;
+                CTX.fillStyle = '#f00'; CTX.beginPath(); CTX.arc(b.x, b.y, 2, 0, Math.PI*2); CTX.fill();
+                CTX.shadowBlur = 0;
+            } else {
+                // Detailed Tracer
+                CTX.shadowColor = b.color; CTX.shadowBlur = 10; 
+                CTX.strokeStyle = b.color; CTX.lineWidth = b.size;
+                CTX.beginPath(); 
+                CTX.moveTo(b.x, b.y); 
+                CTX.lineTo(b.x - b.vx*2, b.y - b.vy*2); // Elongated trail
+                CTX.stroke();
+                CTX.shadowBlur = 0;
+            }
         });
-        CTX.shadowBlur = 0;
 
         particles.forEach(p => {
             CTX.fillStyle = p.color; CTX.globalAlpha = p.life;
@@ -740,166 +672,103 @@
         });
         CTX.globalAlpha = 1;
 
-        CTX.font = "bold 20px 'Inter'";
-        CTX.textAlign = "center";
+        CTX.font = "bold 20px 'Inter'"; CTX.textAlign = "center";
         damageNumbers.forEach(n => {
             CTX.fillStyle = `rgba(255, 255, 255, ${n.life})`;
             CTX.fillText(n.val, n.x, n.y - (1-n.life)*30);
         });
-
         CTX.restore();
     }
 
     function drawTower(t, color) {
-        CTX.fillStyle = '#1c1917';
-        CTX.beginPath(); CTX.arc(t.x, t.y, 60, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = '#1c1917'; CTX.beginPath(); CTX.arc(t.x, t.y, 60, 0, Math.PI*2); CTX.fill();
         CTX.shadowColor = t.color; CTX.shadowBlur = 20; CTX.fillStyle = t.color;
-        CTX.beginPath(); CTX.arc(t.x, t.y, 25, 0, Math.PI*2); CTX.fill();
-        CTX.shadowBlur = 0;
-        CTX.strokeStyle = '#555'; CTX.lineWidth = 5;
-        CTX.beginPath(); CTX.arc(t.x, t.y, 45, 0, Math.PI*2); CTX.stroke();
-        
-        // Turret Barrel
-        CTX.fillStyle = '#333';
-        CTX.save(); CTX.translate(t.x, t.y);
-        // Rotate turret towards closest player (visual only)
-        // Omitted for simplicity, just fixed or rotating
-        CTX.fillRect(-8, -8, 16, 16);
-        CTX.restore();
+        CTX.beginPath(); CTX.arc(t.x, t.y, 25, 0, Math.PI*2); CTX.fill(); CTX.shadowBlur = 0;
+        CTX.strokeStyle = '#555'; CTX.lineWidth = 5; CTX.beginPath(); CTX.arc(t.x, t.y, 45, 0, Math.PI*2); CTX.stroke();
+        CTX.fillStyle = '#333'; CTX.save(); CTX.translate(t.x, t.y); CTX.fillRect(-8, -8, 16, 16); CTX.restore();
     }
 
     function drawPlayer(p) {
-        if(p.hp <= 0) return;
-        CTX.save();
-        CTX.translate(p.x, p.y);
-        CTX.rotate(p.angle);
-
-        // Uniform Colors
+        if(p.dead) return;
+        CTX.save(); CTX.translate(p.x, p.y); CTX.rotate(p.angle);
         let vestColor = p.team === 'blue' ? '#1e3a8a' : '#7f1d1d';
         let helmetColor = p.team === 'blue' ? '#3b82f6' : '#ef4444';
-        let skinColor = '#e5c29f';
 
-        // Legs (Animated)
         if(p.moving) {
             const shift = Math.sin(Date.now()/80) * 10;
-            CTX.fillStyle = '#18181b'; // Black pants
-            CTX.beginPath(); CTX.roundRect(0, 8+shift, 14, 10, 4); CTX.fill(); // R Leg
-            CTX.beginPath(); CTX.roundRect(0, -18-shift, 14, 10, 4); CTX.fill(); // L Leg
+            CTX.fillStyle = '#18181b'; 
+            CTX.beginPath(); CTX.roundRect(0, 8+shift, 14, 10, 4); CTX.fill();
+            CTX.beginPath(); CTX.roundRect(0, -18-shift, 14, 10, 4); CTX.fill();
         } else {
              CTX.fillStyle = '#18181b';
              CTX.beginPath(); CTX.roundRect(0, 8, 14, 10, 4); CTX.fill();
              CTX.beginPath(); CTX.roundRect(0, -18, 14, 10, 4); CTX.fill();
         }
 
-        // Body Armor / Shoulders
-        CTX.fillStyle = vestColor;
-        CTX.beginPath(); CTX.arc(0, 0, 18, 0, Math.PI*2); CTX.fill(); // Torso
-        
-        // Backpack
-        CTX.fillStyle = '#27272a';
-        CTX.beginPath(); CTX.roundRect(-18, -12, 8, 24, 3); CTX.fill();
+        CTX.fillStyle = vestColor; CTX.beginPath(); CTX.arc(0, 0, 18, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = '#27272a'; CTX.beginPath(); CTX.roundRect(-18, -12, 8, 24, 3); CTX.fill();
+        CTX.fillStyle = helmetColor; CTX.beginPath(); CTX.arc(2, 0, 12, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = '#111'; CTX.fillRect(8, -6, 4, 12);
+        CTX.fillStyle = vestColor; 
+        CTX.beginPath(); CTX.arc(6, 16, 7, 0, Math.PI*2); CTX.fill();
+        CTX.beginPath(); CTX.arc(6, -16, 7, 0, Math.PI*2); CTX.fill();
+        CTX.fillStyle = '#333'; 
+        CTX.beginPath(); CTX.arc(15, 8, 5, 0, Math.PI*2); CTX.fill();
+        CTX.beginPath(); CTX.arc(25, -2, 5, 0, Math.PI*2); CTX.fill();
 
-        // Helmet
-        CTX.fillStyle = helmetColor;
-        CTX.beginPath(); CTX.arc(2, 0, 12, 0, Math.PI*2); CTX.fill();
-        // Visor/Goggles
-        CTX.fillStyle = '#111';
-        CTX.fillRect(8, -6, 4, 12);
-
-        // Arms
-        CTX.fillStyle = vestColor; // Sleeves
-        CTX.beginPath(); CTX.arc(6, 16, 7, 0, Math.PI*2); CTX.fill(); // R Shoulder
-        CTX.beginPath(); CTX.arc(6, -16, 7, 0, Math.PI*2); CTX.fill(); // L Shoulder
-
-        // Hands (holding gun)
-        CTX.fillStyle = '#333'; // Gloves
-        CTX.beginPath(); CTX.arc(15, 8, 5, 0, Math.PI*2); CTX.fill(); // R Hand
-        CTX.beginPath(); CTX.arc(25, -2, 5, 0, Math.PI*2); CTX.fill(); // L Hand (Front)
-
-        // GUN Rendering
         const gun = GUNS[p.gun];
-        const recoilX = - (p.recoil || 0);
-        
-        CTX.translate(10 + recoilX, 5); // Gun Position
-        
-        CTX.fillStyle = gun.color; // Gun Body
-        CTX.fillRect(0, -gun.width/2, gun.length, gun.width);
-        
-        // Gun Details based on type
+        CTX.translate(10 - (p.recoil||0), 5);
+        CTX.fillStyle = gun.color; CTX.fillRect(0, -gun.width/2, gun.length, gun.width);
         if(p.gun === 'ar') {
-            CTX.fillStyle = '#111'; // Stock
-            CTX.fillRect(-10, -3, 10, 6);
-            CTX.fillStyle = '#222'; // Magazine
-            CTX.fillRect(10, 2, 4, 8);
-            CTX.fillStyle = '#000'; // Rails
-            CTX.fillRect(5, -4, 20, 2);
+            CTX.fillStyle = '#111'; CTX.fillRect(-10, -3, 10, 6);
+            CTX.fillStyle = '#222'; CTX.fillRect(10, 2, 4, 8);
+            CTX.fillStyle = '#000'; CTX.fillRect(5, -4, 20, 2);
         } else if(p.gun === 'sniper') {
-            CTX.fillStyle = '#111'; // Stock
-            CTX.fillRect(-15, -3, 15, 6);
-            CTX.fillStyle = '#000'; // Scope
-            CTX.fillRect(5, -5, 15, 3);
-            CTX.fillStyle = '#222'; // Barrel tip
-            CTX.fillRect(gun.length, -3, 5, 6);
+            CTX.fillStyle = '#111'; CTX.fillRect(-15, -3, 15, 6);
+            CTX.fillStyle = '#000'; CTX.fillRect(5, -5, 15, 3);
+            CTX.fillStyle = '#222'; CTX.fillRect(gun.length, -3, 5, 6);
         }
-
         CTX.restore();
 
-        // Nameplate
-        CTX.fillStyle = 'rgba(0,0,0,0.6)';
-        CTX.fillRect(p.x-30, p.y-55, 60, 16);
-        CTX.fillStyle = '#fff'; CTX.font = 'bold 10px Inter'; CTX.textAlign = 'center';
-        CTX.fillText(p.name, p.x, p.y-43);
+        CTX.fillStyle = 'rgba(0,0,0,0.6)'; CTX.fillRect(p.x-30, p.y-55, 60, 16);
+        CTX.fillStyle = '#fff'; CTX.font = 'bold 10px Inter'; CTX.textAlign = 'center'; CTX.fillText(p.name, p.x, p.y-43);
         CTX.fillStyle = '#22c55e'; CTX.fillRect(p.x-30, p.y-39, 60 * (p.hp/PLAYER_MAX_HP), 3);
     }
 
-    // --- Inputs ---
-    window.addEventListener('mousedown', (e) => {
-        if(gameActive && localPlayer.hp > 0 && e.button === 0) tryShoot();
-    });
-    
+    // --- Input ---
+    window.addEventListener('mousedown', (e) => { if(gameActive && !localPlayer.dead && e.button === 0) tryShoot(); });
     window.addEventListener('mousemove', (e) => {
         const r = CANVAS.getBoundingClientRect();
-        mouse.x = e.clientX - r.left;
-        mouse.y = e.clientY - r.top;
-        mouse.worldX = mouse.x + camera.x;
-        mouse.worldY = mouse.y + camera.y;
+        mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top;
+        mouse.worldX = mouse.x + camera.x; mouse.worldY = mouse.y + camera.y;
     });
-
     window.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        // Just move, no marker
-        localPlayer.destX = mouse.worldX;
-        localPlayer.destY = mouse.worldY;
+        localPlayer.destX = mouse.worldX; localPlayer.destY = mouse.worldY;
     });
 
     function tryShoot() {
         const gun = GUNS[localPlayer.gun];
         if(Date.now() - (localPlayer.lastShot || 0) < 60000/gun.rate) return;
         localPlayer.lastShot = Date.now();
-        
-        localPlayer.recoil = 8; // Visual Kick
+        localPlayer.recoil = 8;
 
         const spread = (Math.random()-0.5) * gun.spread;
         const angle = localPlayer.angle + spread;
         bullets.push({
-            x: localPlayer.x + Math.cos(localPlayer.angle)*30,
-            y: localPlayer.y + Math.sin(localPlayer.angle)*30,
-            vx: Math.cos(angle) * gun.speed,
-            vy: Math.sin(angle) * gun.speed,
-            range: gun.range * 20, dmg: gun.dmg, color: '#fffae3', owner: localPlayer.team
+            x: localPlayer.x + Math.cos(localPlayer.angle)*30, y: localPlayer.y + Math.sin(localPlayer.angle)*30,
+            vx: Math.cos(angle) * gun.speed, vy: Math.sin(angle) * gun.speed,
+            range: gun.range * 20, dmg: gun.dmg, color: gun.trail, owner: localPlayer.team, size: gun.width, isTracer: true
         });
         camera.shake = 5;
         
-        // Shell
         const shellAngle = localPlayer.angle + Math.PI/2;
         particles.push({
             x: localPlayer.x, y: localPlayer.y,
             vx: Math.cos(shellAngle)*4 + (Math.random()-0.5), vy: Math.sin(shellAngle)*4 + (Math.random()-0.5),
             life: 0.8, size: 2, color: '#fbbf24', decay: 0.02
         });
-        // Muzzle Flash
         spawnParticles(localPlayer.x + Math.cos(localPlayer.angle)*40, localPlayer.y + Math.sin(localPlayer.angle)*40, 6, '#fff', 4);
-        
         send({ type: 'event', kind: 'shot', gun: localPlayer.gun, a: angle });
     }
 
@@ -907,8 +776,7 @@
         for(let i=0; i<count; i++) {
             particles.push({
                 x: x, y: y,
-                vx: (Math.random()-0.5) * 10 * speed,
-                vy: (Math.random()-0.5) * 10 * speed,
+                vx: (Math.random()-0.5) * 10 * speed, vy: (Math.random()-0.5) * 10 * speed,
                 life: 1.0, color: color, size: Math.random() * 3 + 1, decay: 0.05 + Math.random()*0.05
             });
         }
@@ -916,81 +784,44 @@
 
     function spawnBlood(x, y) {
         spawnParticles(x, y, 12, '#991b1b', 1.5);
-        decals.push({
-            x: x + (Math.random()-0.5)*15, y: y + (Math.random()-0.5)*15,
-            size: 5 + Math.random()*8, color: '#450a0a', alpha: 0.7
-        });
+        decals.push({ x: x + (Math.random()-0.5)*15, y: y + (Math.random()-0.5)*15, size: 5 + Math.random()*8, color: '#450a0a', alpha: 0.7 });
         if(decals.length > 50) decals.shift();
     }
-
-    function spawnDamageNumber(x, y, val) {
-        damageNumbers.push({ x, y, val, life: 1.0 });
-    }
-
+    function spawnDamageNumber(x, y, val) { damageNumbers.push({ x, y, val, life: 1.0 }); }
     function updateParticles(dt) {
         for(let i=particles.length-1; i>=0; i--) {
-            let p = particles[i];
-            p.x += p.vx; p.y += p.vy;
-            p.life -= p.decay;
+            let p = particles[i]; p.x += p.vx; p.y += p.vy; p.life -= p.decay;
             if(p.life <= 0) particles.splice(i,1);
         }
         for(let i=damageNumbers.length-1; i>=0; i--) {
-            let n = damageNumbers[i];
-            n.y -= 1; n.life -= 0.02;
+            let n = damageNumbers[i]; n.y -= 1; n.life -= 0.02;
             if(n.life <= 0) damageNumbers.splice(i,1);
         }
     }
-
-    function resize() {
-        CANVAS.width = window.innerWidth;
-        CANVAS.height = window.innerHeight;
-        CTX.fillStyle = COLORS.bg;
-        CTX.fillRect(0,0, CANVAS.width, CANVAS.height);
-    }
-
+    function resize() { CANVAS.width = window.innerWidth; CANVAS.height = window.innerHeight; CTX.fillStyle = COLORS.bg; CTX.fillRect(0,0, CANVAS.width, CANVAS.height); }
     function endGame(reason) {
-        if(!gameActive) return;
-        gameActive = false;
-        
-        let winner = 'draw';
-        let winReasonText = "MISSION ENDED";
-
+        if(!gameActive) return; gameActive = false;
+        let winner = 'draw', winReasonText = "MISSION ENDED";
         if(reason === 'timeout') {
             winReasonText = "TIME LIMIT REACHED";
             if(towers.blue.hp > towers.red.hp) winner = 'blue';
             else if(towers.red.hp > towers.blue.hp) winner = 'red';
-            else winner = 'draw';
         } else {
             winReasonText = "TARGET DESTROYED";
             if(towers.blue.hp <= 0 && towers.red.hp > 0) winner = 'red';
             else if(towers.red.hp <= 0 && towers.blue.hp > 0) winner = 'blue';
-            else winner = 'draw';
         }
-
         endGameDisplay(winner, winReasonText);
         send({ type: 'event', kind: 'game_over', winner: winner, reason: winReasonText });
     }
-
     function endGameDisplay(winner, reasonText) {
-        gameActive = false;
-        document.getElementById('end-screen').classList.remove('hidden');
-        const title = document.getElementById('end-title');
-        const reason = document.getElementById('end-reason');
-        
+        gameActive = false; document.getElementById('end-screen').classList.remove('hidden');
+        const title = document.getElementById('end-title'), reason = document.getElementById('end-reason');
         reason.innerText = reasonText;
-
-        if(winner === localPlayer.team) {
-            title.innerText = "VICTORY";
-            title.className = "text-8xl font-black italic tracking-tighter mb-2 text-green-500";
-        } else if(winner === 'draw') {
-            title.innerText = "DRAW";
-            title.className = "text-8xl font-black italic tracking-tighter mb-2 text-yellow-500";
-        } else {
-            title.innerText = "DEFEAT";
-            title.className = "text-8xl font-black italic tracking-tighter mb-2 text-red-500";
-        }
+        if(winner === localPlayer.team) { title.innerText = "VICTORY"; title.className = "text-8xl font-black italic tracking-tighter mb-2 text-green-500"; }
+        else if(winner === 'draw') { title.innerText = "DRAW"; title.className = "text-8xl font-black italic tracking-tighter mb-2 text-yellow-500"; }
+        else { title.innerText = "DEFEAT"; title.className = "text-8xl font-black italic tracking-tighter mb-2 text-red-500"; }
     }
-
     init();
 </script>
 </body>
