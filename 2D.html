@@ -236,6 +236,8 @@
         red: '#dc2626',
         wallTop: '#403d39',
         wallSide: '#252422',
+        dirt: '#3d342b',
+        bush: '#1a331a'
     };
 
     const GUNS = {
@@ -259,6 +261,7 @@
     let camera = { x: 0, y: 0, shake: 0 };
     let mouse = { x: 0, y: 0, worldX: 0, worldY: 0 };
     let towers = { blue: { x: 0, y: 0, hp: TOWER_MAX_HP }, red: { x: 0, y: 0, hp: TOWER_MAX_HP } };
+    let groundDetails = []; // Mud, bushes
 
     // --- Init ---
     function init() {
@@ -358,10 +361,15 @@
     // --- Game Logic ---
     function generateMap(seed) {
         walls = [];
+        groundDetails = [];
+        
+        // Borders
         walls.push({ x: -100, y: -100, w: MAP_W+200, h: 100 });
         walls.push({ x: -100, y: MAP_H, w: MAP_W+200, h: 100 });
         walls.push({ x: -100, y: 0, w: 100, h: MAP_H });
         walls.push({ x: MAP_W, y: 0, w: 100, h: MAP_H });
+        
+        // Mid structures
         walls.push({ x: MAP_W/2 - 60, y: MAP_H/2 - 250, w: 120, h: 500, type: 'bunker' }); 
         walls.push({ x: 400, y: 400, w: 200, h: 60, type: 'sandbag' });
         walls.push({ x: 400, y: 460, w: 60, h: 150, type: 'sandbag' });
@@ -369,12 +377,24 @@
         walls.push({ x: MAP_W-460, y: MAP_H-610, w: 60, h: 150, type: 'sandbag' });
         
         const r = (n) => { const x = Math.sin(seed * n) * 10000; return x - Math.floor(x); };
+        
+        // Walls
         for(let i=0; i<15; i++) {
             walls.push({
                 x: 200 + r(i) * (MAP_W-400), y: 200 + r(i+1) * (MAP_H-400),
                 w: 80 + r(i+2)*80, h: 80 + r(i+3)*80, type: r(i+4) > 0.5 ? 'crate' : 'bunker'
             });
         }
+        
+        // Ground Details (Mud & Bushes)
+        for(let i=0; i<30; i++) {
+            groundDetails.push({
+                x: r(i+20) * MAP_W, y: r(i+21) * MAP_H,
+                size: 50 + r(i+22) * 100,
+                type: r(i+23) > 0.6 ? 'bush' : 'mud'
+            });
+        }
+
         towers.blue = { x: 200, y: MAP_H/2, hp: TOWER_MAX_HP, color: '#3b82f6' };
         towers.red = { x: MAP_W - 200, y: MAP_H/2, hp: TOWER_MAX_HP, color: '#ef4444' };
     }
@@ -534,7 +554,8 @@
             if(hit) { bullets.splice(i,1); continue; }
 
             if(b.owner === localPlayer.team) {
-                if(!remotePlayer.dead && Math.hypot(b.x - remotePlayer.x, b.y - remotePlayer.y) < 25) {
+                // FIXED COLLISION LOGIC: Increased hitbox radius to 40
+                if(!remotePlayer.dead && Math.hypot(b.x - remotePlayer.x, b.y - remotePlayer.y) < 40) {
                     spawnBlood(b.x, b.y);
                     spawnDamageNumber(b.x, b.y, b.dmg);
                     send({ type: 'event', kind: 'hit_player', dmg: b.dmg });
@@ -542,7 +563,7 @@
                     continue;
                 }
                 const targetTower = localPlayer.team === 'blue' ? towers.red : towers.blue;
-                if(targetTower.hp > 0 && Math.hypot(b.x - targetTower.x, b.y - targetTower.y) < 50) {
+                if(targetTower.hp > 0 && Math.hypot(b.x - targetTower.x, b.y - targetTower.y) < 60) {
                     spawnParticles(b.x, b.y, 8, '#f59e0b', 3);
                     send({ type: 'event', kind: 'hit_tower', dmg: b.dmg, team: localPlayer.team === 'blue' ? 'red' : 'blue' });
                     bullets.splice(i,1);
@@ -613,6 +634,16 @@
         CTX.fillStyle = COLORS.grassLight;
         for(let i=0; i<MAP_W; i+=100) for(let j=0; j<MAP_H; j+=100) if((i+j)%200===0) CTX.fillRect(i,j,100,100);
         
+        // Draw Ground Details
+        groundDetails.forEach(g => {
+            CTX.fillStyle = g.type === 'bush' ? COLORS.bush : COLORS.dirt;
+            CTX.beginPath(); CTX.arc(g.x, g.y, g.size, 0, Math.PI*2); CTX.fill();
+            if(g.type === 'bush') {
+                CTX.fillStyle = '#142a14'; // Bush detail
+                CTX.beginPath(); CTX.arc(g.x+10, g.y-10, g.size/2, 0, Math.PI*2); CTX.fill();
+            }
+        });
+
         CTX.strokeStyle = 'rgba(0,0,0,0.2)'; CTX.lineWidth = 1; CTX.beginPath();
         for(let x=0; x<=MAP_W; x+=100) { CTX.moveTo(x,0); CTX.lineTo(x, MAP_H); }
         for(let y=0; y<=MAP_H; y+=100) { CTX.moveTo(0,y); CTX.lineTo(MAP_W, y); }
@@ -630,12 +661,21 @@
             let colorSide = w.type === 'crate' ? '#451a03' : (w.type === 'sandbag' ? '#6b6b47' : COLORS.wallSide);
             CTX.fillStyle = colorSide; CTX.fillRect(w.x, w.y + w.h, w.w, 20);
             CTX.fillStyle = colorTop; CTX.fillRect(w.x, w.y, w.w, w.h);
-            CTX.fillStyle = 'rgba(255,255,255,0.05)'; CTX.fillRect(w.x, w.y, w.w, 5);
-            if(w.type === 'crate') {
+            
+            // Detail for Bunkers/Sandbags
+            if(w.type === 'bunker') {
+                CTX.fillStyle = '#111'; // Rivets
+                CTX.beginPath(); CTX.arc(w.x+10, w.y+10, 3, 0, Math.PI*2); CTX.fill();
+                CTX.beginPath(); CTX.arc(w.x+w.w-10, w.y+10, 3, 0, Math.PI*2); CTX.fill();
+                CTX.beginPath(); CTX.arc(w.x+10, w.y+w.h-10, 3, 0, Math.PI*2); CTX.fill();
+                CTX.beginPath(); CTX.arc(w.x+w.w-10, w.y+w.h-10, 3, 0, Math.PI*2); CTX.fill();
+            } else if(w.type === 'crate') {
                 CTX.strokeStyle = 'rgba(0,0,0,0.2)'; CTX.lineWidth = 5; CTX.beginPath();
                 CTX.moveTo(w.x, w.y); CTX.lineTo(w.x+w.w, w.y+w.h);
                 CTX.moveTo(w.x+w.w, w.y); CTX.lineTo(w.x, w.y+w.h); CTX.stroke();
             }
+            
+            CTX.fillStyle = 'rgba(255,255,255,0.05)'; CTX.fillRect(w.x, w.y, w.w, 5);
         });
 
         drawTower(towers.blue, 'blue');
