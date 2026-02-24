@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Unfiltered Local Image Editor</title>
+<style>
+  body { margin:0; font-family:Arial; background:#111; color:#eee; }
+  #container { display:flex; flex-direction:column; height:100vh; }
+  #toolbar {
+    padding:8px; background:#222; display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+  }
+  #canvasContainer { flex:1; position:relative; overflow:auto; background:#000 url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="20" height="20" fill="%23111"/><rect x="20" y="20" width="20" height="20" fill="%23111"/><rect x="20" y="0" width="20" height="20" fill="%23222"/><rect y="20" width="20" height="20" fill="%23222"/></svg>'); }
+  canvas { image-rendering:pixelated; touch-action:none; }
+  button, input, select { padding:6px 10px; background:#333; color:#eee; border:1px solid #555; border-radius:4px; }
+  button:hover { background:#444; }
+  #size { width:60px; }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="toolbar">
+    <input type="file" id="loadImage" accept="image/*">
+    <button onclick="clearCanvas()">Clear</button>
+    <select id="tool">
+      <option value="brush">Brush</option>
+      <option value="erase">Erase</option>
+      <option value="clone">Clone Stamp</option>
+      <option value="blur">Blur</option>
+      <option value="sharpen">Sharpen</option>
+      <option value="smudge">Smudge</option>
+    </select>
+    <label>Size: <input type="range" id="size" min="1" max="100" value="20"></label>
+    <input type="color" id="color" value="#ff0000">
+    <label>Opacity: <input type="range" id="opacity" min="0.1" max="1" step="0.1" value="1"></label>
+    <button onclick="undo()">Undo</button>
+    <button onclick="download()">Download</button>
+  </div>
+
+  <div id="canvasContainer">
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+// ────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', {willReadFrequently: true});
+const container = document.getElementById('canvasContainer');
+
+let painting = false;
+let tool = 'brush';
+let lastX, lastY;
+let cloneSource = null;
+let history = [];
+let historyIndex = -1;
+
+function resize() {
+  canvas.width = Math.max(container.clientWidth, 800);
+  canvas.height = Math.max(container.clientHeight, 600);
+  redraw();
+}
+window.addEventListener('resize', resize);
+resize();
+
+function saveState() {
+  if (historyIndex < history.length - 1) history.length = historyIndex + 1;
+  history.push(canvas.toDataURL());
+  historyIndex++;
+  if (history.length > 30) { history.shift(); historyIndex--; }
+}
+
+function redraw() {
+  if (historyIndex >= 0) {
+    const img = new Image();
+    img.src = history[historyIndex];
+    img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  }
+}
+
+function undo() {
+  if (historyIndex <= 0) return;
+  historyIndex--;
+  redraw();
+}
+
+function clearCanvas() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  saveState();
+}
+
+// ─── Tools & Drawing ───────────────────────────────────────
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX || e.touches[0].clientX) - rect.left,
+    y: (e.clientY || e.touches[0].clientY) - rect.top
+  };
+}
+
+function draw(e) {
+  if (!painting) return;
+  const pos = getPos(e);
+  const size = +document.getElementById('size').value;
+  const opacity = +document.getElementById('opacity').value;
+  const color = document.getElementById('color').value;
+
+  ctx.globalAlpha = opacity;
+  ctx.lineWidth = size * 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (tool === 'brush') {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  }
+  else if (tool === 'erase') {
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.strokeStyle = '#000';
+    ctx.beginPath();
+    ctx.moveTo(lastX, lastY);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  else if (tool === 'clone' && cloneSource) {
+    ctx.drawImage(canvas,
+      cloneSource.x - size, cloneSource.y - size, size*2, size*2,
+      pos.x - size, pos.y - size, size*2, size*2);
+    cloneSource = pos;
+  }
+  else if (tool === 'blur') {
+    ctx.filter = `blur(${size/4}px)`;
+    ctx.drawImage(canvas, pos.x-size, pos.y-size, size*2, size*2,
+                             pos.x-size, pos.y-size, size*2, size*2);
+    ctx.filter = 'none';
+  }
+  else if (tool === 'sharpen') {
+    const imgData = ctx.getImageData(pos.x-size, pos.y-size, size*2, size*2);
+    const data = imgData.data;
+    for (let i = 0; i < data.length; i+=4) {
+      data[i]   = Math.min(255, data[i]*1.5   - (data[i-4]+data[i+4]+data[i- (size*2*4)]+data[i+(size*2*4)])/4 );
+      data[i+1] = Math.min(255, data[i+1]*1.5 - (data[i-3]+data[i+5]+data[i-(size*2*4)+1]+data[i+(size*2*4)+1])/4 );
+      data[i+2] = Math.min(255, data[i+2]*1.5 - (data[i-2]+data[i+6]+data[i-(size*2*4)+2]+data[i+(size*2*4)+2])/4 );
+    }
+    ctx.putImageData(imgData, pos.x-size, pos.y-size);
+  }
+  else if (tool === 'smudge') {
+    ctx.globalAlpha = 0.4;
+    ctx.drawImage(canvas, lastX-size, lastY-size, size*2, size*2,
+                           pos.x-size, pos.y-size, size*2, size*2);
+    ctx.globalAlpha = opacity;
+  }
+
+  lastX = pos.x;
+  lastY = pos.y;
+}
+
+// ─── Events ──────────────────────────────────────────────────
+canvas.addEventListener('mousedown', e => {
+  painting = true;
+  const pos = getPos(e);
+  lastX = pos.x; lastY = pos.y;
+  if (tool === 'clone' && e.altKey) cloneSource = pos;
+  saveState();
+});
+canvas.addEventListener('mousemove', draw);
+canvas.addEventListener('mouseup',   () => painting = false);
+canvas.addEventListener('mouseout',  () => painting = false);
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  painting = true;
+  const pos = getPos(e);
+  lastX = pos.x; lastY = pos.y;
+});
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  draw(e);
+});
+canvas.addEventListener('touchend',   () => painting = false);
+
+document.getElementById('tool').onchange = e => tool = e.target.value;
+
+// Load image
+document.getElementById('loadImage').onchange = e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.width;
+      canvas.height = img.height;
+      ctx.drawImage(img, 0, 0);
+      saveState();
+    };
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+};
+
+function download() {
+  const link = document.createElement('a');
+  link.download = 'edited.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+// keyboard shortcuts
+window.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'z') undo();
+  if (e.key === 'c' && e.altKey) tool = 'clone';
+});
+</script>
+</body>
+</html>
