@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>StockTracker</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #080a0d;
+  --s1: #0d1117;
+  --s2: #131920;
+  --s3: #1a2230;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --g: #00f07a;
+  --g2: #00c45f;
+  --gdim: rgba(0,240,122,0.1);
+  --r: #ff3d5a;
+  --rdim: rgba(255,61,90,0.1);
+  --txt: #eef2f7;
+  --txt2: #7a8899;
+  --txt3: #4a5665;
+  --syne: 'Syne', sans-serif;
+  --mono: 'JetBrains Mono', monospace;
+}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { height:100%; overflow:hidden; }
+body {
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--syne);
+  max-width: 430px;
+  margin: 0 auto;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+body::before {
+  content:'';
+  position:fixed; inset:0;
+  background: radial-gradient(ellipse 80% 40% at 50% -10%, rgba(0,240,122,0.06) 0%, transparent 70%);
+  pointer-events:none; z-index:0;
+}
+.screen { display:none; flex-direction:column; height:100%; overflow:hidden; position:relative; z-index:1; }
+.screen.active { display:flex; }
+
+/* TOPBAR */
+.topbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding: 14px 18px 10px; flex-shrink:0;
+}
+.brand { display:flex; align-items:center; gap:8px; }
+.brand-icon {
+  width:34px; height:34px;
+  background: linear-gradient(135deg, var(--g), var(--g2));
+  border-radius:10px;
+  display:flex; align-items:center; justify-content:center;
+}
+.brand-icon svg { width:18px; height:18px; }
+.brand-name { font-size:17px; font-weight:800; letter-spacing:-0.5px; }
+.brand-name span { color: var(--g); }
+.live-pill {
+  display:flex; align-items:center; gap:5px;
+  background: var(--gdim);
+  border: 1px solid rgba(0,240,122,0.2);
+  padding: 5px 10px; border-radius:20px;
+  font-family: var(--mono); font-size:10px; color: var(--g);
+}
+.pulse-dot { width:5px; height:5px; border-radius:50%; background:var(--g); animation: blink 1.4s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+/* TAPE */
+.tape-wrap {
+  overflow:hidden; margin:0 -0px;
+  border-top:1px solid var(--border); border-bottom:1px solid var(--border);
+  padding:8px 0; background:var(--s1); flex-shrink:0;
+}
+.tape-inner { display:flex; gap:24px; white-space:nowrap; animation:tape 32s linear infinite; }
+@keyframes tape { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+.tape-item { display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; }
+.tape-sym { color:var(--txt2); }
+.tape-p { color:var(--txt); font-weight:500; }
+.tape-c { font-size:10px; }
+.up { color: var(--g); }
+.dn { color: var(--r); }
+
+/* SEARCH */
+.search-wrap { padding:10px 16px; flex-shrink:0; position:relative; }
+.search-box {
+  width:100%; background:var(--s2); border:1px solid var(--border2);
+  border-radius:14px; padding:12px 16px 12px 44px;
+  font-size:14px; font-family:var(--syne); color:var(--txt); outline:none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.search-box:focus { border-color:rgba(0,240,122,0.4); box-shadow:0 0 0 3px rgba(0,240,122,0.06); }
+.search-box::placeholder { color:var(--txt3); }
+.search-icon { position:absolute; left:28px; top:50%; transform:translateY(-50%); color:var(--txt3); pointer-events:none; }
+.search-icon svg { width:16px; height:16px; display:block; }
+.dropdown {
+  position:absolute; top:calc(100% - 6px); left:16px; right:16px;
+  background:var(--s2); border:1px solid var(--border2); border-radius:12px;
+  overflow:hidden; z-index:100; box-shadow:0 20px 40px rgba(0,0,0,0.5); display:none;
+}
+.dropdown.show { display:block; }
+.drop-item {
+  display:flex; align-items:center; gap:12px; padding:12px 16px;
+  cursor:pointer; border-bottom:1px solid var(--border); transition:background .15s;
+}
+.drop-item:last-child { border-bottom:none; }
+.drop-item:active { background:var(--s3); }
+.drop-ticker { font-family:var(--mono); font-size:13px; font-weight:700; color:var(--g); min-width:48px; }
+.drop-name { font-size:12px; color:var(--txt2); flex:1; }
+.drop-price { font-family:var(--mono); font-size:12px; }
+
+/* CHIPS */
+.chips-row { padding:0 16px 8px; flex-shrink:0; }
+.chips { display:flex; gap:7px; overflow-x:auto; padding-bottom:2px; }
+.chips::-webkit-scrollbar{display:none}
+.chip {
+  flex-shrink:0; padding:7px 14px;
+  background:var(--s2); border:1px solid var(--border);
+  border-radius:20px; font-size:12px; font-weight:600;
+  cursor:pointer; transition:all .15s; white-space:nowrap; color:var(--txt2);
+}
+.chip.sel, .chip:active { background:var(--gdim); border-color:rgba(0,240,122,0.3); color:var(--g); }
+
+/* SECTION LABEL */
+.section-label {
+  font-size:10px; font-weight:700; letter-spacing:1.5px;
+  color:var(--txt3); text-transform:uppercase; margin:10px 16px 8px;
+}
+
+/* SCROLL AREA */
+.scroll-area { flex:1; overflow-y:auto; overflow-x:hidden; scroll-behavior:smooth; }
+.scroll-area::-webkit-scrollbar{display:none}
+
+/* WATCHLIST CARD */
+.wl-card {
+  display:flex; align-items:center;
+  background:var(--s1); border:1px solid var(--border); border-radius:14px;
+  padding:13px 15px; margin:0 16px 8px; cursor:pointer;
+  transition:border-color .15s, background .15s;
+  animation:fadeUp .3s ease both;
+}
+.wl-card:active { background:var(--s2); }
+.wl-left { flex:1 1 auto; }
+.wl-ticker { font-family:var(--mono); font-size:15px; font-weight:700; letter-spacing:-0.3px; }
+.wl-name { font-size:11px; color:var(--txt3); margin-top:2px; }
+.wl-mid { flex:0 0 80px; margin:0 12px; }
+.wl-mini-chart { width:80px; height:36px; display:block; }
+.wl-right { text-align:right; flex-shrink:0; }
+.wl-price { font-family:var(--mono); font-size:15px; font-weight:700; }
+.wl-chg { font-family:var(--mono); font-size:11px; padding:2px 7px; border-radius:5px; margin-top:4px; display:inline-block; }
+.chg-up { background:var(--gdim); color:var(--g); }
+.chg-dn { background:var(--rdim); color:var(--r); }
+@keyframes fadeUp { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+/* BOTTOM NAV */
+.bottom-nav { display:flex; border-top:1px solid var(--border); background:var(--s1); flex-shrink:0; }
+.nav-btn {
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  padding:10px 0 14px; cursor:pointer; transition:color .15s;
+  color:var(--txt3); font-size:10px; font-weight:600; gap:4px; letter-spacing:0.3px;
+}
+.nav-btn svg { width:20px; height:20px; }
+.nav-btn.on { color:var(--g); }
+
+/* ── DETAIL ── */
+.detail-header { padding:14px 18px 0; flex-shrink:0; }
+.back-btn {
+  display:flex; align-items:center; gap:6px;
+  font-size:13px; color:var(--txt2); cursor:pointer;
+  width:fit-content; margin-bottom:14px; transition:color .15s;
+}
+.back-btn:active { color:var(--g); }
+.back-btn svg { width:16px; height:16px; }
+.detail-title { display:flex; align-items:flex-start; justify-content:space-between; }
+.detail-ticker { font-size:28px; font-weight:800; letter-spacing:-1px; line-height:1; }
+.detail-name { font-size:12px; color:var(--txt2); margin-top:4px; }
+.detail-sector {
+  font-size:10px; font-weight:600;
+  background:var(--s3); border:1px solid var(--border);
+  padding:4px 10px; border-radius:20px; color:var(--txt2); letter-spacing:0.5px;
+}
+.detail-price-row { padding:12px 18px 10px; flex-shrink:0; }
+.detail-price { font-family:var(--mono); font-size:36px; font-weight:700; letter-spacing:-1px; line-height:1; }
+.detail-change-row { display:flex; align-items:center; gap:10px; margin-top:6px; }
+.detail-chg { font-family:var(--mono); font-size:14px; font-weight:500; padding:4px 12px; border-radius:8px; }
+.detail-updated { font-size:11px; color:var(--txt3); }
+
+/* CHART */
+.chart-area { padding:0 10px; flex-shrink:0; position:relative; }
+.chart-canvas { width:100% !important; display:block; cursor:crosshair; }
+.hover-label {
+  position:absolute; background:var(--s3); border:1px solid var(--border2);
+  border-radius:6px; padding:5px 9px; font-family:var(--mono); font-size:11px;
+  color:var(--txt); pointer-events:none; display:none; z-index:10; white-space:nowrap;
+}
+.tf-row { display:flex; gap:5px; padding:4px 16px 0; flex-shrink:0; }
+.tf {
+  flex:1; padding:7px 0; text-align:center; font-family:var(--mono); font-size:11px;
+  background:transparent; border:1px solid var(--border); border-radius:8px;
+  color:var(--txt2); cursor:pointer; transition:all .15s;
+}
+.tf.on { background:var(--gdim); border-color:rgba(0,240,122,0.3); color:var(--g); }
+
+/* STATS */
+.detail-scroll { flex:1; overflow-y:auto; }
+.detail-scroll::-webkit-scrollbar{display:none}
+.stats-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:0 16px; }
+.stat-box { background:var(--s1); border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
+.stat-lbl { font-size:10px; color:var(--txt3); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:5px; }
+.stat-v { font-family:var(--mono); font-size:14px; font-weight:700; }
+.stat-bar { height:3px; background:var(--border); border-radius:2px; margin-top:8px; overflow:hidden; }
+.stat-bar-fill { height:100%; border-radius:2px; background:var(--g); }
+.about-box { background:var(--s1); border:1px solid var(--border); border-radius:12px; padding:14px; margin:0 16px; }
+.about-box p { font-size:12.5px; line-height:1.65; color:var(--txt2); }
+</style>
+</head>
+<body>
+
+<!-- HOME SCREEN -->
+<div class="screen active" id="homeScreen">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline>
+          <polyline points="16 7 22 7 22 13"></polyline>
+        </svg>
+      </div>
+      <div class="brand-name">Stock<span>Tracker</span></div>
+    </div>
+    <div class="live-pill"><div class="pulse-dot"></div>LIVE</div>
+  </div>
+
+  <div class="tape-wrap"><div class="tape-inner" id="tape"></div></div>
+
+  <div class="search-wrap">
+    <div class="search-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+    </div>
+    <input class="search-box" id="searchInput" type="text" placeholder="Search stocks, crypto…" autocomplete="off" spellcheck="false">
+    <div class="dropdown" id="dropdown"></div>
+  </div>
+
+  <div class="chips-row">
+    <div class="chips">
+      <div class="chip sel" onclick="filterChip(this,'all')">All</div>
+      <div class="chip" onclick="filterChip(this,'tech')">Tech</div>
+      <div class="chip" onclick="filterChip(this,'crypto')">Crypto</div>
+      <div class="chip" onclick="filterChip(this,'finance')">Finance</div>
+      <div class="chip" onclick="filterChip(this,'consumer')">Consumer</div>
+    </div>
+  </div>
+
+  <div class="scroll-area">
+    <div class="section-label">Market Overview</div>
+    <div id="watchlist"></div>
+    <div style="height:8px"></div>
+  </div>
+
+  <div class="bottom-nav">
+    <div class="nav-btn on">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Market
+    </div>
+    <div class="nav-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Watchlist
+    </div>
+    <div class="nav-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg>
+      Portfolio
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL SCREEN -->
+<div class="screen" id="detailScreen">
+  <div class="detail-header">
+    <div class="back-btn" onclick="goBack()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </div>
+    <div class="detail-title">
+      <div>
+        <div class="detail-ticker" id="dTicker"></div>
+        <div class="detail-name" id="dName"></div>
+      </div>
+      <div class="detail-sector" id="dSector"></div>
+    </div>
+  </div>
+
+  <div class="detail-price-row">
+    <div class="detail-price" id="dPrice"></div>
+    <div class="detail-change-row">
+      <div class="detail-chg" id="dChg"></div>
+      <div class="detail-updated">Updated just now</div>
+    </div>
+  </div>
+
+  <div class="chart-area">
+    <canvas class="chart-canvas" id="mainChart" height="160"></canvas>
+    <div class="hover-label" id="hoverLabel"></div>
+  </div>
+
+  <div class="tf-row" id="tfRow">
+    <div class="tf on" onclick="setTF(this,'1D')">1D</div>
+    <div class="tf" onclick="setTF(this,'1W')">1W</div>
+    <div class="tf" onclick="setTF(this,'1M')">1M</div>
+    <div class="tf" onclick="setTF(this,'3M')">3M</div>
+    <div class="tf" onclick="setTF(this,'1Y')">1Y</div>
+  </div>
+
+  <div class="detail-scroll">
+    <div class="section-label">Key Statistics</div>
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="section-label" style="margin-top:14px">About</div>
+    <div class="about-box"><p id="aboutText"></p></div>
+    <div style="height:20px"></div>
+  </div>
+</div>
+
+<script>
+const DB = {
+  AAPL:  { name:"Apple Inc.", sector:"Technology", cat:"tech", price:189.06, chg:1.74, open:188.10, high:190.34, low:187.56, vol:"72.1M", cap:"$2.91T", pe:"31.2", wk52h:199.62, wk52l:142.45, about:"Apple designs, manufactures, and markets smartphones, personal computers, tablets, wearables, and accessories. Best known for the iPhone, Mac, iPad, and Apple Watch ecosystem." },
+  MSFT:  { name:"Microsoft Corp.", sector:"Technology", cat:"tech", price:415.08, chg:-0.61, open:417.20, high:418.55, low:413.40, vol:"18.5M", cap:"$3.08T", pe:"35.8", wk52h:468.35, wk52l:362.90, about:"Microsoft develops software, services, and devices including Windows, Office 365, Azure cloud, Xbox, and LinkedIn. One of the world's most valuable companies." },
+  NVDA:  { name:"NVIDIA Corporation", sector:"Semiconductors", cat:"tech", price:876.09, chg:0.83, open:869.00, high:882.50, low:865.20, vol:"41.3M", cap:"$2.16T", pe:"72.4", wk52h:974.00, wk52l:461.86, about:"NVIDIA designs GPUs and system-on-chip units. Dominant in AI/ML accelerators, gaming, and data center computing. Powers most of the world's AI infrastructure." },
+  TSLA:  { name:"Tesla Inc.", sector:"Auto / EV", cat:"tech", price:178.40, chg:1.38, open:176.20, high:180.10, low:175.80, vol:"99.2M", cap:"$568B", pe:"58.1", wk52h:299.29, wk52l:138.80, about:"Tesla designs and manufactures electric vehicles, energy storage, and solar products. Also operates the world's largest EV fast-charging network globally." },
+  AMZN:  { name:"Amazon.com Inc.", sector:"Consumer Tech", cat:"consumer", price:198.11, chg:-1.86, open:200.50, high:201.30, low:197.20, vol:"33.8M", cap:"$2.08T", pe:"44.2", wk52h:229.00, wk52l:151.61, about:"Amazon operates e-commerce, AWS cloud computing, digital streaming, and AI services. AWS is the world's largest cloud provider by revenue and market share." },
+  GOOGL: { name:"Alphabet Inc.", sector:"Technology", cat:"tech", price:142.02, chg:-0.12, open:142.50, high:143.80, low:141.10, vol:"22.1M", cap:"$1.75T", pe:"23.8", wk52h:193.31, wk52l:130.67, about:"Alphabet is Google's parent. Operates the world's largest search engine, YouTube, Android, Google Cloud, and the Waymo autonomous vehicle project." },
+  META:  { name:"Meta Platforms", sector:"Technology", cat:"tech", price:523.07, chg:1.55, open:516.00, high:525.40, low:514.80, vol:"14.9M", cap:"$1.32T", pe:"26.5", wk52h:589.50, wk52l:392.36, about:"Meta operates Facebook, Instagram, WhatsApp, and Messenger with nearly 4 billion users. Investing in AR/VR through its Reality Labs division." },
+  AMD:   { name:"Advanced Micro Devices", sector:"Semiconductors", cat:"tech", price:26.48, chg:0.63, open:26.00, high:26.90, low:25.70, vol:"55.4M", cap:"$43B", pe:"18.6", wk52h:227.30, wk52l:22.64, about:"AMD designs high-performance CPUs and GPUs for servers, desktops, and embedded markets. Key competitor to NVIDIA in AI accelerators and to Intel in x86 CPUs." },
+  NFLX:  { name:"Netflix Inc.", sector:"Streaming", cat:"tech", price:629.85, chg:1.52, open:621.00, high:633.40, low:619.80, vol:"8.2M", cap:"$271B", pe:"47.1", wk52h:700.98, wk52l:344.79, about:"Netflix is the world's largest subscription streaming service with over 270 million members globally, offering original films, TV series, and documentaries." },
+  BAC:   { name:"Bank of America", sector:"Finance", cat:"finance", price:38.72, chg:2.62, open:37.75, high:38.90, low:37.60, vol:"44.5M", cap:"$304B", pe:"13.1", wk52h:44.44, wk52l:25.32, about:"Bank of America is one of the world's largest financial institutions serving individual consumers, businesses, and institutional investors across the globe." },
+  JPM:   { name:"JPMorgan Chase", sector:"Finance", cat:"finance", price:197.44, chg:0.88, open:195.80, high:198.20, low:195.10, vol:"9.8M", cap:"$564B", pe:"11.6", wk52h:220.82, wk52l:136.07, about:"JPMorgan Chase is a global leader in financial services including investment banking, commercial banking, asset management, and private banking." },
+  V:     { name:"Visa Inc.", sector:"Finance", cat:"finance", price:272.00, chg:0.43, open:270.80, high:273.10, low:270.20, vol:"6.4M", cap:"$551B", pe:"30.1", wk52h:290.96, wk52l:225.00, about:"Visa operates the world's largest retail electronic payments network, processing billions of transactions across 200+ countries and territories annually." },
+  BTC:   { name:"Bitcoin", sector:"Crypto", cat:"crypto", price:66965, chg:-2.43, open:68500, high:69100, low:66200, vol:"$28.4B", cap:"$1.31T", pe:"N/A", wk52h:73738, wk52l:40130, about:"Bitcoin is the world's first decentralized cryptocurrency, created in 2009 by Satoshi Nakamoto. It operates on a peer-to-peer network secured by proof-of-work mining." },
+  ETH:   { name:"Ethereum", sector:"Crypto", cat:"crypto", price:3816.25, chg:2.25, open:3730, high:3850, low:3710, vol:"$12.1B", cap:"$458B", pe:"N/A", wk52h:4091, wk52l:1505, about:"Ethereum is a decentralized blockchain platform enabling smart contracts and decentralized applications. ETH is its native currency used to pay for network operations." },
+  XRP:   { name:"Ripple / XRP", sector:"Crypto", cat:"crypto", price:0.6189, chg:2.94, open:0.601, high:0.622, low:0.598, vol:"$1.8B", cap:"$34B", pe:"N/A", wk52h:0.93, wk52l:0.41, about:"XRP is a digital asset designed for global payments, settling international transactions in seconds at minimal cost, used by banks and financial institutions worldwide." },
+  COST:  { name:"Costco Wholesale", sector:"Retail", cat:"consumer", price:792.72, chg:0.55, open:788.50, high:795.90, low:787.30, vol:"2.1M", cap:"$351B", pe:"55.3", wk52h:887.78, wk52l:682.49, about:"Costco operates membership-only warehouse clubs offering merchandise at substantially lower prices. Known for high employee wages and exceptional member loyalty." },
+  WMT:   { name:"Walmart Inc.", sector:"Retail", cat:"consumer", price:61.20, chg:0.72, open:60.80, high:61.55, low:60.60, vol:"17.3M", cap:"$493B", pe:"35.4", wk52h:83.47, wk52l:48.94, about:"Walmart is the world's largest retailer, operating hypermarkets, discount department stores, and grocery stores. Serves over 240 million customers weekly worldwide." },
+};
+
+const ALIASES = {
+  "apple":"AAPL","microsoft":"MSFT","nvidia":"NVDA","tesla":"TSLA","amazon":"AMZN",
+  "google":"GOOGL","alphabet":"GOOGL","meta":"META","facebook":"META","amd":"AMD",
+  "advanced micro devices":"AMD","netflix":"NFLX","bank of america":"BAC",
+  "jpmorgan":"JPM","jp morgan":"JPM","visa":"V","bitcoin":"BTC","ethereum":"ETH",
+  "ripple":"XRP","xrp":"XRP","costco":"COST","walmart":"WMT","btc":"BTC","eth":"ETH",
+};
+
+function resolve(q) {
+  const u = q.trim().toUpperCase();
+  if (DB[u]) return u;
+  const l = q.trim().toLowerCase();
+  if (ALIASES[l]) return ALIASES[l];
+  const t = Object.keys(DB).find(k => k.startsWith(u));
+  if (t) return t;
+  const a = Object.keys(ALIASES).find(k => k.includes(l));
+  if (a) return ALIASES[a];
+  return Object.keys(DB).find(k => DB[k].name.toLowerCase().includes(l)) || null;
+}
+
+function fmtP(p) {
+  if (p >= 1000) return '$'+p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if (p >= 1) return '$'+p.toFixed(2);
+  if (p >= 0.01) return '$'+p.toFixed(4);
+  return '$'+p.toFixed(8);
+}
+
+function buildTape() {
+  const tks = ['AAPL','MSFT','NVDA','TSLA','AMZN','GOOGL','META','AMD','BTC','ETH','NFLX','BAC','JPM','V'];
+  let html = '';
+  for (let r=0;r<2;r++) tks.forEach(t=>{
+    const s=DB[t], cls=s.chg>=0?'up':'dn', arr=s.chg>=0?'▲':'▼';
+    html+=`<div class="tape-item"><span class="tape-sym">${t}</span><span class="tape-p">${fmtP(s.price)}</span><span class="tape-c ${cls}">${arr}${Math.abs(s.chg)}%</span></div>`;
+  });
+  document.getElementById('tape').innerHTML = html;
+}
+
+let currentFilter='all';
+function buildWatchlist() {
+  const container=document.getElementById('watchlist');
+  container.innerHTML='';
+  Object.entries(DB).filter(([,v])=>currentFilter==='all'||v.cat===currentFilter).forEach(([ticker,s],i)=>{
+    const isUp=s.chg>=0;
+    const card=document.createElement('div');
+    card.className='wl-card';
+    card.style.animationDelay=(i*0.04)+'s';
+    card.innerHTML=`<div class="wl-left"><div class="wl-ticker">${ticker}</div><div class="wl-name">${s.name}</div></div>
+      <div class="wl-mid"><canvas class="wl-mini-chart" id="mini_${ticker}" width="80" height="36"></canvas></div>
+      <div class="wl-right"><div class="wl-price ${isUp?'up':'dn'}">${fmtP(s.price)}</div><div class="wl-chg ${isUp?'chg-up':'chg-dn'}">${isUp?'▲':'▼'}${Math.abs(s.chg)}%</div></div>`;
+    card.onclick=()=>openDetail(ticker);
+    container.appendChild(card);
+    setTimeout(()=>drawMini(ticker,isUp),50+i*15);
+  });
+}
+
+function filterChip(el,cat) {
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('sel'));
+  el.classList.add('sel'); currentFilter=cat; buildWatchlist();
+}
+
+function genData(s,tf) {
+  const n={1:48,'1D':48,'1W':7,'1M':30,'3M':90,'1Y':52}[tf]||48;
+  const base=s.price/(1+s.chg/100);
+  const data=[base]; const v=s.price*0.018;
+  for(let i=1;i<n;i++){
+    const drift=(s.price-data[i-1])/(n-i)*0.7;
+    data.push(Math.max(0.0001,data[i-1]+drift+(Math.random()-0.47)*v*0.3));
+  }
+  data[data.length-1]=s.price;
+  return data;
+}
+
+function drawLine(ctx,data,w,h,color,fill,pl,pr,mini) {
+  pl=pl||8; pr=pr||8;
+  const pt=mini?2:8, pb=mini?2:20;
+  const cw=w-pl-pr, ch=h-pt-pb;
+  const mn=Math.min(...data), mx=Math.max(...data), range=mx-mn||1;
+  const pts=data.map((v,i)=>({x:pl+(i/(data.length-1))*cw, y:pt+ch-((v-mn)/range)*ch}));
+  if(fill){
+    const g=ctx.createLinearGradient(0,pt,0,pt+ch);
+    if(color==='#00f07a'){g.addColorStop(0,'rgba(0,240,122,0.22)');g.addColorStop(1,'rgba(0,240,122,0)');}
+    else{g.addColorStop(0,'rgba(255,61,90,0.22)');g.addColorStop(1,'rgba(255,61,90,0)');}
+    ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++){const cp={x:(pts[i-1].x+pts[i].x)/2,y:(pts[i-1].y+pts[i].y)/2};ctx.quadraticCurveTo(pts[i-1].x,pts[i-1].y,cp.x,cp.y);}
+    ctx.lineTo(pts[pts.length-1].x,pt+ch); ctx.lineTo(pts[0].x,pt+ch); ctx.closePath();
+    ctx.fillStyle=g; ctx.fill();
+  }
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length;i++){const cp={x:(pts[i-1].x+pts[i].x)/2,y:(pts[i-1].y+pts[i].y)/2};ctx.quadraticCurveTo(pts[i-1].x,pts[i-1].y,cp.x,cp.y);}
+  ctx.lineTo(pts[pts.length-1].x,pts[pts.length-1].y);
+  ctx.strokeStyle=color; ctx.lineWidth=mini?1.5:2; ctx.lineJoin='round'; ctx.stroke();
+  if(!mini){
+    const last=pts[pts.length-1];
+    ctx.beginPath(); ctx.arc(last.x,last.y,4,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+    ctx.beginPath(); ctx.arc(last.x,last.y,4,0,Math.PI*2); ctx.strokeStyle='rgba(255,255,255,0.25)'; ctx.lineWidth=1.5; ctx.stroke();
+  }
+  return pts;
+}
+
+function drawMini(ticker,isUp) {
+  const canvas=document.getElementById('mini_'+ticker);
+  if(!canvas) return;
+  const s=DB[ticker], ctx=canvas.getContext('2d'), dpr=window.devicePixelRatio||1;
+  canvas.width=80*dpr; canvas.height=36*dpr; ctx.scale(dpr,dpr);
+  drawLine(ctx,genData(s,'1M'),80,36,isUp?'#00f07a':'#ff3d5a',false,4,4,true);
+}
+
+let currentTicker=null, currentTF='1D', currentPts=[], currentData=[];
+
+function openDetail(ticker) {
+  const s=DB[ticker]; currentTicker=ticker;
+  const isUp=s.chg>=0;
+  document.getElementById('dTicker').textContent=ticker;
+  document.getElementById('dName').textContent=s.name;
+  document.getElementById('dSector').textContent=s.sector.toUpperCase();
+  document.getElementById('dPrice').textContent=fmtP(s.price);
+  document.getElementById('dPrice').className='detail-price '+(isUp?'up':'dn');
+  const chgEl=document.getElementById('dChg');
+  chgEl.textContent=`${isUp?'▲':'▼'} ${Math.abs(s.chg)}%  (${isUp?'+':''}${(s.price*s.chg/100).toFixed(s.price>100?2:4)})`;
+  chgEl.className='detail-chg '+(isUp?'chg-up':'chg-dn');
+  document.getElementById('aboutText').textContent=s.about;
+
+  const pct=s.wk52h>s.wk52l?((s.price-s.wk52l)/(s.wk52h-s.wk52l)*100).toFixed(0):50;
+  document.getElementById('statsGrid').innerHTML=`
+    <div class="stat-box"><div class="stat-lbl">Open</div><div class="stat-v">${fmtP(s.open)}</div></div>
+    <div class="stat-box"><div class="stat-lbl">Volume</div><div class="stat-v">${s.vol}</div></div>
+    <div class="stat-box"><div class="stat-lbl">Day High</div><div class="stat-v up">${fmtP(s.high)}</div></div>
+    <div class="stat-box"><div class="stat-lbl">Day Low</div><div class="stat-v dn">${fmtP(s.low)}</div></div>
+    <div class="stat-box"><div class="stat-lbl">Market Cap</div><div class="stat-v">${s.cap}</div></div>
+    <div class="stat-box"><div class="stat-lbl">P/E Ratio</div><div class="stat-v">${s.pe}</div></div>
+    <div class="stat-box" style="grid-column:1/-1">
+      <div class="stat-lbl">52-Week Range</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--r)">${fmtP(s.wk52l)}</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--g)">${fmtP(s.wk52h)}</span>
+      </div>
+      <div class="stat-bar"><div class="stat-bar-fill" style="width:${pct}%"></div></div>
+    </div>`;
+
+  document.querySelectorAll('.tf').forEach(t=>t.classList.remove('on'));
+  document.querySelector('.tf').classList.add('on');
+  currentTF='1D';
+
+  document.getElementById('homeScreen').classList.remove('active');
+  document.getElementById('detailScreen').classList.add('active');
+  setTimeout(()=>{drawMainChart('1D');setupChartInteraction();},60);
+}
+
+function drawMainChart(tf) {
+  const s=DB[currentTicker], canvas=document.getElementById('mainChart');
+  const ctx=canvas.getContext('2d'), dpr=window.devicePixelRatio||1;
+  const w=canvas.offsetWidth;
+  canvas.width=w*dpr; canvas.height=160*dpr; ctx.scale(dpr,dpr);
+  ctx.clearRect(0,0,w,160);
+  const isUp=s.chg>=0, color=isUp?'#00f07a':'#ff3d5a';
+  currentData=genData(s,tf);
+  currentPts=drawLine(ctx,currentData,w,160,color,true,12,12,false);
+  ctx.font=`9px 'JetBrains Mono',monospace`; ctx.fillStyle='#4a5665';
+  ctx.textAlign='left'; ctx.fillText(fmtP(currentData[0]),12,155);
+  ctx.textAlign='right'; ctx.fillText(fmtP(currentData[currentData.length-1]),w-12,155);
+}
+
+function setupChartInteraction() {
+  const canvas=document.getElementById('mainChart'), label=document.getElementById('hoverLabel');
+  const hit=x=>{
+    if(!currentPts.length) return;
+    let ci=0, md=Infinity;
+    currentPts.forEach((p,i)=>{const d=Math.abs(p.x-x);if(d<md){md=d;ci=i;}});
+    const p=currentPts[ci], val=currentData[ci];
+    label.style.display='block';
+    let lx=p.x+8; if(lx>canvas.offsetWidth-90) lx=p.x-80;
+    label.style.left=lx+'px'; label.style.top=Math.max(4,p.y-22)+'px';
+    label.textContent=fmtP(val);
+    redrawWithCrosshair(p.x,p.y);
+  };
+  const clear=()=>{label.style.display='none'; drawMainChart(currentTF);};
+  canvas.onmousemove=e=>hit(e.clientX-canvas.getBoundingClientRect().left);
+  canvas.ontouchmove=e=>{e.preventDefault();hit(e.touches[0].clientX-canvas.getBoundingClientRect().left);};
+  canvas.onmouseleave=clear; canvas.ontouchend=clear;
+}
+
+function redrawWithCrosshair(cx,cy) {
+  const s=DB[currentTicker], canvas=document.getElementById('mainChart');
+  const ctx=canvas.getContext('2d'), dpr=window.devicePixelRatio||1;
+  const w=canvas.offsetWidth;
+  ctx.clearRect(0,0,w*dpr,160*dpr);
+  ctx.save(); ctx.scale(dpr,dpr);
+  const isUp=s.chg>=0, color=isUp?'#00f07a':'#ff3d5a';
+  drawLine(ctx,currentData,w,160,color,true,12,12,false);
+  ctx.setLineDash([3,4]); ctx.strokeStyle='rgba(255,255,255,0.18)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cx,8); ctx.lineTo(cx,136); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(12,cy); ctx.lineTo(w-12,cy); ctx.stroke();
+  ctx.setLineDash([]); ctx.restore();
+}
+
+function setTF(el,tf) {
+  currentTF=tf;
+  document.querySelectorAll('.tf').forEach(t=>t.classList.remove('on'));
+  el.classList.add('on'); drawMainChart(tf);
+}
+
+function goBack() {
+  document.getElementById('detailScreen').classList.remove('active');
+  document.getElementById('homeScreen').classList.add('active');
+  currentTF='1D';
+}
+
+// SEARCH
+const si=document.getElementById('searchInput'), dd=document.getElementById('dropdown');
+si.addEventListener('input',function(){
+  const q=this.value.trim();
+  if(!q){dd.classList.remove('show');return;}
+  const ql=q.toLowerCase(), qu=q.toUpperCase();
+  const m=Object.entries(DB).filter(([t,s])=>t.startsWith(qu)||s.name.toLowerCase().includes(ql)).slice(0,6);
+  if(!m.length){dd.classList.remove('show');return;}
+  const isUp=s=>s.chg>=0;
+  dd.innerHTML=m.map(([t,s])=>`<div class="drop-item" onclick="pick('${t}')"><span class="drop-ticker">${t}</span><span class="drop-name">${s.name}</span><span class="drop-price ${isUp(s)?'up':'dn'}">${fmtP(s.price)}</span></div>`).join('');
+  dd.classList.add('show');
+});
+si.addEventListener('keydown',e=>{if(e.key==='Enter'){const t=resolve(si.value);if(t)pick(t);}});
+document.addEventListener('click',e=>{if(!e.target.closest('.search-wrap'))dd.classList.remove('show');});
+function pick(t){dd.classList.remove('show');si.value='';openDetail(t);}
+
+buildTape();
+buildWatchlist();
+</script>
+</body>
+</html>
