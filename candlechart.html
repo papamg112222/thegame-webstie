@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Candlestick & Chart Patterns</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #060a0f;
+    --panel: #0b1117;
+    --card: #0f1923;
+    --border: #1a2a3a;
+    --bull: #00e676;
+    --bear: #ff1744;
+    --neutral: #29b6f6;
+    --text: #c9d8e8;
+    --muted: #4a6070;
+    --accent: #ffd600;
+    --glow-bull: 0 0 12px rgba(0,230,118,0.4);
+    --glow-bear: 0 0 12px rgba(255,23,68,0.4);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid scanlines */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,200,255,0.015) 2px,
+      rgba(0,200,255,0.015) 4px
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    text-align: center;
+    padding: 40px 20px 24px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0a1520 0%, transparent 100%);
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 10%; right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--neutral), var(--accent), var(--neutral), transparent);
+    opacity: 0.6;
+  }
+  .title-small {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 6px;
+    color: var(--neutral);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    opacity: 0.8;
+  }
+  h1 {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(22px, 4vw, 42px);
+    font-weight: 900;
+    letter-spacing: 3px;
+    background: linear-gradient(135deg, #00e676, #29b6f6, #ffd600);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.1;
+  }
+  .subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 8px;
+    letter-spacing: 2px;
+  }
+
+  /* Controls */
+  .controls {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    gap: 12px;
+    padding: 14px 24px;
+    background: rgba(6,10,15,0.95);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(10px);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+  }
+  .search-wrap::before {
+    content: '⌕';
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    font-size: 18px;
+    pointer-events: none;
+  }
+  input[type="text"] {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    padding: 9px 12px 9px 36px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  input[type="text"]:focus {
+    border-color: var(--neutral);
+    box-shadow: 0 0 0 2px rgba(41,182,246,0.15);
+  }
+  input::placeholder { color: var(--muted); }
+
+  .filter-btns {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .filter-btn {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: 1.5px;
+    padding: 7px 16px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .filter-btn:hover { border-color: var(--text); color: var(--text); }
+  .filter-btn.active-all { border-color: var(--accent); color: var(--accent); background: rgba(255,214,0,0.08); }
+  .filter-btn.active-bull { border-color: var(--bull); color: var(--bull); background: rgba(0,230,118,0.08); }
+  .filter-btn.active-bear { border-color: var(--bear); color: var(--bear); background: rgba(255,23,68,0.08); }
+  .filter-btn.active-reversal { border-color: var(--neutral); color: var(--neutral); background: rgba(41,182,246,0.08); }
+  .filter-btn.active-continuation { border-color: #ce93d8; color: #ce93d8; background: rgba(206,147,216,0.08); }
+
+  /* Main */
+  main {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .section {
+    margin-bottom: 40px;
+    transition: opacity 0.3s;
+  }
+  .section.hidden { display: none; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+  }
+  .bull-title { color: var(--bull); text-shadow: var(--glow-bull); }
+  .bear-title { color: var(--bear); text-shadow: var(--glow-bear); }
+  .reversal-title { color: var(--neutral); }
+  .continuation-title { color: #ce93d8; }
+
+  .section-line { flex: 1; height: 1px; }
+  .bull-line { background: linear-gradient(90deg, var(--bull), transparent); }
+  .bear-line { background: linear-gradient(90deg, var(--bear), transparent); }
+  .reversal-line { background: linear-gradient(90deg, var(--neutral), transparent); }
+  .continuation-line { background: linear-gradient(90deg, #ce93d8, transparent); }
+
+  .count-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 2px;
+    letter-spacing: 1px;
+  }
+  .bull-badge { background: rgba(0,230,118,0.12); color: var(--bull); border: 1px solid rgba(0,230,118,0.3); }
+  .bear-badge { background: rgba(255,23,68,0.12); color: var(--bear); border: 1px solid rgba(255,23,68,0.3); }
+  .reversal-badge { background: rgba(41,182,246,0.12); color: var(--neutral); border: 1px solid rgba(41,182,246,0.3); }
+  .continuation-badge { background: rgba(206,147,216,0.12); color: #ce93d8; border: 1px solid rgba(206,147,216,0.3); }
+
+  /* Cards grid */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 10px 12px;
+    cursor: pointer;
+    transition: all 0.25s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  .card.bull::before { background: var(--bull); }
+  .card.bear::before { background: var(--bear); }
+  .card.reversal::before { background: var(--neutral); }
+  .card.continuation::before { background: #ce93d8; }
+  .card:hover { transform: translateY(-3px); border-color: #2a3f55; }
+  .card.bull:hover { box-shadow: var(--glow-bull); border-color: rgba(0,230,118,0.4); }
+  .card.bear:hover { box-shadow: var(--glow-bear); border-color: rgba(255,23,68,0.4); }
+  .card.reversal:hover { box-shadow: 0 0 12px rgba(41,182,246,0.4); border-color: rgba(41,182,246,0.4); }
+  .card.continuation:hover { box-shadow: 0 0 12px rgba(206,147,216,0.4); border-color: rgba(206,147,216,0.4); }
+  .card:hover::before { opacity: 1; }
+  .card.hidden-card { display: none; }
+
+  .card-chart {
+    width: 100%;
+    height: 70px;
+  }
+  .card-name {
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 600;
+    font-size: 12px;
+    text-align: center;
+    color: var(--text);
+    letter-spacing: 0.5px;
+    line-height: 1.3;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 30px;
+    max-width: 480px;
+    width: 90%;
+    position: relative;
+    animation: modalIn 0.25s ease;
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.93) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  .modal-close {
+    position: absolute;
+    top: 14px; right: 16px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 22px;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 0.2s;
+  }
+  .modal-close:hover { color: var(--text); }
+  .modal-type {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .modal-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 18px;
+  }
+  .modal-chart {
+    width: 100%;
+    height: 120px;
+    margin-bottom: 20px;
+  }
+  .modal-desc {
+    font-size: 15px;
+    line-height: 1.7;
+    color: #8aaabb;
+    margin-bottom: 16px;
+  }
+  .modal-signal {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    padding: 6px 14px;
+    border-radius: 3px;
+    letter-spacing: 1px;
+  }
+  .signal-bull { background: rgba(0,230,118,0.1); color: var(--bull); border: 1px solid rgba(0,230,118,0.3); }
+  .signal-bear { background: rgba(255,23,68,0.1); color: var(--bear); border: 1px solid rgba(255,23,68,0.3); }
+  .signal-neutral { background: rgba(41,182,246,0.1); color: var(--neutral); border: 1px solid rgba(41,182,246,0.3); }
+
+  .no-results {
+    text-align: center;
+    padding: 60px 20px;
+    font-family: 'Share Tech Mono', monospace;
+    color: var(--muted);
+    font-size: 13px;
+    letter-spacing: 2px;
+    display: none;
+  }
+
+  /* Candle SVG helpers */
+  .candle-up { fill: var(--bull); }
+  .candle-down { fill: var(--bear); }
+  .wick-up { stroke: var(--bull); stroke-width: 1.5; }
+  .wick-down { stroke: var(--bear); stroke-width: 1.5; }
+  .line-neutral { stroke: #4a6070; stroke-width: 1; fill: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title-small">Technical Analysis Reference</div>
+  <h1>Candlestick & Chart Patterns</h1>
+  <div class="subtitle">// INTERACTIVE PATTERN LIBRARY — CLICK ANY PATTERN TO EXPAND //</div>
+</header>
+
+<div class="controls">
+  <div class="search-wrap">
+    <input type="text" id="searchInput" placeholder="Search patterns..." autocomplete="off">
+  </div>
+  <div class="filter-btns">
+    <button class="filter-btn active-all" data-filter="all">All</button>
+    <button class="filter-btn" data-filter="bull">▲ Bullish</button>
+    <button class="filter-btn" data-filter="bear">▼ Bearish</button>
+    <button class="filter-btn" data-filter="reversal">↺ Reversal</button>
+    <button class="filter-btn" data-filter="continuation">→ Continuation</button>
+  </div>
+</div>
+
+<main>
+  <div id="bullSection" class="section" data-section="bull">
+    <div class="section-header">
+      <span class="section-title bull-title">▲ Bullish Patterns</span>
+      <div class="section-line bull-line"></div>
+      <span class="count-badge bull-badge" id="bullCount">0</span>
+    </div>
+    <div class="cards-grid" id="bullGrid"></div>
+  </div>
+
+  <div id="bearSection" class="section" data-section="bear">
+    <div class="section-header">
+      <span class="section-title bear-title">▼ Bearish Patterns</span>
+      <div class="section-line bear-line"></div>
+      <span class="count-badge bear-badge" id="bearCount">0</span>
+    </div>
+    <div class="cards-grid" id="bearGrid"></div>
+  </div>
+
+  <div id="reversalSection" class="section" data-section="reversal">
+    <div class="section-header">
+      <span class="section-title reversal-title">↺ Reversal Patterns</span>
+      <div class="section-line reversal-line"></div>
+      <span class="count-badge reversal-badge" id="reversalCount">0</span>
+    </div>
+    <div class="cards-grid" id="reversalGrid"></div>
+  </div>
+
+  <div id="continuationSection" class="section" data-section="continuation">
+    <div class="section-header">
+      <span class="section-title continuation-title">→ Continuation Patterns</span>
+      <div class="section-line continuation-line"></div>
+      <span class="count-badge continuation-badge" id="continuationCount">0</span>
+    </div>
+    <div class="cards-grid" id="continuationGrid"></div>
+  </div>
+
+  <div class="no-results" id="noResults">// NO PATTERNS MATCH — TRY ANOTHER QUERY //</div>
+</main>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal" id="modal">
+    <button class="modal-close" onclick="closeModalDirect()">×</button>
+    <div class="modal-type" id="modalType"></div>
+    <div class="modal-title" id="modalTitle"></div>
+    <svg class="modal-chart" id="modalChart" viewBox="0 0 300 120" xmlns="http://www.w3.org/2000/svg"></svg>
+    <div class="modal-desc" id="modalDesc"></div>
+    <span class="modal-signal" id="modalSignal"></span>
+  </div>
+</div>
+
+<script>
+// ── Pattern Data ────────────────────────────────────────────────────────────
+const patterns = {
+  bull: [
+    { name:"Bullish Breakaway", desc:"A multi-candle pattern where price breaks decisively above resistance after a consolidation, signaling strong upward momentum.", signal:"Strong Bullish" },
+    { name:"Bullish Concealing Baby Swallow", desc:"A rare 4-candle pattern with two black Marubozu candles followed by a candle that gaps down then recovers, indicating reversal.", signal:"Bullish Reversal" },
+    { name:"Bullish Doji Star", desc:"A downtrend candle followed by a Doji that gaps below, then a bullish confirmation candle. Signals indecision turning to buying.", signal:"Bullish Reversal" },
+    { name:"Bullish Engulfing", desc:"A large bullish candle completely engulfs the prior bearish candle's body. One of the most reliable reversal signals.", signal:"Strong Bullish" },
+    { name:"Bullish Hammer", desc:"Small body at top with long lower wick (2×+ body). Buyers rejected lower prices. Most powerful at key support.", signal:"Bullish Reversal" },
+    { name:"Bullish Harami", desc:"A small bullish candle contained within the previous large bearish candle. Suggests slowing bearish momentum.", signal:"Mild Bullish" },
+    { name:"Bullish Homing Pigeon", desc:"Two bearish candles where the second is smaller and contained within the first — a pause in selling pressure.", signal:"Potential Reversal" },
+    { name:"Bullish Inverted Hammer", desc:"Small body at bottom with long upper wick. Buyers tested higher prices; confirmation needed on next candle.", signal:"Bullish Reversal" },
+    { name:"Bullish Kicking", desc:"A bearish Marubozu followed by a bullish Marubozu gapping up. One of the strongest two-candle reversal signals.", signal:"Strong Bullish" },
+    { name:"Bullish Ladder Bottom", desc:"Five-candle pattern: three declining bearish, a small bearish with upper wick, then a strong bullish engulfing.", signal:"Bullish Reversal" },
+    { name:"Bullish Matching Low", desc:"Two candles closing at nearly the same low — a double-bottom structure within two sessions indicating strong support.", signal:"Support Signal" },
+    { name:"Bullish Meeting Lines", desc:"A bearish candle and bullish candle closing at the same price. Bulls have stopped the decline at this level.", signal:"Potential Reversal" },
+    { name:"Bullish Morning Doji Star", desc:"Three-candle reversal: bearish candle, Doji gap, bullish candle. The Doji marks the turning point precisely.", signal:"Strong Bullish" },
+    { name:"Bullish Morning Star", desc:"Classic three-candle reversal. Bearish trend, small middle candle (star), strong bullish candle. Very reliable.", signal:"Strong Bullish" },
+    { name:"Bullish Piercing Line", desc:"A bearish candle followed by a bullish candle that opens below and closes above the midpoint of the prior candle.", signal:"Bullish Reversal" },
+    { name:"Bullish Rising 3 Methods", desc:"A strong bullish candle, three small bearish inside candles, then another strong bullish continuation. Trend continues.", signal:"Bullish Continuation" },
+    { name:"Bullish Separating Lines", desc:"A bearish candle followed by a bullish candle opening at the same open level — bulls forcefully reject the prior move.", signal:"Bullish Signal" },
+    { name:"Bullish Side-by-Side White Lines", desc:"After an uptrend gap, two consecutive bullish candles of similar size confirm continued buying momentum.", signal:"Bullish Continuation" },
+    { name:"Bullish Stick Sandwich", desc:"Two bullish candles surrounding a bearish candle, all closing near the same level — strong support confirmed.", signal:"Support Signal" },
+    { name:"Bullish Inside Up", desc:"A smaller candle inside the prior candle followed by a larger bullish breakout candle. Compression then expansion.", signal:"Bullish Breakout" },
+    { name:"Bullish 3 Stars in the South", desc:"Three progressively smaller bearish candles with shortening wicks — selling exhaustion before reversal.", signal:"Bullish Reversal" },
+    { name:"Bullish 3 Outside Up", desc:"A small bearish candle engulfed by a large bullish candle, then confirmed by a third bullish close. Triple confirmation.", signal:"Strong Bullish" },
+    { name:"Bullish 3 Inside Up", desc:"Small bullish inside prior candle, then a third candle closing above the second. Gradual momentum shift.", signal:"Bullish Reversal" },
+    { name:"Bullish Tri-Star", desc:"Three consecutive Doji candles in a downtrend. Extreme indecision signaling potential reversal. Very rare.", signal:"Potential Reversal" },
+    { name:"Bullish 3 White Soldiers", desc:"Three consecutive bullish candles with higher closes and minimal wicks. Powerful uptrend initiation signal.", signal:"Strong Bullish" },
+    { name:"Bullish 3 Line Strike", desc:"Three bullish candles followed by a bearish candle that retraces all gains — but trend likely continues.", signal:"Bullish Continuation" },
+    { name:"Bullish Abandoned Baby", desc:"Bearish candle, gap-down Doji (isolated), gap-up bullish candle. Extremely rare and highly reliable reversal.", signal:"Strong Bullish" },
+    { name:"Bullish Belt Hold", desc:"A long bullish candle opening at the session low (no lower wick) — buyers controlled the entire session.", signal:"Strong Bullish" },
+    { name:"Bullish Upside Gap 2 Crows", desc:"Despite two small bearish candles in a gap area, the original support holds and trend likely resumes.", signal:"Bullish Continuation" },
+    { name:"Bullish Tasuki Gap", desc:"Upward gap between two bullish candles, followed by a bearish that partially fills the gap — gap holds.", signal:"Bullish Continuation" },
+    { name:"Bullish Line Strike", desc:"Three bullish candles followed by a large bearish line that closes near the start — a pullback, not reversal.", signal:"Bullish Continuation" },
+  ],
+  bear: [
+    { name:"Bearish 3 Crows", desc:"Three consecutive large bearish candles with lower closes. Mirrors 3 White Soldiers — strong downtrend signal.", signal:"Strong Bearish" },
+    { name:"Bearish 2 Live Strike", desc:"After a bullish candle, a small gap and two bearish candles. Reversal pressure building.", signal:"Bearish Signal" },
+    { name:"Bearish Abandoned Baby", desc:"Bullish candle, gap-up Doji (isolated), gap-down bearish candle. Mirror of bullish version. Extremely reliable.", signal:"Strong Bearish" },
+    { name:"Bearish Advance Block", desc:"Three bullish candles with progressively smaller bodies and longer upper wicks — momentum fading fast.", signal:"Bearish Warning" },
+    { name:"Bearish Belt Hold", desc:"Long bearish candle opening at session high (no upper wick) — sellers dominated the entire session.", signal:"Strong Bearish" },
+    { name:"Bearish Breakaway", desc:"Multi-candle pattern breaking below support after a consolidation. Confirms downtrend continuation.", signal:"Strong Bearish" },
+    { name:"Bearish Engulfing", desc:"Large bearish candle completely engulfs the prior bullish body. Highly reliable topping signal.", signal:"Strong Bearish" },
+    { name:"Bearish Evening Doji Star", desc:"Bullish candle, gap-up Doji, gap-down bearish candle. The Doji marks the precise top.", signal:"Strong Bearish" },
+    { name:"Bearish Evening Star", desc:"Three-candle top reversal: bullish, small star, large bearish confirmation. Classic reliable signal.", signal:"Strong Bearish" },
+    { name:"Bearish Falling 3 Methods", desc:"Long bearish candle, three small bullish inside candles, another strong bearish continuation.", signal:"Bearish Continuation" },
+    { name:"Bearish Harami", desc:"Small bearish candle inside prior large bullish candle. Bulls losing control.", signal:"Bearish Warning" },
+    { name:"Bearish Harami Cross", desc:"A Doji contained within the prior bullish candle's body. Stronger signal than regular Harami.", signal:"Bearish Reversal" },
+    { name:"Bearish Kicking", desc:"Bullish Marubozu followed by gap-down bearish Marubozu. One of the strongest reversals.", signal:"Strong Bearish" },
+    { name:"Bearish Meeting Lines", desc:"Bullish then bearish candle closing at same level. Bulls failed to hold gains.", signal:"Potential Reversal" },
+    { name:"Bearish On-Neck", desc:"Bearish candle followed by a small bullish candle closing near the low of the prior candle. Bulls failing.", signal:"Bearish Continuation" },
+    { name:"Bearish Separating Lines", desc:"Bullish candle then bearish candle opening at the same open — bears forcefully reject the rally.", signal:"Bearish Signal" },
+    { name:"Bearish Shooting Star", desc:"Small body at bottom with long upper wick. Buyers were rejected at highs. Strong topping signal.", signal:"Bearish Reversal" },
+    { name:"Bearish Hanging Man", desc:"Looks like a Hammer but occurs at the top of an uptrend. Bears are gaining intraday control.", signal:"Bearish Warning" },
+    { name:"Bearish Side-by-Side White Lines", desc:"After a gap down, two bullish candles fail to recover — bears maintain control despite buying attempts.", signal:"Bearish Continuation" },
+    { name:"Bearish Separating Lines 2", desc:"Further confirmation of bearish separation at a key level.", signal:"Bearish Signal" },
+    { name:"Bearish Shooting Star 2", desc:"Variant with slight body differences confirming overhead rejection.", signal:"Bearish Reversal" },
+    { name:"Bearish Thrusting", desc:"Bearish candle then bullish candle closing into but not above the midpoint of the prior bearish body.", signal:"Bearish Continuation" },
+    { name:"Bearish Tri-Star", desc:"Three consecutive Doji candles in uptrend — extreme indecision, potential top formation.", signal:"Potential Reversal" },
+    { name:"Bearish Deliberation", desc:"Three bullish candles where the third is smaller and higher — buying power exhausted.", signal:"Bearish Warning" },
+    { name:"Bearish Doji Star", desc:"Strong bullish candle followed by a gap-up Doji — indecision at the top before sellers take over.", signal:"Bearish Reversal" },
+    { name:"Bearish Dark Cloud Cover", desc:"Bullish candle then bearish candle opening above and closing below the midpoint of the bull candle.", signal:"Strong Bearish" },
+    { name:"Bearish Identical 3 Crows", desc:"Three bearish candles opening at the close of the previous one — relentless selling pressure.", signal:"Strong Bearish" },
+    { name:"Bearish In-Neck", desc:"Like On-Neck but closes inside the prior body rather than at the low. Weaker bears.", signal:"Mild Bearish" },
+    { name:"Bearish 3 Inside Down", desc:"Three-candle pattern confirming reversal: inside candle then third breaking below confirmation.", signal:"Bearish Reversal" },
+    { name:"Bearish 3 Outside Down", desc:"Small bullish engulfed by large bearish, then third candle closing below. Triple confirmation.", signal:"Strong Bearish" },
+    { name:"Bearish Downside Tasuki Gap", desc:"Gap down between two bearish candles, bullish partially fills — gap holds, downtrend continues.", signal:"Bearish Continuation" },
+    { name:"Bearish Doji 3-Methods", desc:"Bearish trend continuation confirmed with Doji within the context of three declining sessions.", signal:"Bearish Continuation" },
+  ],
+  reversal: [
+    { name:"Double Top", desc:"Price reaches same high twice, fails both times. Neckline break confirms bearish reversal. Very common and reliable.", signal:"Strong Bearish" },
+    { name:"Head and Shoulders", desc:"Three peaks — middle highest. Neckline break is the sell signal. One of the most reliable reversal patterns.", signal:"Strong Bearish" },
+    { name:"Riding Wedge (Rising)", desc:"Price making higher highs and higher lows but converging. Bearish breakout expected from rising wedge.", signal:"Bearish Reversal" },
+    { name:"Double Bottom", desc:"Price hits same low twice with a recovery between. Neckline break confirms bullish reversal.", signal:"Strong Bullish" },
+    { name:"Inverse Head and Shoulders", desc:"Inverse of H&S. Three troughs with deepest in middle. Neckline break is the buy signal.", signal:"Strong Bullish" },
+    { name:"Falling Wedge (Reversal)", desc:"Downward-converging price action. Bullish breakout from falling wedge signals trend reversal.", signal:"Bullish Reversal" },
+  ],
+  continuation: [
+    { name:"Falling Wedge (Cont.)", desc:"In a downtrend, a falling wedge can be a continuation of the bearish move after a brief consolidation.", signal:"Bearish Continuation" },
+    { name:"Bullish Rectangle", desc:"Price oscillates between two horizontal levels in an uptrend. Breakout above upper boundary resumes uptrend.", signal:"Bullish Continuation" },
+    { name:"Rising Wedge (Cont.)", desc:"In an uptrend, rising wedge can be bearish continuation after pause. Watch for breakdown.", signal:"Bearish Warning" },
+    { name:"Bearish Rectangle", desc:"Sideways consolidation in a downtrend between two parallel levels. Breakdown resumes downtrend.", signal:"Bearish Continuation" },
+    { name:"Bullish Pennant", desc:"A small symmetrical triangle after a strong bullish move (flagpole). Breakout continues the move.", signal:"Bullish Continuation" },
+    { name:"Bearish Pennant", desc:"Small symmetrical triangle after a sharp decline. Breakdown continues the bearish move.", signal:"Bearish Continuation" },
+    { name:"Ascending Triangle", desc:"Flat top resistance, rising lows. Buyers are accumulating. Breakout above resistance is bullish.", signal:"Strong Bullish" },
+    { name:"Descending Triangle", desc:"Flat bottom support, declining highs. Sellers pressing down. Breakdown below support is bearish.", signal:"Strong Bearish" },
+  ]
+};
+
+// ── SVG Chart Generators ─────────────────────────────────────────────────────
+function makeBullCandle(x, y, w, h, wickTop, wickBot) {
+  return `<line x1="${x+w/2}" y1="${y-wickTop}" x2="${x+w/2}" y2="${y+h+wickBot}" class="wick-up"/>
+          <rect x="${x}" y="${y}" width="${w}" height="${h}" class="candle-up" rx="1"/>`;
+}
+function makeBearCandle(x, y, w, h, wickTop, wickBot) {
+  return `<line x1="${x+w/2}" y1="${y-wickTop}" x2="${x+w/2}" y2="${y+h+wickBot}" class="wick-down"/>
+          <rect x="${x}" y="${y}" width="${w}" height="${h}" class="candle-down" rx="1"/>`;
+}
+function makeDoji(x, centerY, w, wickTop, wickBot) {
+  return `<line x1="${x+w/2}" y1="${centerY-wickTop}" x2="${x+w/2}" y2="${centerY+wickBot}" stroke="#ffd600" stroke-width="1.5"/>
+          <line x1="${x}" y1="${centerY}" x2="${x+w}" y2="${centerY}" stroke="#ffd600" stroke-width="2"/>`;
+}
+
+function getPatternSVG(type, name, small=true) {
+  const vw = small ? 140 : 300, vh = small ? 70 : 120;
+  const s = small ? 1 : 2.2;
+  let svg = ``;
+
+  // Simplified representative SVGs per pattern type
+  const n = name.toLowerCase();
+
+  if (type === 'bull') {
+    if (n.includes('engulfing')) {
+      svg = makeBearCandle(40*s,10*s,14*s,40*s,5*s,5*s) + makeBullCandle(62*s,5*s,14*s,50*s,5*s,5*s);
+    } else if (n.includes('hammer') && !n.includes('inverted')) {
+      svg = makeBearCandle(20*s,20*s,12*s,20*s,3*s,3*s) + makeBearCandle(40*s,25*s,12*s,15*s,3*s,3*s) + makeBullCandle(60*s,35*s,12*s,8*s,3*s,25*s);
+    } else if (n.includes('morning star')) {
+      svg = makeBearCandle(15*s,8*s,13*s,38*s,4*s,4*s) + makeBearCandle(35*s,42*s,13*s,10*s,6*s,6*s) + makeBullCandle(55*s,15*s,13*s,38*s,4*s,4*s);
+    } else if (n.includes('doji star') || n.includes('morning doji')) {
+      svg = makeBearCandle(15*s,8*s,13*s,38*s,4*s,4*s) + makeDoji(35*s,48*s,13*s,8*s,8*s) + makeBullCandle(55*s,15*s,13*s,38*s,4*s,4*s);
+    } else if (n.includes('3 white soldiers')) {
+      svg = makeBullCandle(15*s,40*s,13*s,25*s,3*s,3*s) + makeBullCandle(33*s,28*s,13*s,25*s,3*s,3*s) + makeBullCandle(51*s,15*s,13*s,28*s,3*s,3*s);
+    } else if (n.includes('harami')) {
+      svg = makeBearCandle(35*s,8*s,14*s,50*s,4*s,4*s) + makeBullCandle(42*s,22*s,8*s,22*s,3*s,3*s);
+    } else if (n.includes('kicking')) {
+      svg = makeBearCandle(30*s,15*s,15*s,45*s,0,0) + makeBullCandle(52*s,10*s,15*s,45*s,0,0);
+    } else if (n.includes('belt hold')) {
+      svg = makeBullCandle(55*s,10*s,14*s,50*s,0,4*s);
+    } else {
+      // Default bull pattern
+      svg = makeBearCandle(15*s,20*s,12*s,25*s,4*s,4*s) + makeBearCandle(32*s,28*s,12*s,22*s,4*s,4*s) + makeBullCandle(50*s,15*s,12*s,35*s,4*s,4*s);
+    }
+  } else if (type === 'bear') {
+    if (n.includes('engulfing')) {
+      svg = makeBullCandle(38*s,20*s,14*s,35*s,5*s,5*s) + makeBearCandle(60*s,8*s,14*s,55*s,5*s,5*s);
+    } else if (n.includes('shooting star') || n.includes('hanging man')) {
+      svg = makeBullCandle(20*s,30*s,12*s,20*s,3*s,3*s) + makeBullCandle(38*s,22*s,12*s,20*s,3*s,3*s) + makeBearCandle(58*s,42*s,12*s,8*s,25*s,3*s);
+    } else if (n.includes('evening star')) {
+      svg = makeBullCandle(15*s,25*s,13*s,38*s,4*s,4*s) + makeBullCandle(35*s,12*s,13*s,10*s,6*s,6*s) + makeBearCandle(55*s,18*s,13*s,38*s,4*s,4*s);
+    } else if (n.includes('3 crows') || n.includes('3 black')) {
+      svg = makeBearCandle(15*s,15*s,13*s,25*s,3*s,3*s) + makeBearCandle(33*s,25*s,13*s,25*s,3*s,3*s) + makeBearCandle(51*s,36*s,13*s,25*s,3*s,3*s);
+    } else if (n.includes('dark cloud')) {
+      svg = makeBullCandle(35*s,18*s,14*s,40*s,4*s,4*s) + makeBearCandle(57*s,8*s,14*s,45*s,5*s,5*s);
+    } else if (n.includes('harami')) {
+      svg = makeBullCandle(35*s,8*s,14*s,50*s,4*s,4*s) + makeBearCandle(42*s,22*s,8*s,22*s,3*s,3*s);
+    } else if (n.includes('kicking')) {
+      svg = makeBullCandle(30*s,10*s,15*s,45*s,0,0) + makeBearCandle(52*s,15*s,15*s,45*s,0,0);
+    } else if (n.includes('belt hold')) {
+      svg = makeBearCandle(55*s,8*s,14*s,50*s,0,4*s);
+    } else if (n.includes('abandoned baby')) {
+      svg = makeBullCandle(15*s,20*s,13*s,38*s,4*s,4*s) + makeDoji(38*s,8*s,13*s,6*s,6*s) + makeBearCandle(58*s,18*s,13*s,38*s,4*s,4*s);
+    } else {
+      svg = makeBullCandle(15*s,25*s,12*s,25*s,4*s,4*s) + makeBullCandle(32*s,18*s,12*s,22*s,4*s,4*s) + makeBearCandle(50*s,12*s,12*s,40*s,4*s,4*s);
+    }
+  } else if (type === 'reversal') {
+    if (n.includes('double top')) {
+      const pts = `20,55 35,20 50,38 65,20 80,55 80,55`;
+      svg = `<polyline points="${pts.split(' ').map(p=>{const[x,y]=p.split(',');return `${x*s},${y*s}`}).join(' ')}" class="line-neutral" stroke="${'var(--bear)'}"/>
+             <line x1="${20*s}" y1="${55*s}" x2="${80*s}" y2="${55*s}" stroke="rgba(255,23,68,0.4)" stroke-width="1" stroke-dasharray="3,3"/>`;
+    } else if (n.includes('head and shoulders') && !n.includes('inverse')) {
+      const pts = [[20,55],[30,30],[40,45],[50,10],[60,45],[70,30],[80,55]];
+      svg = `<polyline points="${pts.map(([x,y])=>`${x*s},${y*s}`).join(' ')}" fill="none" stroke="var(--bear)" stroke-width="1.5"/>`;
+    } else if (n.includes('inverse head')) {
+      const pts = [[20,20],[30,45],[40,30],[50,55],[60,30],[70,45],[80,20]];
+      svg = `<polyline points="${pts.map(([x,y])=>`${x*s},${y*s}`).join(' ')}" fill="none" stroke="var(--bull)" stroke-width="1.5"/>`;
+    } else if (n.includes('double bottom')) {
+      const pts = [[20,20],[35,55],[50,35],[65,55],[80,20]];
+      svg = `<polyline points="${pts.map(([x,y])=>`${x*s},${y*s}`).join(' ')}" fill="none" stroke="var(--bull)" stroke-width="1.5"/>`;
+    } else if (n.includes('rising wedge') || n.includes('riding wedge')) {
+      svg = `<line x1="${15*s}" y1="${55*s}" x2="${85*s}" y2="${25*s}" stroke="rgba(255,23,68,0.5)" stroke-width="1" stroke-dasharray="2,2"/>
+             <line x1="${15*s}" y1="${45*s}" x2="${85*s}" y2="${35*s}" stroke="rgba(255,23,68,0.5)" stroke-width="1" stroke-dasharray="2,2"/>
+             <polyline points="${15*s},${50*s} ${35*s},${38*s} ${50*s},${44*s} ${65*s},${33*s} ${80*s},${38*s}" fill="none" stroke="var(--bear)" stroke-width="2"/>`;
+    } else if (n.includes('falling wedge')) {
+      svg = `<line x1="${15*s}" y1="${20*s}" x2="${85*s}" y2="${45*s}" stroke="rgba(0,230,118,0.5)" stroke-width="1" stroke-dasharray="2,2"/>
+             <line x1="${15*s}" y1="${30*s}" x2="${85*s}" y2="${50*s}" stroke="rgba(0,230,118,0.5)" stroke-width="1" stroke-dasharray="2,2"/>
+             <polyline points="${15*s},${25*s} ${35*s},${36*s} ${50*s},${32*s} ${65*s},${42*s} ${80*s},${38*s}" fill="none" stroke="var(--bull)" stroke-width="2"/>`;
+    } else {
+      svg = `<polyline points="${15*s},${15*s} ${40*s},${50*s} ${60*s},${30*s} ${80*s},${55*s}" fill="none" stroke="var(--neutral)" stroke-width="1.5"/>`;
+    }
+  } else if (type === 'continuation') {
+    if (n.includes('ascending triangle')) {
+      svg = `<line x1="${15*s}" y1="${20*s}" x2="${85*s}" y2="${20*s}" stroke="rgba(0,230,118,0.5)" stroke-width="1" stroke-dasharray="3,2"/>
+             <polyline points="${15*s},${55*s} ${30*s},${20*s} ${45*s},${45*s} ${60*s},${22*s} ${75*s},${20*s} ${85*s},${10*s}" fill="none" stroke="var(--bull)" stroke-width="2"/>`;
+    } else if (n.includes('descending triangle')) {
+      svg = `<line x1="${15*s}" y1="${55*s}" x2="${85*s}" y2="${55*s}" stroke="rgba(255,23,68,0.5)" stroke-width="1" stroke-dasharray="3,2"/>
+             <polyline points="${15*s},${15*s} ${30*s},${55*s} ${45*s},${30*s} ${60*s},${53*s} ${75*s},${55*s} ${85*s},${60*s}" fill="none" stroke="var(--bear)" stroke-width="2"/>`;
+    } else if (n.includes('rectangle')) {
+      const col = n.includes('bull') ? 'var(--bull)' : 'var(--bear)';
+      const y1=20*s, y2=50*s;
+      svg = `<line x1="${15*s}" y1="${y1}" x2="${85*s}" y2="${y1}" stroke="${col}" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+             <line x1="${15*s}" y1="${y2}" x2="${85*s}" y2="${y2}" stroke="${col}" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+             <polyline points="${15*s},${35*s} ${25*s},${y1} ${35*s},${y2} ${45*s},${y1} ${55*s},${y2} ${65*s},${y1} ${75*s},${15*s}" fill="none" stroke="${col}" stroke-width="2"/>`;
+    } else if (n.includes('pennant')) {
+      const col = n.includes('bull') ? 'var(--bull)' : 'var(--bear)';
+      svg = `<line x1="${10*s}" y1="${n.includes('bull')?55*s:10*s}" x2="${40*s}" y2="${n.includes('bull')?10*s:55*s}" stroke="${col}" stroke-width="2"/>
+             <line x1="${40*s}" y1="${20*s}" x2="${60*s}" y2="${35*s}" stroke="${col}" stroke-width="1" stroke-dasharray="2,2" opacity="0.5"/>
+             <line x1="${40*s}" y1="${45*s}" x2="${60*s}" y2="${35*s}" stroke="${col}" stroke-width="1" stroke-dasharray="2,2" opacity="0.5"/>
+             <line x1="${60*s}" y1="${35*s}" x2="${85*s}" y2="${n.includes('bull')?10*s:60*s}" stroke="${col}" stroke-width="2"/>`;
+    } else {
+      svg = `<polyline points="${10*s},${35*s} ${30*s},${20*s} ${50*s},${30*s} ${70*s},${18*s} ${85*s},${10*s}" fill="none" stroke="var(--neutral)" stroke-width="2"/>`;
+    }
+  }
+
+  return `<svg viewBox="0 0 ${vw} ${vh}" xmlns="http://www.w3.org/2000/svg">${svg}</svg>`;
+}
+
+// ── Build Cards ──────────────────────────────────────────────────────────────
+const typeConfig = {
+  bull: { grid: 'bullGrid', count: 'bullCount', section: 'bullSection' },
+  bear: { grid: 'bearGrid', count: 'bearCount', section: 'bearSection' },
+  reversal: { grid: 'reversalGrid', count: 'reversalCount', section: 'reversalSection' },
+  continuation: { grid: 'continuationGrid', count: 'continuationCount', section: 'continuationSection' },
+};
+
+Object.entries(patterns).forEach(([type, list]) => {
+  const grid = document.getElementById(typeConfig[type].grid);
+  const countEl = document.getElementById(typeConfig[type].count);
+  countEl.textContent = list.length;
+
+  list.forEach((p, i) => {
+    const card = document.createElement('div');
+    card.className = `card ${type}`;
+    card.dataset.name = p.name.toLowerCase();
+    card.dataset.type = type;
+    card.dataset.index = i;
+    card.innerHTML = `
+      ${getPatternSVG(type, p.name, true)}
+      <div class="card-name">${p.name}</div>
+    `;
+    card.addEventListener('click', () => openModal(type, i));
+    grid.appendChild(card);
+  });
+});
+
+// ── Filter + Search ──────────────────────────────────────────────────────────
+let activeFilter = 'all';
+
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => {
+      b.className = 'filter-btn';
+    });
+    const f = btn.dataset.filter;
+    btn.classList.add(`active-${f}`);
+    activeFilter = f;
+    applyFilters();
+  });
+});
+
+document.getElementById('searchInput').addEventListener('input', applyFilters);
+
+function applyFilters() {
+  const query = document.getElementById('searchInput').value.toLowerCase().trim();
+  let totalVisible = 0;
+
+  Object.keys(patterns).forEach(type => {
+    const section = document.getElementById(typeConfig[type].section);
+    const grid = document.getElementById(typeConfig[type].grid);
+    const countEl = document.getElementById(typeConfig[type].count);
+    const cards = grid.querySelectorAll('.card');
+
+    if (activeFilter !== 'all' && activeFilter !== type) {
+      section.classList.add('hidden');
+      return;
+    }
+    section.classList.remove('hidden');
+
+    let visibleInSection = 0;
+    cards.forEach(card => {
+      const matches = !query || card.dataset.name.includes(query);
+      card.classList.toggle('hidden-card', !matches);
+      if (matches) visibleInSection++;
+    });
+
+    countEl.textContent = visibleInSection;
+    totalVisible += visibleInSection;
+    section.style.display = visibleInSection === 0 ? 'none' : '';
+  });
+
+  document.getElementById('noResults').style.display = totalVisible === 0 ? 'block' : 'none';
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+function openModal(type, index) {
+  const p = patterns[type][index];
+  const typeLabels = { bull:'BULLISH PATTERN', bear:'BEARISH PATTERN', reversal:'REVERSAL PATTERN', continuation:'CONTINUATION PATTERN' };
+  const typeColors = { bull:'var(--bull)', bear:'var(--bear)', reversal:'var(--neutral)', continuation:'#ce93d8' };
+  const signalClass = { bull:'signal-bull', bear:'signal-bear', reversal:'signal-neutral', continuation:'signal-neutral' };
+
+  document.getElementById('modalType').style.color = typeColors[type];
+  document.getElementById('modalType').textContent = typeLabels[type];
+  document.getElementById('modalTitle').style.color = typeColors[type];
+  document.getElementById('modalTitle').textContent = p.name;
+  document.getElementById('modalChart').innerHTML = getPatternSVG(type, p.name, false);
+  document.getElementById('modalDesc').textContent = p.desc;
+
+  const sig = document.getElementById('modalSignal');
+  sig.className = `modal-signal ${signalClass[type]}`;
+  const arrows = { bull:'▲', bear:'▼', reversal:'↺', continuation:'→' };
+  sig.innerHTML = `${arrows[type]} ${p.signal}`;
+
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function closeModal(e) {
+  if (e.target === document.getElementById('modalOverlay')) closeModalDirect();
+}
+function closeModalDirect() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModalDirect(); });
+</script>
+</body>
+</html>
