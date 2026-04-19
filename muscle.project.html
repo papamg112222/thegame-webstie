@@ -511,7 +511,8 @@ body::before{
 }
 .test-user-item {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1.2fr 1fr 1.2fr 60px; /* Added column for Kick button */
+  align-items: center;
   font-size: 11px;
   padding: 6px 4px;
   border-bottom: 1px solid var(--border);
@@ -902,13 +903,14 @@ body::before{
     </div>
 
     <div class="test-section">
-      <h4>Account Check (Local Database)</h4>
+      <h4>Global Account Check (Serverless DB)</h4>
       <button class="test-btn" style="margin-bottom:8px;" onclick="populateTestUserList()">Refresh List</button>
       <div class="test-user-list">
         <div class="test-user-item test-user-header">
           <div>Username</div>
           <div>Password</div>
           <div>ELO / Reps</div>
+          <div>Action</div>
         </div>
         <div id="testUserListContainer">
           </div>
@@ -979,6 +981,7 @@ class NetworkManager {
     this.connected = false;
     this.globalPlayers = {}; 
     this.topicBase = 'pushmax_v1/leaderboard/';
+    this.kickTopic = 'pushmax_v1/admin/kick/'; // Topic to listen for bans
     this.myId = 'pm_' + Math.random().toString(36).substr(2, 9);
     this.syncTimer = null;
   }
@@ -991,6 +994,7 @@ class NetworkManager {
       console.log("Connected to Global Server");
       this.connected = true;
       this.client.subscribe(this.topicBase + '#');
+      this.client.subscribe(this.kickTopic + '#'); // Listen for global kicks
       
       // Broadcast stats immediately on connection
       this.broadcastStats();
@@ -1002,8 +1006,34 @@ class NetworkManager {
     });
 
     this.client.on('message', (topic, message) => {
+      
+      // Handle Global Kicks
+      if (topic.startsWith(this.kickTopic)) {
+          const targetUser = topic.split('/').pop();
+          if (targetUser === currentUser) {
+              // I have been kicked!
+              kickUser(currentUser, true); 
+          } else {
+              // Someone else was kicked, remove them from memory
+              delete this.globalPlayers[targetUser];
+              if(document.getElementById('tab-leaderboard').style.display === 'block') {
+                 buildLeaderboard();
+              }
+              // If Admin panel is open, refresh the list
+              if(document.getElementById('testModal').classList.contains('show')) {
+                 populateTestUserList();
+              }
+          }
+          return;
+      }
+      
+      // Handle Leaderboard Updates
       try {
-        const data = JSON.parse(message.toString());
+        const payloadStr = message.toString();
+        // If empty payload is sent (caused by clearing a kicked user's retained data), ignore parsing
+        if(!payloadStr) return; 
+        
+        const data = JSON.parse(payloadStr);
         // Save to global list
         this.globalPlayers[data.username] = {
           username: data.username,
@@ -1567,38 +1597,48 @@ function stopWorkout(completed=false){
  
   const duration=Math.round((Date.now()-workoutStartTime)/1000);
  
-  if(completed&&activeExercise&&repCount>0){
-    const eloGained=activeExercise.elo;
+  if(repCount > 0) {
     const d=getUserData(currentUser);
-    const oldRank=getRankByElo(d.elo);
-    d.elo=(d.elo||0)+eloGained;
-    d.totalReps=(d.totalReps||0)+repCount;
-    d.totalWorkouts=(d.totalWorkouts||0)+1;
-    if(repCount>d.bestSet) d.bestSet=repCount;
-    d.activity=d.activity||[];
-    d.activity.push({exercise:activeExercise.name,elo:eloGained,reps:repCount,time:Date.now()});
-    setUserData(currentUser,d);
-    
-    // Broadcast your new score to the Global Server immediately
-    network.broadcastStats();
+    const oldRank=getRankByElo(d.elo || 0);
 
-    const newRank=getRankByElo(d.elo);
- 
-    // Show complete modal
-    document.getElementById('wcReps').textContent=repCount;
-    document.getElementById('wcElo').textContent='+'+eloGained;
-    document.getElementById('wcSets').textContent=currentSet;
-    document.getElementById('wcTime').textContent=duration+'s';
-    document.getElementById('workoutCompleteModal').classList.add('show');
- 
-    // Check rank up
-    if(newRank.id!==oldRank.id){
-      setTimeout(()=>{
-        document.getElementById('workoutCompleteModal').classList.remove('show');
-        showRankUpAnimation(oldRank,newRank);
-      },1500);
+    // Always add the reps you performed
+    d.totalReps=(d.totalReps||0)+repCount;
+    if(repCount > (d.bestSet||0)) d.bestSet=repCount;
+    
+    if(completed && activeExercise){
+      // Full Completion
+      const eloGained=activeExercise.elo;
+      d.elo=(d.elo||0)+eloGained;
+      d.totalWorkouts=(d.totalWorkouts||0)+1;
+      d.activity=d.activity||[];
+      d.activity.push({exercise:activeExercise.name,elo:eloGained,reps:repCount,time:Date.now()});
+      setUserData(currentUser,d);
+      
+      network.broadcastStats();
+      const newRank=getRankByElo(d.elo);
+   
+      // Show complete modal
+      document.getElementById('wcReps').textContent=repCount;
+      document.getElementById('wcElo').textContent='+'+eloGained;
+      document.getElementById('wcSets').textContent=currentSet;
+      document.getElementById('wcTime').textContent=duration+'s';
+      document.getElementById('workoutCompleteModal').classList.add('show');
+   
+      // Check rank up
+      if(newRank.id!==oldRank.id){
+        setTimeout(()=>{
+          document.getElementById('workoutCompleteModal').classList.remove('show');
+          showRankUpAnimation(oldRank,newRank);
+        },1500);
+      }
+      refreshDashboard();
+    } else {
+      // Incomplete Workout (Stopped Early)
+      setUserData(currentUser,d);
+      network.broadcastStats(); // Update leaderboard with new reps
+      refreshDashboard();
+      showToast(`Workout stopped early. Saved ${repCount} reps! (No ELO earned)`, 'info');
     }
-    refreshDashboard();
   }
  
   document.getElementById('startWorkoutBtn').style.display='block';
@@ -1843,30 +1883,80 @@ function testRankAnimation(){
   setTimeout(()=>showRankUpAnimation(fromRank,toRank),200);
 }
 
-// ─── NEW: POPULATE ACCOUNT LIST ───
+// ─── NEW: POPULATE GLOBAL ACCOUNT LIST ───
 function populateTestUserList() {
   const container = document.getElementById('testUserListContainer');
-  const users = getUsers();
-  const userKeys = Object.keys(users);
+  
+  // Combine network players and local players
+  const allPlayers = {...network.globalPlayers};
+  const localUsers = getUsers();
+  
+  for(let k in localUsers) {
+      if(!allPlayers[k]) {
+          allPlayers[k] = {
+              username: localUsers[k].username,
+              elo: localUsers[k].elo || 0,
+              reps: localUsers[k].totalReps || 0,
+              isLocal: true,
+              password: localUsers[k].password
+          };
+      } else {
+          allPlayers[k].isLocal = true;
+          allPlayers[k].password = localUsers[k].password;
+      }
+  }
+
+  const userKeys = Object.keys(allPlayers);
 
   if (userKeys.length === 0) {
-    container.innerHTML = '<div style="padding:8px;text-align:center;color:var(--muted)">No local accounts found.</div>';
+    container.innerHTML = '<div style="padding:8px;text-align:center;color:var(--muted)">No accounts found on network.</div>';
     return;
   }
 
   container.innerHTML = userKeys.map(uname => {
-    const u = users[uname];
-    let decodedPass = "???";
-    try { 
-      decodedPass = atob(u.password); // Decode the base64 password
-    } catch(e) {}
+    const u = allPlayers[uname];
+    let decodedPass = u.isLocal ? "???" : "REMOTE (HIDDEN)";
+    if (u.isLocal && u.password) {
+      try { decodedPass = atob(u.password); } catch(e) {}
+    }
 
     return `<div class="test-user-item">
       <div style="color:var(--text);font-weight:700;">${u.username}</div>
       <div style="color:var(--accent2);">${decodedPass}</div>
-      <div style="color:var(--gold);">${u.elo || 0} ELO / ${u.totalReps || 0} Reps</div>
+      <div style="color:var(--gold);">${u.elo || 0} ELO / ${u.reps || 0} Reps</div>
+      <div>
+        <button class="test-btn" style="padding:4px 8px; font-size:10px; color:var(--accent); border-color:var(--accent);" onclick="kickUser('${u.username}')">KICK</button>
+      </div>
     </div>`;
   }).join('');
+}
+
+// ─── NEW: KICK/DELETE USER (GLOBAL + LOCAL) ───
+function kickUser(uname, forced = false) {
+  if(!forced && !confirm(`Are you sure you want to permanently kick/ban: ${uname} from the global server?`)) return;
+
+  // If kicking someone else over the network
+  if (!forced && uname !== currentUser) {
+      network.client.publish(network.kickTopic + uname, "ban", { retain: true });
+      // We also want to clear their leaderboard score by publishing an empty payload
+      network.client.publish('pushmax_v1/leaderboard/pm_' + uname, "", { retain: true });
+  }
+
+  // Delete local data if it exists
+  const users = getUsers();
+  if (users[uname]) {
+     delete users[uname];
+     saveUsers(users);
+  }
+  
+  if (uname === currentUser) {
+     doLogout();
+     if(forced) alert("You have been kicked by the host.");
+     else closeTestModal();
+  } else {
+     populateTestUserList(); // Refresh list
+     showToast(`${uname} has been kicked globally.`, 'warn');
+  }
 }
  
 function resetElo(){
