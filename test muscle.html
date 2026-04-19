@@ -572,7 +572,7 @@ body::before{
 .wc-stat .l{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-top:4px;}
  
 /* ════════════════════════════════════════
-   TOAST
+   TOAST & GLOBAL ANNOUNCE
 ════════════════════════════════════════ */
 #toastContainer{position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;}
 .toast{
@@ -586,6 +586,38 @@ body::before{
 .toast.warn{border-color:rgba(255,180,0,.4);color:#ffb400;}
 @keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
 @keyframes fadeOut{from{opacity:1;}to{opacity:0;transform:translateX(30px);}}
+
+/* ─── NEW: GLOBAL KICK ANNOUNCEMENT STYLES ─── */
+#globalAnnounce {
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 60, 60, 0.95);
+  border: 1px solid #ff3c3c;
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-family: 'Orbitron', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(255, 0, 0, 0.4);
+  display: none;
+  opacity: 0;
+  pointer-events: none;
+}
+#globalAnnounce.show {
+  display: flex;
+  animation: dropFade 4s forwards;
+}
+@keyframes dropFade {
+  0% { top: -50px; opacity: 0; }
+  10% { top: 24px; opacity: 1; }
+  80% { top: 24px; opacity: 1; }
+  100% { top: -50px; opacity: 0; }
+}
  
 /* misc */
 .section-title{
@@ -964,6 +996,8 @@ body::before{
 </div>
  
 <div id="toastContainer"></div>
+
+<div id="globalAnnounce"></div>
  
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
@@ -971,6 +1005,14 @@ body::before{
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
  
 <script>
+// ─── NEW: GLOBAL ANNOUNCEMENT TRIGGER ───
+function showGlobalAnnouncement(msg) {
+  const el = document.getElementById('globalAnnounce');
+  el.textContent = msg;
+  el.classList.remove('show');
+  void el.offsetWidth; // Trigger reflow to restart animation
+  el.classList.add('show');
+}
 
 // ═══════════════════════════════════════════════════
 // GLOBAL MULTIPLAYER NETWORK (MQTT)
@@ -982,7 +1024,6 @@ class NetworkManager {
     this.globalPlayers = {}; 
     this.topicBase = 'pushmax_v1/leaderboard/';
     this.kickTopic = 'pushmax_v1/admin/kick/'; // Topic to listen for bans
-    this.myId = 'pm_' + Math.random().toString(36).substr(2, 9);
     this.syncTimer = null;
   }
 
@@ -1010,12 +1051,17 @@ class NetworkManager {
       // Handle Global Kicks
       if (topic.startsWith(this.kickTopic)) {
           const targetUser = topic.split('/').pop();
+          
           if (targetUser === currentUser) {
               // I have been kicked!
               kickUser(currentUser, true); 
           } else {
+              // Show the Global Dropdown Alert for everyone!
+              showGlobalAnnouncement(`🚨 ${targetUser} has been kicked! 🚨`);
+              
               // Someone else was kicked, remove them from memory
               delete this.globalPlayers[targetUser];
+              
               if(document.getElementById('tab-leaderboard').style.display === 'block') {
                  buildLeaderboard();
               }
@@ -1062,8 +1108,8 @@ class NetworkManager {
       reps: d.totalReps || 0
     };
     
-    // Publish with retain:true so the server remembers it forever for offline players
-    this.client.publish(this.topicBase + this.myId, JSON.stringify(payload), { retain: true });
+    // Publish using the USERNAME as the topic so we can cleanly delete it later
+    this.client.publish(this.topicBase + d.username, JSON.stringify(payload), { retain: true });
   }
 }
 
@@ -1938,8 +1984,8 @@ function kickUser(uname, forced = false) {
   // If kicking someone else over the network
   if (!forced && uname !== currentUser) {
       network.client.publish(network.kickTopic + uname, "ban", { retain: true });
-      // We also want to clear their leaderboard score by publishing an empty payload
-      network.client.publish('pushmax_v1/leaderboard/pm_' + uname, "", { retain: true });
+      // We also want to clear their leaderboard score by publishing an empty payload using their username exactly
+      network.client.publish('pushmax_v1/leaderboard/' + uname, "", { retain: true });
   }
 
   // Delete local data if it exists
@@ -1955,7 +2001,6 @@ function kickUser(uname, forced = false) {
      else closeTestModal();
   } else {
      populateTestUserList(); // Refresh list
-     showToast(`${uname} has been kicked globally.`, 'warn');
   }
 }
  
