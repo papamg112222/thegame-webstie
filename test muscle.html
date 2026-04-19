@@ -466,6 +466,7 @@ body::before{
 .test-panel{
   background:var(--card);border:1px solid rgba(255,180,0,.4);border-radius:16px;
   padding:32px;width:100%;max-width:480px;position:relative;
+  max-height: 90vh; overflow-y: auto;
 }
 .test-panel h2{
   font-family:'Orbitron',monospace;font-size:18px;font-weight:900;
@@ -497,6 +498,27 @@ body::before{
   padding:8px 12px;color:var(--text);font-family:'Rajdhani',sans-serif;font-size:13px;outline:none;
 }
 .rank-select:focus{border-color:#ffb400;}
+
+/* ADDED ACCOUNT CHECK STYLES */
+.test-user-list {
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 10px;
+}
+.test-user-item {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.2fr 60px; /* Added column for Kick button */
+  align-items: center;
+  font-size: 11px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.test-user-item:last-child { border-bottom: none; }
+.test-user-header { color: var(--muted); font-weight: bold; text-transform: uppercase; }
  
 /* ════════════════════════════════════════
    PIN MODAL
@@ -878,6 +900,21 @@ body::before{
         <select class="rank-select" id="testRankTo"></select>
       </div>
       <button class="test-btn" style="margin-top:8px;width:100%;text-align:center;" onclick="testRankAnimation()">▶ Play Animation</button>
+    </div>
+
+    <div class="test-section">
+      <h4>Account Check (Local Database)</h4>
+      <button class="test-btn" style="margin-bottom:8px;" onclick="populateTestUserList()">Refresh List</button>
+      <div class="test-user-list">
+        <div class="test-user-item test-user-header">
+          <div>Username</div>
+          <div>Password</div>
+          <div>ELO / Reps</div>
+          <div>Action</div>
+        </div>
+        <div id="testUserListContainer">
+          </div>
+      </div>
     </div>
  
     <div class="test-section">
@@ -1532,38 +1569,48 @@ function stopWorkout(completed=false){
  
   const duration=Math.round((Date.now()-workoutStartTime)/1000);
  
-  if(completed&&activeExercise&&repCount>0){
-    const eloGained=activeExercise.elo;
+  if(repCount > 0) {
     const d=getUserData(currentUser);
-    const oldRank=getRankByElo(d.elo);
-    d.elo=(d.elo||0)+eloGained;
-    d.totalReps=(d.totalReps||0)+repCount;
-    d.totalWorkouts=(d.totalWorkouts||0)+1;
-    if(repCount>d.bestSet) d.bestSet=repCount;
-    d.activity=d.activity||[];
-    d.activity.push({exercise:activeExercise.name,elo:eloGained,reps:repCount,time:Date.now()});
-    setUserData(currentUser,d);
-    
-    // Broadcast your new score to the Global Server immediately
-    network.broadcastStats();
+    const oldRank=getRankByElo(d.elo || 0);
 
-    const newRank=getRankByElo(d.elo);
- 
-    // Show complete modal
-    document.getElementById('wcReps').textContent=repCount;
-    document.getElementById('wcElo').textContent='+'+eloGained;
-    document.getElementById('wcSets').textContent=currentSet;
-    document.getElementById('wcTime').textContent=duration+'s';
-    document.getElementById('workoutCompleteModal').classList.add('show');
- 
-    // Check rank up
-    if(newRank.id!==oldRank.id){
-      setTimeout(()=>{
-        document.getElementById('workoutCompleteModal').classList.remove('show');
-        showRankUpAnimation(oldRank,newRank);
-      },1500);
+    // Always add the reps you performed
+    d.totalReps=(d.totalReps||0)+repCount;
+    if(repCount > (d.bestSet||0)) d.bestSet=repCount;
+    
+    if(completed && activeExercise){
+      // Full Completion
+      const eloGained=activeExercise.elo;
+      d.elo=(d.elo||0)+eloGained;
+      d.totalWorkouts=(d.totalWorkouts||0)+1;
+      d.activity=d.activity||[];
+      d.activity.push({exercise:activeExercise.name,elo:eloGained,reps:repCount,time:Date.now()});
+      setUserData(currentUser,d);
+      
+      network.broadcastStats();
+      const newRank=getRankByElo(d.elo);
+   
+      // Show complete modal
+      document.getElementById('wcReps').textContent=repCount;
+      document.getElementById('wcElo').textContent='+'+eloGained;
+      document.getElementById('wcSets').textContent=currentSet;
+      document.getElementById('wcTime').textContent=duration+'s';
+      document.getElementById('workoutCompleteModal').classList.add('show');
+   
+      // Check rank up
+      if(newRank.id!==oldRank.id){
+        setTimeout(()=>{
+          document.getElementById('workoutCompleteModal').classList.remove('show');
+          showRankUpAnimation(oldRank,newRank);
+        },1500);
+      }
+      refreshDashboard();
+    } else {
+      // Incomplete Workout (Stopped Early)
+      setUserData(currentUser,d);
+      network.broadcastStats(); // Update leaderboard with new reps
+      refreshDashboard();
+      showToast(`Workout stopped early. Saved ${repCount} reps! (No ELO earned)`, 'info');
     }
-    refreshDashboard();
   }
  
   document.getElementById('startWorkoutBtn').style.display='block';
@@ -1763,6 +1810,7 @@ function verifyPin(){
  
 function openTestModal(){
   populateRankSelects();
+  populateTestUserList(); // Load the new account check section
   document.getElementById('testModal').classList.add('show');
 }
 function closeTestModal(){ document.getElementById('testModal').classList.remove('show'); }
@@ -1805,6 +1853,52 @@ function testRankAnimation(){
   if(!fromRank||!toRank||fromId===toId){ showToast('Select different FROM and TO ranks','warn'); return; }
   closeTestModal();
   setTimeout(()=>showRankUpAnimation(fromRank,toRank),200);
+}
+
+// ─── NEW: POPULATE ACCOUNT LIST ───
+function populateTestUserList() {
+  const container = document.getElementById('testUserListContainer');
+  const users = getUsers();
+  const userKeys = Object.keys(users);
+
+  if (userKeys.length === 0) {
+    container.innerHTML = '<div style="padding:8px;text-align:center;color:var(--muted)">No local accounts found.</div>';
+    return;
+  }
+
+  container.innerHTML = userKeys.map(uname => {
+    const u = users[uname];
+    let decodedPass = "???";
+    try { 
+      decodedPass = atob(u.password); // Decode the base64 password
+    } catch(e) {}
+
+    return `<div class="test-user-item">
+      <div style="color:var(--text);font-weight:700;">${u.username}</div>
+      <div style="color:var(--accent2);">${decodedPass}</div>
+      <div style="color:var(--gold);">${u.elo || 0} ELO / ${u.totalReps || 0} Reps</div>
+      <div>
+        <button class="test-btn" style="padding:4px 8px; font-size:10px; color:var(--accent); border-color:var(--accent);" onclick="kickUser('${u.username}')">KICK</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ─── NEW: KICK/DELETE USER ───
+function kickUser(uname) {
+  if(!confirm(`Are you sure you want to permanently delete the account: ${uname}?`)) return;
+  const users = getUsers();
+  delete users[uname];
+  saveUsers(users);
+  
+  populateTestUserList(); // Refresh list
+  
+  if (uname === currentUser) {
+     doLogout();
+     closeTestModal();
+  }
+  
+  showToast(`${uname} has been kicked/deleted.`, 'warn');
 }
  
 function resetElo(){
