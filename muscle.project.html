@@ -6,6 +6,7 @@
 <title>PushMax – Rank Up or Stay Down</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;600;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <style>
 :root {
   --bg: #050508;
@@ -185,7 +186,7 @@ body::before{
   content:'';position:absolute;inset:-6px;border-radius:50%;
   border:2px solid transparent;
   background:linear-gradient(var(--card),var(--card)) padding-box,
-             linear-gradient(135deg,var(--accent),var(--accent2)) border-box;
+              linear-gradient(135deg,var(--accent),var(--accent2)) border-box;
   animation:spin 8s linear infinite;
 }
 @keyframes spin{to{transform:rotate(360deg);}}
@@ -465,6 +466,7 @@ body::before{
 .test-panel{
   background:var(--card);border:1px solid rgba(255,180,0,.4);border-radius:16px;
   padding:32px;width:100%;max-width:480px;position:relative;
+  max-height: 90vh; overflow-y: auto;
 }
 .test-panel h2{
   font-family:'Orbitron',monospace;font-size:18px;font-weight:900;
@@ -496,6 +498,26 @@ body::before{
   padding:8px 12px;color:var(--text);font-family:'Rajdhani',sans-serif;font-size:13px;outline:none;
 }
 .rank-select:focus{border-color:#ffb400;}
+
+/* ADDED ACCOUNT CHECK STYLES */
+.test-user-list {
+  max-height: 180px;
+  overflow-y: auto;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-top: 10px;
+}
+.test-user-item {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  font-size: 11px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.test-user-item:last-child { border-bottom: none; }
+.test-user-header { color: var(--muted); font-weight: bold; text-transform: uppercase; }
  
 /* ════════════════════════════════════════
    PIN MODAL
@@ -585,7 +607,6 @@ body::before{
 </head>
 <body>
  
-<!-- ════ LOGIN PAGE ════ -->
 <div id="loginPage" class="page active">
   <div class="login-wrap">
     <div class="logo-hero">
@@ -597,7 +618,6 @@ body::before{
         <button class="auth-tab active" onclick="switchAuthTab('login')">Login</button>
         <button class="auth-tab" onclick="switchAuthTab('register')">Register</button>
       </div>
-      <!-- LOGIN FORM -->
       <div id="loginForm">
         <div class="form-group">
           <label>Username</label>
@@ -610,7 +630,6 @@ body::before{
         <div id="loginError" class="error-msg"></div>
         <button class="btn-primary" onclick="doLogin()">LOGIN</button>
       </div>
-      <!-- REGISTER FORM -->
       <div id="registerForm" style="display:none">
         <div class="form-group">
           <label>Username</label>
@@ -641,7 +660,6 @@ body::before{
   </div>
 </div>
  
-<!-- ════ APP PAGE ════ -->
 <div id="appPage" class="page">
   <nav class="nav">
     <div class="nav-logo">PUSHMAX</div>
@@ -661,7 +679,6 @@ body::before{
     </div>
   </nav>
  
-  <!-- DASHBOARD TAB -->
   <div id="tab-dashboard" class="page-inner" style="display:block">
     <div class="dash-grid">
       <div>
@@ -723,7 +740,6 @@ body::before{
     </div>
   </div>
  
-  <!-- EXERCISE TAB -->
   <div id="tab-exercise" class="page-inner" style="display:none">
     <div id="exerciseList">
       <div class="section-title">Choose Your Exercise</div>
@@ -789,7 +805,6 @@ body::before{
     </div>
   </div>
  
-  <!-- LEADERBOARD TAB -->
   <div id="tab-leaderboard" class="page-inner" style="display:none">
     <div class="lb-header">
       <div class="lb-title">🐐 ALL THE GOAT 🐐</div>
@@ -808,7 +823,6 @@ body::before{
     </div>
   </div>
  
-  <!-- SETTINGS TAB -->
   <div id="tab-settings" class="page-inner" style="display:none">
     <div class="section-title">Profile Settings</div>
     <div class="settings-section">
@@ -839,10 +853,8 @@ body::before{
   </div>
 </div>
  
-<!-- GEAR BUTTON -->
 <button class="gear-btn" id="gearBtn" onclick="openPin()">⚙️</button>
  
-<!-- ════ RANK UP OVERLAY ════ -->
 <div id="rankUpOverlay">
   <div class="rankup-content">
     <div class="light-rays" id="lightRays"></div>
@@ -858,7 +870,6 @@ body::before{
   </div>
 </div>
  
-<!-- ════ TESTING MODE MODAL ════ -->
 <div id="testModal">
   <div class="test-panel">
     <button class="test-close" onclick="closeTestModal()">✕</button>
@@ -889,6 +900,20 @@ body::before{
       </div>
       <button class="test-btn" style="margin-top:8px;width:100%;text-align:center;" onclick="testRankAnimation()">▶ Play Animation</button>
     </div>
+
+    <div class="test-section">
+      <h4>Account Check (Local Database)</h4>
+      <button class="test-btn" style="margin-bottom:8px;" onclick="populateTestUserList()">Refresh List</button>
+      <div class="test-user-list">
+        <div class="test-user-item test-user-header">
+          <div>Username</div>
+          <div>Password</div>
+          <div>ELO / Reps</div>
+        </div>
+        <div id="testUserListContainer">
+          </div>
+      </div>
+    </div>
  
     <div class="test-section">
       <h4>Reset</h4>
@@ -900,7 +925,6 @@ body::before{
   </div>
 </div>
  
-<!-- ════ PIN MODAL ════ -->
 <div id="pinModal">
   <div class="pin-panel">
     <h3>🔒 ENTER PIN</h3>
@@ -923,7 +947,6 @@ body::before{
   </div>
 </div>
  
-<!-- ════ WORKOUT COMPLETE ════ -->
 <div id="workoutCompleteModal">
   <div class="wc-panel">
     <div class="wc-icon">🏋️</div>
@@ -938,31 +961,100 @@ body::before{
   </div>
 </div>
  
-<!-- ════ TOAST ════ -->
 <div id="toastContainer"></div>
  
-<!-- ════ MEDIAPIPE & SCRIPTS ════ -->
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
  
 <script>
+
+// ═══════════════════════════════════════════════════
+// GLOBAL MULTIPLAYER NETWORK (MQTT)
+// ═══════════════════════════════════════════════════
+class NetworkManager {
+  constructor() {
+    this.client = null;
+    this.connected = false;
+    this.globalPlayers = {}; 
+    this.topicBase = 'pushmax_v1/leaderboard/';
+    this.myId = 'pm_' + Math.random().toString(36).substr(2, 9);
+    this.syncTimer = null;
+  }
+
+  connect() {
+    console.log("Connecting to Global Leaderboard...");
+    this.client = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    
+    this.client.on('connect', () => {
+      console.log("Connected to Global Server");
+      this.connected = true;
+      this.client.subscribe(this.topicBase + '#');
+      
+      // Broadcast stats immediately on connection
+      this.broadcastStats();
+      
+      // Broadcast stats every 30 minutes (1800000 ms) as requested
+      // (We also broadcast instantly when workouts end, so this is just a backup ping)
+      if (this.syncTimer) clearInterval(this.syncTimer);
+      this.syncTimer = setInterval(() => this.broadcastStats(), 1800000); 
+    });
+
+    this.client.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
+        // Save to global list
+        this.globalPlayers[data.username] = {
+          username: data.username,
+          elo: data.elo,
+          reps: data.reps,
+          lastSeen: Date.now()
+        };
+        // Refresh UI if we are on the leaderboard tab
+        if(document.getElementById('tab-leaderboard').style.display === 'block') {
+           buildLeaderboard();
+        }
+      } catch (e) {
+        // Ignore garbled data
+      }
+    });
+  }
+
+  broadcastStats() {
+    if (!this.connected || !currentUser) return;
+    const d = getUserData(currentUser);
+    if (!d) return;
+    
+    const payload = {
+      username: d.username,
+      elo: d.elo || 0,
+      reps: d.totalReps || 0
+    };
+    
+    // Publish with retain:true so the server remembers it forever for offline players
+    this.client.publish(this.topicBase + this.myId, JSON.stringify(payload), { retain: true });
+  }
+}
+
+// Initialize the Network
+const network = new NetworkManager();
+
 // ═══════════════════════════════════════════════════
 // RANK SYSTEM
 // ═══════════════════════════════════════════════════
 const RANKS = [
-  { id:'unranked',  name:'Unranked',    tier:'',  icon:'⬜', color:'#555577', eloMin:0,    eloMax:199  },
-  { id:'bronze1',   name:'Bronze I',    tier:'1', icon:'🟫', color:'#cd7f32', eloMin:200,  eloMax:399  },
-  { id:'bronze2',   name:'Bronze II',   tier:'2', icon:'🟫', color:'#cd7f32', eloMin:400,  eloMax:599  },
-  { id:'silver1',   name:'Silver I',    tier:'1', icon:'⬜', color:'#c0c0c0', eloMin:600,  eloMax:899  },
-  { id:'silver2',   name:'Silver II',   tier:'2', icon:'⬜', color:'#c0c0c0', eloMin:900,  eloMax:1199 },
-  { id:'gold1',     name:'Gold I',      tier:'1', icon:'🟨', color:'#ffd700', eloMin:1200, eloMax:1599 },
-  { id:'gold2',     name:'Gold II',     tier:'2', icon:'🟨', color:'#ffd700', eloMin:1600, eloMax:1999 },
+  { id:'unranked',  name:'Unranked',   tier:'',  icon:'⬜', color:'#555577', eloMin:0,    eloMax:199  },
+  { id:'bronze1',   name:'Bronze I',   tier:'1', icon:'🟫', color:'#cd7f32', eloMin:200,  eloMax:399  },
+  { id:'bronze2',   name:'Bronze II',  tier:'2', icon:'🟫', color:'#cd7f32', eloMin:400,  eloMax:599  },
+  { id:'silver1',   name:'Silver I',   tier:'1', icon:'⬜', color:'#c0c0c0', eloMin:600,  eloMax:899  },
+  { id:'silver2',   name:'Silver II',  tier:'2', icon:'⬜', color:'#c0c0c0', eloMin:900,  eloMax:1199 },
+  { id:'gold1',     name:'Gold I',     tier:'1', icon:'🟨', color:'#ffd700', eloMin:1200, eloMax:1599 },
+  { id:'gold2',     name:'Gold II',    tier:'2', icon:'🟨', color:'#ffd700', eloMin:1600, eloMax:1999 },
   { id:'platinum1', name:'Platinum I',  tier:'1', icon:'🔷', color:'#00e5ff', eloMin:2000, eloMax:2499 },
   { id:'platinum2', name:'Platinum II', tier:'2', icon:'🔷', color:'#00e5ff', eloMin:2500, eloMax:2999 },
   { id:'platinum3', name:'Platinum III',tier:'3', icon:'🔷', color:'#00e5ff', eloMin:3000, eloMax:3599 },
-  { id:'diamond1',  name:'Diamond I',   tier:'1', icon:'💎', color:'#b9f2ff', eloMin:3600, eloMax:4199 },
+  { id:'diamond1',  name:'Diamond I',  tier:'1', icon:'💎', color:'#b9f2ff', eloMin:3600, eloMax:4199 },
   { id:'diamond2',  name:'Diamond II',  tier:'2', icon:'💎', color:'#b9f2ff', eloMin:4200, eloMax:4999 },
   { id:'diamond3',  name:'Diamond III', tier:'3', icon:'💎', color:'#b9f2ff', eloMin:5000, eloMax:5999 },
   { id:'asc1',      name:'Ascendent I', tier:'1', icon:'🔮', color:'#7b2fff', eloMin:6000, eloMax:6999 },
@@ -972,11 +1064,11 @@ const RANKS = [
   { id:'van2',      name:'Vanguard II', tier:'2', icon:'🔥', color:'#ff3c3c', eloMin:10200,eloMax:11199},
   { id:'van3',      name:'Vanguard III',tier:'3', icon:'🔥', color:'#ff3c3c', eloMin:11200,eloMax:12399},
   { id:'van4',      name:'Vanguard IV', tier:'4', icon:'🔥', color:'#ff3c3c', eloMin:12400,eloMax:13999},
-  { id:'god1',      name:'Godlike I',   tier:'1', icon:'⚡', color:'#ff6b00', eloMin:14000,eloMax:15999},
+  { id:'god1',      name:'Godlike I',  tier:'1', icon:'⚡', color:'#ff6b00', eloMin:14000,eloMax:15999},
   { id:'god2',      name:'Godlike II',  tier:'2', icon:'⚡', color:'#ff6b00', eloMin:16000,eloMax:17999},
   { id:'god3',      name:'Godlike III', tier:'3', icon:'⚡', color:'#ff6b00', eloMin:18000,eloMax:19999},
   { id:'god4',      name:'Godlike IV',  tier:'4', icon:'⚡', color:'#ff6b00', eloMin:20000,eloMax:22999},
-  { id:'god5',      name:'Godlike V',   tier:'5', icon:'🌟', color:'#ffd700', eloMin:23000,eloMax:Infinity},
+  { id:'god5',      name:'Godlike V',  tier:'5', icon:'🌟', color:'#ffd700', eloMin:23000,eloMax:Infinity},
 ];
  
 function getRankByElo(elo){
@@ -991,13 +1083,13 @@ function getRankIndex(rankId){ return RANKS.findIndex(r=>r.id===rankId); }
 // EXERCISES
 // ═══════════════════════════════════════════════════
 const EXERCISES = [
-  { id:'pushup',      name:'Push-Up',         icon:'🏋️', desc:'Classic upper body builder. Lower chest to floor.',            elo:30,  sets:3, reps:10, diff:'medium',  keyAngles:['elbow','hip'] },
-  { id:'jumpjack',    name:'Jumping Jack',     icon:'⭐', desc:'Full body warm-up. Jump feet wide, arms overhead.',           elo:15,  sets:3, reps:20, diff:'easy',    keyAngles:['shoulder','knee'] },
-  { id:'squat',       name:'Squat',            icon:'🦵', desc:'King of leg exercises. Hips below knees.',                   elo:25,  sets:3, reps:12, diff:'medium',  keyAngles:['knee','hip'] },
+  { id:'pushup',      name:'Push-Up',         icon:'🏋️', desc:'Classic upper body builder. Lower chest to floor.',             elo:30,  sets:3, reps:10, diff:'medium',  keyAngles:['elbow','hip'] },
+  { id:'jumpjack',    name:'Jumping Jack',     icon:'⭐', desc:'Full body warm-up. Jump feet wide, arms overhead.',            elo:15,  sets:3, reps:20, diff:'easy',    keyAngles:['shoulder','knee'] },
+  { id:'squat',       name:'Squat',            icon:'🦵', desc:'King of leg exercises. Hips below knees.',                    elo:25,  sets:3, reps:12, diff:'medium',  keyAngles:['knee','hip'] },
   { id:'burpee',      name:'Burpee',           icon:'💥', desc:'Full-body explosive movement. The ultimate cardio killer.',   elo:60,  sets:3, reps:8,  diff:'hard',    keyAngles:['elbow','knee'] },
   { id:'mountaincli', name:'Mountain Climber', icon:'🧗', desc:'Core and cardio combined. Drive knees to chest fast.',       elo:35,  sets:3, reps:20, diff:'medium',  keyAngles:['hip','shoulder'] },
   { id:'lunge',       name:'Lunge',            icon:'🚶', desc:'Unilateral leg strength. Step forward, knee to 90°.',        elo:20,  sets:3, reps:10, diff:'easy',    keyAngles:['knee','hip'] },
-  { id:'plank',       name:'Plank Hold',       icon:'🧘', desc:'Core stability test. Hold perfect alignment.',               elo:40,  sets:3, reps:30, diff:'medium',  keyAngles:['hip','shoulder'] },
+  { id:'plank',       name:'Plank Hold',       icon:'🧘', desc:'Core stability test. Hold perfect alignment.',                elo:40,  sets:3, reps:30, diff:'medium',  keyAngles:['hip','shoulder'] },
   { id:'pistolsq',    name:'Pistol Squat',     icon:'🎯', desc:'One-legged squat. Ultimate balance and leg strength.',       elo:100, sets:2, reps:5,  diff:'extreme', keyAngles:['knee','hip'] },
   { id:'archer',      name:'Archer Push-Up',   icon:'🏹', desc:'Asymmetric push-up. Extreme unilateral chest strength.',     elo:80,  sets:2, reps:6,  diff:'extreme', keyAngles:['elbow','shoulder'] },
   { id:'handstand',   name:'Handstand Hold',   icon:'🤸', desc:'Invert your world. Full shoulder and core stability.',       elo:150, sets:2, reps:20, diff:'extreme', keyAngles:['shoulder','elbow'] },
@@ -1006,9 +1098,7 @@ const EXERCISES = [
 const DIFF_COLORS = { easy:'diff-easy', medium:'diff-medium', hard:'diff-hard', extreme:'diff-extreme' };
  
 // ═══════════════════════════════════════════════════
-// STORAGE (localStorage as shared backend simulation)
-// Each user stored as pushmax_user_{username}
-// Leaderboard as pushmax_lb (array of {username,elo,reps,rankId})
+// STORAGE 
 // ═══════════════════════════════════════════════════
 function getUsers(){
   try{ return JSON.parse(localStorage.getItem('pushmax_users')||'{}'); }catch{return {};}
@@ -1023,19 +1113,6 @@ function setUserData(username,data){
   const users=getUsers();
   users[username]=data;
   saveUsers(users);
-  updateLeaderboard();
-}
- 
-function updateLeaderboard(){
-  const users=getUsers();
-  const lb=Object.values(users).map(u=>({
-    username:u.username,elo:u.elo||0,reps:u.totalReps||0,rankId:getRankByElo(u.elo||0).id
-  }));
-  lb.sort((a,b)=>b.elo-a.elo);
-  localStorage.setItem('pushmax_lb',JSON.stringify(lb));
-}
-function getLeaderboard(){
-  try{ return JSON.parse(localStorage.getItem('pushmax_lb')||'[]'); }catch{return [];}
 }
  
 // ═══════════════════════════════════════════════════
@@ -1086,6 +1163,9 @@ function doRegister(){
   setUserData(u,newUser);
   currentUser=u;
   localStorage.setItem('pushmax_session',u);
+  
+  // Instantly send to global leaderboard
+  network.broadcastStats();
   openApp();
 }
  
@@ -1094,7 +1174,6 @@ function doLogout(){
   currentUser=null;
   localStorage.removeItem('pushmax_session');
   showPage('loginPage');
-  stopLeaderboardRefresh();
 }
  
 function openApp(){
@@ -1102,7 +1181,11 @@ function openApp(){
   refreshDashboard();
   buildExerciseGrid();
   buildLeaderboard();
-  startLeaderboardRefresh();
+  
+  // Ensure network is connected
+  if(!network.connected) network.connect();
+  else network.broadcastStats(); // Re-broadcast our existence if already connected
+  
   showTab('dashboard');
 }
  
@@ -1495,6 +1578,10 @@ function stopWorkout(completed=false){
     d.activity=d.activity||[];
     d.activity.push({exercise:activeExercise.name,elo:eloGained,reps:repCount,time:Date.now()});
     setUserData(currentUser,d);
+    
+    // Broadcast your new score to the Global Server immediately
+    network.broadcastStats();
+
     const newRank=getRankByElo(d.elo);
  
     // Show complete modal
@@ -1592,19 +1679,38 @@ function closeRankUp(){
 }
  
 // ═══════════════════════════════════════════════════
-// LEADERBOARD
+// LEADERBOARD (NOW POWERED BY MQTT/GLOBAL NETWORK)
 // ═══════════════════════════════════════════════════
-let lbRefreshInterval=null;
- 
 function buildLeaderboard(){
-  const lb=getLeaderboard();
+  
+  // Combine Network players + Local User
+  let lb = Object.values(network.globalPlayers);
+  
+  if (currentUser) {
+     const localData = getUserData(currentUser);
+     if (localData) {
+         // Prevent duplicate of local user
+         lb = lb.filter(u => u.username !== currentUser);
+         lb.push({
+             username: localData.username,
+             elo: localData.elo || 0,
+             reps: localData.totalReps || 0
+         });
+     }
+  }
+  
+  // Sort descending by ELO
+  lb.sort((a, b) => b.elo - a.elo);
+  
   const medals=['🥇','🥈','🥉'];
   const rankNums=['gold','silver','bronze'];
   const body=document.getElementById('lbBody');
+  
   if(lb.length===0){
-    body.innerHTML=`<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">No athletes yet. Be the first to register!</div>`;
+    body.innerHTML=`<div style="padding:32px;text-align:center;color:var(--muted);font-size:13px">Loading network or no athletes yet...</div>`;
     return;
   }
+  
   body.innerHTML=lb.map((u,i)=>{
     const rank=getRankByElo(u.elo);
     const numClass=i<3?rankNums[i]:'';
@@ -1625,15 +1731,6 @@ function buildLeaderboard(){
     </div>`;
   }).join('');
 }
- 
-function startLeaderboardRefresh(){
-  stopLeaderboardRefresh();
-  lbRefreshInterval=setInterval(()=>{
-    updateLeaderboard();
-    buildLeaderboard();
-  },10000);
-}
-function stopLeaderboardRefresh(){ if(lbRefreshInterval){ clearInterval(lbRefreshInterval); lbRefreshInterval=null; } }
  
 // ═══════════════════════════════════════════════════
 // SETTINGS
@@ -1701,6 +1798,7 @@ function verifyPin(){
  
 function openTestModal(){
   populateRankSelects();
+  populateTestUserList(); // Load the new account check section
   document.getElementById('testModal').classList.add('show');
 }
 function closeTestModal(){ document.getElementById('testModal').classList.remove('show'); }
@@ -1721,6 +1819,10 @@ function addTestElo(amount){
   const oldRank=getRankByElo(d.elo);
   d.elo=(d.elo||0)+amount;
   setUserData(currentUser,d);
+  
+  // Instantly send to global leaderboard
+  network.broadcastStats();
+  
   const newRank=getRankByElo(d.elo);
   refreshDashboard();
   buildLeaderboard();
@@ -1740,12 +1842,42 @@ function testRankAnimation(){
   closeTestModal();
   setTimeout(()=>showRankUpAnimation(fromRank,toRank),200);
 }
+
+// ─── NEW: POPULATE ACCOUNT LIST ───
+function populateTestUserList() {
+  const container = document.getElementById('testUserListContainer');
+  const users = getUsers();
+  const userKeys = Object.keys(users);
+
+  if (userKeys.length === 0) {
+    container.innerHTML = '<div style="padding:8px;text-align:center;color:var(--muted)">No local accounts found.</div>';
+    return;
+  }
+
+  container.innerHTML = userKeys.map(uname => {
+    const u = users[uname];
+    let decodedPass = "???";
+    try { 
+      decodedPass = atob(u.password); // Decode the base64 password
+    } catch(e) {}
+
+    return `<div class="test-user-item">
+      <div style="color:var(--text);font-weight:700;">${u.username}</div>
+      <div style="color:var(--accent2);">${decodedPass}</div>
+      <div style="color:var(--gold);">${u.elo || 0} ELO / ${u.totalReps || 0} Reps</div>
+    </div>`;
+  }).join('');
+}
  
 function resetElo(){
   if(!currentUser) return;
   const d=getUserData(currentUser);
   d.elo=0;
   setUserData(currentUser,d);
+  
+  // Instantly send to global leaderboard
+  network.broadcastStats();
+  
   refreshDashboard();
   buildLeaderboard();
   showToast('ELO reset to 0','warn');
@@ -1757,6 +1889,10 @@ function resetAll(){
   const d=getUserData(currentUser);
   const fresh={...d,elo:0,totalReps:0,totalWorkouts:0,bestSet:0,activity:[]};
   setUserData(currentUser,fresh);
+  
+  // Instantly send to global leaderboard
+  network.broadcastStats();
+  
   refreshDashboard();
   buildLeaderboard();
   showToast('Account fully reset','warn');
@@ -1783,10 +1919,9 @@ function showToast(msg,type='info'){
   const session=localStorage.getItem('pushmax_session');
   if(session&&getUserData(session)){
     currentUser=session;
-    openApp();
+    openApp(); // This will connect the network
   }
 })();
 </script>
 </body>
 </html>
- 
