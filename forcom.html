@@ -13,7 +13,7 @@
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
+        body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; user-select: none; -webkit-user-select: none; }
         
         #game-container { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; background: #87CEEB; z-index: 1; }
         
@@ -29,6 +29,19 @@
             animation: spin 1s linear infinite;
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Virtual Joystick */
+        #joystick-zone {
+            position: absolute; bottom: 20px; left: 20px; width: 150px; height: 150px;
+            background: rgba(255, 255, 255, 0.1); border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%; z-index: 10;
+        }
+        #joystick-knob {
+            position: absolute; top: 50%; left: 50%; width: 60px; height: 60px;
+            background: rgba(255, 255, 255, 0.8); border-radius: 50%;
+            transform: translate(-50%, -50%); box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
@@ -43,11 +56,15 @@
                 <p class="text-lg text-yellow-500 font-bold tracking-widest uppercase mb-1">Slain Knights</p>
                 <p id="score-display" class="text-4xl font-black medieval-text">0</p>
             </div>
+            <div class="text-right">
+                <p class="text-sm text-gray-300 font-bold uppercase">Controls</p>
+                <p class="text-md text-white">WASD to Move | Q/E to Turn</p>
+            </div>
         </div>
         <div class="flex justify-between items-end">
             <div>
                 <p class="text-lg text-red-500 font-bold tracking-widest uppercase mb-1">Your Health</p>
-                <p id="lives-display" class="text-4xl font-black medieval-text text-red-400">3</p>
+                <p id="lives-display" class="text-4xl font-black medieval-text text-red-400">100</p>
             </div>
             <div class="text-center bg-black/60 px-8 py-3 rounded-xl border border-gray-700 shadow-lg backdrop-blur-sm">
                 <p class="text-sm text-cyan-400 font-bold tracking-widest uppercase mb-1">P2P Weapon</p>
@@ -62,7 +79,7 @@
         
         <!-- 1. Role Selection -->
         <div id="screen-role-select" class="text-center max-w-2xl p-6 sm:p-10 bg-gray-900 rounded-lg border-2 border-yellow-700 shadow-[0_0_50px_rgba(202,138,4,0.2)] m-4">
-            <h1 class="text-4xl sm:text-5xl font-black text-yellow-500 title-text medieval-text mb-4">AR MEDIEVAL DEFENDER</h1>
+            <h1 class="text-4xl sm:text-5xl font-black text-yellow-500 title-text medieval-text mb-4">AR MEDIEVAL ARENA</h1>
             <p class="text-lg text-gray-300 mb-8 leading-relaxed">
                 Welcome to a True Mixed Reality Experience.<br>
                 One device runs the 3D Game Screen. Your Phone becomes the motion-sensing Sword and Gun.
@@ -110,26 +127,37 @@
 
     <!-- ================= CONTROLLER UI (PHONE ONLY) ================= -->
     <div id="ui-controller" class="hidden fixed inset-0 bg-gray-950 flex flex-col p-4 z-[100] text-white">
-        <div class="text-center mb-2">
+        
+        <!-- Top Bar: Status and Recenter -->
+        <div class="flex justify-between items-center mb-4">
             <span class="text-green-500 font-bold text-sm tracking-widest">● P2P LINKED</span>
+            <button onclick="triggerRecenter()" class="bg-gray-800 border-2 border-gray-600 px-6 py-3 rounded-xl text-md font-bold active:bg-gray-700 shadow-lg">
+                🎯 RECENTER AIM
+            </button>
         </div>
         
-        <button onclick="triggerRecenter()" class="bg-gray-800 border-2 border-gray-600 py-4 rounded-xl text-xl font-bold mb-4 active:bg-gray-700 shadow-lg">
-            🎯 RECENTER AIM
-        </button>
-        
-        <div class="flex-1 flex flex-col gap-4">
-            <button id="btn-mode-sword" onclick="setMode('sword')" class="flex-1 bg-blue-600 rounded-xl text-4xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all">
+        <!-- Weapon Switcher -->
+        <div class="flex gap-4 mb-4">
+            <button id="btn-mode-sword" onclick="setMode('sword')" class="flex-1 bg-blue-600 rounded-xl py-4 text-2xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all">
                 🗡️ SWORD
             </button>
-            <button id="btn-mode-gun" onclick="setMode('gun')" class="flex-1 bg-gray-800 rounded-xl text-4xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all">
+            <button id="btn-mode-gun" onclick="setMode('gun')" class="flex-1 bg-gray-800 rounded-xl py-4 text-2xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all">
                 🔫 GUN
             </button>
         </div>
 
-        <button id="btn-fire" onclick="triggerFire()" class="hidden h-1/2 w-full bg-red-600 rounded-xl text-6xl font-black text-yellow-300 active:bg-red-500 mt-4 border-4 border-red-400 shadow-[0_0_30px_rgba(255,0,0,0.6)]">
-            FIRE!
-        </button>
+        <!-- Play Area (Joystick & Fire Button) -->
+        <div class="flex-1 relative border-t-2 border-gray-800 pt-4">
+            <!-- Left Thumb: Movement Joystick -->
+            <div id="joystick-zone">
+                <div id="joystick-knob"></div>
+            </div>
+
+            <!-- Right Thumb: Fire Button (Hidden when Sword is active) -->
+            <button id="btn-fire" onclick="triggerFire()" class="hidden absolute bottom-20 right-10 w-32 h-32 bg-red-600 rounded-full text-3xl font-black text-yellow-300 active:bg-red-500 border-4 border-red-400 shadow-[0_0_30px_rgba(255,0,0,0.6)]">
+                FIRE
+            </button>
+        </div>
     </div>
 
     <script>
@@ -152,7 +180,8 @@
         window.gameControllerData = {
             active: false,
             alpha: 0, beta: 0, gamma: 0,
-            accMag: 0,
+            accX: 0, accY: 0, accZ: 0, accMag: 0,
+            joyX: 0, joyY: 0,
             mode: 'sword',
             triggerFire: false,
             triggerRecenter: false
@@ -164,6 +193,7 @@
                     document.getElementById('screen-join').classList.add('hidden');
                     document.getElementById('ui-controller').classList.remove('hidden');
                     window.startControllerSensors();
+                    window.setupJoystick();
                 } else {
                     document.getElementById('screen-waiting').classList.add('hidden');
                     window.startGame(); // Start 3D Game!
@@ -177,7 +207,12 @@
                         window.gameControllerData.alpha = data.alpha;
                         window.gameControllerData.beta = data.beta;
                         window.gameControllerData.gamma = data.gamma;
+                        window.gameControllerData.accX = data.accX;
+                        window.gameControllerData.accY = data.accY;
+                        window.gameControllerData.accZ = data.accZ;
                         window.gameControllerData.accMag = data.accMag;
+                        window.gameControllerData.joyX = data.joyX;
+                        window.gameControllerData.joyY = data.joyY;
                         window.gameControllerData.mode = data.mode;
                     } else if (data.type === 'fire') {
                         window.gameControllerData.triggerFire = true;
@@ -204,15 +239,8 @@
 
             peer = new Peer(roomId);
 
-            peer.on('connection', (conn) => {
-                connection = conn;
-                setupConnection(conn);
-            });
-
-            peer.on('error', (err) => {
-                console.error(err);
-                alert("Error setting up host room.");
-            });
+            peer.on('connection', (conn) => { connection = conn; setupConnection(conn); });
+            peer.on('error', (err) => { console.error(err); alert("Error setting up host room."); });
         };
 
         window.selectController = function() {
@@ -235,27 +263,22 @@
             document.getElementById('screen-join').innerHTML = '<h2 class="text-2xl font-bold text-yellow-400 mb-4">CONNECTING P2P...</h2><div class="flex justify-center"><div class="loader"></div></div>';
             
             peer = new Peer();
-
             peer.on('open', () => {
                 const hostId = 'ar-defender-' + pin;
                 connection = peer.connect(hostId, { reliable: true });
                 setupConnection(connection);
             });
-
-            peer.on('error', (err) => {
-                console.error(err);
-                alert("Connection failed. Did you enter the right PIN?");
-                location.reload();
-            });
+            peer.on('error', (err) => { console.error(err); alert("Connection failed. Did you enter the right PIN?"); location.reload(); });
         };
 
         window.sendControllerData = (type, payload = {}) => {
-            if (connection && connection.open) {
-                connection.send({ type, ...payload });
-            }
+            if (connection && connection.open) { connection.send({ type, ...payload }); }
         };
 
+        // --- PHONE SENSORS & JOYSTICK LOGIC ---
         let lastSendTime = 0;
+        let pJoyX = 0, pJoyY = 0;
+        let lastAccX = 0, lastAccY = 0, lastAccZ = 0, lastAccMag = 0;
         
         window.startControllerSensors = () => {
             window.addEventListener('deviceorientation', (e) => {
@@ -263,7 +286,8 @@
                 if (now - lastSendTime > 16) { 
                     window.sendControllerData('state', {
                         alpha: e.alpha || 0, beta: e.beta || 0, gamma: e.gamma || 0,
-                        accMag: window.lastAccMag || 0, mode: mode
+                        accX: lastAccX, accY: lastAccY, accZ: lastAccZ, accMag: lastAccMag,
+                        joyX: pJoyX, joyY: pJoyY, mode: mode
                     });
                     lastSendTime = now;
                 }
@@ -271,10 +295,45 @@
 
             window.addEventListener('devicemotion', (e) => {
                 if (e.acceleration) {
-                    const ax = e.acceleration.x || 0, ay = e.acceleration.y || 0, az = e.acceleration.z || 0;
-                    window.lastAccMag = Math.sqrt(ax*ax + ay*ay + az*az);
+                    lastAccX = e.acceleration.x || 0;
+                    lastAccY = e.acceleration.y || 0;
+                    lastAccZ = e.acceleration.z || 0;
+                    lastAccMag = Math.sqrt(lastAccX*lastAccX + lastAccY*lastAccY + lastAccZ*lastAccZ);
                 }
             });
+        };
+
+        window.setupJoystick = () => {
+            const joyZone = document.getElementById('joystick-zone');
+            const joyKnob = document.getElementById('joystick-knob');
+            let joyActive = false;
+            let joyCenter = {x:0, y:0};
+
+            joyZone.addEventListener('touchstart', (e) => {
+                joyActive = true;
+                const rect = joyZone.getBoundingClientRect();
+                joyCenter = { x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+                updateJoy(e.touches[0]);
+            });
+            joyZone.addEventListener('touchmove', (e) => {
+                if(joyActive) updateJoy(e.touches[0]);
+            });
+            joyZone.addEventListener('touchend', (e) => {
+                joyActive = false;
+                pJoyX = 0; pJoyY = 0;
+                joyKnob.style.transform = `translate(-50%, -50%)`;
+            });
+
+            function updateJoy(touch) {
+                let dx = touch.clientX - joyCenter.x;
+                let dy = touch.clientY - joyCenter.y;
+                const maxR = 50;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist > maxR) { dx = (dx/dist)*maxR; dy = (dy/dist)*maxR; }
+                joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                pJoyX = dx / maxR; 
+                pJoyY = dy / maxR; 
+            }
         };
 
         window.setMode = (newMode) => {
@@ -284,31 +343,24 @@
             const btnFire = document.getElementById('btn-fire');
 
             if (mode === 'sword') {
-                btnSword.className = "flex-1 bg-blue-600 rounded-xl text-4xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all";
-                btnGun.className = "flex-1 bg-gray-800 rounded-xl text-4xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all";
+                btnSword.className = "flex-1 bg-blue-600 rounded-xl py-4 text-2xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all";
+                btnGun.className = "flex-1 bg-gray-800 rounded-xl py-4 text-2xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all";
                 btnFire.classList.add('hidden');
             } else {
-                btnSword.className = "h-24 bg-gray-800 rounded-xl text-2xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all";
-                btnGun.className = "h-24 bg-blue-600 rounded-xl text-2xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all";
+                btnSword.className = "flex-1 bg-gray-800 rounded-xl py-4 text-2xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all";
+                btnGun.className = "flex-1 bg-blue-600 rounded-xl py-4 text-2xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all";
                 btnFire.classList.remove('hidden');
             }
         };
 
-        window.triggerFire = () => {
-            window.sendControllerData('fire');
-            if (navigator.vibrate) navigator.vibrate(50);
-        };
-
-        window.triggerRecenter = () => {
-            window.sendControllerData('recenter');
-            if (navigator.vibrate) navigator.vibrate(20);
-        };
+        window.triggerFire = () => { window.sendControllerData('fire'); if (navigator.vibrate) navigator.vibrate(50); };
+        window.triggerRecenter = () => { window.sendControllerData('recenter'); if (navigator.vibrate) navigator.vibrate(20); };
 
         // ==========================================
         // 2. 3D GAME ENGINE LOGIC (Host Desktop)
         // ==========================================
         
-        let score = 0, lives = 3;
+        let score = 0, playerHealth = 100;
         let gameState = 'START';
         
         let scene, camera, renderer, swordGroup, gunGroup, swordTip, gunTip;
@@ -319,34 +371,36 @@
         let isCalibrated = false;
         const eulerTemp = new THREE.Euler();
         const qTarget = new THREE.Quaternion();
+        
+        // 6DOF Physical tracking offsets
+        let wepVelX = 0, wepVelY = 0, wepVelZ = 0;
+        let wepOffsetX = 0, wepOffsetY = 0, wepOffsetZ = 0;
 
-        // --- PROCEDURAL TEXTURES FOR DAYLIGHT MEDIEVAL DETAIL ---
+        // PC Keyboard Controls
+        const keys = { w:false, a:false, s:false, d:false, q:false, e:false };
+        window.addEventListener('keydown', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true; });
+        window.addEventListener('keyup', e => { if(keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false; });
+
+        // --- PROCEDURAL TEXTURES ---
         function createBrickTexture() {
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#bfa58a'; // Lighter daytime mortar
+            ctx.fillStyle = '#bfa58a';
             ctx.fillRect(0,0,512,512);
             for(let y=0; y<512; y+=32) {
                 let off = (y/32)%2===0 ? 0 : 32;
                 for(let x=-64; x<512; x+=64) {
-                    // Warmer daytime brick colors
-                    let r = 160 + Math.random()*40;
-                    let g = 130 + Math.random()*30;
-                    let b = 110 + Math.random()*25;
+                    let r = 160 + Math.random()*40, g = 130 + Math.random()*30, b = 110 + Math.random()*25;
                     ctx.fillStyle = `rgb(${r},${g},${b})`;
                     ctx.fillRect(x+off+2, y+2, 60, 28);
-                    
-                    // Add noise/bump detail to bricks
                     ctx.fillStyle = 'rgba(0,0,0,0.15)';
-                    for(let n=0; n<15; n++) {
-                        ctx.fillRect(x+off+2+Math.random()*60, y+2+Math.random()*28, 2, 2);
-                    }
+                    for(let n=0; n<15; n++) ctx.fillRect(x+off+2+Math.random()*60, y+2+Math.random()*28, 2, 2);
                 }
             }
             const tex = new THREE.CanvasTexture(canvas);
             tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-            tex.repeat.set(8, 2);
+            tex.repeat.set(20, 2);
             return tex;
         }
 
@@ -354,7 +408,7 @@
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#6b665c'; // Dusty street color
+            ctx.fillStyle = '#6b665c';
             ctx.fillRect(0,0,512,512);
             for(let i=0; i<800; i++) {
                 let v = 110 + Math.random()*50;
@@ -365,7 +419,7 @@
             }
             const tex = new THREE.CanvasTexture(canvas);
             tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-            tex.repeat.set(6, 20);
+            tex.repeat.set(20, 20);
             return tex;
         }
 
@@ -376,20 +430,18 @@
             gameState = 'PLAYING';
             init3D();
             
-            // Spawn civilians
-            for(let i=0; i<6; i++) spawnCivilian();
-            
-            // Spawn first Knight
+            for(let i=0; i<15; i++) spawnCivilian(); // More civilians for big arena
             spawnEnemy();
         };
 
         function init3D() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // Sky Blue!
-            scene.fog = new THREE.FogExp2(0x87CEEB, 0.02); 
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.FogExp2(0x87CEEB, 0.015); 
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-            camera.position.set(0, 2, 0); 
+            camera.position.set(0, 2, 20); // Start slightly back in the arena
+            scene.add(camera); // Add camera to scene so it can have children
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -405,234 +457,151 @@
 
             // DAYTIME LIGHTING
             scene.add(new THREE.AmbientLight(0xffffff, 0.7)); 
-            
             const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
-            sunLight.position.set(10, 20, 10);
+            sunLight.position.set(20, 50, 20);
             scene.add(sunLight);
 
-            // Environment (High Detail Procedural Textures)
+            // =====================================
+            // LARGE ARENA ENVIRONMENT (100x100)
+            // =====================================
             const brickTex = createBrickTexture();
             const cobbleTex = createCobbleTexture();
 
-            const floorMat = new THREE.MeshStandardMaterial({ 
-                map: cobbleTex, bumpMap: cobbleTex, bumpScale: 0.5, roughness: 0.9, metalness: 0.1
-            });
-            // Wider street!
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 100), floorMat);
+            const floorMat = new THREE.MeshStandardMaterial({ map: cobbleTex, bumpMap: cobbleTex, bumpScale: 0.5, roughness: 0.9, metalness: 0.1 });
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            const wallMat = new THREE.MeshStandardMaterial({ 
-                map: brickTex, bumpMap: brickTex, bumpScale: 0.8, roughness: 0.8, metalness: 0.0 
-            });
+            const wallMat = new THREE.MeshStandardMaterial({ map: brickTex, bumpMap: brickTex, bumpScale: 0.8, roughness: 0.8 });
             
-            // Walls pushed further out
-            const leftWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
-            leftWall.position.set(-15, 5, -20);
-            scene.add(leftWall);
-            
-            const rightWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
-            rightWall.position.set(15, 5, -20);
-            scene.add(rightWall);
+            // 4 Walls bounding the arena
+            const wN = new THREE.Mesh(new THREE.BoxGeometry(100, 10, 2), wallMat); wN.position.set(0, 5, -50); scene.add(wN);
+            const wS = new THREE.Mesh(new THREE.BoxGeometry(100, 10, 2), wallMat); wS.position.set(0, 5, 50); scene.add(wS);
+            const wE = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat); wE.position.set(50, 5, 0); scene.add(wE);
+            const wW = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat); wW.position.set(-50, 5, 0); scene.add(wW);
 
             // =====================================
-            // 1000x DETAIL SWORD
+            // WEAPONS (Parented to Camera for VR movement)
             // =====================================
             swordGroup = new THREE.Group();
             swordGroup.scale.set(0.7, 0.7, 0.7);
             
-            // Blade (Sharpened Diamond cut)
             const bladeGeo = new THREE.CylinderGeometry(0.01, 0.25, 4.5, 4);
             const bladeMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.2, flatShading: true });
             const blade = new THREE.Mesh(bladeGeo, bladeMat);
             blade.rotation.x = Math.PI / 2; blade.rotation.y = Math.PI / 4; blade.position.z = -2.75; 
             swordGroup.add(blade);
             
-            // Glowing Magic Core
             const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
             const core = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.05, 4.0, 4), coreMat);
             core.rotation.x = Math.PI / 2; core.position.z = -2.7;
             swordGroup.add(core);
 
-            // Intricate Crossguard
             const hiltMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, metalness: 1.0, roughness: 0.3, flatShading: true });
+            const guardCenter = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), hiltMat); guardCenter.position.z = -0.3; swordGroup.add(guardCenter);
+            const guardL = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 4), hiltMat); guardL.rotation.z = Math.PI/2; guardL.rotation.y = -Math.PI/6; guardL.position.set(-0.6, 0, -0.3); swordGroup.add(guardL);
+            const guardR = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 4), hiltMat); guardR.rotation.z = -Math.PI/2; guardR.rotation.y = Math.PI/6; guardR.position.set(0.6, 0, -0.3); swordGroup.add(guardR);
+
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 8), new THREE.MeshStandardMaterial({ color: 0x331100, roughness: 0.9 }));
+            handle.rotation.x = Math.PI / 2; handle.position.z = 0.5; swordGroup.add(handle);
+
+            const pommel = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), hiltMat); pommel.position.z = 1.2; swordGroup.add(pommel);
+
+            const swordLight = new THREE.PointLight(0x00ffff, 1.5, 10); swordLight.position.z = -1.5; swordGroup.add(swordLight);
+
+            swordTip = new THREE.Object3D(); swordTip.position.z = -5.0; swordGroup.add(swordTip);
             
-            const guardCenter = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), hiltMat);
-            guardCenter.position.z = -0.3;
-            swordGroup.add(guardCenter);
+            // Add to CAMERA so it follows movement naturally
+            camera.add(swordGroup);
 
-            const guardL = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 4), hiltMat);
-            guardL.rotation.z = Math.PI / 2; guardL.rotation.y = -Math.PI / 6; guardL.position.set(-0.6, 0, -0.3);
-            swordGroup.add(guardL);
-            
-            const guardR = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 4), hiltMat);
-            guardR.rotation.z = -Math.PI / 2; guardR.rotation.y = Math.PI / 6; guardR.position.set(0.6, 0, -0.3);
-            swordGroup.add(guardR);
-
-            // Leather Grip
-            const handleMat = new THREE.MeshStandardMaterial({ color: 0x331100, roughness: 0.9 });
-            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 8), handleMat);
-            handle.rotation.x = Math.PI / 2; handle.position.z = 0.5;
-            swordGroup.add(handle);
-
-            // Pommel Jewel
-            const pommel = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), hiltMat);
-            pommel.position.z = 1.2;
-            swordGroup.add(pommel);
-
-            // Sword Magic Light
-            const swordLight = new THREE.PointLight(0x00ffff, 1.5, 10);
-            swordLight.position.z = -1.5;
-            swordGroup.add(swordLight);
-
-            swordTip = new THREE.Object3D(); swordTip.position.z = -5.0; // Extend tip slightly past visible blade
-            swordGroup.add(swordTip);
-            scene.add(swordGroup);
-
-            // =====================================
-            // 1000x DETAIL GUN (Flintlock Style)
-            // =====================================
+            // GUN
             gunGroup = new THREE.Group();
             gunGroup.scale.set(1.5, 1.5, 1.5);
             
-            // Metallic Barrel
-            const barrelMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.3 });
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.0, 16), barrelMat);
-            barrel.rotation.x = Math.PI / 2; barrel.position.z = -0.5;
-            gunGroup.add(barrel);
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.0, 16), new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.3 }));
+            barrel.rotation.x = Math.PI / 2; barrel.position.z = -0.5; gunGroup.add(barrel);
             
-            // Wooden Body
             const woodMat = new THREE.MeshStandardMaterial({ color: 0x5c2a16, roughness: 0.8 });
-            const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.8), woodMat);
-            body.position.z = -0.2; body.position.y = -0.05;
-            gunGroup.add(body);
-
-            // Grip
-            const grip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.2), woodMat);
-            grip.position.set(0, -0.25, 0.15); grip.rotation.x = Math.PI / 6;
-            gunGroup.add(grip);
-
-            // Gold Trims & Mechanism
-            const trim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.17, 0.2), hiltMat);
-            trim.position.z = 0; trim.position.y = -0.05;
-            gunGroup.add(trim);
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.8), woodMat); body.position.z = -0.2; body.position.y = -0.05; gunGroup.add(body);
+            const grip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.2), woodMat); grip.position.set(0, -0.25, 0.15); grip.rotation.x = Math.PI / 6; gunGroup.add(grip);
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.17, 0.2), hiltMat); trim.position.z = 0; trim.position.y = -0.05; gunGroup.add(trim);
             
-            gunTip = new THREE.Object3D(); gunTip.position.z = -1.0;
-            gunGroup.add(gunTip);
-            scene.add(gunGroup);
+            gunTip = new THREE.Object3D(); gunTip.position.z = -1.0; gunGroup.add(gunTip);
+            
+            camera.add(gunGroup);
 
-            // Initial positioning
-            swordGroup.position.set(0, 1.5, -2);
-            gunGroup.position.set(0, 1.5, -2);
+            swordGroup.position.set(0, -0.5, -2);
+            gunGroup.position.set(0, -0.5, -2);
 
             requestAnimationFrame(gameLoop);
         }
 
         // =====================================
-        // CIVILIANS
+        // CIVILIANS & ENEMIES
         // =====================================
         function spawnCivilian() {
             if (gameState !== 'PLAYING') return;
             const civGroup = new THREE.Group();
             
-            // Tunics in earthy colors
             const colors = [0x8B4513, 0x556B2F, 0x8B0000, 0x4682B4];
             const tunicColor = colors[Math.floor(Math.random() * colors.length)];
-            const bodyMat = new THREE.MeshStandardMaterial({ color: tunicColor, roughness: 0.9 });
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8), bodyMat);
-            body.position.y = 0.75;
-            civGroup.add(body);
-            
-            const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.7 });
-            const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), headMat);
-            head.position.y = 1.8;
-            civGroup.add(head);
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8), new THREE.MeshStandardMaterial({ color: tunicColor, roughness: 0.9 }));
+            body.position.y = 0.75; civGroup.add(body);
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.7 }));
+            head.position.y = 1.8; civGroup.add(head);
 
-            civGroup.position.set((Math.random() - 0.5) * 20, 0, -10 - Math.random() * 40); 
-            
-            civGroup.userData = { 
-                speed: 0.03 + Math.random() * 0.03, 
-                targetX: civGroup.position.x + (Math.random() - 0.5) * 10,
-                targetZ: civGroup.position.z + (Math.random() - 0.5) * 10,
-                changeTimer: 0
-            };
-            scene.add(civGroup);
-            civilians.push(civGroup);
+            civGroup.position.set((Math.random() - 0.5) * 80, 0, (Math.random() - 0.5) * 80); 
+            civGroup.userData = { speed: 0.03 + Math.random() * 0.03, targetX: civGroup.position.x, targetZ: civGroup.position.z, changeTimer: 0 };
+            scene.add(civGroup); civilians.push(civGroup);
         }
 
-        // =====================================
-        // THE CHALLENGER (1v1 KNIGHT)
-        // =====================================
         function spawnEnemy() {
             if (gameState !== 'PLAYING') return;
             const enemyGroup = new THREE.Group();
             
-            // Heavy Armor Plate Look
             const armorMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.8, roughness: 0.4 });
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.6, 1.8, 8), armorMat);
-            body.position.y = 0.9;
-            enemyGroup.add(body);
-            
-            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.6, 8), armorMat);
-            head.position.y = 2.0;
-            enemyGroup.add(head);
-            
-            // Red Plume/Visor glow
-            const eyeGeo = new THREE.BoxGeometry(0.5, 0.1, 0.1);
-            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const visor = new THREE.Mesh(eyeGeo, eyeMat); 
-            visor.position.set(0, 2.0, 0.4); 
-            enemyGroup.add(visor);
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.6, 1.8, 8), armorMat); body.position.y = 0.9; enemyGroup.add(body);
+            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.6, 8), armorMat); head.position.y = 2.0; enemyGroup.add(head);
+            const visor = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: 0xff0000 })); visor.position.set(0, 2.0, 0.4); enemyGroup.add(visor);
 
-            // Floating Health Bar
-            const hpGroup = new THREE.Group();
-            hpGroup.position.y = 2.7;
+            const hpGroup = new THREE.Group(); hpGroup.position.y = 2.7;
             const hpBG = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.15), new THREE.MeshBasicMaterial({color: 0x550000}));
             const hpFG = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.15), new THREE.MeshBasicMaterial({color: 0x00ff00}));
-            hpFG.position.z = 0.01;
-            hpGroup.add(hpBG);
-            hpGroup.add(hpFG);
-            enemyGroup.add(hpGroup);
+            hpFG.position.z = 0.01; hpGroup.add(hpBG); hpGroup.add(hpFG); enemyGroup.add(hpGroup);
 
-            enemyGroup.position.set(0, 0, -40); // Spawns far down the street
+            // Spawn at random location far from player
+            let spawnX, spawnZ;
+            do {
+                spawnX = (Math.random() - 0.5) * 80;
+                spawnZ = (Math.random() - 0.5) * 80;
+            } while (Math.hypot(spawnX - camera.position.x, spawnZ - camera.position.z) < 20); // Keep away from player initially
+            
+            enemyGroup.position.set(spawnX, 0, spawnZ); 
             
             enemyGroup.userData = { 
-                speed: 0.05 + (score * 0.005), 
-                active: true, 
-                hitRadius: 1.5,
-                maxHealth: 100,
-                health: 100,
-                hpBar: hpFG,
-                lastHitTime: 0,
-                isBleeding: false,
-                bodyMesh: body
+                speed: 0.08 + (score * 0.005), 
+                active: true, hitRadius: 1.5, maxHealth: 100, health: 100,
+                hpBar: hpFG, lastHitTime: 0, lastAttackTime: 0, isBleeding: false, bodyMesh: body
             };
-            
-            scene.add(enemyGroup); 
-            enemies.push(enemyGroup);
+            scene.add(enemyGroup); enemies.push(enemyGroup);
         }
 
         // =====================================
-        // COMBAT, GORE & PHYSICS
+        // COMBAT & PHYSICS
         // =====================================
         function shootBullet() {
             const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
             const tipPos = new THREE.Vector3(); gunTip.getWorldPosition(tipPos); bullet.position.copy(tipPos);
             const basePos = new THREE.Vector3(); gunGroup.getWorldPosition(basePos);
             bullet.userData = { velocity: new THREE.Vector3().subVectors(tipPos, basePos).normalize().multiplyScalar(1.2), life: 100 };
-            
-            const bLight = new THREE.PointLight(0xffff00, 1, 5);
-            bullet.add(bLight);
-            
+            bullet.add(new THREE.PointLight(0xffff00, 1, 5));
             scene.add(bullet); bullets.push(bullet);
         }
 
         function createBloodBurst(pos) {
             for(let i=0; i<15; i++) {
                 const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), new THREE.MeshBasicMaterial({ color: 0x880000 }));
-                p.position.copy(pos);
-                p.position.y += Math.random() * 1.5;
-                p.position.x += (Math.random() - 0.5) * 0.5;
+                p.position.copy(pos); p.position.y += Math.random() * 1.5; p.position.x += (Math.random() - 0.5) * 0.5;
                 p.userData = { vx: (Math.random()-0.5)*0.5, vy: Math.random()*0.3, vz: (Math.random()-0.5)*0.5, life: 1.0, isBlood: true };
                 scene.add(p); particles.push(p);
             }
@@ -640,22 +609,14 @@
         
         function spawnBloodDrop(enemyPos) {
             const drop = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: 0x880000 }));
-            drop.position.copy(enemyPos);
-            drop.position.y += 1.0 + (Math.random() * 0.5); // Random height on body
-            drop.position.x += (Math.random() - 0.5) * 0.8;
-            scene.add(drop);
-            bloodDrops.push({ mesh: drop, state: 'falling', life: 1.0 });
+            drop.position.copy(enemyPos); drop.position.y += 1.0 + (Math.random() * 0.5); drop.position.x += (Math.random() - 0.5) * 0.8;
+            scene.add(drop); bloodDrops.push({ mesh: drop, state: 'falling', life: 1.0 });
         }
 
         function addWoundToEnemy(enemy) {
-            const woundGeo = new THREE.BoxGeometry(0.8, 0.1, 0.2);
-            const woundMat = new THREE.MeshBasicMaterial({ color: 0x660000 });
-            const wound = new THREE.Mesh(woundGeo, woundMat);
-            
-            // Randomly position and rotate the gash on the armor body
+            const wound = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.2), new THREE.MeshBasicMaterial({ color: 0x660000 }));
             wound.position.set((Math.random()-0.5)*0.5, (Math.random()-0.5)*0.8, 0.5);
             wound.rotation.z = (Math.random() - 0.5) * Math.PI;
-            
             enemy.userData.bodyMesh.add(wound);
             enemy.userData.isBleeding = true;
         }
@@ -673,33 +634,21 @@
 
         function damageEnemy(enemy, index) {
             const now = Date.now();
-            // 400ms cooldown so a single pass doesn't hit them 60 times a second
             if (now - enemy.userData.lastHitTime < 400) return; 
             
             enemy.userData.lastHitTime = now;
-            enemy.userData.health -= 35; // Takes 3 hits to kill
+            enemy.userData.health -= 35; // 3 hits to kill
             
-            // Visuals
-            addWoundToEnemy(enemy);
-            createBloodBurst(enemy.position);
+            addWoundToEnemy(enemy); createBloodBurst(enemy.position);
             scene.background = new THREE.Color(0xffcccc); setTimeout(() => { scene.background = new THREE.Color(0x87CEEB); }, 50);
 
-            // Update Healthbar
             const hpRatio = Math.max(0, enemy.userData.health / enemy.userData.maxHealth);
-            enemy.userData.hpBar.scale.x = hpRatio;
-            enemy.userData.hpBar.position.x = -(1.5 - (1.5 * hpRatio)) / 2; // Keep left aligned
+            enemy.userData.hpBar.scale.x = hpRatio; enemy.userData.hpBar.position.x = -(1.5 - (1.5 * hpRatio)) / 2;
 
-            // Death check
             if (enemy.userData.health <= 0) {
-                enemy.userData.active = false; 
-                scene.remove(enemy); 
-                enemies.splice(index, 1);
-                
-                score++; 
-                document.getElementById('score-display').innerText = score;
-                
-                // Spawn the NEXT challenger!
-                setTimeout(spawnEnemy, 2000);
+                enemy.userData.active = false; scene.remove(enemy); enemies.splice(index, 1);
+                score++; document.getElementById('score-display').innerText = score;
+                setTimeout(spawnEnemy, 2000); // Spawn NEXT challenger
             }
         }
 
@@ -714,8 +663,8 @@
                     
                     const dist = pointToLineDistance(enemy.position.x, enemy.position.y + 1, enemy.position.z, basePos.x, basePos.y, basePos.z, tipPos.x, tipPos.y, tipPos.z);
                     
-                    // You must swing to damage them (AccMag > 5)
-                    if (dist < enemy.userData.hitRadius && window.gameControllerData.accMag > 5) {
+                    // You must swing hard (AccMag > 5) or thrust forward (Z velocity) to deal damage
+                    if (dist < enemy.userData.hitRadius && (window.gameControllerData.accMag > 5 || Math.abs(wepVelZ) > 0.05)) {
                         damageEnemy(enemy, i);
                     }
                 }
@@ -736,9 +685,7 @@
 
         function angleDiff(a, b) {
             let d = a - b;
-            while (d > 180) d -= 360;
-            while (d < -180) d += 360;
-            return d;
+            while (d > 180) d -= 360; while (d < -180) d += 360; return d;
         }
 
         // ==========================================
@@ -748,21 +695,43 @@
             if (gameState === 'PLAYING') {
                 const ctrl = window.gameControllerData;
                 
-                // Weapon switching
+                // --- PLAYER MOVEMENT (Keyboard + Phone Joystick) ---
+                let rotSpeed = 0.04;
+                let moveSpeed = 0.2;
+                
+                // Keyboard
+                if(keys.a) camera.rotation.y += rotSpeed;
+                if(keys.d) camera.rotation.y -= rotSpeed;
+                if(keys.q) { camera.position.x -= Math.cos(camera.rotation.y) * moveSpeed; camera.position.z -= Math.sin(camera.rotation.y) * -moveSpeed; }
+                if(keys.e) { camera.position.x += Math.cos(camera.rotation.y) * moveSpeed; camera.position.z += Math.sin(camera.rotation.y) * -moveSpeed; }
+                if(keys.w) { camera.position.x -= Math.sin(camera.rotation.y) * moveSpeed; camera.position.z -= Math.cos(camera.rotation.y) * moveSpeed; }
+                if(keys.s) { camera.position.x += Math.sin(camera.rotation.y) * moveSpeed; camera.position.z += Math.cos(camera.rotation.y) * moveSpeed; }
+                
+                // Phone Joystick
+                if (ctrl.joyX || ctrl.joyY) {
+                    camera.rotation.y -= ctrl.joyX * rotSpeed * 1.5;
+                    camera.position.x -= Math.sin(camera.rotation.y) * -ctrl.joyY * moveSpeed;
+                    camera.position.z -= Math.cos(camera.rotation.y) * -ctrl.joyY * moveSpeed;
+                }
+
+                // Bounds checking
+                camera.position.x = Math.max(-48, Math.min(48, camera.position.x));
+                camera.position.z = Math.max(-48, Math.min(48, camera.position.z));
+
+                // --- WEAPON HANDLING ---
                 swordGroup.visible = (ctrl.mode === 'sword');
                 gunGroup.visible = (ctrl.mode === 'gun');
                 weaponDisplay.innerText = ctrl.mode.toUpperCase();
                 weaponDisplay.className = ctrl.mode === 'gun' ? "text-2xl font-black medieval-text text-yellow-300" : "text-2xl font-black medieval-text text-white";
                 let activeWeapon = ctrl.mode === 'gun' ? gunGroup : swordGroup;
 
-                // Handle TRUE 1:1 Phone Orientation Logic
+                // Handle TRUE 1:1 Phone Orientation & 6DOF Physics
                 if (ctrl.active) {
                     if (ctrl.triggerRecenter || !isCalibrated) {
-                        yawOffset = ctrl.alpha || 0;
-                        isCalibrated = true;
-                        ctrl.triggerRecenter = false;
+                        yawOffset = ctrl.alpha || 0; isCalibrated = true; ctrl.triggerRecenter = false;
                     }
 
+                    // 1. ROTATION (Absolute mapping to relative camera space)
                     let calAlpha = (ctrl.alpha || 0) - yawOffset;
                     eulerTemp.set(
                         THREE.MathUtils.degToRad(ctrl.beta || 0),
@@ -773,17 +742,36 @@
                     qTarget.setFromEuler(eulerTemp);
                     activeWeapon.quaternion.slerp(qTarget, 0.4);
 
+                    // 2. 6DOF POSITIONAL TRACKING (Integrating phone acceleration)
+                    // Map phone axes to relative camera axes: X=Right, Y=Up, Z=Forward
+                    // Device orientation axes depend on portrait mode.
+                    wepVelX += (ctrl.accX || 0) * 0.005;
+                    wepVelY += (ctrl.accY || 0) * 0.005;
+                    wepVelZ += (ctrl.accZ || 0) * 0.005; // Forward thrust!
+                    
+                    // Friction to stop infinite sliding
+                    wepVelX *= 0.8; wepVelY *= 0.8; wepVelZ *= 0.8;
+                    
+                    // Accumulate offset
+                    wepOffsetX += wepVelX;
+                    wepOffsetY += wepVelY;
+                    wepOffsetZ += wepVelZ;
+                    
+                    // Spring force back to center to prevent permanent drift
+                    wepOffsetX *= 0.9; wepOffsetY *= 0.9; wepOffsetZ *= 0.9;
+
+                    // Base visual shoulder offset
                     eulerTemp.setFromQuaternion(activeWeapon.quaternion, 'YXZ');
-                    let targetPosX = eulerTemp.y * -2.0; 
-                    let targetPosY = 1.5 + (eulerTemp.x * 2.0);
+                    let basePosX = eulerTemp.y * -2.0; 
+                    let basePosY = -0.5 + (eulerTemp.x * 2.0);
+                    let basePosZ = -2.0;
 
-                    activeWeapon.position.x += (targetPosX - activeWeapon.position.x) * 0.15;
-                    activeWeapon.position.y += (targetPosY - activeWeapon.position.y) * 0.15;
+                    // Apply combined offset to weapon's LOCAL position relative to camera
+                    activeWeapon.position.x += ((basePosX + wepOffsetX) - activeWeapon.position.x) * 0.3;
+                    activeWeapon.position.y += ((basePosY + wepOffsetY) - activeWeapon.position.y) * 0.3;
+                    activeWeapon.position.z += ((basePosZ - wepOffsetZ) - activeWeapon.position.z) * 0.3; // -Z is forward
 
-                    if (ctrl.triggerFire && ctrl.mode === 'gun') {
-                        shootBullet();
-                        ctrl.triggerFire = false;
-                    }
+                    if (ctrl.triggerFire && ctrl.mode === 'gun') { shootBullet(); ctrl.triggerFire = false; }
                 }
 
                 // Civilians Wander Logic
@@ -792,42 +780,64 @@
                     if (civ.userData.changeTimer <= 0) {
                         civ.userData.targetX = civ.position.x + (Math.random() - 0.5) * 10;
                         civ.userData.targetZ = civ.position.z + (Math.random() - 0.5) * 10;
-                        // Keep on street
-                        civ.userData.targetX = Math.max(-12, Math.min(12, civ.userData.targetX));
-                        civ.userData.targetZ = Math.max(-50, Math.min(-5, civ.userData.targetZ));
+                        civ.userData.targetX = Math.max(-45, Math.min(45, civ.userData.targetX));
+                        civ.userData.targetZ = Math.max(-45, Math.min(45, civ.userData.targetZ));
                         civ.userData.changeTimer = 100 + Math.random() * 200;
                     }
                     civ.position.x += (civ.userData.targetX - civ.position.x) * civ.userData.speed * 0.1;
                     civ.position.z += (civ.userData.targetZ - civ.position.z) * civ.userData.speed * 0.1;
+                    civ.lookAt(civ.userData.targetX, civ.position.y, civ.userData.targetZ);
                 });
 
-                // Knight Update
+                // --- NEW ENEMY AI (STOP & FIGHT) ---
                 for (let i = enemies.length - 1; i >= 0; i--) {
                     const e = enemies[i];
-                    e.position.z += e.userData.speed; 
                     
-                    // Bobbing
-                    e.position.y = Math.sin(timestamp * 0.005) * 0.1;
+                    // Vector to player
+                    const dir = new THREE.Vector3().subVectors(camera.position, e.position);
+                    dir.y = 0; // Ignore height difference
+                    const distToPlayer = dir.length();
 
-                    // Bleeding effects
-                    if (e.userData.isBleeding && Math.random() < 0.15) {
-                        spawnBloodDrop(e.position);
-                    }
+                    e.lookAt(camera.position.x, e.position.y, camera.position.z);
 
-                    // Reached player
-                    if (e.position.z > camera.position.z) {
-                        scene.remove(e); enemies.splice(i, 1);
-                        lives--; document.getElementById('lives-display').innerText = lives;
-                        camera.position.x = (Math.random() - 0.5) * 1; setTimeout(() => { camera.position.x = 0; }, 50);
+                    if (distToPlayer > 3.0) {
+                        // WALKING TOWARDS PLAYER
+                        dir.normalize();
+                        e.position.add(dir.multiplyScalar(e.userData.speed));
+                        e.position.y = Math.sin(timestamp * 0.005) * 0.1; // Bobbing
+                    } else {
+                        // IN RANGE: STOP AND FIGHT
+                        const now = Date.now();
                         
-                        if (lives > 0) {
-                            setTimeout(spawnEnemy, 2000); // Spawn next one if alive
+                        // Check if ready to attack (Every 2 seconds)
+                        if (now - e.userData.lastAttackTime > 2000) {
+                            e.userData.lastAttackTime = now;
+                            
+                            // Lunge Animation
+                            e.position.add(dir.normalize().multiplyScalar(1.5));
+                            
+                            // Deal Damage
+                            playerHealth -= 15; 
+                            document.getElementById('lives-display').innerText = playerHealth;
+                            scene.background = new THREE.Color(0xaa0000); 
+                            setTimeout(() => { scene.background = new THREE.Color(0x87CEEB); }, 150);
+                            
+                            if (playerHealth <= 0) {
+                                gameState = 'GAMEOVER';
+                                uiLayer.classList.remove('hidden'); document.getElementById('screen-gameover').classList.remove('hidden');
+                                document.getElementById('final-score').innerText = score;
+                            }
                         } else {
-                            gameState = 'GAMEOVER';
-                            uiLayer.classList.remove('hidden'); document.getElementById('screen-gameover').classList.remove('hidden');
-                            document.getElementById('final-score').innerText = score;
+                            // Pull back slightly after lunge
+                            if (now - e.userData.lastAttackTime > 300 && now - e.userData.lastAttackTime < 800) {
+                                e.position.add(dir.normalize().multiplyScalar(-0.05));
+                            }
+                            e.position.y = 0; // Stop bobbing
                         }
                     }
+
+                    // Bleeding effects
+                    if (e.userData.isBleeding && Math.random() < 0.15) spawnBloodDrop(e.position);
                 }
 
                 // Bullets
@@ -845,24 +855,21 @@
                     if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
                 }
                 
-                // Blood Drops (Dripping onto floor)
+                // Blood Drops
                 for (let i = bloodDrops.length - 1; i >= 0; i--) {
                     const drop = bloodDrops[i];
                     if (drop.state === 'falling') {
                         drop.mesh.position.y -= 0.1;
                         if (drop.mesh.position.y <= 0.05) {
                             drop.mesh.position.y = 0.05;
-                            drop.mesh.scale.set(3, 0.1, 3); // Flatten out into a puddle
+                            drop.mesh.scale.set(3, 0.1, 3);
                             drop.state = 'puddle';
                         }
                     } else if (drop.state === 'puddle') {
-                        drop.life -= 0.005; // Fade away slowly
+                        drop.life -= 0.005; 
                         drop.mesh.material.opacity = Math.max(0, drop.life);
                         drop.mesh.material.transparent = true;
-                        if (drop.life <= 0) {
-                            scene.remove(drop.mesh);
-                            bloodDrops.splice(i, 1);
-                        }
+                        if (drop.life <= 0) { scene.remove(drop.mesh); bloodDrops.splice(i, 1); }
                     }
                 }
 
