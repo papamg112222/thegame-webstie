@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Medieval Motion - VR Dual Device Game</title>
+    <title>Medieval Motion - Full VR Tracking</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
@@ -20,7 +20,9 @@
         .stick-bg { width: 120px; height: 120px; background: rgba(255, 255, 255, 0.05); border-radius: 50%; position: absolute; display: none; border: 2px solid rgba(255, 255, 255, 0.2); pointer-events: none; }
         .stick-knob { width: 50px; height: 50px; background: rgba(255, 255, 255, 0.5); border-radius: 50%; position: absolute; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
         
-        #swing-btn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 15px 30px; background: #ef4444; border-radius: 30px; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.5); z-index: 20; }
+        #recenter-btn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 15px 30px; background: #3b82f6; border-radius: 30px; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.5); z-index: 20; color: white;}
+        #recenter-btn:active { background: #2563eb; transform: translateX(-50%) scale(0.95); }
+        
         #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; background: white; border-radius: 50%; z-index: 5; mix-blend-mode: difference; display: none;}
         
         /* Mini Map Styles */
@@ -28,18 +30,21 @@
         #minimap-player { position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 5px #3b82f6; z-index: 10; }
         .minimap-npc { position: absolute; width: 6px; height: 6px; background: #ef4444; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 5px #ef4444; }
         .minimap-building { position: absolute; background: rgba(156, 163, 175, 0.5); transform: translate(-50%, -50%); border-radius: 2px; }
+        
+        /* New HUD & Combat Styles */
+        #game-hud { display: none; position: absolute; top: 20px; left: 20px; z-index: 5; pointer-events: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); font-family: 'Courier New', Courier, monospace; }
+        .hud-stat { font-size: 1.5rem; font-weight: bold; margin-bottom: 5px; color: #fff; text-transform: uppercase; letter-spacing: 2px;}
+        .hud-value { color: #fbbf24; font-size: 2rem; }
+        #damage-flash { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: radial-gradient(circle, rgba(255,0,0,0) 50%, rgba(255,0,0,0.4) 100%); z-index: 4; pointer-events: none; transition: opacity 0.1s; opacity: 0; }
     </style>
 </head>
 <body>
 
     <!-- Main UI Menus -->
     <div id="ui-layer" class="relative z-50 flex items-center justify-center w-screen h-screen p-4">
-        
-        <!-- Main Menu -->
         <div id="main-menu" class="glass-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full">
             <h1 class="text-4xl font-extrabold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">Medieval Motion</h1>
-            <p class="text-gray-400 mb-8">A dual-device VR experience. Computer = Screen, Phone = Sword/Movement.</p>
-            
+            <p class="text-gray-400 mb-8">Full VR Tracking. Move your phone to stab, slash, and deflect.</p>
             <div class="space-y-4">
                 <button onclick="showHostMenu()" class="w-full py-3 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold transition-all transform hover:scale-105 shadow-[0_0_15px_rgba(37,99,235,0.5)]">
                     💻 Create Host Server (PC)
@@ -80,30 +85,31 @@
     <!-- Phone Controller UI -->
     <div id="controller-ui">
         <div class="absolute top-8 left-0 w-full text-center text-gray-400 text-sm font-bold z-10 pointer-events-none">
-            <span class="text-green-400">●</span> VR Sensor Active<br>Tilt phone to aim sword, swing to attack!
+            <span class="text-green-400">●</span> Full 1:1 VR Tracking Active<br>Move phone physically to slash & stab!
         </div>
         
-        <!-- Left Side: Movement -->
         <div id="left-zone" class="joystick-zone">
             <div class="absolute bottom-12 text-gray-500 pointer-events-none font-bold uppercase tracking-wider text-xl opacity-50">Slide to Walk</div>
             <div id="stick-bg-left" class="stick-bg"><div id="stick-knob-left" class="stick-knob"></div></div>
         </div>
         
-        <!-- Right Side: Look -->
         <div id="right-zone" class="joystick-zone">
              <div class="absolute bottom-12 text-gray-500 pointer-events-none font-bold uppercase tracking-wider text-xl opacity-50">Slide to Look</div>
             <div id="stick-bg-right" class="stick-bg"><div id="stick-knob-right" class="stick-knob"></div></div>
         </div>
         
-        <!-- Fallback/Manual Action button -->
-        <button id="swing-btn" onclick="triggerSwing()">Tap to Swing</button>
+        <!-- Recalibration Button -->
+        <button id="recenter-btn" onclick="recenterSword()">🎯 Recenter Sword</button>
     </div>
 
     <!-- Host Game Rendering -->
     <canvas id="game-canvas"></canvas>
     <div id="crosshair"></div>
-    
-    <!-- Host Mini-Map -->
+    <div id="damage-flash"></div>
+    <div id="game-hud">
+        <div class="hud-stat">Score: <span id="score-val" class="hud-value">0</span></div>
+        <div class="hud-stat">Combo: <span id="combo-val" class="hud-value">x1</span></div>
+    </div>
     <div id="minimap-container">
         <div id="minimap-player"></div>
         <div id="minimap-elements"></div>
@@ -126,9 +132,7 @@
 
         let peer = null;
         let connection = null;
-        let isHost = false;
 
-        // Generate a random 4-letter code for easier typing
         const generateShortId = () => Math.random().toString(36).substring(2, 6).toUpperCase();
 
         function showMainMenu() {
@@ -141,67 +145,48 @@
         function showHostMenu() {
             mainMenu.classList.add('hidden');
             hostMenu.classList.remove('hidden');
-            isHost = true;
             initPeerHost();
         }
 
         function showJoinMenu() {
             mainMenu.classList.add('hidden');
             joinMenu.classList.remove('hidden');
-            isHost = false;
         }
 
         // ==========================================
-        // WebRTC P2P Networking (PeerJS)
+        // WebRTC P2P Networking
         // ==========================================
         function initPeerHost() {
             const shortId = generateShortId();
             peer = new Peer('med-town-vr-' + shortId);
             
-            peer.on('open', (id) => {
-                serverIdDisplay.innerText = shortId;
-            });
+            peer.on('open', (id) => serverIdDisplay.innerText = shortId);
 
             peer.on('connection', (conn) => {
                 connection = conn;
-                connection.on('open', () => {
-                    console.log("Client connected!");
-                    startGameHost();
-                });
+                connection.on('open', () => startGameHost());
                 connection.on('data', handleNetworkData);
-                connection.on('close', () => {
-                    alert("Controller disconnected.");
-                    location.reload();
-                });
+                connection.on('close', () => { alert("Controller disconnected."); location.reload(); });
             });
-
-            peer.on('error', (err) => {
-                console.error(err);
-                serverIdDisplay.innerText = "Error. Retry.";
-            });
+            peer.on('error', (err) => { serverIdDisplay.innerText = "Error. Retry."; });
         }
 
         function connectToHost() {
             const shortId = document.getElementById('join-id-input').value.toUpperCase().trim();
             if(!shortId) return;
-
-            const btn = document.getElementById('connect-btn');
-            btn.innerText = "Connecting...";
+            document.getElementById('connect-btn').innerText = "Connecting...";
 
             peer = new Peer();
             peer.on('open', () => {
                 connection = peer.connect('med-town-vr-' + shortId, { reliable: true });
-                
                 connection.on('open', () => {
-                    // Connected successfully! Initialize Controller
                     uiLayer.style.display = 'none';
                     controllerUI.style.display = 'block';
                     initController();
                 });
-
                 connection.on('error', (err) => {
-                    alert("Connection failed. Check ID.");
-                    btn.innerText = "Connect & Start VR";
+                    alert("Connection failed.");
+                    document.getElementById('connect-btn').innerText = "Connect & Start VR";
                 });
             });
         }
@@ -210,37 +195,80 @@
         // Host Game Engine (Three.js)
         // ==========================================
         let scene, camera, renderer;
-        let player, swordMesh;
-        let npcs = [];
-        let buildings = [];
-        
-        // Map Dimensions (for logic and minimap)
+        let player, swordPivot, swordMesh;
+        let npcs = [], buildings = [];
         const MAP_SIZE = 100;
         
-        // Input state from network
+        // --- NEW GAMEPLAY SYSTEMS ---
+        let score = 0;
+        let combo = 1;
+        let comboTimer = 0;
+        let particles = [];
+        let dayTime = 0;
+        let directionalLight;
+        
+        // --- WEB AUDIO API SYNTHESIZER ---
+        // Generates sound waves via math so we don't need external audio files
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
+        
+        function playSound(type) {
+            if(audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            const now = audioCtx.currentTime;
+            if(type === 'swing') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(40, now + 0.2);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+            } else if (type === 'hit') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(300, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+                gain.gain.setValueAtTime(0.6, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+            }
+        }
+        // --- END NEW SYSTEMS ---
+
         let netInput = {
-            moveX: 0, moveY: 0, 
-            lookX: 0, lookY: 0,
-            swordBeta: null, swordGamma: null // Gyro data
+            moveX: 0, moveY: 0, lookX: 0, lookY: 0,
+            swordAlpha: 0, swordBeta: 0, swordGamma: 0, // Relative orientation
+            accelX: 0, accelY: 0, accelZ: 0 // Linear acceleration for thrusts
         };
 
-        let playerRotation = new THREE.Vector2(0, 0); // Yaw, Pitch
-        let swordAnimation = { active: false, time: 0 };
+        let playerRotation = new THREE.Vector2(0, 0);
+        let swordPhysics = {
+            velocity: new THREE.Vector3(),
+            offset: new THREE.Vector3()
+        };
 
         function handleNetworkData(data) {
-            // Strict type checking ensures connection sync glitches won't cause NaN crashes
             if(data.type === 'input') {
+                // Joystick
                 if (typeof data.moveX === 'number') netInput.moveX = data.moveX;
                 if (typeof data.moveY === 'number') netInput.moveY = data.moveY;
                 if (typeof data.lookX === 'number') netInput.lookX = data.lookX;
                 if (typeof data.lookY === 'number') netInput.lookY = data.lookY;
+                
+                // 1:1 VR Orientation
+                if (typeof data.swordAlpha === 'number') netInput.swordAlpha = data.swordAlpha;
                 if (typeof data.swordBeta === 'number') netInput.swordBeta = data.swordBeta;
                 if (typeof data.swordGamma === 'number') netInput.swordGamma = data.swordGamma;
-            } else if (data.type === 'action' && data.action === 'swing') {
-                if(!swordAnimation.active) {
-                    swordAnimation.active = true;
-                    swordAnimation.time = 0;
-                }
+                
+                // Motion Translation (Stabbing)
+                if (typeof data.accelX === 'number') netInput.accelX = data.accelX;
+                if (typeof data.accelY === 'number') netInput.accelY = data.accelY;
+                if (typeof data.accelZ === 'number') netInput.accelZ = data.accelZ;
             }
         }
 
@@ -249,249 +277,165 @@
             gameCanvas.style.display = 'block';
             crosshair.style.display = 'block';
             minimapContainer.style.display = 'block';
+            document.getElementById('game-hud').style.display = 'block'; // Activate HUD
             initThreeJS();
         }
 
         function initThreeJS() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            scene.background = new THREE.Color(0x87CEEB);
             scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
-
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
             renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-            // Lighting
             const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
             scene.add(ambientLight);
+            
+            // Replaced local const with global directionalLight for Day/Night cycle
+            directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(50, 100, 50);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
 
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(50, 100, 50);
-            dirLight.castShadow = true;
-            dirLight.shadow.camera.top = 100;
-            dirLight.shadow.camera.bottom = -100;
-            dirLight.shadow.camera.left = -100;
-            dirLight.shadow.camera.right = 100;
-            dirLight.shadow.mapSize.width = 2048;
-            dirLight.shadow.mapSize.height = 2048;
-            scene.add(dirLight);
-
-            // Ground - Using Solid Color to prevent black screen issues
             const groundGeo = new THREE.PlaneGeometry(MAP_SIZE * 2, MAP_SIZE * 2);
-            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4d7c38, roughness: 1.0 }); // Green Grass
+            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4d7c38, roughness: 1.0 });
             const ground = new THREE.Mesh(groundGeo, groundMat);
             ground.rotation.x = -Math.PI / 2;
             ground.receiveShadow = true;
             scene.add(ground);
             
-            // Map Grid Helper for a better sense of movement
             const gridHelper = new THREE.GridHelper(MAP_SIZE * 2, 50, 0x3a5e2a, 0x3a5e2a);
             gridHelper.position.y = 0.01;
             scene.add(gridHelper);
 
-            // Map Bounds (Walls)
-            createWalls();
-
-            // Generate Map (Houses & Civilians)
             generateMap();
 
-            // Player Setup - Guaranteed safe spawn in the center
             player = new THREE.Group();
-            player.position.set(0, 2, 0); // Center plaza, eye level
+            player.position.set(0, 2, 0);
             scene.add(player);
             player.add(camera);
 
-            // First Person Sword
             createSword();
 
             window.addEventListener('resize', onWindowResize, false);
-            
-            // Start Engine
             animate();
-        }
-        
-        function createWalls() {
-            const wallGeo = new THREE.BoxGeometry(MAP_SIZE * 2, 10, 2);
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9 });
-            
-            const wall1 = new THREE.Mesh(wallGeo, wallMat);
-            wall1.position.set(0, 5, -MAP_SIZE);
-            scene.add(wall1);
-            
-            const wall2 = new THREE.Mesh(wallGeo, wallMat);
-            wall2.position.set(0, 5, MAP_SIZE);
-            scene.add(wall2);
-            
-            const wall3 = new THREE.Mesh(wallGeo, wallMat);
-            wall3.rotation.y = Math.PI / 2;
-            wall3.position.set(-MAP_SIZE, 5, 0);
-            scene.add(wall3);
-            
-            const wall4 = new THREE.Mesh(wallGeo, wallMat);
-            wall4.rotation.y = Math.PI / 2;
-            wall4.position.set(MAP_SIZE, 5, 0);
-            scene.add(wall4);
         }
 
         function createSword() {
+            // Pivot group holds the base rotation and rests at the default hand position
+            swordPivot = new THREE.Group();
+            swordPivot.position.set(0.5, -0.5, -0.7);
+            
+            // Set base artistic resting angle
+            swordPivot.rotation.set(Math.PI/4, -Math.PI/8, -Math.PI/6);
+            camera.add(swordPivot);
+
+            // Mesh group receives the dynamic VR relative rotations & translations
             swordMesh = new THREE.Group();
             
-            // Blade
-            const bladeGeo = new THREE.BoxGeometry(0.1, 1.2, 0.05);
-            const bladeMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 });
-            const blade = new THREE.Mesh(bladeGeo, bladeMat);
+            const blade = new THREE.Mesh(
+                new THREE.BoxGeometry(0.1, 1.2, 0.05),
+                new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 })
+            );
             blade.position.y = 0.8;
             blade.castShadow = true;
 
-            // Guard
-            const guardGeo = new THREE.BoxGeometry(0.4, 0.05, 0.1);
-            const guardMat = new THREE.MeshStandardMaterial({ color: 0xb8860b, metalness: 0.6, roughness: 0.4 });
-            const guard = new THREE.Mesh(guardGeo, guardMat);
+            const guard = new THREE.Mesh(
+                new THREE.BoxGeometry(0.4, 0.05, 0.1),
+                new THREE.MeshStandardMaterial({ color: 0xb8860b, metalness: 0.6, roughness: 0.4 })
+            );
             guard.position.y = 0.2;
             guard.castShadow = true;
 
-            // Handle
-            const handleGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.3);
-            const handleMat = new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 });
-            const handle = new THREE.Mesh(handleGeo, handleMat);
+            const handle = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.04, 0.04, 0.3),
+                new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 })
+            );
             handle.position.y = 0;
 
             swordMesh.add(blade);
             swordMesh.add(guard);
             swordMesh.add(handle);
-
-            // Position relative to camera
-            swordMesh.position.set(0.5, -0.5, -0.7);
             
-            // Default rotation
-            swordMesh.rotation.set(Math.PI/4, -Math.PI/8, -Math.PI/6);
-            camera.add(swordMesh);
+            swordPivot.add(swordMesh);
         }
 
         function generateMap() {
+            // Simplified environment code
             const houseBaseGeo = new THREE.BoxGeometry(6, 5, 6);
-            const houseBaseMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.8 }); // Stone color
+            const houseBaseMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.8 });
             const roofGeo = new THREE.ConeGeometry(5, 4, 4);
-            const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 1.0 }); // Brown wood roof
+            const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 1.0 });
 
-            // Generate a small plaza in the center
-            const plazaGeo = new THREE.CircleGeometry(10, 32);
-            const plazaMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa });
-            const plaza = new THREE.Mesh(plazaGeo, plazaMat);
-            plaza.rotation.x = -Math.PI/2;
-            plaza.position.y = 0.02;
-            scene.add(plaza);
+            const plaza = new THREE.Mesh(new THREE.CircleGeometry(10, 32), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
+            plaza.rotation.x = -Math.PI/2; plaza.position.y = 0.02; scene.add(plaza);
 
-            // Generate structured houses around the map, keeping the center clear
             for(let i = 0; i < 40; i++) {
-                // Random position within map bounds
                 const x = (Math.random() - 0.5) * (MAP_SIZE * 1.8);
                 const z = (Math.random() - 0.5) * (MAP_SIZE * 1.8);
-
-                // Keep away from center spawn (radius 15)
                 if(Math.sqrt(x*x + z*z) < 15) continue; 
 
                 const house = new THREE.Group();
-                
                 const base = new THREE.Mesh(houseBaseGeo, houseBaseMat);
-                base.position.y = 2.5;
-                base.castShadow = true;
-                base.receiveShadow = true;
-
+                base.position.y = 2.5; base.castShadow = true; base.receiveShadow = true;
                 const roof = new THREE.Mesh(roofGeo, roofMat);
-                roof.position.y = 7;
-                roof.rotation.y = Math.PI / 4;
-                roof.castShadow = true;
-
-                house.add(base);
-                house.add(roof);
-                house.position.set(x, 0, z);
-                
-                // Random rotation snapping to 90 degrees for a "street" feel
-                house.rotation.y = (Math.floor(Math.random() * 4) * Math.PI) / 2;
-
+                roof.position.y = 7; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
+                house.add(base); house.add(roof);
+                house.position.set(x, 0, z); house.rotation.y = (Math.floor(Math.random() * 4) * Math.PI) / 2;
                 scene.add(house);
                 buildings.push({ x: x, z: z, radius: 4 });
-                
-                // Add to Minimap
                 addMinimapElement('building', x, z, 10);
             }
 
-            // Generate Civilians (NPCs)
-            // FIXED: Replaced unsupported CapsuleGeometry with CylinderGeometry for r128 compatibility
             const npcGeo = new THREE.CylinderGeometry(0.5, 0.5, 2, 8); 
-            const shirtMat1 = new THREE.MeshStandardMaterial({ color: 0x2563eb }); // Blue shirt
-            const shirtMat2 = new THREE.MeshStandardMaterial({ color: 0xb45309 }); // Brown shirt
-            
+            const shirtMat = [new THREE.MeshStandardMaterial({ color: 0x2563eb }), new THREE.MeshStandardMaterial({ color: 0xb45309 })];
             for(let i = 0; i < 20; i++) {
-                const npc = new THREE.Mesh(npcGeo, Math.random() > 0.5 ? shirtMat1 : shirtMat2);
+                const npc = new THREE.Mesh(npcGeo, shirtMat[Math.floor(Math.random()*2)].clone()); // Cloned material for individual damage flashes
+                const nx = (Math.random() - 0.5) * MAP_SIZE, nz = (Math.random() - 0.5) * MAP_SIZE;
+                npc.position.set(nx, 1, nz); npc.castShadow = true;
                 
-                // Spawn randomly
-                const nx = (Math.random() - 0.5) * MAP_SIZE;
-                const nz = (Math.random() - 0.5) * MAP_SIZE;
-                
-                npc.position.set(nx, 1, nz);
-                npc.castShadow = true;
-                
-                npc.userData = {
-                    id: 'npc_' + i,
-                    target: new THREE.Vector3(nx + (Math.random()-0.5)*10, 1, nz + (Math.random()-0.5)*10),
-                    speed: 0.02 + Math.random() * 0.03
+                // Add combat state and health data
+                npc.userData = { 
+                    id: 'npc_' + i, 
+                    target: new THREE.Vector3(nx + (Math.random()-0.5)*10, 1, nz + (Math.random()-0.5)*10), 
+                    speed: 0.02 + Math.random() * 0.03,
+                    hp: 100,
+                    state: 'alive'
                 };
-                scene.add(npc);
-                npcs.push(npc);
-                
-                // Add to Minimap
+                scene.add(npc); npcs.push(npc);
                 addMinimapElement('npc', nx, nz, 6, npc.userData.id);
             }
         }
         
-        // --- Minimap Logic ---
         function addMinimapElement(type, x, z, size, id = null) {
-            const el = document.createElement('div');
-            el.className = 'minimap-' + type;
-            if(id) el.id = 'mm_' + id;
-            el.style.width = size + 'px';
-            el.style.height = size + 'px';
-            
-            // Map 3D coordinate (-MAP_SIZE to MAP_SIZE) to Percentage (0% to 100%)
-            const percentX = ((x + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
-            const percentZ = ((z + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
-            
-            el.style.left = percentX + '%';
-            el.style.top = percentZ + '%';
-            
+            const el = document.createElement('div'); el.className = 'minimap-' + type;
+            if(id) el.id = 'mm_' + id; el.style.width = size + 'px'; el.style.height = size + 'px';
+            el.style.left = (((x + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%'; el.style.top = (((z + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
             minimapElements.appendChild(el);
         }
         
         function updateMinimap() {
-            // Update Player dot
-            const pX = ((player.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
-            const pZ = ((player.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
             const mmPlayer = document.getElementById('minimap-player');
-            mmPlayer.style.left = pX + '%';
-            mmPlayer.style.top = pZ + '%';
+            mmPlayer.style.left = (((player.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
+            mmPlayer.style.top = (((player.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
             
-            // Update NPC dots
             for(let npc of npcs) {
                 const dot = document.getElementById('mm_' + npc.userData.id);
                 if(dot) {
-                    const nX = ((npc.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
-                    const nZ = ((npc.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
-                    dot.style.left = nX + '%';
-                    dot.style.top = nZ + '%';
+                    dot.style.left = (((npc.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
+                    dot.style.top = (((npc.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
                 }
             }
         }
 
         function onWindowResize() {
             if(!camera) return;
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         const clock = new THREE.Clock();
@@ -500,251 +444,276 @@
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
 
-            // 1. Camera Look (from right joystick)
-            playerRotation.x -= netInput.lookX * 0.04; // Yaw (Left/Right)
-            playerRotation.y -= netInput.lookY * 0.04; // Pitch (Up/Down)
-            playerRotation.y = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, playerRotation.y)); // Clamp pitch
-
+            // 1. Camera Look
+            playerRotation.x -= netInput.lookX * 0.04;
+            playerRotation.y -= netInput.lookY * 0.04;
+            playerRotation.y = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, playerRotation.y));
             player.rotation.y = playerRotation.x;
             camera.rotation.x = playerRotation.y;
 
-            // 2. Player Movement (from left joystick)
-            const speed = 10; // Walking speed
+            // 2. Player Movement
+            const speed = 10;
             const moveVec = new THREE.Vector3(netInput.moveX, 0, -netInput.moveY);
             moveVec.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
             moveVec.normalize().multiplyScalar(speed * delta);
 
-            // Simple Collision Detection against buildings & walls
             let newPos = player.position.clone().add(moveVec);
             let collision = false;
+            if(Math.abs(newPos.x) > MAP_SIZE - 2 || Math.abs(newPos.z) > MAP_SIZE - 2) collision = true;
+            else { for(let b of buildings) if(Math.sqrt(Math.pow(newPos.x-b.x,2) + Math.pow(newPos.z-b.z,2)) < b.radius + 1) { collision = true; break; } }
+            if(!collision) player.position.copy(newPos);
+
+            // 3. FULL VR SWORD TRACKING
+
+            // --- A. Physics Translations (Stabbing / Slashing Movement) ---
+            // Phone -Z is thrusting outward/away from user. 
+            // In ThreeJS camera space, -Z is forward. So Phone Z maps to ThreeJS Z naturally.
+            swordPhysics.velocity.x += (netInput.accelX * delta * 1.5);
+            swordPhysics.velocity.y += (netInput.accelY * delta * 1.5);
+            swordPhysics.velocity.z += (netInput.accelZ * delta * 2.0); // Z is more sensitive for stabs
+
+            // Friction to slow down velocity
+            swordPhysics.velocity.multiplyScalar(0.85);
             
-            // Wall boundaries bounds
-            if(Math.abs(newPos.x) > MAP_SIZE - 2 || Math.abs(newPos.z) > MAP_SIZE - 2) {
-                collision = true;
-            } else {
-                for(let b of buildings) {
-                    const dx = newPos.x - b.x;
-                    const dz = newPos.z - b.z;
-                    if(Math.sqrt(dx*dx + dz*dz) < b.radius + 1) { // +1 for player radius
-                        collision = true;
-                        break;
-                    }
-                }
-            }
+            // Add velocity to physical position offset
+            swordPhysics.offset.add(swordPhysics.velocity.clone().multiplyScalar(delta));
             
-            if(!collision) {
-                player.position.copy(newPos);
+            // Spring effect: constantly pull the sword back to (0,0,0) local origin
+            swordPhysics.offset.lerp(new THREE.Vector3(0, 0, 0), 0.15);
+            
+            // Limit how far the sword can translate from the pivot
+            swordPhysics.offset.x = THREE.MathUtils.clamp(swordPhysics.offset.x, -2, 2);
+            swordPhysics.offset.y = THREE.MathUtils.clamp(swordPhysics.offset.y, -2, 2);
+            swordPhysics.offset.z = THREE.MathUtils.clamp(swordPhysics.offset.z, -2.5, 1);
+
+            // Apply calculated offset position
+            swordMesh.position.set(swordPhysics.offset.x, swordPhysics.offset.y, swordPhysics.offset.z);
+            
+            // Trigger sound on rapid physical movement
+            if(swordPhysics.velocity.length() > 4.0 && Math.random() > 0.8) {
+                playSound('swing');
             }
 
-            // 3. VR Sword Tracking
-            if(swordAnimation.active) {
-                // Hard Swing Animation (Overrides VR Gyro tracking briefly)
-                swordAnimation.time += delta * 15;
-                if(swordAnimation.time > Math.PI) {
-                    swordAnimation.active = false; // end swing
-                } else {
-                    const baseRotX = Math.PI/4;
-                    const swingArc = Math.sin(swordAnimation.time);
-                    swordMesh.rotation.x = baseRotX - swingArc * 2.0; // Slash down
-                    swordMesh.rotation.z = -Math.PI/6 - swingArc * 0.5;
-                }
-            } else {
-                // 1:1 VR Gyro Tracking from Phone (With NaN safeguards)
-                let beta = netInput.swordBeta;
-                let gamma = netInput.swordGamma;
-                
-                if (typeof beta === 'number' && typeof gamma === 'number') {
-                    // We assume user is holding phone vertically like a handle. 
-                    // So Beta = 90 is neutral pointing forward.
-                    let pitch = THREE.MathUtils.degToRad(beta - 90);
-                    let roll = THREE.MathUtils.degToRad(-gamma);
-                    
-                    if(!isNaN(pitch) && !isNaN(roll)) {
-                        // Smoothly interpolate current rotation to target rotation
-                        swordMesh.rotation.x += (pitch - swordMesh.rotation.x) * 0.2;
-                        swordMesh.rotation.z += (roll - swordMesh.rotation.z) * 0.2;
-                    }
-                    
-                    // Idle bobbing from movement
-                    const isMoving = Math.abs(netInput.moveX) > 0.1 || Math.abs(netInput.moveY) > 0.1;
-                    const bobFreq = isMoving ? 12 : 2;
-                    const bobAmp = isMoving ? 0.05 : 0.01;
-                    swordMesh.position.y = -0.5 + Math.sin(clock.elapsedTime * bobFreq) * bobAmp;
-                    
-                } else {
-                    // Fallback idle if no gyro data available
-                    swordMesh.rotation.set(Math.PI/4, -Math.PI/8, -Math.PI/6);
-                }
-            }
+            // --- B. 1:1 Orientation Mapping ---
+            // We use the Calibrated VR angles sent from the phone
+            let pitch = THREE.MathUtils.degToRad(netInput.swordBeta || 0);
+            let yaw   = THREE.MathUtils.degToRad(netInput.swordAlpha || 0);
+            let roll  = THREE.MathUtils.degToRad(-(netInput.swordGamma || 0));
 
-            // 4. Update NPCs (Wandering AI)
+            // Create quaternion to prevent Gimbal Lock
+            let euler = new THREE.Euler(pitch, yaw, roll, 'YXZ');
+            let targetQuat = new THREE.Quaternion().setFromEuler(euler);
+            
+            // Smooth Slerp makes it feel weighty and removes network jitter
+            swordMesh.quaternion.slerp(targetQuat, 0.4);
+
+            // --- C. Combat & Hit Detection ---
+            // Calculate the tip of the blade in World Space for accurate hitboxes
+            let swordTipLocal = new THREE.Vector3(0, 1.2, 0); 
+            let swordTipWorld = swordTipLocal.clone();
+            swordMesh.localToWorld(swordTipWorld);
+            
+            let isSwingingHard = swordPhysics.velocity.length() > 2.0;
+
+            // 4. Update NPCs & Process Combat
             for(let npc of npcs) {
-                const dir = new THREE.Vector3().subVectors(npc.userData.target, npc.position);
-                dir.y = 0; // Keep on ground
-                
-                if(dir.length() < 0.5) {
-                    // Pick new target within map
-                    npc.userData.target.set(
-                        npc.position.x + (Math.random()-0.5)*20, 
-                        1, 
-                        npc.position.z + (Math.random()-0.5)*20
-                    );
-                } else {
-                    dir.normalize();
-                    npc.position.addScaledVector(dir, npc.userData.speed);
-                    npc.rotation.y = Math.atan2(dir.x, dir.z);
+                if(npc.userData.state === 'dead') continue; // Skip dead logic
+
+                // Collision Detection
+                if(isSwingingHard) {
+                    let dist = npc.position.distanceTo(swordTipWorld);
+                    if(dist < 2.2) { // Strike registered
+                        npc.userData.hp -= 35; // Damage
+                        playSound('hit');
+                        
+                        // Spawn Physical Particle Effects
+                        for(let p=0; p<8; p++) {
+                            const pMesh = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
+                            pMesh.position.copy(swordTipWorld);
+                            pMesh.userData = {
+                                velocity: new THREE.Vector3((Math.random()-0.5)*8, Math.random()*8, (Math.random()-0.5)*8),
+                                life: 0.8
+                            };
+                            scene.add(pMesh);
+                            particles.push(pMesh);
+                        }
+                        
+                        // Apply Physical Knockback based on angle
+                        let knockback = new THREE.Vector3().subVectors(npc.position, player.position).normalize();
+                        npc.position.addScaledVector(knockback, 0.6);
+                        
+                        // Flash effect
+                        const originalColor = npc.material.color.getHex();
+                        npc.material.color.setHex(0xff0000);
+                        setTimeout(() => { if(npc.userData.state === 'alive') npc.material.color.setHex(originalColor); }, 150);
+
+                        // Update Combo & Score UI
+                        combo++;
+                        comboTimer = 2.5; // Seconds before combo resets
+                        score += 15 * combo;
+                        document.getElementById('score-val').innerText = score;
+                        document.getElementById('combo-val').innerText = 'x' + combo;
+                        
+                        // Render Screen Damage Flash Overlay
+                        const flash = document.getElementById('damage-flash');
+                        flash.style.display = 'block';
+                        flash.style.opacity = '1';
+                        setTimeout(() => { flash.style.opacity = '0'; setTimeout(() => flash.style.display = 'none', 100); }, 50);
+
+                        // Check for death
+                        if(npc.userData.hp <= 0) {
+                            npc.userData.state = 'dead';
+                            npc.rotation.x = Math.PI / 2; // Collapse to ground
+                            npc.position.y = 0.5;
+                            score += 100 * combo;
+                            document.getElementById('score-val').innerText = score;
+                            
+                            // Respawn timer
+                            setTimeout(() => {
+                                npc.userData.state = 'alive';
+                                npc.userData.hp = 100;
+                                npc.rotation.x = 0;
+                                npc.position.set((Math.random() - 0.5) * MAP_SIZE, 1, (Math.random() - 0.5) * MAP_SIZE);
+                                npc.material.color.setHex(originalColor);
+                            }, 8000);
+                        }
+                    }
+                }
+
+                const dir = new THREE.Vector3().subVectors(npc.userData.target, npc.position); dir.y = 0;
+                if(dir.length() < 0.5) npc.userData.target.set(npc.position.x + (Math.random()-0.5)*20, 1, npc.position.z + (Math.random()-0.5)*20);
+                else { dir.normalize(); npc.position.addScaledVector(dir, npc.userData.speed); npc.rotation.y = Math.atan2(dir.x, dir.z); }
+            }
+                const dir = new THREE.Vector3().subVectors(npc.userData.target, npc.position); dir.y = 0;
+                if(dir.length() < 0.5) npc.userData.target.set(npc.position.x + (Math.random()-0.5)*20, 1, npc.position.z + (Math.random()-0.5)*20);
+                else { dir.normalize(); npc.position.addScaledVector(dir, npc.userData.speed); npc.rotation.y = Math.atan2(dir.x, dir.z); }
+            }
+            
+            // --- D. Global World Updates ---
+            
+            // Process Particle Physics
+            for(let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.userData.life -= delta;
+                p.userData.velocity.y -= 9.8 * delta; // Gravity pull
+                p.position.addScaledVector(p.userData.velocity, delta);
+                if(p.userData.life <= 0 || p.position.y < 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
                 }
             }
+            
+            // Process Combo Drain
+            if(comboTimer > 0) {
+                comboTimer -= delta;
+                if(comboTimer <= 0) {
+                    combo = 1;
+                    document.getElementById('combo-val').innerText = 'x' + combo;
+                }
+            }
+            
+            // Dynamic Day & Night Cycle
+            dayTime += delta * 0.05;
+            directionalLight.position.x = Math.cos(dayTime) * 50;
+            directionalLight.position.y = Math.max(-10, Math.sin(dayTime) * 100);
+            directionalLight.position.z = Math.sin(dayTime) * 50;
+            
+            let skyIntensity = Math.max(0.15, Math.sin(dayTime));
+            scene.background.setRGB(0.53 * skyIntensity, 0.8 * skyIntensity, 0.92 * skyIntensity);
+            scene.fog.color.copy(scene.background);
+            directionalLight.intensity = Math.max(0, skyIntensity * 1.5);
 
-            // Update 2D Minimap UI
             updateMinimap();
-
             renderer.render(scene, camera);
         }
 
         // ==========================================
         // Client Controller Logic (Phone)
         // ==========================================
+        let clientInput = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
         
-        let clientInput = { 
-            moveX: 0, moveY: 0, 
-            lookX: 0, lookY: 0,
-            swordBeta: 90, swordGamma: 0 // Default upright handle position
-        };
-        
-        let lastSwingTime = 0;
+        // Calibration Variables
+        let rawAlpha = 0, rawBeta = 0, rawGamma = 0;
+        let calibAlpha = 0, calibBeta = 0, calibGamma = 0;
 
         function initController() {
-            // Left stick = Walk/Slide
-            setupJoystick('left-zone', 'stick-bg-left', 'stick-knob-left', (x, y) => {
-                clientInput.moveX = x;
-                clientInput.moveY = -y; // Invert Y for forward/back
-            });
+            setupJoystick('left-zone', 'stick-bg-left', 'stick-knob-left', (x, y) => { clientInput.moveX = x; clientInput.moveY = -y; });
+            setupJoystick('right-zone', 'stick-bg-right', 'stick-knob-right', (x, y) => { clientInput.lookX = x; clientInput.lookY = y; });
 
-            // Right stick = Look around
-            setupJoystick('right-zone', 'stick-bg-right', 'stick-knob-right', (x, y) => {
-                clientInput.lookX = x;
-                clientInput.lookY = y;
-            });
-
-            // Network Loop - Send state continuously
+            // 30 fps network updates for smoother 1:1 tracking
             setInterval(() => {
-                if(connection && connection.open) {
-                    connection.send({ type: 'input', ...clientInput });
-                }
-            }, 40); // 25 fps updates
+                if(connection && connection.open) connection.send({ type: 'input', ...clientInput });
+            }, 33);
 
-            // Start reading Phone sensors
             requestSensors();
         }
 
-        function triggerSwing() {
-            if(connection && connection.open) {
-                connection.send({ type: 'action', action: 'swing' });
-                // Haptic feedback if supported
-                if(navigator.vibrate) navigator.vibrate(150);
-            }
+        // Allows player to reset their hand resting position comfortably
+        function recenterSword() {
+            calibAlpha = rawAlpha;
+            calibBeta = rawBeta;
+            calibGamma = rawGamma;
+            if(navigator.vibrate) navigator.vibrate(50);
         }
 
         function requestSensors() {
-            // Ask permission for iOS 13+ devices, automatically works on Android
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                        }
-                    })
-                    .catch(console.error);
-                    
-                DeviceMotionEvent.requestPermission()
-                    .then(permissionState => {
-                        if(permissionState === 'granted') {
-                            window.addEventListener('devicemotion', handleMotion);
-                        }
-                    })
-                    .catch(console.error);
+                DeviceOrientationEvent.requestPermission().then(state => { if (state === 'granted') window.addEventListener('deviceorientation', handleOrientation); }).catch(console.error);
+                DeviceMotionEvent.requestPermission().then(state => { if (state === 'granted') window.addEventListener('devicemotion', handleMotion); }).catch(console.error);
             } else {
-                // Non-iOS 13 devices
                 window.addEventListener('deviceorientation', handleOrientation);
                 window.addEventListener('devicemotion', handleMotion);
             }
         }
 
-        // Maps Phone Rotation to Sword Rotation safely
         function handleOrientation(event) {
-            if (typeof event.beta === 'number') clientInput.swordBeta = event.beta;
-            if (typeof event.gamma === 'number') clientInput.swordGamma = event.gamma;
+            rawAlpha = event.alpha || 0;
+            rawBeta = event.beta || 0;
+            rawGamma = event.gamma || 0;
+
+            // Calculate relative orientation based on user's calibration
+            let a = rawAlpha - calibAlpha;
+            // Handle compass wrapping (0-360)
+            if (a > 180) a -= 360;
+            if (a < -180) a += 360;
+
+            clientInput.swordAlpha = a;
+            clientInput.swordBeta = rawBeta - calibBeta;
+            clientInput.swordGamma = rawGamma - calibGamma;
         }
 
-        // Detects Hard Swings
         function handleMotion(event) {
-            if(!event.accelerationIncludingGravity) return;
-            const ax = event.accelerationIncludingGravity.x || 0;
-            const ay = event.accelerationIncludingGravity.y || 0;
-            const az = event.accelerationIncludingGravity.z || 0;
-
-            const mag = Math.sqrt(ax*ax + ay*ay + az*az);
-            const threshold = 25; // standard gravity is ~9.8. Hard swing hits 20+
-            const now = Date.now();
-
-            if(mag > threshold && (now - lastSwingTime > 600)) { 
-                triggerSwing();
-                lastSwingTime = now;
-            }
+            if(!event.acceleration) return;
+            // We use 'acceleration' (which excludes gravity) to track linear thrusts
+            const threshold = 1.0; // Filter micro-jitters
+            
+            clientInput.accelX = Math.abs(event.acceleration.x) > threshold ? event.acceleration.x : 0;
+            clientInput.accelY = Math.abs(event.acceleration.y) > threshold ? event.acceleration.y : 0;
+            clientInput.accelZ = Math.abs(event.acceleration.z) > threshold ? event.acceleration.z : 0;
         }
 
-        // Reusable Virtual Joystick Logic
         function setupJoystick(zoneId, bgId, knobId, callback) {
-            const zone = document.getElementById(zoneId);
-            const bg = document.getElementById(bgId);
-            const knob = document.getElementById(knobId);
-            
-            let activeTouchId = null;
-            let originX = 0, originY = 0;
-            const maxRadius = 60; // Max distance knob can move
+            const zone = document.getElementById(zoneId), bg = document.getElementById(bgId), knob = document.getElementById(knobId);
+            let activeTouchId = null, originX = 0, originY = 0; const maxRadius = 60;
 
             zone.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                if(activeTouchId !== null) return; 
-
-                const touch = e.changedTouches[0];
-                activeTouchId = touch.identifier;
-
-                originX = touch.clientX;
-                originY = touch.clientY;
-
-                bg.style.display = 'block';
-                bg.style.left = (originX - 60) + 'px'; // Center bg (120px/2)
-                bg.style.top = (originY - 60) + 'px';
-                
-                knob.style.transform = `translate(-50%, -50%) translate(0px, 0px)`;
-                callback(0, 0);
+                e.preventDefault(); if(activeTouchId !== null) return; 
+                const touch = e.changedTouches[0]; activeTouchId = touch.identifier;
+                originX = touch.clientX; originY = touch.clientY;
+                bg.style.display = 'block'; bg.style.left = (originX - 60) + 'px'; bg.style.top = (originY - 60) + 'px';
+                knob.style.transform = `translate(-50%, -50%) translate(0px, 0px)`; callback(0, 0);
             }, {passive: false});
 
             zone.addEventListener('touchmove', (e) => {
-                e.preventDefault();
-                if(activeTouchId === null) return;
-
+                e.preventDefault(); if(activeTouchId === null) return;
                 for(let i=0; i<e.changedTouches.length; i++) {
                     const touch = e.changedTouches[i];
                     if(touch.identifier === activeTouchId) {
-                        
-                        let dx = touch.clientX - originX;
-                        let dy = touch.clientY - originY;
-                        
+                        let dx = touch.clientX - originX, dy = touch.clientY - originY;
                         const distance = Math.sqrt(dx*dx + dy*dy);
-                        if(distance > maxRadius) {
-                            const ratio = maxRadius / distance;
-                            dx *= ratio;
-                            dy *= ratio;
-                        }
-
+                        if(distance > maxRadius) { const ratio = maxRadius / distance; dx *= ratio; dy *= ratio; }
                         knob.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
-                        
-                        // Output normalized values -1.0 to 1.0
-                        callback(dx / maxRadius, dy / maxRadius);
-                        break;
+                        callback(dx / maxRadius, dy / maxRadius); break;
                     }
                 }
             }, {passive: false});
@@ -752,20 +721,13 @@
             const endTouch = (e) => {
                 if(activeTouchId === null) return;
                 for(let i=0; i<e.changedTouches.length; i++) {
-                    const touch = e.changedTouches[i];
-                    if(touch.identifier === activeTouchId) {
-                        activeTouchId = null;
-                        bg.style.display = 'none';
-                        callback(0, 0); // Reset speed to 0
-                        break;
+                    if(e.changedTouches[i].identifier === activeTouchId) {
+                        activeTouchId = null; bg.style.display = 'none'; callback(0, 0); break;
                     }
                 }
             };
-
-            zone.addEventListener('touchend', endTouch);
-            zone.addEventListener('touchcancel', endTouch);
+            zone.addEventListener('touchend', endTouch); zone.addEventListener('touchcancel', endTouch);
         }
-
     </script>
 </body>
 </html>
