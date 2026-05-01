@@ -3,731 +3,637 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Medieval Motion - Full VR Tracking</title>
+    <title>AR Medieval Defender (P2P)</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js for 3D Game Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    
+    <!-- Firebase for P2P Signaling -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- FIREBASE INIT ---
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'local-dev-id';
+        let currentUser = null;
+
+        const initAuth = async () => {
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        };
+
+        // --- P2P WEBRTC SETUP ---
+        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+        let dataChannel = null;
+        let roomRef = null;
+
+        window.gameControllerData = {
+            active: false,
+            alpha: 0, beta: 0, gamma: 0,
+            accMag: 0,
+            mode: 'sword',
+            triggerFire: false,
+            triggerRecenter: false
+        };
+
+        function setupDataChannel(channel) {
+            channel.onopen = () => {
+                document.getElementById('screen-role-select').classList.add('hidden');
+                document.getElementById('screen-waiting').classList.add('hidden');
+                if (window.isHost) {
+                    window.startGame(); // Start 3D Game!
+                } else {
+                    document.getElementById('ui-controller').classList.remove('hidden');
+                    window.startControllerSensors();
+                }
+            };
+            channel.onmessage = (e) => {
+                if (window.isHost) {
+                    const data = JSON.parse(e.data);
+                    if (data.type === 'state') {
+                        window.gameControllerData.active = true;
+                        window.gameControllerData.alpha = data.alpha;
+                        window.gameControllerData.beta = data.beta;
+                        window.gameControllerData.gamma = data.gamma;
+                        window.gameControllerData.accMag = data.accMag;
+                        window.gameControllerData.mode = data.mode;
+                    } else if (data.type === 'fire') {
+                        window.gameControllerData.triggerFire = true;
+                    } else if (data.type === 'recenter') {
+                        window.gameControllerData.triggerRecenter = true;
+                    }
+                }
+            };
+        }
+
+        // Host logic (The Screen)
+        window.createHostRoom = async () => {
+            if (!currentUser) return;
+            window.isHost = true;
+            const pin = Math.floor(1000 + Math.random() * 9000).toString();
+            document.getElementById('pin-display').innerText = pin;
+            
+            roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'webrtc_rooms', pin);
+            await setDoc(roomRef, { offer: null, answer: null, hostCandidates: [], controllerCandidates: [] });
+
+            pc.ondatachannel = (e) => {
+                dataChannel = e.channel;
+                setupDataChannel(dataChannel);
+            };
+
+            pc.onicecandidate = (e) => {
+                if (e.candidate) updateDoc(roomRef, { hostCandidates: arrayUnion(e.candidate.toJSON()) });
+            };
+
+            onSnapshot(roomRef, async (snap) => {
+                const data = snap.data();
+                if (data?.offer && !pc.currentRemoteDescription) {
+                    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    await updateDoc(roomRef, { answer: { type: answer.type, sdp: answer.sdp } });
+                }
+                if (data?.controllerCandidates) {
+                    data.controllerCandidates.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
+                }
+            });
+        };
+
+        // Controller logic (The Phone)
+        window.joinRoom = async (pin) => {
+            if (!currentUser) return;
+            window.isHost = false;
+            roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'webrtc_rooms', pin);
+            
+            dataChannel = pc.createDataChannel('gameData');
+            setupDataChannel(dataChannel);
+
+            pc.onicecandidate = (e) => {
+                if (e.candidate) updateDoc(roomRef, { controllerCandidates: arrayUnion(e.candidate.toJSON()) });
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await setDoc(roomRef, { offer: { type: offer.type, sdp: offer.sdp }, answer: null, hostCandidates: [], controllerCandidates: [] });
+
+            onSnapshot(roomRef, (snap) => {
+                const data = snap.data();
+                if (data?.answer && !pc.currentRemoteDescription) {
+                    pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+                }
+                if (data?.hostCandidates) {
+                    data.hostCandidates.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
+                }
+            });
+        };
+
+        window.sendControllerData = (type, payload = {}) => {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify({ type, ...payload }));
+            }
+        };
+
+        // Wait for Auth before enabling buttons
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('auth-loading').classList.add('hidden');
+                document.getElementById('role-buttons').classList.remove('hidden');
+            }
+        });
+
+        initAuth();
+    </script>
+
     <style>
-        body { margin: 0; overflow: hidden; background-color: #0f172a; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; -webkit-user-select: none; touch-action: none; }
-        #game-canvas { display: none; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
-        .glass-panel { background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); }
+        body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
         
-        /* Controller Styles */
-        #controller-ui { display: none; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 10; background: #020617; }
-        .joystick-zone { position: absolute; top: 0; width: 50%; height: 100%; display: flex; align-items: center; justify-content: center; touch-action: none; }
-        #left-zone { left: 0; border-right: 2px dashed rgba(255,255,255,0.1); }
-        #right-zone { right: 0; }
-        .stick-bg { width: 120px; height: 120px; background: rgba(255, 255, 255, 0.05); border-radius: 50%; position: absolute; display: none; border: 2px solid rgba(255, 255, 255, 0.2); pointer-events: none; }
-        .stick-knob { width: 50px; height: 50px; background: rgba(255, 255, 255, 0.5); border-radius: 50%; position: absolute; transform: translate(-50%, -50%); pointer-events: none; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        #game-container { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; background: #111; z-index: 1; }
         
-        #recenter-btn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); padding: 15px 30px; background: #3b82f6; border-radius: 30px; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.5); z-index: 20; color: white;}
-        #recenter-btn:active { background: #2563eb; transform: translateX(-50%) scale(0.95); }
-        
-        #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 10px; height: 10px; background: white; border-radius: 50%; z-index: 5; mix-blend-mode: difference; display: none;}
-        
-        /* Mini Map Styles */
-        #minimap-container { display: none; position: absolute; top: 20px; right: 20px; width: 150px; height: 150px; background: rgba(0,0,0,0.5); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; z-index: 5; overflow: hidden; backdrop-filter: blur(5px); }
-        #minimap-player { position: absolute; top: 50%; left: 50%; width: 8px; height: 8px; background: #3b82f6; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 5px #3b82f6; z-index: 10; }
-        .minimap-npc { position: absolute; width: 6px; height: 6px; background: #ef4444; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 5px #ef4444; }
-        .minimap-building { position: absolute; background: rgba(156, 163, 175, 0.5); transform: translate(-50%, -50%); border-radius: 2px; }
-        
-        /* New HUD & Combat Styles */
-        #game-hud { display: none; position: absolute; top: 20px; left: 20px; z-index: 5; pointer-events: none; text-shadow: 2px 2px 4px rgba(0,0,0,0.8); font-family: 'Courier New', Courier, monospace; }
-        .hud-stat { font-size: 1.5rem; font-weight: bold; margin-bottom: 5px; color: #fff; text-transform: uppercase; letter-spacing: 2px;}
-        .hud-value { color: #fbbf24; font-size: 2rem; }
-        #damage-flash { display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: radial-gradient(circle, rgba(255,0,0,0) 50%, rgba(255,0,0,0.4) 100%); z-index: 4; pointer-events: none; transition: opacity 0.1s; opacity: 0; }
+        .medieval-text { text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
+        .title-text { font-family: 'Times New Roman', Times, serif; letter-spacing: 2px; }
+
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #facc15;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <!-- Main UI Menus -->
-    <div id="ui-layer" class="relative z-50 flex items-center justify-center w-screen h-screen p-4">
-        <div id="main-menu" class="glass-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full">
-            <h1 class="text-4xl font-extrabold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500">Medieval Motion</h1>
-            <p class="text-gray-400 mb-8">Full VR Tracking. Move your phone to stab, slash, and deflect.</p>
-            <div class="space-y-4">
-                <button onclick="showHostMenu()" class="w-full py-3 px-6 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold transition-all transform hover:scale-105 shadow-[0_0_15px_rgba(37,99,235,0.5)]">
-                    💻 Create Host Server (PC)
+    <!-- 3D Game Engine (Host Only) -->
+    <div id="game-container" class="hidden"></div>
+
+    <!-- Host HUD -->
+    <div id="hud" class="absolute inset-0 p-8 flex flex-col justify-between hidden z-10 pointer-events-none">
+        <div class="flex justify-between items-start">
+            <div>
+                <p class="text-lg text-yellow-500 font-bold tracking-widest uppercase mb-1">Slain Enemies</p>
+                <p id="score-display" class="text-4xl font-black medieval-text">0</p>
+            </div>
+        </div>
+        <div class="flex justify-between items-end">
+            <div>
+                <p class="text-lg text-red-500 font-bold tracking-widest uppercase mb-1">City Health</p>
+                <p id="lives-display" class="text-4xl font-black medieval-text text-red-400">3</p>
+            </div>
+            <div class="text-center bg-black/60 px-8 py-3 rounded-xl border border-gray-700 shadow-lg backdrop-blur-sm">
+                <p class="text-sm text-cyan-400 font-bold tracking-widest uppercase mb-1">P2P Weapon</p>
+                <p id="weapon-display" class="text-2xl font-black medieval-text text-white">SWORD</p>
+            </div>
+            <div style="width: 150px;"></div>
+        </div>
+    </div>
+
+    <!-- ================= UI SCREENS ================= -->
+    <div id="ui-layer" class="fixed inset-0 w-screen flex items-center justify-center bg-black/90 backdrop-blur-sm z-50 transition-opacity duration-300 overflow-y-auto">
+        
+        <!-- 1. Role Selection -->
+        <div id="screen-role-select" class="text-center max-w-2xl p-6 sm:p-10 bg-gray-900 rounded-lg border-2 border-yellow-700 shadow-[0_0_50px_rgba(202,138,4,0.2)] m-4">
+            <h1 class="text-4xl sm:text-5xl font-black text-yellow-500 title-text medieval-text mb-4">AR MEDIEVAL DEFENDER</h1>
+            <p class="text-lg text-gray-300 mb-8 leading-relaxed">
+                Welcome to a True Mixed Reality Experience.<br>
+                One device runs the 3D Game Screen. Your Phone becomes the motion-sensing Sword and Gun.
+            </p>
+            
+            <div id="auth-loading" class="flex flex-col items-center mb-4">
+                <div class="loader mb-2"></div>
+                <p class="text-gray-400">Connecting to P2P Server...</p>
+            </div>
+
+            <div id="role-buttons" class="hidden flex flex-col gap-4">
+                <button onclick="selectHost()" class="w-full px-8 py-5 bg-blue-800 hover:bg-blue-700 border-2 border-blue-500 text-white font-bold rounded-xl text-xl transition-all shadow-[0_0_20px_rgba(0,100,255,0.4)] hover:scale-105 active:scale-95">
+                    📺 I AM THE SCREEN (HOST)
                 </button>
-                <button onclick="showJoinMenu()" class="w-full py-3 px-6 bg-purple-600 hover:bg-purple-500 rounded-xl font-bold transition-all transform hover:scale-105 shadow-[0_0_15px_rgba(147,51,234,0.5)]">
-                    📱 Join Server (Phone)
+                <div class="text-gray-500 font-bold">- OR -</div>
+                <button onclick="selectController()" class="w-full px-8 py-5 bg-green-800 hover:bg-green-700 border-2 border-green-500 text-white font-bold rounded-xl text-xl transition-all shadow-[0_0_20px_rgba(0,255,100,0.4)] hover:scale-105 active:scale-95">
+                    📱 I AM THE CONTROLLER (PHONE)
                 </button>
             </div>
         </div>
 
-        <!-- Host Menu -->
-        <div id="host-menu" class="glass-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full hidden">
-            <h2 class="text-2xl font-bold mb-4">Host Server Lobby</h2>
-            <p class="text-gray-300 mb-2">Enter this Server ID on your phone:</p>
-            <div class="bg-black bg-opacity-50 text-yellow-400 font-mono text-4xl p-4 rounded-xl mb-6 tracking-widest font-bold" id="server-id-display">...</div>
-            
-            <div class="flex items-center justify-center space-x-3 text-blue-400 animate-pulse mb-6">
-                <div class="w-3 h-3 bg-blue-400 rounded-full"></div>
-                <p>Waiting for phone to connect...</p>
-            </div>
-            <button onclick="showMainMenu()" class="text-gray-400 hover:text-white underline">Cancel</button>
+        <!-- 2. Host Waiting for Controller -->
+        <div id="screen-waiting" class="text-center hidden max-w-2xl p-10 bg-gray-900 rounded-lg border-2 border-blue-700 shadow-[0_0_50px_rgba(0,100,255,0.2)]">
+            <h2 class="text-3xl font-bold text-blue-400 mb-6">AWAITING CONTROLLER...</h2>
+            <p class="text-xl text-gray-300 mb-4">Leave this screen open.</p>
+            <p class="text-lg text-gray-400 mb-2">Open this exact webpage on your phone and click "Controller", then enter PIN:</p>
+            <div id="pin-display" class="text-7xl font-black tracking-widest text-yellow-400 medieval-text my-8">----</div>
+            <div class="flex justify-center"><div class="loader"></div></div>
         </div>
 
-        <!-- Join Menu -->
-        <div id="join-menu" class="glass-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full hidden">
-            <h2 class="text-2xl font-bold mb-4">Connect Phone</h2>
-            <p class="text-gray-300 mb-4">Enter the Server ID displayed on your computer.</p>
-            
-            <input type="text" id="join-id-input" placeholder="Enter Server ID" class="w-full bg-black bg-opacity-50 text-white border border-gray-600 rounded-xl p-4 text-center text-2xl uppercase font-mono mb-4 focus:outline-none focus:border-purple-500">
-            
-            <button onclick="connectToHost()" id="connect-btn" class="w-full py-4 px-6 bg-green-600 hover:bg-green-500 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(22,163,74,0.5)] mb-4 text-lg">
-                Connect & Start VR
+        <!-- 3. Controller PIN Entry -->
+        <div id="screen-join" class="text-center hidden max-w-sm w-full p-6 bg-gray-900 rounded-lg border-2 border-green-700 m-4">
+            <h2 class="text-2xl font-bold text-green-400 mb-4">CONNECT TO SCREEN</h2>
+            <p class="text-gray-400 mb-4">Enter the 4-digit PIN shown on your computer/tablet screen.</p>
+            <input type="number" id="pin-input" class="w-full bg-black border-2 border-gray-600 text-white text-center text-4xl py-4 rounded-xl mb-6 font-mono tracking-widest" placeholder="1234">
+            <button onclick="connectController()" class="w-full px-6 py-4 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl text-xl shadow-[0_0_15px_rgba(0,255,100,0.4)] active:scale-95">
+                LINK WEAPON
             </button>
-            <button onclick="showMainMenu()" class="text-gray-400 hover:text-white underline block mx-auto">Back</button>
         </div>
+
+        <!-- 4. Game Over (Host only) -->
+        <div id="screen-gameover" class="text-center hidden max-w-lg p-10 bg-gray-900 rounded-lg border-2 border-red-700 shadow-[0_0_50px_rgba(255,0,0,0.3)] z-50">
+            <h1 class="text-6xl font-black text-red-600 title-text medieval-text mb-4">CITY FALLEN</h1>
+            <p class="text-2xl text-gray-200 mb-2">Enemies Defeated</p>
+            <p id="final-score" class="text-6xl font-black text-yellow-500 medieval-text mb-8">0</p>
+            <p class="text-gray-400">Refresh the page to play again.</p>
+        </div>
+
     </div>
 
-    <!-- Phone Controller UI -->
-    <div id="controller-ui">
-        <div class="absolute top-8 left-0 w-full text-center text-gray-400 text-sm font-bold z-10 pointer-events-none">
-            <span class="text-green-400">●</span> Full 1:1 VR Tracking Active<br>Move phone physically to slash & stab!
+    <!-- ================= CONTROLLER UI (PHONE ONLY) ================= -->
+    <div id="ui-controller" class="hidden fixed inset-0 bg-gray-950 flex flex-col p-4 z-[100] text-white">
+        <div class="text-center mb-2">
+            <span class="text-green-500 font-bold text-sm tracking-widest">● P2P LINKED</span>
         </div>
         
-        <div id="left-zone" class="joystick-zone">
-            <div class="absolute bottom-12 text-gray-500 pointer-events-none font-bold uppercase tracking-wider text-xl opacity-50">Slide to Walk</div>
-            <div id="stick-bg-left" class="stick-bg"><div id="stick-knob-left" class="stick-knob"></div></div>
-        </div>
+        <button onclick="triggerRecenter()" class="bg-gray-800 border-2 border-gray-600 py-4 rounded-xl text-xl font-bold mb-4 active:bg-gray-700 shadow-lg">
+            🎯 RECENTER AIM
+        </button>
         
-        <div id="right-zone" class="joystick-zone">
-             <div class="absolute bottom-12 text-gray-500 pointer-events-none font-bold uppercase tracking-wider text-xl opacity-50">Slide to Look</div>
-            <div id="stick-bg-right" class="stick-bg"><div id="stick-knob-right" class="stick-knob"></div></div>
+        <div class="flex-1 flex flex-col gap-4">
+            <button id="btn-mode-sword" onclick="setMode('sword')" class="flex-1 bg-blue-600 rounded-xl text-4xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all">
+                🗡️ SWORD
+            </button>
+            <button id="btn-mode-gun" onclick="setMode('gun')" class="flex-1 bg-gray-800 rounded-xl text-4xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all">
+                🔫 GUN
+            </button>
         </div>
-        
-        <!-- Recalibration Button -->
-        <button id="recenter-btn" onclick="recenterSword()">🎯 Recenter Sword</button>
-    </div>
 
-    <!-- Host Game Rendering -->
-    <canvas id="game-canvas"></canvas>
-    <div id="crosshair"></div>
-    <div id="damage-flash"></div>
-    <div id="game-hud">
-        <div class="hud-stat">Score: <span id="score-val" class="hud-value">0</span></div>
-        <div class="hud-stat">Combo: <span id="combo-val" class="hud-value">x1</span></div>
-    </div>
-    <div id="minimap-container">
-        <div id="minimap-player"></div>
-        <div id="minimap-elements"></div>
+        <button id="btn-fire" onclick="triggerFire()" class="hidden h-1/2 w-full bg-red-600 rounded-xl text-6xl font-black text-yellow-300 active:bg-red-500 mt-4 border-4 border-red-400 shadow-[0_0_30px_rgba(255,0,0,0.6)]">
+            FIRE!
+        </button>
     </div>
 
     <script>
-        // ==========================================
-        // UI & State Management
-        // ==========================================
+        // --- UI ROUTING ---
         const uiLayer = document.getElementById('ui-layer');
-        const mainMenu = document.getElementById('main-menu');
-        const hostMenu = document.getElementById('host-menu');
-        const joinMenu = document.getElementById('join-menu');
-        const serverIdDisplay = document.getElementById('server-id-display');
-        const controllerUI = document.getElementById('controller-ui');
-        const gameCanvas = document.getElementById('game-canvas');
-        const crosshair = document.getElementById('crosshair');
-        const minimapContainer = document.getElementById('minimap-container');
-        const minimapElements = document.getElementById('minimap-elements');
+        const roleSelect = document.getElementById('screen-role-select');
+        const hostWaiting = document.getElementById('screen-waiting');
+        const controllerJoin = document.getElementById('screen-join');
+        const gameContainer = document.getElementById('game-container');
+        const hud = document.getElementById('hud');
+        const weaponDisplay = document.getElementById('weapon-display');
 
-        let peer = null;
-        let connection = null;
+        let mode = 'sword';
 
-        const generateShortId = () => Math.random().toString(36).substring(2, 6).toUpperCase();
-
-        function showMainMenu() {
-            mainMenu.classList.remove('hidden');
-            hostMenu.classList.add('hidden');
-            joinMenu.classList.add('hidden');
-            if (peer) { peer.destroy(); peer = null; }
+        function selectHost() {
+            roleSelect.classList.add('hidden');
+            hostWaiting.classList.remove('hidden');
+            window.createHostRoom();
         }
 
-        function showHostMenu() {
-            mainMenu.classList.add('hidden');
-            hostMenu.classList.remove('hidden');
-            initPeerHost();
+        function selectController() {
+            roleSelect.classList.add('hidden');
+            controllerJoin.classList.remove('hidden');
         }
 
-        function showJoinMenu() {
-            mainMenu.classList.add('hidden');
-            joinMenu.classList.remove('hidden');
-        }
-
-        // ==========================================
-        // WebRTC P2P Networking
-        // ==========================================
-        function initPeerHost() {
-            const shortId = generateShortId();
-            peer = new Peer('med-town-vr-' + shortId);
+        async function connectController() {
+            const pin = document.getElementById('pin-input').value;
+            if (pin.length !== 4) return alert("Enter 4 digit PIN");
             
-            peer.on('open', (id) => serverIdDisplay.innerText = shortId);
-
-            peer.on('connection', (conn) => {
-                connection = conn;
-                connection.on('open', () => startGameHost());
-                connection.on('data', handleNetworkData);
-                connection.on('close', () => { alert("Controller disconnected."); location.reload(); });
-            });
-            peer.on('error', (err) => { serverIdDisplay.innerText = "Error. Retry."; });
-        }
-
-        function connectToHost() {
-            const shortId = document.getElementById('join-id-input').value.toUpperCase().trim();
-            if(!shortId) return;
-            document.getElementById('connect-btn').innerText = "Connecting...";
-
-            peer = new Peer();
-            peer.on('open', () => {
-                connection = peer.connect('med-town-vr-' + shortId, { reliable: true });
-                connection.on('open', () => {
-                    uiLayer.style.display = 'none';
-                    controllerUI.style.display = 'block';
-                    initController();
-                });
-                connection.on('error', (err) => {
-                    alert("Connection failed.");
-                    document.getElementById('connect-btn').innerText = "Connect & Start VR";
-                });
-            });
-        }
-
-        // ==========================================
-        // Host Game Engine (Three.js)
-        // ==========================================
-        let scene, camera, renderer;
-        let player, swordPivot, swordMesh;
-        let npcs = [], buildings = [];
-        const MAP_SIZE = 100;
-        
-        // --- NEW GAMEPLAY SYSTEMS ---
-        let score = 0;
-        let combo = 1;
-        let comboTimer = 0;
-        let particles = [];
-        let dayTime = 0;
-        let directionalLight;
-        
-        // --- WEB AUDIO API SYNTHESIZER ---
-        // Generates sound waves via math so we don't need external audio files
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioContext();
-        
-        function playSound(type) {
-            if(audioCtx.state === 'suspended') audioCtx.resume();
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            
-            const now = audioCtx.currentTime;
-            if(type === 'swing') {
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(150, now);
-                osc.frequency.exponentialRampToValueAtTime(40, now + 0.2);
-                gain.gain.setValueAtTime(0.3, now);
-                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-                osc.start(now);
-                osc.stop(now + 0.2);
-            } else if (type === 'hit') {
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(300, now);
-                osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
-                gain.gain.setValueAtTime(0.6, now);
-                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-                osc.start(now);
-                osc.stop(now + 0.1);
-            }
-        }
-        // --- END NEW SYSTEMS ---
-
-        let netInput = {
-            moveX: 0, moveY: 0, lookX: 0, lookY: 0,
-            swordAlpha: 0, swordBeta: 0, swordGamma: 0, // Relative orientation
-            accelX: 0, accelY: 0, accelZ: 0 // Linear acceleration for thrusts
-        };
-
-        let playerRotation = new THREE.Vector2(0, 0);
-        let swordPhysics = {
-            velocity: new THREE.Vector3(),
-            offset: new THREE.Vector3()
-        };
-
-        function handleNetworkData(data) {
-            if(data.type === 'input') {
-                // Joystick
-                if (typeof data.moveX === 'number') netInput.moveX = data.moveX;
-                if (typeof data.moveY === 'number') netInput.moveY = data.moveY;
-                if (typeof data.lookX === 'number') netInput.lookX = data.lookX;
-                if (typeof data.lookY === 'number') netInput.lookY = data.lookY;
-                
-                // 1:1 VR Orientation
-                if (typeof data.swordAlpha === 'number') netInput.swordAlpha = data.swordAlpha;
-                if (typeof data.swordBeta === 'number') netInput.swordBeta = data.swordBeta;
-                if (typeof data.swordGamma === 'number') netInput.swordGamma = data.swordGamma;
-                
-                // Motion Translation (Stabbing)
-                if (typeof data.accelX === 'number') netInput.accelX = data.accelX;
-                if (typeof data.accelY === 'number') netInput.accelY = data.accelY;
-                if (typeof data.accelZ === 'number') netInput.accelZ = data.accelZ;
-            }
-        }
-
-        function startGameHost() {
-            uiLayer.style.display = 'none';
-            gameCanvas.style.display = 'block';
-            crosshair.style.display = 'block';
-            minimapContainer.style.display = 'block';
-            document.getElementById('game-hud').style.display = 'block'; // Activate HUD
-            initThreeJS();
-        }
-
-        function initThreeJS() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB);
-            scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            
-            renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.shadowMap.enabled = true;
-
-            const ambientLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-            scene.add(ambientLight);
-            
-            // Replaced local const with global directionalLight for Day/Night cycle
-            directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            directionalLight.position.set(50, 100, 50);
-            directionalLight.castShadow = true;
-            directionalLight.shadow.mapSize.width = 2048;
-            directionalLight.shadow.mapSize.height = 2048;
-            scene.add(directionalLight);
-
-            const groundGeo = new THREE.PlaneGeometry(MAP_SIZE * 2, MAP_SIZE * 2);
-            const groundMat = new THREE.MeshStandardMaterial({ color: 0x4d7c38, roughness: 1.0 });
-            const ground = new THREE.Mesh(groundGeo, groundMat);
-            ground.rotation.x = -Math.PI / 2;
-            ground.receiveShadow = true;
-            scene.add(ground);
-            
-            const gridHelper = new THREE.GridHelper(MAP_SIZE * 2, 50, 0x3a5e2a, 0x3a5e2a);
-            gridHelper.position.y = 0.01;
-            scene.add(gridHelper);
-
-            generateMap();
-
-            player = new THREE.Group();
-            player.position.set(0, 2, 0);
-            scene.add(player);
-            player.add(camera);
-
-            createSword();
-
-            window.addEventListener('resize', onWindowResize, false);
-            animate();
-        }
-
-        function createSword() {
-            // Pivot group holds the base rotation and rests at the default hand position
-            swordPivot = new THREE.Group();
-            swordPivot.position.set(0.5, -0.5, -0.7);
-            
-            // Set base artistic resting angle
-            swordPivot.rotation.set(Math.PI/4, -Math.PI/8, -Math.PI/6);
-            camera.add(swordPivot);
-
-            // Mesh group receives the dynamic VR relative rotations & translations
-            swordMesh = new THREE.Group();
-            
-            const blade = new THREE.Mesh(
-                new THREE.BoxGeometry(0.1, 1.2, 0.05),
-                new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.8, roughness: 0.2 })
-            );
-            blade.position.y = 0.8;
-            blade.castShadow = true;
-
-            const guard = new THREE.Mesh(
-                new THREE.BoxGeometry(0.4, 0.05, 0.1),
-                new THREE.MeshStandardMaterial({ color: 0xb8860b, metalness: 0.6, roughness: 0.4 })
-            );
-            guard.position.y = 0.2;
-            guard.castShadow = true;
-
-            const handle = new THREE.Mesh(
-                new THREE.CylinderGeometry(0.04, 0.04, 0.3),
-                new THREE.MeshStandardMaterial({ color: 0x3e2723, roughness: 0.9 })
-            );
-            handle.position.y = 0;
-
-            swordMesh.add(blade);
-            swordMesh.add(guard);
-            swordMesh.add(handle);
-            
-            swordPivot.add(swordMesh);
-        }
-
-        function generateMap() {
-            // Simplified environment code
-            const houseBaseGeo = new THREE.BoxGeometry(6, 5, 6);
-            const houseBaseMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.8 });
-            const roofGeo = new THREE.ConeGeometry(5, 4, 4);
-            const roofMat = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 1.0 });
-
-            const plaza = new THREE.Mesh(new THREE.CircleGeometry(10, 32), new THREE.MeshStandardMaterial({ color: 0xaaaaaa }));
-            plaza.rotation.x = -Math.PI/2; plaza.position.y = 0.02; scene.add(plaza);
-
-            for(let i = 0; i < 40; i++) {
-                const x = (Math.random() - 0.5) * (MAP_SIZE * 1.8);
-                const z = (Math.random() - 0.5) * (MAP_SIZE * 1.8);
-                if(Math.sqrt(x*x + z*z) < 15) continue; 
-
-                const house = new THREE.Group();
-                const base = new THREE.Mesh(houseBaseGeo, houseBaseMat);
-                base.position.y = 2.5; base.castShadow = true; base.receiveShadow = true;
-                const roof = new THREE.Mesh(roofGeo, roofMat);
-                roof.position.y = 7; roof.rotation.y = Math.PI / 4; roof.castShadow = true;
-                house.add(base); house.add(roof);
-                house.position.set(x, 0, z); house.rotation.y = (Math.floor(Math.random() * 4) * Math.PI) / 2;
-                scene.add(house);
-                buildings.push({ x: x, z: z, radius: 4 });
-                addMinimapElement('building', x, z, 10);
-            }
-
-            const npcGeo = new THREE.CylinderGeometry(0.5, 0.5, 2, 8); 
-            const shirtMat = [new THREE.MeshStandardMaterial({ color: 0x2563eb }), new THREE.MeshStandardMaterial({ color: 0xb45309 })];
-            for(let i = 0; i < 20; i++) {
-                const npc = new THREE.Mesh(npcGeo, shirtMat[Math.floor(Math.random()*2)].clone()); // Cloned material for individual damage flashes
-                const nx = (Math.random() - 0.5) * MAP_SIZE, nz = (Math.random() - 0.5) * MAP_SIZE;
-                npc.position.set(nx, 1, nz); npc.castShadow = true;
-                
-                // Add combat state and health data
-                npc.userData = { 
-                    id: 'npc_' + i, 
-                    target: new THREE.Vector3(nx + (Math.random()-0.5)*10, 1, nz + (Math.random()-0.5)*10), 
-                    speed: 0.02 + Math.random() * 0.03,
-                    hp: 100,
-                    state: 'alive'
-                };
-                scene.add(npc); npcs.push(npc);
-                addMinimapElement('npc', nx, nz, 6, npc.userData.id);
-            }
-        }
-        
-        function addMinimapElement(type, x, z, size, id = null) {
-            const el = document.createElement('div'); el.className = 'minimap-' + type;
-            if(id) el.id = 'mm_' + id; el.style.width = size + 'px'; el.style.height = size + 'px';
-            el.style.left = (((x + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%'; el.style.top = (((z + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
-            minimapElements.appendChild(el);
-        }
-        
-        function updateMinimap() {
-            const mmPlayer = document.getElementById('minimap-player');
-            mmPlayer.style.left = (((player.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
-            mmPlayer.style.top = (((player.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
-            
-            for(let npc of npcs) {
-                const dot = document.getElementById('mm_' + npc.userData.id);
-                if(dot) {
-                    dot.style.left = (((npc.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
-                    dot.style.top = (((npc.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100) + '%';
-                }
-            }
-        }
-
-        function onWindowResize() {
-            if(!camera) return;
-            camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        const clock = new THREE.Clock();
-
-        function animate() {
-            requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-
-            // 1. Camera Look
-            playerRotation.x -= netInput.lookX * 0.04;
-            playerRotation.y -= netInput.lookY * 0.04;
-            playerRotation.y = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, playerRotation.y));
-            player.rotation.y = playerRotation.x;
-            camera.rotation.x = playerRotation.y;
-
-            // 2. Player Movement
-            const speed = 10;
-            const moveVec = new THREE.Vector3(netInput.moveX, 0, -netInput.moveY);
-            moveVec.applyAxisAngle(new THREE.Vector3(0,1,0), player.rotation.y);
-            moveVec.normalize().multiplyScalar(speed * delta);
-
-            let newPos = player.position.clone().add(moveVec);
-            let collision = false;
-            if(Math.abs(newPos.x) > MAP_SIZE - 2 || Math.abs(newPos.z) > MAP_SIZE - 2) collision = true;
-            else { for(let b of buildings) if(Math.sqrt(Math.pow(newPos.x-b.x,2) + Math.pow(newPos.z-b.z,2)) < b.radius + 1) { collision = true; break; } }
-            if(!collision) player.position.copy(newPos);
-
-            // 3. FULL VR SWORD TRACKING
-
-            // --- A. Physics Translations (Stabbing / Slashing Movement) ---
-            // Phone -Z is thrusting outward/away from user. 
-            // In ThreeJS camera space, -Z is forward. So Phone Z maps to ThreeJS Z naturally.
-            swordPhysics.velocity.x += (netInput.accelX * delta * 1.5);
-            swordPhysics.velocity.y += (netInput.accelY * delta * 1.5);
-            swordPhysics.velocity.z += (netInput.accelZ * delta * 2.0); // Z is more sensitive for stabs
-
-            // Friction to slow down velocity
-            swordPhysics.velocity.multiplyScalar(0.85);
-            
-            // Add velocity to physical position offset
-            swordPhysics.offset.add(swordPhysics.velocity.clone().multiplyScalar(delta));
-            
-            // Spring effect: constantly pull the sword back to (0,0,0) local origin
-            swordPhysics.offset.lerp(new THREE.Vector3(0, 0, 0), 0.15);
-            
-            // Limit how far the sword can translate from the pivot
-            swordPhysics.offset.x = THREE.MathUtils.clamp(swordPhysics.offset.x, -2, 2);
-            swordPhysics.offset.y = THREE.MathUtils.clamp(swordPhysics.offset.y, -2, 2);
-            swordPhysics.offset.z = THREE.MathUtils.clamp(swordPhysics.offset.z, -2.5, 1);
-
-            // Apply calculated offset position
-            swordMesh.position.set(swordPhysics.offset.x, swordPhysics.offset.y, swordPhysics.offset.z);
-            
-            // Trigger sound on rapid physical movement
-            if(swordPhysics.velocity.length() > 4.0 && Math.random() > 0.8) {
-                playSound('swing');
-            }
-
-            // --- B. 1:1 Orientation Mapping ---
-            // We use the Calibrated VR angles sent from the phone
-            let pitch = THREE.MathUtils.degToRad(netInput.swordBeta || 0);
-            let yaw   = THREE.MathUtils.degToRad(netInput.swordAlpha || 0);
-            let roll  = THREE.MathUtils.degToRad(-(netInput.swordGamma || 0));
-
-            // Create quaternion to prevent Gimbal Lock
-            let euler = new THREE.Euler(pitch, yaw, roll, 'YXZ');
-            let targetQuat = new THREE.Quaternion().setFromEuler(euler);
-            
-            // Smooth Slerp makes it feel weighty and removes network jitter
-            swordMesh.quaternion.slerp(targetQuat, 0.4);
-
-            // --- C. Combat & Hit Detection ---
-            // Calculate the tip of the blade in World Space for accurate hitboxes
-            let swordTipLocal = new THREE.Vector3(0, 1.2, 0); 
-            let swordTipWorld = swordTipLocal.clone();
-            swordMesh.localToWorld(swordTipWorld);
-            
-            let isSwingingHard = swordPhysics.velocity.length() > 2.0;
-
-            // 4. Update NPCs & Process Combat
-            for(let npc of npcs) {
-                if(npc.userData.state === 'dead') continue; // Skip dead logic
-
-                // Collision Detection
-                if(isSwingingHard) {
-                    let dist = npc.position.distanceTo(swordTipWorld);
-                    if(dist < 2.2) { // Strike registered
-                        npc.userData.hp -= 35; // Damage
-                        playSound('hit');
-                        
-                        // Spawn Physical Particle Effects
-                        for(let p=0; p<8; p++) {
-                            const pMesh = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), new THREE.MeshBasicMaterial({ color: 0xff3333 }));
-                            pMesh.position.copy(swordTipWorld);
-                            pMesh.userData = {
-                                velocity: new THREE.Vector3((Math.random()-0.5)*8, Math.random()*8, (Math.random()-0.5)*8),
-                                life: 0.8
-                            };
-                            scene.add(pMesh);
-                            particles.push(pMesh);
-                        }
-                        
-                        // Apply Physical Knockback based on angle
-                        let knockback = new THREE.Vector3().subVectors(npc.position, player.position).normalize();
-                        npc.position.addScaledVector(knockback, 0.6);
-                        
-                        // Flash effect
-                        const originalColor = npc.material.color.getHex();
-                        npc.material.color.setHex(0xff0000);
-                        setTimeout(() => { if(npc.userData.state === 'alive') npc.material.color.setHex(originalColor); }, 150);
-
-                        // Update Combo & Score UI
-                        combo++;
-                        comboTimer = 2.5; // Seconds before combo resets
-                        score += 15 * combo;
-                        document.getElementById('score-val').innerText = score;
-                        document.getElementById('combo-val').innerText = 'x' + combo;
-                        
-                        // Render Screen Damage Flash Overlay
-                        const flash = document.getElementById('damage-flash');
-                        flash.style.display = 'block';
-                        flash.style.opacity = '1';
-                        setTimeout(() => { flash.style.opacity = '0'; setTimeout(() => flash.style.display = 'none', 100); }, 50);
-
-                        // Check for death
-                        if(npc.userData.hp <= 0) {
-                            npc.userData.state = 'dead';
-                            npc.rotation.x = Math.PI / 2; // Collapse to ground
-                            npc.position.y = 0.5;
-                            score += 100 * combo;
-                            document.getElementById('score-val').innerText = score;
-                            
-                            // Respawn timer
-                            setTimeout(() => {
-                                npc.userData.state = 'alive';
-                                npc.userData.hp = 100;
-                                npc.rotation.x = 0;
-                                npc.position.set((Math.random() - 0.5) * MAP_SIZE, 1, (Math.random() - 0.5) * MAP_SIZE);
-                                npc.material.color.setHex(originalColor);
-                            }, 8000);
-                        }
-                    }
-                }
-
-                const dir = new THREE.Vector3().subVectors(npc.userData.target, npc.position); dir.y = 0;
-                if(dir.length() < 0.5) npc.userData.target.set(npc.position.x + (Math.random()-0.5)*20, 1, npc.position.z + (Math.random()-0.5)*20);
-                else { dir.normalize(); npc.position.addScaledVector(dir, npc.userData.speed); npc.rotation.y = Math.atan2(dir.x, dir.z); }
-            }
-                const dir = new THREE.Vector3().subVectors(npc.userData.target, npc.position); dir.y = 0;
-                if(dir.length() < 0.5) npc.userData.target.set(npc.position.x + (Math.random()-0.5)*20, 1, npc.position.z + (Math.random()-0.5)*20);
-                else { dir.normalize(); npc.position.addScaledVector(dir, npc.userData.speed); npc.rotation.y = Math.atan2(dir.x, dir.z); }
-            }
-            
-            // --- D. Global World Updates ---
-            
-            // Process Particle Physics
-            for(let i = particles.length - 1; i >= 0; i--) {
-                let p = particles[i];
-                p.userData.life -= delta;
-                p.userData.velocity.y -= 9.8 * delta; // Gravity pull
-                p.position.addScaledVector(p.userData.velocity, delta);
-                if(p.userData.life <= 0 || p.position.y < 0) {
-                    scene.remove(p);
-                    particles.splice(i, 1);
-                }
-            }
-            
-            // Process Combo Drain
-            if(comboTimer > 0) {
-                comboTimer -= delta;
-                if(comboTimer <= 0) {
-                    combo = 1;
-                    document.getElementById('combo-val').innerText = 'x' + combo;
-                }
-            }
-            
-            // Dynamic Day & Night Cycle
-            dayTime += delta * 0.05;
-            directionalLight.position.x = Math.cos(dayTime) * 50;
-            directionalLight.position.y = Math.max(-10, Math.sin(dayTime) * 100);
-            directionalLight.position.z = Math.sin(dayTime) * 50;
-            
-            let skyIntensity = Math.max(0.15, Math.sin(dayTime));
-            scene.background.setRGB(0.53 * skyIntensity, 0.8 * skyIntensity, 0.92 * skyIntensity);
-            scene.fog.color.copy(scene.background);
-            directionalLight.intensity = Math.max(0, skyIntensity * 1.5);
-
-            updateMinimap();
-            renderer.render(scene, camera);
-        }
-
-        // ==========================================
-        // Client Controller Logic (Phone)
-        // ==========================================
-        let clientInput = { moveX: 0, moveY: 0, lookX: 0, lookY: 0 };
-        
-        // Calibration Variables
-        let rawAlpha = 0, rawBeta = 0, rawGamma = 0;
-        let calibAlpha = 0, calibBeta = 0, calibGamma = 0;
-
-        function initController() {
-            setupJoystick('left-zone', 'stick-bg-left', 'stick-knob-left', (x, y) => { clientInput.moveX = x; clientInput.moveY = -y; });
-            setupJoystick('right-zone', 'stick-bg-right', 'stick-knob-right', (x, y) => { clientInput.lookX = x; clientInput.lookY = y; });
-
-            // 30 fps network updates for smoother 1:1 tracking
-            setInterval(() => {
-                if(connection && connection.open) connection.send({ type: 'input', ...clientInput });
-            }, 33);
-
-            requestSensors();
-        }
-
-        // Allows player to reset their hand resting position comfortably
-        function recenterSword() {
-            calibAlpha = rawAlpha;
-            calibBeta = rawBeta;
-            calibGamma = rawGamma;
-            if(navigator.vibrate) navigator.vibrate(50);
-        }
-
-        function requestSensors() {
+            // Request device sensors (Required for iOS 13+)
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission().then(state => { if (state === 'granted') window.addEventListener('deviceorientation', handleOrientation); }).catch(console.error);
-                DeviceMotionEvent.requestPermission().then(state => { if (state === 'granted') window.addEventListener('devicemotion', handleMotion); }).catch(console.error);
+                try {
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState !== 'granted') return alert('Sensor permission required!');
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+            
+            document.getElementById('screen-join').innerHTML = '<h2 class="text-2xl font-bold text-yellow-400 mb-4">CONNECTING P2P...</h2><div class="flex justify-center"><div class="loader"></div></div>';
+            window.joinRoom(pin);
+        }
+
+        // --- CONTROLLER SENSOR LOGIC (Phone) ---
+        let lastSendTime = 0;
+        
+        window.startControllerSensors = () => {
+            window.addEventListener('deviceorientation', (e) => {
+                const now = Date.now();
+                if (now - lastSendTime > 16) { // ~60fps throttle
+                    window.sendControllerData('state', {
+                        alpha: e.alpha || 0,
+                        beta: e.beta || 0,
+                        gamma: e.gamma || 0,
+                        accMag: window.lastAccMag || 0,
+                        mode: mode
+                    });
+                    lastSendTime = now;
+                }
+            });
+
+            window.addEventListener('devicemotion', (e) => {
+                if (e.acceleration) {
+                    const ax = e.acceleration.x || 0;
+                    const ay = e.acceleration.y || 0;
+                    const az = e.acceleration.z || 0;
+                    window.lastAccMag = Math.sqrt(ax*ax + ay*ay + az*az);
+                }
+            });
+        };
+
+        window.setMode = (newMode) => {
+            mode = newMode;
+            const btnSword = document.getElementById('btn-mode-sword');
+            const btnGun = document.getElementById('btn-mode-gun');
+            const btnFire = document.getElementById('btn-fire');
+
+            if (mode === 'sword') {
+                btnSword.className = "flex-1 bg-blue-600 rounded-xl text-4xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all";
+                btnGun.className = "flex-1 bg-gray-800 rounded-xl text-4xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all";
+                btnFire.classList.add('hidden');
             } else {
-                window.addEventListener('deviceorientation', handleOrientation);
-                window.addEventListener('devicemotion', handleMotion);
+                btnSword.className = "h-24 bg-gray-800 rounded-xl text-2xl font-bold active:bg-gray-700 border-4 border-gray-900 opacity-50 transition-all";
+                btnGun.className = "h-24 bg-blue-600 rounded-xl text-2xl font-bold active:bg-blue-500 border-4 border-blue-400 shadow-[0_0_20px_rgba(0,100,255,0.4)] transition-all";
+                btnFire.classList.remove('hidden');
+            }
+        };
+
+        window.triggerFire = () => {
+            window.sendControllerData('fire');
+            // Haptic feedback if supported
+            if (navigator.vibrate) navigator.vibrate(50);
+        };
+
+        window.triggerRecenter = () => {
+            window.sendControllerData('recenter');
+            if (navigator.vibrate) navigator.vibrate(20);
+        };
+
+        // ==========================================
+        // 3D GAME ENGINE LOGIC (Host Desktop)
+        // ==========================================
+        
+        let score = 0, lives = 3;
+        let gameState = 'START';
+        
+        let scene, camera, renderer, swordGroup, gunGroup, swordTip, gunTip;
+        let enemies = [], bullets = [], particles = [];
+        
+        // Calibration offsets
+        let offsetAlpha = 0, offsetBeta = 0, offsetGamma = 0;
+        let isCalibrated = false;
+
+        window.startGame = () => {
+            uiLayer.classList.add('hidden');
+            gameContainer.classList.remove('hidden');
+            hud.classList.remove('hidden');
+            gameState = 'PLAYING';
+            init3D();
+            setTimeout(spawnEnemy, 2000);
+        };
+
+        function init3D() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x111118); 
+            scene.fog = new THREE.Fog(0x111118, 10, 40); 
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 2, 0); 
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            gameContainer.appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            scene.add(new THREE.AmbientLight(0x404040, 1.5)); 
+            const ptLight = new THREE.PointLight(0xffaa00, 2, 50); 
+            ptLight.position.set(0, 5, 0);
+            scene.add(ptLight);
+
+            // Environment
+            const floorGeo = new THREE.PlaneGeometry(20, 100);
+            const floorMat = new THREE.MeshLambertMaterial({ color: 0x3d352c });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const wallMat = new THREE.MeshLambertMaterial({ color: 0x4a4a4a });
+            const leftWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
+            leftWall.position.set(-6, 5, -20);
+            scene.add(leftWall);
+            const rightWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
+            rightWall.position.set(6, 5, -20);
+            scene.add(rightWall);
+
+            // Weapons
+            swordGroup = new THREE.Group();
+            swordGroup.scale.set(0.6, 0.6, 0.6);
+            
+            const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.3, 4, 4), new THREE.MeshStandardMaterial({ color: 0xe0f7fa, metalness: 1.0, roughness: 0.1, flatShading: true }));
+            blade.rotation.x = Math.PI / 2; blade.rotation.y = Math.PI / 4; blade.position.z = -2.5; 
+            swordGroup.add(blade);
+            
+            const core = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.08, 3.9, 4), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
+            core.rotation.x = Math.PI / 2; core.position.z = -2.5;
+            swordGroup.add(core);
+
+            const hiltMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.0, 8), new THREE.MeshStandardMaterial({ color: 0x221100, roughness: 1.0 }));
+            handle.rotation.x = Math.PI / 2; handle.position.z = 0.5;
+            swordGroup.add(handle);
+
+            const swordLight = new THREE.PointLight(0x00ffff, 1.5, 10);
+            swordLight.position.z = -1.5;
+            swordGroup.add(swordLight);
+
+            swordTip = new THREE.Object3D(); swordTip.position.z = -4.5;
+            swordGroup.add(swordTip);
+            scene.add(swordGroup);
+
+            gunGroup = new THREE.Group();
+            gunGroup.scale.set(1.5, 1.5, 1.5);
+            const gunBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.8), new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.9 }));
+            gunBarrel.position.z = -0.4; gunGroup.add(gunBarrel);
+            const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.15), hiltMat);
+            gunGrip.position.set(0, -0.2, 0.1); gunGrip.rotation.x = Math.PI / 6; gunGroup.add(gunGrip);
+            
+            gunTip = new THREE.Object3D(); gunTip.position.z = -0.8;
+            gunGroup.add(gunTip);
+            scene.add(gunGroup);
+
+            swordGroup.position.set(0, 1.5, -2);
+            gunGroup.position.set(0, 1.5, -2);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Entity Spawning
+        function spawnEnemy() {
+            if (gameState !== 'PLAYING') return;
+            const enemyGroup = new THREE.Group();
+            enemyGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), new THREE.MeshLambertMaterial({ color: 0x228B22 })));
+            
+            const eyeGeo = new THREE.SphereGeometry(0.2, 8, 8), eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const le = new THREE.Mesh(eyeGeo, eyeMat); le.position.set(-0.3, 0.2, 0.7); enemyGroup.add(le);
+            const re = new THREE.Mesh(eyeGeo, eyeMat); re.position.set(0.3, 0.2, 0.7); enemyGroup.add(re);
+
+            enemyGroup.position.set((Math.random() - 0.5) * 8, 1.5, -40); 
+            enemyGroup.userData = { speed: 0.15 + (Math.random() * 0.1) + (score * 0.005), active: true, hitRadius: 1.0 };
+            scene.add(enemyGroup); enemies.push(enemyGroup);
+            setTimeout(spawnEnemy, Math.max(800, 2500 - score * 50));
+        }
+
+        function shootBullet() {
+            const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
+            const tipPos = new THREE.Vector3(); gunTip.getWorldPosition(tipPos); bullet.position.copy(tipPos);
+            const basePos = new THREE.Vector3(); gunGroup.getWorldPosition(basePos);
+            bullet.userData = { velocity: new THREE.Vector3().subVectors(tipPos, basePos).normalize().multiplyScalar(0.8), life: 100 };
+            scene.add(bullet); bullets.push(bullet);
+            scene.background = new THREE.Color(0x333300); setTimeout(() => { scene.background = new THREE.Color(0x111118); }, 50);
+        }
+
+        function createExplosion(pos, isBullet = false) {
+            for(let i=0; i<8; i++) {
+                const p = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({ color: isBullet ? 0xffff00 : 0x228b22 }));
+                p.position.copy(pos);
+                p.userData = { vx: (Math.random()-0.5)*0.5, vy: (Math.random()-0.5)*0.5, vz: (Math.random()-0.5)*0.5, life: 1.0 };
+                scene.add(p); particles.push(p);
             }
         }
 
-        function handleOrientation(event) {
-            rawAlpha = event.alpha || 0;
-            rawBeta = event.beta || 0;
-            rawGamma = event.gamma || 0;
-
-            // Calculate relative orientation based on user's calibration
-            let a = rawAlpha - calibAlpha;
-            // Handle compass wrapping (0-360)
-            if (a > 180) a -= 360;
-            if (a < -180) a += 360;
-
-            clientInput.swordAlpha = a;
-            clientInput.swordBeta = rawBeta - calibBeta;
-            clientInput.swordGamma = rawGamma - calibGamma;
+        // Math & Collisions
+        function pointToLineDistance(px, py, pz, x1, y1, z1, x2, y2, z2) {
+            const A = px-x1, B = py-y1, C = pz-z1, D = x2-x1, E = y2-y1, F = z2-z1;
+            const dot = A*D + B*E + C*F, len_sq = D*D + E*E + F*F;
+            let param = len_sq !== 0 ? dot / len_sq : -1;
+            let xx = param < 0 ? x1 : (param > 1 ? x2 : x1 + param * D);
+            let yy = param < 0 ? y1 : (param > 1 ? y2 : y1 + param * E);
+            let zz = param < 0 ? z1 : (param > 1 ? z2 : z1 + param * F);
+            const dx = px-xx, dy = py-yy, dz = pz-zz;
+            return Math.sqrt(dx*dx + dy*dy + dz*dz);
         }
 
-        function handleMotion(event) {
-            if(!event.acceleration) return;
-            // We use 'acceleration' (which excludes gravity) to track linear thrusts
-            const threshold = 1.0; // Filter micro-jitters
-            
-            clientInput.accelX = Math.abs(event.acceleration.x) > threshold ? event.acceleration.x : 0;
-            clientInput.accelY = Math.abs(event.acceleration.y) > threshold ? event.acceleration.y : 0;
-            clientInput.accelZ = Math.abs(event.acceleration.z) > threshold ? event.acceleration.z : 0;
-        }
+        function checkCollisions() {
+            if (window.gameControllerData.mode === 'sword') {
+                const basePos = new THREE.Vector3(), tipPos = new THREE.Vector3();
+                swordGroup.getWorldPosition(basePos); swordTip.getWorldPosition(tipPos);
 
-        function setupJoystick(zoneId, bgId, knobId, callback) {
-            const zone = document.getElementById(zoneId), bg = document.getElementById(bgId), knob = document.getElementById(knobId);
-            let activeTouchId = null, originX = 0, originY = 0; const maxRadius = 60;
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const enemy = enemies[i];
+                    if (!enemy.userData.active) continue;
+                    const dist = pointToLineDistance(enemy.position.x, enemy.position.y, enemy.position.z, basePos.x, basePos.y, basePos.z, tipPos.x, tipPos.y, tipPos.z);
+                    
+                    // Swinging check using accelerometer data from phone!
+                    const isSwinging = window.gameControllerData.accMag > 8; 
 
-            zone.addEventListener('touchstart', (e) => {
-                e.preventDefault(); if(activeTouchId !== null) return; 
-                const touch = e.changedTouches[0]; activeTouchId = touch.identifier;
-                originX = touch.clientX; originY = touch.clientY;
-                bg.style.display = 'block'; bg.style.left = (originX - 60) + 'px'; bg.style.top = (originY - 60) + 'px';
-                knob.style.transform = `translate(-50%, -50%) translate(0px, 0px)`; callback(0, 0);
-            }, {passive: false});
-
-            zone.addEventListener('touchmove', (e) => {
-                e.preventDefault(); if(activeTouchId === null) return;
-                for(let i=0; i<e.changedTouches.length; i++) {
-                    const touch = e.changedTouches[i];
-                    if(touch.identifier === activeTouchId) {
-                        let dx = touch.clientX - originX, dy = touch.clientY - originY;
-                        const distance = Math.sqrt(dx*dx + dy*dy);
-                        if(distance > maxRadius) { const ratio = maxRadius / distance; dx *= ratio; dy *= ratio; }
-                        knob.style.transform = `translate(-50%, -50%) translate(${dx}px, ${dy}px)`;
-                        callback(dx / maxRadius, dy / maxRadius); break;
+                    if (dist < enemy.userData.hitRadius && isSwinging) {
+                        killEnemy(enemy, i);
+                        scene.background = new THREE.Color(0x330000); setTimeout(() => { scene.background = new THREE.Color(0x111118); }, 50);
                     }
                 }
-            }, {passive: false});
+            }
 
-            const endTouch = (e) => {
-                if(activeTouchId === null) return;
-                for(let i=0; i<e.changedTouches.length; i++) {
-                    if(e.changedTouches[i].identifier === activeTouchId) {
-                        activeTouchId = null; bg.style.display = 'none'; callback(0, 0); break;
+            for (let bIdx = bullets.length - 1; bIdx >= 0; bIdx--) {
+                const b = bullets[bIdx]; let hitSomething = false;
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const enemy = enemies[i];
+                    if (!enemy.userData.active) continue;
+                    if (b.position.distanceTo(enemy.position) < enemy.userData.hitRadius * 1.5) {
+                        killEnemy(enemy, i, true); hitSomething = true; break;
                     }
                 }
-            };
-            zone.addEventListener('touchend', endTouch); zone.addEventListener('touchcancel', endTouch);
+                if (hitSomething) { scene.remove(b); bullets.splice(bIdx, 1); }
+            }
         }
+
+        function killEnemy(enemy, index, isBullet = false) {
+            enemy.userData.active = false; scene.remove(enemy); enemies.splice(index, 1);
+            createExplosion(enemy.position, isBullet);
+            score++; document.getElementById('score-display').innerText = score;
+        }
+
+        // Main Loop
+        function gameLoop(timestamp) {
+            if (gameState === 'PLAYING') {
+                const ctrl = window.gameControllerData;
+                
+                // Weapon switching
+                swordGroup.visible = (ctrl.mode === 'sword');
+                gunGroup.visible = (ctrl.mode === 'gun');
+                weaponDisplay.innerText = ctrl.mode.toUpperCase();
+                weaponDisplay.className = ctrl.mode === 'gun' ? "text-2xl font-black medieval-text text-yellow-300" : "text-2xl font-black medieval-text text-white";
+                let activeWeapon = ctrl.mode === 'gun' ? gunGroup : swordGroup;
+
+                // Handle Phone Orientation Logic
+                if (ctrl.active) {
+                    if (ctrl.triggerRecenter || !isCalibrated) {
+                        offsetAlpha = ctrl.alpha; offsetBeta = ctrl.beta; offsetGamma = ctrl.gamma;
+                        isCalibrated = true;
+                        ctrl.triggerRecenter = false;
+                    }
+
+                    // Calculate relative rotation
+                    let rAlpha = ctrl.alpha - offsetAlpha;
+                    let rBeta = ctrl.beta - offsetBeta;
+                    let rGamma = ctrl.gamma - offsetGamma;
+
+                    // Apply smooth rotation (Mapping portrait phone motion to forward-facing sword)
+                    activeWeapon.rotation.x = THREE.MathUtils.lerp(activeWeapon.rotation.x, THREE.MathUtils.degToRad(rBeta), 0.3);
+                    activeWeapon.rotation.y = THREE.MathUtils.lerp(activeWeapon.rotation.y, THREE.MathUtils.degToRad(rAlpha), 0.3);
+                    activeWeapon.rotation.z = THREE.MathUtils.lerp(activeWeapon.rotation.z, THREE.MathUtils.degToRad(-rGamma), 0.3);
+
+                    if (ctrl.triggerFire && ctrl.mode === 'gun') {
+                        shootBullet();
+                        ctrl.triggerFire = false;
+                    }
+                }
+
+                // Entities update
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const e = enemies[i];
+                    e.position.z += e.userData.speed; e.position.y = 1.5 + Math.sin(timestamp * 0.005 + i) * 0.5;
+                    if (e.position.z > camera.position.z) {
+                        scene.remove(e); enemies.splice(i, 1);
+                        lives--; document.getElementById('lives-display').innerText = lives;
+                        camera.position.x = (Math.random() - 0.5) * 1; setTimeout(() => { camera.position.x = 0; }, 50);
+                        if (lives <= 0) {
+                            gameState = 'GAMEOVER';
+                            uiLayer.classList.remove('hidden'); document.getElementById('screen-gameover').classList.remove('hidden');
+                            document.getElementById('final-score').innerText = score;
+                        }
+                    }
+                }
+
+                for (let i = bullets.length - 1; i >= 0; i--) {
+                    const b = bullets[i]; b.position.add(b.userData.velocity); b.userData.life--;
+                    if (b.userData.life <= 0) { scene.remove(b); bullets.splice(i, 1); }
+                }
+
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    p.position.x += p.userData.vx; p.position.y += p.userData.vy; p.position.z += p.userData.vz;
+                    p.userData.vy -= 0.02; p.userData.life -= 0.05; p.scale.setScalar(p.userData.life);
+                    if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+                }
+
+                checkCollisions();
+            }
+            if (renderer && scene && camera) renderer.render(scene, camera);
+            requestAnimationFrame(gameLoop);
+        }
+
     </script>
 </body>
 </html>
