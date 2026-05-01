@@ -228,13 +228,14 @@
         let swordAnimation = { active: false, time: 0 };
 
         function handleNetworkData(data) {
+            // Strict type checking ensures connection sync glitches won't cause NaN crashes
             if(data.type === 'input') {
-                netInput.moveX = data.moveX;
-                netInput.moveY = data.moveY;
-                netInput.lookX = data.lookX;
-                netInput.lookY = data.lookY;
-                netInput.swordBeta = data.swordBeta;
-                netInput.swordGamma = data.swordGamma;
+                if (typeof data.moveX === 'number') netInput.moveX = data.moveX;
+                if (typeof data.moveY === 'number') netInput.moveY = data.moveY;
+                if (typeof data.lookX === 'number') netInput.lookX = data.lookX;
+                if (typeof data.lookY === 'number') netInput.lookY = data.lookY;
+                if (typeof data.swordBeta === 'number') netInput.swordBeta = data.swordBeta;
+                if (typeof data.swordGamma === 'number') netInput.swordGamma = data.swordGamma;
             } else if (data.type === 'action' && data.action === 'swing') {
                 if(!swordAnimation.active) {
                     swordAnimation.active = true;
@@ -420,7 +421,8 @@
             }
 
             // Generate Civilians (NPCs)
-            const npcGeo = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+            // FIXED: Replaced unsupported CapsuleGeometry with CylinderGeometry for r128 compatibility
+            const npcGeo = new THREE.CylinderGeometry(0.5, 0.5, 2, 8); 
             const shirtMat1 = new THREE.MeshStandardMaterial({ color: 0x2563eb }); // Blue shirt
             const shirtMat2 = new THREE.MeshStandardMaterial({ color: 0xb45309 }); // Brown shirt
             
@@ -466,8 +468,7 @@
         }
         
         function updateMinimap() {
-            // Update Player dot (always center, but we rotate the map or just move the dot)
-            // It's easier to just move the player dot across the map image
+            // Update Player dot
             const pX = ((player.position.x + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
             const pZ = ((player.position.z + MAP_SIZE) / (MAP_SIZE * 2)) * 100;
             const mmPlayer = document.getElementById('minimap-player');
@@ -548,19 +549,21 @@
                     swordMesh.rotation.z = -Math.PI/6 - swingArc * 0.5;
                 }
             } else {
-                // 1:1 VR Gyro Tracking from Phone
-                if (netInput.swordBeta !== null && netInput.swordGamma !== null) {
-                    // Convert phone degrees to radians
-                    // Beta is front-to-back tilt (Pitch). Gamma is left-to-right twist (Roll).
-                    
+                // 1:1 VR Gyro Tracking from Phone (With NaN safeguards)
+                let beta = netInput.swordBeta;
+                let gamma = netInput.swordGamma;
+                
+                if (typeof beta === 'number' && typeof gamma === 'number') {
                     // We assume user is holding phone vertically like a handle. 
                     // So Beta = 90 is neutral pointing forward.
-                    let pitch = THREE.MathUtils.degToRad(netInput.swordBeta - 90);
-                    let roll = THREE.MathUtils.degToRad(-netInput.swordGamma);
+                    let pitch = THREE.MathUtils.degToRad(beta - 90);
+                    let roll = THREE.MathUtils.degToRad(-gamma);
                     
-                    // Smoothly interpolate current rotation to target rotation for butter-smooth VR feel
-                    swordMesh.rotation.x += (pitch - swordMesh.rotation.x) * 0.2;
-                    swordMesh.rotation.z += (roll - swordMesh.rotation.z) * 0.2;
+                    if(!isNaN(pitch) && !isNaN(roll)) {
+                        // Smoothly interpolate current rotation to target rotation
+                        swordMesh.rotation.x += (pitch - swordMesh.rotation.x) * 0.2;
+                        swordMesh.rotation.z += (roll - swordMesh.rotation.z) * 0.2;
+                    }
                     
                     // Idle bobbing from movement
                     const isMoving = Math.abs(netInput.moveX) > 0.1 || Math.abs(netInput.moveY) > 0.1;
@@ -668,12 +671,10 @@
             }
         }
 
-        // Maps Phone Rotation to Sword Rotation
+        // Maps Phone Rotation to Sword Rotation safely
         function handleOrientation(event) {
-            // Beta: front-to-back tilt in degrees, where front is positive
-            // Gamma: left-to-right tilt in degrees, where right is positive
-            if (event.beta !== null) clientInput.swordBeta = event.beta;
-            if (event.gamma !== null) clientInput.swordGamma = event.gamma;
+            if (typeof event.beta === 'number') clientInput.swordBeta = event.beta;
+            if (typeof event.gamma === 'number') clientInput.swordGamma = event.gamma;
         }
 
         // Detects Hard Swings
