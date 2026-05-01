@@ -15,7 +15,7 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
         
-        #game-container { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; background: #111; z-index: 1; }
+        #game-container { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; background: #050508; z-index: 1; }
         
         .medieval-text { text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
         .title-text { font-family: 'Times New Roman', Times, serif; letter-spacing: 2px; }
@@ -193,7 +193,6 @@
             });
         }
 
-        // Host Flow
         window.selectHost = function() {
             isHost = true;
             roleSelect.classList.add('hidden');
@@ -216,7 +215,6 @@
             });
         };
 
-        // Controller Flow
         window.selectController = function() {
             isHost = false;
             roleSelect.classList.add('hidden');
@@ -227,19 +225,16 @@
             const pin = document.getElementById('pin-input').value;
             if (pin.length !== 4) return alert("Enter 4 digit PIN");
             
-            // Request device sensors (Required for iOS 13+)
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const permissionState = await DeviceOrientationEvent.requestPermission();
                     if (permissionState !== 'granted') return alert('Sensor permission required!');
-                } catch (e) {
-                    console.error(e);
-                }
+                } catch (e) { console.error(e); }
             }
             
             document.getElementById('screen-join').innerHTML = '<h2 class="text-2xl font-bold text-yellow-400 mb-4">CONNECTING P2P...</h2><div class="flex justify-center"><div class="loader"></div></div>';
             
-            peer = new Peer(); // Random ID for the controller
+            peer = new Peer();
 
             peer.on('open', () => {
                 const hostId = 'ar-defender-' + pin;
@@ -260,19 +255,15 @@
             }
         };
 
-        // --- CONTROLLER SENSOR LOGIC (Phone) ---
         let lastSendTime = 0;
         
         window.startControllerSensors = () => {
             window.addEventListener('deviceorientation', (e) => {
                 const now = Date.now();
-                if (now - lastSendTime > 16) { // ~60fps throttle
+                if (now - lastSendTime > 16) { 
                     window.sendControllerData('state', {
-                        alpha: e.alpha || 0,
-                        beta: e.beta || 0,
-                        gamma: e.gamma || 0,
-                        accMag: window.lastAccMag || 0,
-                        mode: mode
+                        alpha: e.alpha || 0, beta: e.beta || 0, gamma: e.gamma || 0,
+                        accMag: window.lastAccMag || 0, mode: mode
                     });
                     lastSendTime = now;
                 }
@@ -280,9 +271,7 @@
 
             window.addEventListener('devicemotion', (e) => {
                 if (e.acceleration) {
-                    const ax = e.acceleration.x || 0;
-                    const ay = e.acceleration.y || 0;
-                    const az = e.acceleration.z || 0;
+                    const ax = e.acceleration.x || 0, ay = e.acceleration.y || 0, az = e.acceleration.z || 0;
                     window.lastAccMag = Math.sqrt(ax*ax + ay*ay + az*az);
                 }
             });
@@ -307,7 +296,6 @@
 
         window.triggerFire = () => {
             window.sendControllerData('fire');
-            // Haptic feedback if supported
             if (navigator.vibrate) navigator.vibrate(50);
         };
 
@@ -326,9 +314,56 @@
         let scene, camera, renderer, swordGroup, gunGroup, swordTip, gunTip;
         let enemies = [], bullets = [], particles = [];
         
-        // Calibration offsets
         let offsetAlpha = 0, offsetBeta = 0, offsetGamma = 0;
         let isCalibrated = false;
+
+        // --- PROCEDURAL TEXTURES FOR HIGH DETAIL ---
+        function createBrickTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#1a1a1a'; // dark mortar
+            ctx.fillRect(0,0,512,512);
+            for(let y=0; y<512; y+=32) {
+                let off = (y/32)%2===0 ? 0 : 32;
+                for(let x=-64; x<512; x+=64) {
+                    let r = 50 + Math.random()*30;
+                    let g = 45 + Math.random()*25;
+                    let b = 40 + Math.random()*20;
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fillRect(x+off+2, y+2, 60, 28);
+                    
+                    // Add noise/bump detail to bricks
+                    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    for(let n=0; n<15; n++) {
+                        ctx.fillRect(x+off+2+Math.random()*60, y+2+Math.random()*28, 2, 2);
+                    }
+                }
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(8, 2);
+            return tex;
+        }
+
+        function createCobbleTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 512; canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#0a0a0a';
+            ctx.fillRect(0,0,512,512);
+            for(let i=0; i<600; i++) {
+                let v = 30 + Math.random()*40;
+                ctx.fillStyle = `rgb(${v},${v},${v})`;
+                ctx.beginPath();
+                ctx.arc(Math.random()*512, Math.random()*512, 8+Math.random()*12, 0, Math.PI*2);
+                ctx.fill();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(4, 20);
+            return tex;
+        }
 
         window.startGame = () => {
             uiLayer.classList.add('hidden');
@@ -341,14 +376,16 @@
 
         function init3D() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x111118); 
-            scene.fog = new THREE.Fog(0x111118, 10, 40); 
+            scene.background = new THREE.Color(0x050508); 
+            scene.fog = new THREE.FogExp2(0x050508, 0.04); 
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(0, 2, 0); 
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
             gameContainer.appendChild(renderer.domElement);
 
             window.addEventListener('resize', () => {
@@ -357,62 +394,126 @@
                 renderer.setSize(window.innerWidth, window.innerHeight);
             });
 
-            scene.add(new THREE.AmbientLight(0x404040, 1.5)); 
-            const ptLight = new THREE.PointLight(0xffaa00, 2, 50); 
-            ptLight.position.set(0, 5, 0);
-            scene.add(ptLight);
+            // Lighting
+            scene.add(new THREE.AmbientLight(0x202030, 1.0)); 
+            
+            // Corridor Torches
+            for(let z=-10; z>=-40; z-=15) {
+                const torch = new THREE.PointLight(0xff8800, 1.5, 20);
+                torch.position.set(0, 4, z);
+                scene.add(torch);
+            }
 
-            // Environment
-            const floorGeo = new THREE.PlaneGeometry(20, 100);
-            const floorMat = new THREE.MeshLambertMaterial({ color: 0x3d352c });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
+            // Environment (High Detail Procedural Textures)
+            const brickTex = createBrickTexture();
+            const cobbleTex = createCobbleTexture();
+
+            const floorMat = new THREE.MeshStandardMaterial({ 
+                map: cobbleTex, bumpMap: cobbleTex, bumpScale: 0.5, roughness: 0.9, metalness: 0.1
+            });
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 100), floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            const wallMat = new THREE.MeshLambertMaterial({ color: 0x4a4a4a });
+            const wallMat = new THREE.MeshStandardMaterial({ 
+                map: brickTex, bumpMap: brickTex, bumpScale: 0.8, roughness: 0.8, metalness: 0.0 
+            });
+            
             const leftWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
-            leftWall.position.set(-6, 5, -20);
+            leftWall.position.set(-8, 5, -20);
             scene.add(leftWall);
+            
             const rightWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
-            rightWall.position.set(6, 5, -20);
+            rightWall.position.set(8, 5, -20);
             scene.add(rightWall);
 
-            // Weapons
+            // =====================================
+            // 1000x DETAIL SWORD
+            // =====================================
             swordGroup = new THREE.Group();
-            swordGroup.scale.set(0.6, 0.6, 0.6);
+            swordGroup.scale.set(0.7, 0.7, 0.7);
             
-            const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.3, 4, 4), new THREE.MeshStandardMaterial({ color: 0xe0f7fa, metalness: 1.0, roughness: 0.1, flatShading: true }));
-            blade.rotation.x = Math.PI / 2; blade.rotation.y = Math.PI / 4; blade.position.z = -2.5; 
+            // Blade (Sharpened Diamond cut)
+            const bladeGeo = new THREE.CylinderGeometry(0.01, 0.25, 4.5, 4);
+            const bladeMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.2, flatShading: true });
+            const blade = new THREE.Mesh(bladeGeo, bladeMat);
+            blade.rotation.x = Math.PI / 2; blade.rotation.y = Math.PI / 4; blade.position.z = -2.75; 
             swordGroup.add(blade);
             
-            const core = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.08, 3.9, 4), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
-            core.rotation.x = Math.PI / 2; core.position.z = -2.5;
+            // Glowing Magic Core
+            const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+            const core = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.05, 4.0, 4), coreMat);
+            core.rotation.x = Math.PI / 2; core.position.z = -2.7;
             swordGroup.add(core);
 
-            const hiltMat = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.8, roughness: 0.2 });
-            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.0, 8), new THREE.MeshStandardMaterial({ color: 0x221100, roughness: 1.0 }));
+            // Intricate Crossguard
+            const hiltMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, metalness: 1.0, roughness: 0.3, flatShading: true });
+            
+            const guardCenter = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), hiltMat);
+            guardCenter.position.z = -0.3;
+            swordGroup.add(guardCenter);
+
+            const guardL = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 4), hiltMat);
+            guardL.rotation.z = Math.PI / 2; guardL.rotation.y = -Math.PI / 6; guardL.position.set(-0.6, 0, -0.3);
+            swordGroup.add(guardL);
+            
+            const guardR = new THREE.Mesh(new THREE.ConeGeometry(0.15, 1.2, 4), hiltMat);
+            guardR.rotation.z = -Math.PI / 2; guardR.rotation.y = Math.PI / 6; guardR.position.set(0.6, 0, -0.3);
+            swordGroup.add(guardR);
+
+            // Leather Grip
+            const handleMat = new THREE.MeshStandardMaterial({ color: 0x331100, roughness: 0.9 });
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.2, 8), handleMat);
             handle.rotation.x = Math.PI / 2; handle.position.z = 0.5;
             swordGroup.add(handle);
 
+            // Pommel Jewel
+            const pommel = new THREE.Mesh(new THREE.IcosahedronGeometry(0.2, 0), hiltMat);
+            pommel.position.z = 1.2;
+            swordGroup.add(pommel);
+
+            // Sword Magic Light
             const swordLight = new THREE.PointLight(0x00ffff, 1.5, 10);
             swordLight.position.z = -1.5;
             swordGroup.add(swordLight);
 
-            swordTip = new THREE.Object3D(); swordTip.position.z = -4.5;
+            swordTip = new THREE.Object3D(); swordTip.position.z = -5.0; // Extend tip slightly past visible blade
             swordGroup.add(swordTip);
             scene.add(swordGroup);
 
+            // =====================================
+            // 1000x DETAIL GUN (Flintlock Style)
+            // =====================================
             gunGroup = new THREE.Group();
             gunGroup.scale.set(1.5, 1.5, 1.5);
-            const gunBarrel = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.8), new THREE.MeshStandardMaterial({ color: 0x444444, metalness: 0.9 }));
-            gunBarrel.position.z = -0.4; gunGroup.add(gunBarrel);
-            const gunGrip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.15), hiltMat);
-            gunGrip.position.set(0, -0.2, 0.1); gunGrip.rotation.x = Math.PI / 6; gunGroup.add(gunGrip);
             
-            gunTip = new THREE.Object3D(); gunTip.position.z = -0.8;
+            // Metallic Barrel
+            const barrelMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.9, roughness: 0.3 });
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.0, 16), barrelMat);
+            barrel.rotation.x = Math.PI / 2; barrel.position.z = -0.5;
+            gunGroup.add(barrel);
+            
+            // Wooden Body
+            const woodMat = new THREE.MeshStandardMaterial({ color: 0x5c2a16, roughness: 0.8 });
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.8), woodMat);
+            body.position.z = -0.2; body.position.y = -0.05;
+            gunGroup.add(body);
+
+            // Grip
+            const grip = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.4, 0.2), woodMat);
+            grip.position.set(0, -0.25, 0.15); grip.rotation.x = Math.PI / 6;
+            gunGroup.add(grip);
+
+            // Gold Trims & Mechanism
+            const trim = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.17, 0.2), hiltMat);
+            trim.position.z = 0; trim.position.y = -0.05;
+            gunGroup.add(trim);
+            
+            gunTip = new THREE.Object3D(); gunTip.position.z = -1.0;
             gunGroup.add(gunTip);
             scene.add(gunGroup);
 
+            // Initial positioning
             swordGroup.position.set(0, 1.5, -2);
             gunGroup.position.set(0, 1.5, -2);
 
@@ -423,14 +524,23 @@
         function spawnEnemy() {
             if (gameState !== 'PLAYING') return;
             const enemyGroup = new THREE.Group();
-            enemyGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), new THREE.MeshLambertMaterial({ color: 0x228B22 })));
             
-            const eyeGeo = new THREE.SphereGeometry(0.2, 8, 8), eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const le = new THREE.Mesh(eyeGeo, eyeMat); le.position.set(-0.3, 0.2, 0.7); enemyGroup.add(le);
-            const re = new THREE.Mesh(eyeGeo, eyeMat); re.position.set(0.3, 0.2, 0.7); enemyGroup.add(re);
+            // Slightly more detailed enemy shape
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8 });
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.3, 1.4, 8), bodyMat);
+            enemyGroup.add(body);
+            
+            const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5), bodyMat);
+            head.position.y = 0.9;
+            enemyGroup.add(head);
+            
+            const eyeGeo = new THREE.SphereGeometry(0.15, 8, 8);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+            const le = new THREE.Mesh(eyeGeo, eyeMat); le.position.set(-0.2, 0.9, 0.45); enemyGroup.add(le);
+            const re = new THREE.Mesh(eyeGeo, eyeMat); re.position.set(0.2, 0.9, 0.45); enemyGroup.add(re);
 
             enemyGroup.position.set((Math.random() - 0.5) * 8, 1.5, -40); 
-            enemyGroup.userData = { speed: 0.15 + (Math.random() * 0.1) + (score * 0.005), active: true, hitRadius: 1.0 };
+            enemyGroup.userData = { speed: 0.15 + (Math.random() * 0.1) + (score * 0.005), active: true, hitRadius: 1.2 };
             scene.add(enemyGroup); enemies.push(enemyGroup);
             setTimeout(spawnEnemy, Math.max(800, 2500 - score * 50));
         }
@@ -439,16 +549,21 @@
             const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
             const tipPos = new THREE.Vector3(); gunTip.getWorldPosition(tipPos); bullet.position.copy(tipPos);
             const basePos = new THREE.Vector3(); gunGroup.getWorldPosition(basePos);
-            bullet.userData = { velocity: new THREE.Vector3().subVectors(tipPos, basePos).normalize().multiplyScalar(0.8), life: 100 };
+            bullet.userData = { velocity: new THREE.Vector3().subVectors(tipPos, basePos).normalize().multiplyScalar(1.2), life: 100 };
+            
+            // Add a small pointlight to the bullet
+            const bLight = new THREE.PointLight(0xffff00, 1, 5);
+            bullet.add(bLight);
+            
             scene.add(bullet); bullets.push(bullet);
-            scene.background = new THREE.Color(0x333300); setTimeout(() => { scene.background = new THREE.Color(0x111118); }, 50);
+            scene.background = new THREE.Color(0x222200); setTimeout(() => { scene.background = new THREE.Color(0x050508); }, 50);
         }
 
         function createExplosion(pos, isBullet = false) {
-            for(let i=0; i<8; i++) {
+            for(let i=0; i<12; i++) {
                 const p = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({ color: isBullet ? 0xffff00 : 0x228b22 }));
                 p.position.copy(pos);
-                p.userData = { vx: (Math.random()-0.5)*0.5, vy: (Math.random()-0.5)*0.5, vz: (Math.random()-0.5)*0.5, life: 1.0 };
+                p.userData = { vx: (Math.random()-0.5)*0.8, vy: (Math.random()-0.5)*0.8, vz: (Math.random()-0.5)*0.8, life: 1.0 };
                 scene.add(p); particles.push(p);
             }
         }
@@ -480,14 +595,15 @@
                 for (let i = enemies.length - 1; i >= 0; i--) {
                     const enemy = enemies[i];
                     if (!enemy.userData.active) continue;
+                    
+                    // Collision check: Distance from enemy center to the line created by the sword blade
                     const dist = pointToLineDistance(enemy.position.x, enemy.position.y, enemy.position.z, basePos.x, basePos.y, basePos.z, tipPos.x, tipPos.y, tipPos.z);
                     
-                    // Swinging check using accelerometer data from phone!
-                    const isSwinging = window.gameControllerData.accMag > 8; 
-
-                    if (dist < enemy.userData.hitRadius && isSwinging) {
+                    // TRUE COLLISION FIX: Removed the "swing" requirement. 
+                    // Now, if the enemy simply touches the blade, they die immediately!
+                    if (dist < enemy.userData.hitRadius) {
                         killEnemy(enemy, i);
-                        scene.background = new THREE.Color(0x330000); setTimeout(() => { scene.background = new THREE.Color(0x111118); }, 50);
+                        scene.background = new THREE.Color(0x330000); setTimeout(() => { scene.background = new THREE.Color(0x050508); }, 50);
                     }
                 }
             }
@@ -531,30 +647,25 @@
                         ctrl.triggerRecenter = false;
                     }
 
-                    // Calculate relative rotation safely (prevents 360-degree spinning glitches)
+                    // Calculate relative rotation safely
                     let rAlpha = angleDiff(ctrl.alpha, offsetAlpha);
                     let rBeta = angleDiff(ctrl.beta, offsetBeta);
                     let rGamma = angleDiff(ctrl.gamma, offsetGamma);
 
-                    // Sensitivity multiplier (makes swings feel bigger and more responsive)
                     const sens = 1.8;
 
-                    // Map axes properly: Alpha (yaw)=Y axis, Beta (pitch)=X axis, Gamma (roll)=Z axis
                     let targetRotX = THREE.MathUtils.degToRad(-rBeta * sens);
                     let targetRotY = THREE.MathUtils.degToRad(rAlpha * sens);
                     let targetRotZ = THREE.MathUtils.degToRad(-rGamma * sens);
 
-                    // Clamp rotations to prevent the sword from breaking its digital wrist
                     const maxRot = Math.PI / 1.5;
                     targetRotX = Math.max(-maxRot, Math.min(maxRot, targetRotX));
                     targetRotY = Math.max(-maxRot, Math.min(maxRot, targetRotY));
                     targetRotZ = Math.max(-maxRot, Math.min(maxRot, targetRotZ));
 
-                    // Use Quaternion SLERP for perfectly smooth, glitch-free rotation
                     const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(targetRotX, targetRotY, targetRotZ, 'YXZ'));
                     activeWeapon.quaternion.slerp(targetQuat, 0.3);
 
-                    // Add Positional shifting (Simulates your shoulder moving when you swing!)
                     let targetPosX = 0 + (rAlpha * -0.03); 
                     let targetPosY = 1.5 + (rBeta * 0.03);
 
