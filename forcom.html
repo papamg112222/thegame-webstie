@@ -9,150 +9,8 @@
     <!-- Three.js for 3D Game Engine -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
-    <!-- Firebase for P2P Signaling -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- FIREBASE INIT ---
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'local-dev-id';
-        let currentUser = null;
-
-        const initAuth = async () => {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-        };
-
-        // --- P2P WEBRTC SETUP ---
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-        let dataChannel = null;
-        let roomRef = null;
-
-        window.gameControllerData = {
-            active: false,
-            alpha: 0, beta: 0, gamma: 0,
-            accMag: 0,
-            mode: 'sword',
-            triggerFire: false,
-            triggerRecenter: false
-        };
-
-        function setupDataChannel(channel) {
-            channel.onopen = () => {
-                document.getElementById('screen-role-select').classList.add('hidden');
-                document.getElementById('screen-waiting').classList.add('hidden');
-                if (window.isHost) {
-                    window.startGame(); // Start 3D Game!
-                } else {
-                    document.getElementById('ui-controller').classList.remove('hidden');
-                    window.startControllerSensors();
-                }
-            };
-            channel.onmessage = (e) => {
-                if (window.isHost) {
-                    const data = JSON.parse(e.data);
-                    if (data.type === 'state') {
-                        window.gameControllerData.active = true;
-                        window.gameControllerData.alpha = data.alpha;
-                        window.gameControllerData.beta = data.beta;
-                        window.gameControllerData.gamma = data.gamma;
-                        window.gameControllerData.accMag = data.accMag;
-                        window.gameControllerData.mode = data.mode;
-                    } else if (data.type === 'fire') {
-                        window.gameControllerData.triggerFire = true;
-                    } else if (data.type === 'recenter') {
-                        window.gameControllerData.triggerRecenter = true;
-                    }
-                }
-            };
-        }
-
-        // Host logic (The Screen)
-        window.createHostRoom = async () => {
-            if (!currentUser) return;
-            window.isHost = true;
-            const pin = Math.floor(1000 + Math.random() * 9000).toString();
-            document.getElementById('pin-display').innerText = pin;
-            
-            roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'webrtc_rooms', pin);
-            await setDoc(roomRef, { offer: null, answer: null, hostCandidates: [], controllerCandidates: [] });
-
-            pc.ondatachannel = (e) => {
-                dataChannel = e.channel;
-                setupDataChannel(dataChannel);
-            };
-
-            pc.onicecandidate = (e) => {
-                if (e.candidate) updateDoc(roomRef, { hostCandidates: arrayUnion(e.candidate.toJSON()) });
-            };
-
-            onSnapshot(roomRef, async (snap) => {
-                const data = snap.data();
-                if (data?.offer && !pc.currentRemoteDescription) {
-                    await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    await updateDoc(roomRef, { answer: { type: answer.type, sdp: answer.sdp } });
-                }
-                if (data?.controllerCandidates) {
-                    data.controllerCandidates.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
-                }
-            });
-        };
-
-        // Controller logic (The Phone)
-        window.joinRoom = async (pin) => {
-            if (!currentUser) return;
-            window.isHost = false;
-            roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'webrtc_rooms', pin);
-            
-            dataChannel = pc.createDataChannel('gameData');
-            setupDataChannel(dataChannel);
-
-            pc.onicecandidate = (e) => {
-                if (e.candidate) updateDoc(roomRef, { controllerCandidates: arrayUnion(e.candidate.toJSON()) });
-            };
-
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            await setDoc(roomRef, { offer: { type: offer.type, sdp: offer.sdp }, answer: null, hostCandidates: [], controllerCandidates: [] });
-
-            onSnapshot(roomRef, (snap) => {
-                const data = snap.data();
-                if (data?.answer && !pc.currentRemoteDescription) {
-                    pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-                }
-                if (data?.hostCandidates) {
-                    data.hostCandidates.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(()=>{}));
-                }
-            });
-        };
-
-        window.sendControllerData = (type, payload = {}) => {
-            if (dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify({ type, ...payload }));
-            }
-        };
-
-        // Wait for Auth before enabling buttons
-        onAuthStateChanged(auth, (user) => {
-            if (user) {
-                currentUser = user;
-                document.getElementById('auth-loading').classList.add('hidden');
-                document.getElementById('role-buttons').classList.remove('hidden');
-            }
-        });
-
-        initAuth();
-    </script>
+    <!-- PeerJS for public P2P Signaling (Works everywhere, including GitHub!) -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
@@ -209,13 +67,8 @@
                 Welcome to a True Mixed Reality Experience.<br>
                 One device runs the 3D Game Screen. Your Phone becomes the motion-sensing Sword and Gun.
             </p>
-            
-            <div id="auth-loading" class="flex flex-col items-center mb-4">
-                <div class="loader mb-2"></div>
-                <p class="text-gray-400">Connecting to P2P Server...</p>
-            </div>
 
-            <div id="role-buttons" class="hidden flex flex-col gap-4">
+            <div id="role-buttons" class="flex flex-col gap-4">
                 <button onclick="selectHost()" class="w-full px-8 py-5 bg-blue-800 hover:bg-blue-700 border-2 border-blue-500 text-white font-bold rounded-xl text-xl transition-all shadow-[0_0_20px_rgba(0,100,255,0.4)] hover:scale-105 active:scale-95">
                     📺 I AM THE SCREEN (HOST)
                 </button>
@@ -280,7 +133,9 @@
     </div>
 
     <script>
-        // --- UI ROUTING ---
+        // ==========================================
+        // 1. P2P NETWORKING (PEERJS) & UI ROUTING
+        // ==========================================
         const uiLayer = document.getElementById('ui-layer');
         const roleSelect = document.getElementById('screen-role-select');
         const hostWaiting = document.getElementById('screen-waiting');
@@ -289,20 +144,86 @@
         const hud = document.getElementById('hud');
         const weaponDisplay = document.getElementById('weapon-display');
 
+        let peer = null;
+        let connection = null;
+        let isHost = false;
         let mode = 'sword';
 
-        function selectHost() {
+        window.gameControllerData = {
+            active: false,
+            alpha: 0, beta: 0, gamma: 0,
+            accMag: 0,
+            mode: 'sword',
+            triggerFire: false,
+            triggerRecenter: false
+        };
+
+        function setupConnection(conn) {
+            conn.on('open', () => {
+                if (!isHost) {
+                    document.getElementById('screen-join').classList.add('hidden');
+                    document.getElementById('ui-controller').classList.remove('hidden');
+                    window.startControllerSensors();
+                } else {
+                    document.getElementById('screen-waiting').classList.add('hidden');
+                    window.startGame(); // Start 3D Game!
+                }
+            });
+
+            conn.on('data', (data) => {
+                if (isHost && window.gameControllerData) {
+                    if (data.type === 'state') {
+                        window.gameControllerData.active = true;
+                        window.gameControllerData.alpha = data.alpha;
+                        window.gameControllerData.beta = data.beta;
+                        window.gameControllerData.gamma = data.gamma;
+                        window.gameControllerData.accMag = data.accMag;
+                        window.gameControllerData.mode = data.mode;
+                    } else if (data.type === 'fire') {
+                        window.gameControllerData.triggerFire = true;
+                    } else if (data.type === 'recenter') {
+                        window.gameControllerData.triggerRecenter = true;
+                    }
+                }
+            });
+
+            conn.on('close', () => {
+                alert("Connection lost!");
+                location.reload();
+            });
+        }
+
+        // Host Flow
+        window.selectHost = function() {
+            isHost = true;
             roleSelect.classList.add('hidden');
             hostWaiting.classList.remove('hidden');
-            window.createHostRoom();
-        }
+            
+            const pin = Math.floor(1000 + Math.random() * 9000).toString();
+            const roomId = 'ar-defender-' + pin;
+            document.getElementById('pin-display').innerText = pin;
 
-        function selectController() {
+            peer = new Peer(roomId);
+
+            peer.on('connection', (conn) => {
+                connection = conn;
+                setupConnection(conn);
+            });
+
+            peer.on('error', (err) => {
+                console.error(err);
+                alert("Error setting up host room.");
+            });
+        };
+
+        // Controller Flow
+        window.selectController = function() {
+            isHost = false;
             roleSelect.classList.add('hidden');
             controllerJoin.classList.remove('hidden');
-        }
+        };
 
-        async function connectController() {
+        window.connectController = async function() {
             const pin = document.getElementById('pin-input').value;
             if (pin.length !== 4) return alert("Enter 4 digit PIN");
             
@@ -317,8 +238,27 @@
             }
             
             document.getElementById('screen-join').innerHTML = '<h2 class="text-2xl font-bold text-yellow-400 mb-4">CONNECTING P2P...</h2><div class="flex justify-center"><div class="loader"></div></div>';
-            window.joinRoom(pin);
-        }
+            
+            peer = new Peer(); // Random ID for the controller
+
+            peer.on('open', () => {
+                const hostId = 'ar-defender-' + pin;
+                connection = peer.connect(hostId, { reliable: true });
+                setupConnection(connection);
+            });
+
+            peer.on('error', (err) => {
+                console.error(err);
+                alert("Connection failed. Did you enter the right PIN?");
+                location.reload();
+            });
+        };
+
+        window.sendControllerData = (type, payload = {}) => {
+            if (connection && connection.open) {
+                connection.send({ type, ...payload });
+            }
+        };
 
         // --- CONTROLLER SENSOR LOGIC (Phone) ---
         let lastSendTime = 0;
@@ -377,7 +317,7 @@
         };
 
         // ==========================================
-        // 3D GAME ENGINE LOGIC (Host Desktop)
+        // 2. 3D GAME ENGINE LOGIC (Host Desktop)
         // ==========================================
         
         let score = 0, lives = 3;
