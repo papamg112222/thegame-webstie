@@ -314,8 +314,11 @@
         let scene, camera, renderer, swordGroup, gunGroup, swordTip, gunTip;
         let enemies = [], bullets = [], particles = [];
         
-        let offsetAlpha = 0, offsetBeta = 0, offsetGamma = 0;
+        // Physics & Calibration variables
+        let yawOffset = 0;
         let isCalibrated = false;
+        const eulerTemp = new THREE.Euler();
+        const qTarget = new THREE.Quaternion();
 
         // --- PROCEDURAL TEXTURES FOR HIGH DETAIL ---
         function createBrickTexture() {
@@ -569,13 +572,6 @@
         }
 
         // Math & Collisions
-        function angleDiff(a, b) {
-            let d = a - b;
-            while (d > 180) d -= 360;
-            while (d < -180) d += 360;
-            return d;
-        }
-
         function pointToLineDistance(px, py, pz, x1, y1, z1, x2, y2, z2) {
             const A = px-x1, B = py-y1, C = pz-z1, D = x2-x1, E = y2-y1, F = z2-z1;
             const dot = A*D + B*E + C*F, len_sq = D*D + E*E + F*F;
@@ -639,35 +635,34 @@
                 weaponDisplay.className = ctrl.mode === 'gun' ? "text-2xl font-black medieval-text text-yellow-300" : "text-2xl font-black medieval-text text-white";
                 let activeWeapon = ctrl.mode === 'gun' ? gunGroup : swordGroup;
 
-                // Handle Phone Orientation Logic
+                // Handle TRUE 1:1 Phone Orientation Logic
                 if (ctrl.active) {
                     if (ctrl.triggerRecenter || !isCalibrated) {
-                        offsetAlpha = ctrl.alpha; offsetBeta = ctrl.beta; offsetGamma = ctrl.gamma;
+                        yawOffset = ctrl.alpha || 0;
                         isCalibrated = true;
                         ctrl.triggerRecenter = false;
                     }
 
-                    // Calculate relative rotation safely
-                    let rAlpha = angleDiff(ctrl.alpha, offsetAlpha);
-                    let rBeta = angleDiff(ctrl.beta, offsetBeta);
-                    let rGamma = angleDiff(ctrl.gamma, offsetGamma);
+                    // 1. Calculate Calibrated Yaw (Matches your exact seating direction to "Forward")
+                    let calAlpha = (ctrl.alpha || 0) - yawOffset;
+                    
+                    // 2. Build Target Quaternion from physical device orientation
+                    // Beta = Pitch (up/down), Alpha = Yaw (left/right), Gamma = Roll
+                    eulerTemp.set(
+                        THREE.MathUtils.degToRad(ctrl.beta || 0),
+                        THREE.MathUtils.degToRad(calAlpha),
+                        THREE.MathUtils.degToRad(-(ctrl.gamma || 0)),
+                        'YXZ'
+                    );
+                    qTarget.setFromEuler(eulerTemp);
 
-                    const sens = 1.8;
+                    // 3. Smoothly Rotate Weapon (Prevents ALL 360-degree spinning glitches)
+                    activeWeapon.quaternion.slerp(qTarget, 0.4);
 
-                    let targetRotX = THREE.MathUtils.degToRad(-rBeta * sens);
-                    let targetRotY = THREE.MathUtils.degToRad(rAlpha * sens);
-                    let targetRotZ = THREE.MathUtils.degToRad(-rGamma * sens);
-
-                    const maxRot = Math.PI / 1.5;
-                    targetRotX = Math.max(-maxRot, Math.min(maxRot, targetRotX));
-                    targetRotY = Math.max(-maxRot, Math.min(maxRot, targetRotY));
-                    targetRotZ = Math.max(-maxRot, Math.min(maxRot, targetRotZ));
-
-                    const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(targetRotX, targetRotY, targetRotZ, 'YXZ'));
-                    activeWeapon.quaternion.slerp(targetQuat, 0.3);
-
-                    let targetPosX = 0 + (rAlpha * -0.03); 
-                    let targetPosY = 1.5 + (rBeta * 0.03);
+                    // 4. Positional Shifting (Simulates shoulder/elbow movement naturally)
+                    eulerTemp.setFromQuaternion(activeWeapon.quaternion, 'YXZ');
+                    let targetPosX = eulerTemp.y * -2.0; 
+                    let targetPosY = 1.5 + (eulerTemp.x * 2.0);
 
                     activeWeapon.position.x += (targetPosX - activeWeapon.position.x) * 0.15;
                     activeWeapon.position.y += (targetPosY - activeWeapon.position.y) * 0.15;
