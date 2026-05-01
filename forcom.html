@@ -454,6 +454,13 @@
         }
 
         // Math & Collisions
+        function angleDiff(a, b) {
+            let d = a - b;
+            while (d > 180) d -= 360;
+            while (d < -180) d += 360;
+            return d;
+        }
+
         function pointToLineDistance(px, py, pz, x1, y1, z1, x2, y2, z2) {
             const A = px-x1, B = py-y1, C = pz-z1, D = x2-x1, E = y2-y1, F = z2-z1;
             const dot = A*D + B*E + C*F, len_sq = D*D + E*E + F*F;
@@ -524,15 +531,35 @@
                         ctrl.triggerRecenter = false;
                     }
 
-                    // Calculate relative rotation
-                    let rAlpha = ctrl.alpha - offsetAlpha;
-                    let rBeta = ctrl.beta - offsetBeta;
-                    let rGamma = ctrl.gamma - offsetGamma;
+                    // Calculate relative rotation safely (prevents 360-degree spinning glitches)
+                    let rAlpha = angleDiff(ctrl.alpha, offsetAlpha);
+                    let rBeta = angleDiff(ctrl.beta, offsetBeta);
+                    let rGamma = angleDiff(ctrl.gamma, offsetGamma);
 
-                    // Apply smooth rotation (Mapping portrait phone motion to forward-facing sword)
-                    activeWeapon.rotation.x = THREE.MathUtils.lerp(activeWeapon.rotation.x, THREE.MathUtils.degToRad(rBeta), 0.3);
-                    activeWeapon.rotation.y = THREE.MathUtils.lerp(activeWeapon.rotation.y, THREE.MathUtils.degToRad(rAlpha), 0.3);
-                    activeWeapon.rotation.z = THREE.MathUtils.lerp(activeWeapon.rotation.z, THREE.MathUtils.degToRad(-rGamma), 0.3);
+                    // Sensitivity multiplier (makes swings feel bigger and more responsive)
+                    const sens = 1.8;
+
+                    // Map axes properly: Alpha (yaw)=Y axis, Beta (pitch)=X axis, Gamma (roll)=Z axis
+                    let targetRotX = THREE.MathUtils.degToRad(-rBeta * sens);
+                    let targetRotY = THREE.MathUtils.degToRad(rAlpha * sens);
+                    let targetRotZ = THREE.MathUtils.degToRad(-rGamma * sens);
+
+                    // Clamp rotations to prevent the sword from breaking its digital wrist
+                    const maxRot = Math.PI / 1.5;
+                    targetRotX = Math.max(-maxRot, Math.min(maxRot, targetRotX));
+                    targetRotY = Math.max(-maxRot, Math.min(maxRot, targetRotY));
+                    targetRotZ = Math.max(-maxRot, Math.min(maxRot, targetRotZ));
+
+                    // Use Quaternion SLERP for perfectly smooth, glitch-free rotation
+                    const targetQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(targetRotX, targetRotY, targetRotZ, 'YXZ'));
+                    activeWeapon.quaternion.slerp(targetQuat, 0.3);
+
+                    // Add Positional shifting (Simulates your shoulder moving when you swing!)
+                    let targetPosX = 0 + (rAlpha * -0.03); 
+                    let targetPosY = 1.5 + (rBeta * 0.03);
+
+                    activeWeapon.position.x += (targetPosX - activeWeapon.position.x) * 0.15;
+                    activeWeapon.position.y += (targetPosY - activeWeapon.position.y) * 0.15;
 
                     if (ctrl.triggerFire && ctrl.mode === 'gun') {
                         shootBullet();
