@@ -15,7 +15,7 @@
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
         
-        #game-container { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; background: #050508; z-index: 1; }
+        #game-container { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; overflow: hidden; background: #87CEEB; z-index: 1; }
         
         .medieval-text { text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000; }
         .title-text { font-family: 'Times New Roman', Times, serif; letter-spacing: 2px; }
@@ -40,13 +40,13 @@
     <div id="hud" class="absolute inset-0 p-8 flex flex-col justify-between hidden z-10 pointer-events-none">
         <div class="flex justify-between items-start">
             <div>
-                <p class="text-lg text-yellow-500 font-bold tracking-widest uppercase mb-1">Slain Enemies</p>
+                <p class="text-lg text-yellow-500 font-bold tracking-widest uppercase mb-1">Slain Knights</p>
                 <p id="score-display" class="text-4xl font-black medieval-text">0</p>
             </div>
         </div>
         <div class="flex justify-between items-end">
             <div>
-                <p class="text-lg text-red-500 font-bold tracking-widest uppercase mb-1">City Health</p>
+                <p class="text-lg text-red-500 font-bold tracking-widest uppercase mb-1">Your Health</p>
                 <p id="lives-display" class="text-4xl font-black medieval-text text-red-400">3</p>
             </div>
             <div class="text-center bg-black/60 px-8 py-3 rounded-xl border border-gray-700 shadow-lg backdrop-blur-sm">
@@ -100,8 +100,8 @@
 
         <!-- 4. Game Over (Host only) -->
         <div id="screen-gameover" class="text-center hidden max-w-lg p-10 bg-gray-900 rounded-lg border-2 border-red-700 shadow-[0_0_50px_rgba(255,0,0,0.3)] z-50">
-            <h1 class="text-6xl font-black text-red-600 title-text medieval-text mb-4">CITY FALLEN</h1>
-            <p class="text-2xl text-gray-200 mb-2">Enemies Defeated</p>
+            <h1 class="text-6xl font-black text-red-600 title-text medieval-text mb-4">YOU HAVE FALLEN</h1>
+            <p class="text-2xl text-gray-200 mb-2">Knights Defeated</p>
             <p id="final-score" class="text-6xl font-black text-yellow-500 medieval-text mb-8">0</p>
             <p class="text-gray-400">Refresh the page to play again.</p>
         </div>
@@ -312,7 +312,7 @@
         let gameState = 'START';
         
         let scene, camera, renderer, swordGroup, gunGroup, swordTip, gunTip;
-        let enemies = [], bullets = [], particles = [];
+        let enemies = [], civilians = [], bullets = [], particles = [], bloodDrops = [];
         
         // Physics & Calibration variables
         let yawOffset = 0;
@@ -320,24 +320,25 @@
         const eulerTemp = new THREE.Euler();
         const qTarget = new THREE.Quaternion();
 
-        // --- PROCEDURAL TEXTURES FOR HIGH DETAIL ---
+        // --- PROCEDURAL TEXTURES FOR DAYLIGHT MEDIEVAL DETAIL ---
         function createBrickTexture() {
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#1a1a1a'; // dark mortar
+            ctx.fillStyle = '#bfa58a'; // Lighter daytime mortar
             ctx.fillRect(0,0,512,512);
             for(let y=0; y<512; y+=32) {
                 let off = (y/32)%2===0 ? 0 : 32;
                 for(let x=-64; x<512; x+=64) {
-                    let r = 50 + Math.random()*30;
-                    let g = 45 + Math.random()*25;
-                    let b = 40 + Math.random()*20;
+                    // Warmer daytime brick colors
+                    let r = 160 + Math.random()*40;
+                    let g = 130 + Math.random()*30;
+                    let b = 110 + Math.random()*25;
                     ctx.fillStyle = `rgb(${r},${g},${b})`;
                     ctx.fillRect(x+off+2, y+2, 60, 28);
                     
                     // Add noise/bump detail to bricks
-                    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                    ctx.fillStyle = 'rgba(0,0,0,0.15)';
                     for(let n=0; n<15; n++) {
                         ctx.fillRect(x+off+2+Math.random()*60, y+2+Math.random()*28, 2, 2);
                     }
@@ -353,18 +354,18 @@
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#0a0a0a';
+            ctx.fillStyle = '#6b665c'; // Dusty street color
             ctx.fillRect(0,0,512,512);
-            for(let i=0; i<600; i++) {
-                let v = 30 + Math.random()*40;
-                ctx.fillStyle = `rgb(${v},${v},${v})`;
+            for(let i=0; i<800; i++) {
+                let v = 110 + Math.random()*50;
+                ctx.fillStyle = `rgb(${v},${v},${v-10})`;
                 ctx.beginPath();
-                ctx.arc(Math.random()*512, Math.random()*512, 8+Math.random()*12, 0, Math.PI*2);
+                ctx.arc(Math.random()*512, Math.random()*512, 6+Math.random()*15, 0, Math.PI*2);
                 ctx.fill();
             }
             const tex = new THREE.CanvasTexture(canvas);
             tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
-            tex.repeat.set(4, 20);
+            tex.repeat.set(6, 20);
             return tex;
         }
 
@@ -374,13 +375,18 @@
             hud.classList.remove('hidden');
             gameState = 'PLAYING';
             init3D();
-            setTimeout(spawnEnemy, 2000);
+            
+            // Spawn civilians
+            for(let i=0; i<6; i++) spawnCivilian();
+            
+            // Spawn first Knight
+            spawnEnemy();
         };
 
         function init3D() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x050508); 
-            scene.fog = new THREE.FogExp2(0x050508, 0.04); 
+            scene.background = new THREE.Color(0x87CEEB); // Sky Blue!
+            scene.fog = new THREE.FogExp2(0x87CEEB, 0.02); 
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
             camera.position.set(0, 2, 0); 
@@ -397,15 +403,12 @@
                 renderer.setSize(window.innerWidth, window.innerHeight);
             });
 
-            // Lighting
-            scene.add(new THREE.AmbientLight(0x202030, 1.0)); 
+            // DAYTIME LIGHTING
+            scene.add(new THREE.AmbientLight(0xffffff, 0.7)); 
             
-            // Corridor Torches
-            for(let z=-10; z>=-40; z-=15) {
-                const torch = new THREE.PointLight(0xff8800, 1.5, 20);
-                torch.position.set(0, 4, z);
-                scene.add(torch);
-            }
+            const sunLight = new THREE.DirectionalLight(0xfff5e6, 1.2);
+            sunLight.position.set(10, 20, 10);
+            scene.add(sunLight);
 
             // Environment (High Detail Procedural Textures)
             const brickTex = createBrickTexture();
@@ -414,7 +417,8 @@
             const floorMat = new THREE.MeshStandardMaterial({ 
                 map: cobbleTex, bumpMap: cobbleTex, bumpScale: 0.5, roughness: 0.9, metalness: 0.1
             });
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(16, 100), floorMat);
+            // Wider street!
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 100), floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
@@ -422,12 +426,13 @@
                 map: brickTex, bumpMap: brickTex, bumpScale: 0.8, roughness: 0.8, metalness: 0.0 
             });
             
+            // Walls pushed further out
             const leftWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
-            leftWall.position.set(-8, 5, -20);
+            leftWall.position.set(-15, 5, -20);
             scene.add(leftWall);
             
             const rightWall = new THREE.Mesh(new THREE.BoxGeometry(2, 10, 100), wallMat);
-            rightWall.position.set(8, 5, -20);
+            rightWall.position.set(15, 5, -20);
             scene.add(rightWall);
 
             // =====================================
@@ -523,55 +528,138 @@
             requestAnimationFrame(gameLoop);
         }
 
-        // Entity Spawning
+        // =====================================
+        // CIVILIANS
+        // =====================================
+        function spawnCivilian() {
+            if (gameState !== 'PLAYING') return;
+            const civGroup = new THREE.Group();
+            
+            // Tunics in earthy colors
+            const colors = [0x8B4513, 0x556B2F, 0x8B0000, 0x4682B4];
+            const tunicColor = colors[Math.floor(Math.random() * colors.length)];
+            const bodyMat = new THREE.MeshStandardMaterial({ color: tunicColor, roughness: 0.9 });
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 1.5, 8), bodyMat);
+            body.position.y = 0.75;
+            civGroup.add(body);
+            
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.7 });
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), headMat);
+            head.position.y = 1.8;
+            civGroup.add(head);
+
+            civGroup.position.set((Math.random() - 0.5) * 20, 0, -10 - Math.random() * 40); 
+            
+            civGroup.userData = { 
+                speed: 0.03 + Math.random() * 0.03, 
+                targetX: civGroup.position.x + (Math.random() - 0.5) * 10,
+                targetZ: civGroup.position.z + (Math.random() - 0.5) * 10,
+                changeTimer: 0
+            };
+            scene.add(civGroup);
+            civilians.push(civGroup);
+        }
+
+        // =====================================
+        // THE CHALLENGER (1v1 KNIGHT)
+        // =====================================
         function spawnEnemy() {
             if (gameState !== 'PLAYING') return;
             const enemyGroup = new THREE.Group();
             
-            // Slightly more detailed enemy shape
-            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x228B22, roughness: 0.8 });
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.3, 1.4, 8), bodyMat);
+            // Heavy Armor Plate Look
+            const armorMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.8, roughness: 0.4 });
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.6, 1.8, 8), armorMat);
+            body.position.y = 0.9;
             enemyGroup.add(body);
             
-            const head = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5), bodyMat);
-            head.position.y = 0.9;
+            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.6, 8), armorMat);
+            head.position.y = 2.0;
             enemyGroup.add(head);
             
-            const eyeGeo = new THREE.SphereGeometry(0.15, 8, 8);
+            // Red Plume/Visor glow
+            const eyeGeo = new THREE.BoxGeometry(0.5, 0.1, 0.1);
             const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-            const le = new THREE.Mesh(eyeGeo, eyeMat); le.position.set(-0.2, 0.9, 0.45); enemyGroup.add(le);
-            const re = new THREE.Mesh(eyeGeo, eyeMat); re.position.set(0.2, 0.9, 0.45); enemyGroup.add(re);
+            const visor = new THREE.Mesh(eyeGeo, eyeMat); 
+            visor.position.set(0, 2.0, 0.4); 
+            enemyGroup.add(visor);
 
-            enemyGroup.position.set((Math.random() - 0.5) * 8, 1.5, -40); 
-            enemyGroup.userData = { speed: 0.15 + (Math.random() * 0.1) + (score * 0.005), active: true, hitRadius: 1.2 };
-            scene.add(enemyGroup); enemies.push(enemyGroup);
-            setTimeout(spawnEnemy, Math.max(800, 2500 - score * 50));
+            // Floating Health Bar
+            const hpGroup = new THREE.Group();
+            hpGroup.position.y = 2.7;
+            const hpBG = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.15), new THREE.MeshBasicMaterial({color: 0x550000}));
+            const hpFG = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.15), new THREE.MeshBasicMaterial({color: 0x00ff00}));
+            hpFG.position.z = 0.01;
+            hpGroup.add(hpBG);
+            hpGroup.add(hpFG);
+            enemyGroup.add(hpGroup);
+
+            enemyGroup.position.set(0, 0, -40); // Spawns far down the street
+            
+            enemyGroup.userData = { 
+                speed: 0.05 + (score * 0.005), 
+                active: true, 
+                hitRadius: 1.5,
+                maxHealth: 100,
+                health: 100,
+                hpBar: hpFG,
+                lastHitTime: 0,
+                isBleeding: false,
+                bodyMesh: body
+            };
+            
+            scene.add(enemyGroup); 
+            enemies.push(enemyGroup);
         }
 
+        // =====================================
+        // COMBAT, GORE & PHYSICS
+        // =====================================
         function shootBullet() {
             const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffff00 }));
             const tipPos = new THREE.Vector3(); gunTip.getWorldPosition(tipPos); bullet.position.copy(tipPos);
             const basePos = new THREE.Vector3(); gunGroup.getWorldPosition(basePos);
             bullet.userData = { velocity: new THREE.Vector3().subVectors(tipPos, basePos).normalize().multiplyScalar(1.2), life: 100 };
             
-            // Add a small pointlight to the bullet
             const bLight = new THREE.PointLight(0xffff00, 1, 5);
             bullet.add(bLight);
             
             scene.add(bullet); bullets.push(bullet);
-            scene.background = new THREE.Color(0x222200); setTimeout(() => { scene.background = new THREE.Color(0x050508); }, 50);
         }
 
-        function createExplosion(pos, isBullet = false) {
-            for(let i=0; i<12; i++) {
-                const p = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({ color: isBullet ? 0xffff00 : 0x228b22 }));
+        function createBloodBurst(pos) {
+            for(let i=0; i<15; i++) {
+                const p = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.15, 0.15), new THREE.MeshBasicMaterial({ color: 0x880000 }));
                 p.position.copy(pos);
-                p.userData = { vx: (Math.random()-0.5)*0.8, vy: (Math.random()-0.5)*0.8, vz: (Math.random()-0.5)*0.8, life: 1.0 };
+                p.position.y += Math.random() * 1.5;
+                p.position.x += (Math.random() - 0.5) * 0.5;
+                p.userData = { vx: (Math.random()-0.5)*0.5, vy: Math.random()*0.3, vz: (Math.random()-0.5)*0.5, life: 1.0, isBlood: true };
                 scene.add(p); particles.push(p);
             }
         }
+        
+        function spawnBloodDrop(enemyPos) {
+            const drop = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.1), new THREE.MeshBasicMaterial({ color: 0x880000 }));
+            drop.position.copy(enemyPos);
+            drop.position.y += 1.0 + (Math.random() * 0.5); // Random height on body
+            drop.position.x += (Math.random() - 0.5) * 0.8;
+            scene.add(drop);
+            bloodDrops.push({ mesh: drop, state: 'falling', life: 1.0 });
+        }
 
-        // Math & Collisions
+        function addWoundToEnemy(enemy) {
+            const woundGeo = new THREE.BoxGeometry(0.8, 0.1, 0.2);
+            const woundMat = new THREE.MeshBasicMaterial({ color: 0x660000 });
+            const wound = new THREE.Mesh(woundGeo, woundMat);
+            
+            // Randomly position and rotate the gash on the armor body
+            wound.position.set((Math.random()-0.5)*0.5, (Math.random()-0.5)*0.8, 0.5);
+            wound.rotation.z = (Math.random() - 0.5) * Math.PI;
+            
+            enemy.userData.bodyMesh.add(wound);
+            enemy.userData.isBleeding = true;
+        }
+
         function pointToLineDistance(px, py, pz, x1, y1, z1, x2, y2, z2) {
             const A = px-x1, B = py-y1, C = pz-z1, D = x2-x1, E = y2-y1, F = z2-z1;
             const dot = A*D + B*E + C*F, len_sq = D*D + E*E + F*F;
@@ -583,6 +671,38 @@
             return Math.sqrt(dx*dx + dy*dy + dz*dz);
         }
 
+        function damageEnemy(enemy, index) {
+            const now = Date.now();
+            // 400ms cooldown so a single pass doesn't hit them 60 times a second
+            if (now - enemy.userData.lastHitTime < 400) return; 
+            
+            enemy.userData.lastHitTime = now;
+            enemy.userData.health -= 35; // Takes 3 hits to kill
+            
+            // Visuals
+            addWoundToEnemy(enemy);
+            createBloodBurst(enemy.position);
+            scene.background = new THREE.Color(0xffcccc); setTimeout(() => { scene.background = new THREE.Color(0x87CEEB); }, 50);
+
+            // Update Healthbar
+            const hpRatio = Math.max(0, enemy.userData.health / enemy.userData.maxHealth);
+            enemy.userData.hpBar.scale.x = hpRatio;
+            enemy.userData.hpBar.position.x = -(1.5 - (1.5 * hpRatio)) / 2; // Keep left aligned
+
+            // Death check
+            if (enemy.userData.health <= 0) {
+                enemy.userData.active = false; 
+                scene.remove(enemy); 
+                enemies.splice(index, 1);
+                
+                score++; 
+                document.getElementById('score-display').innerText = score;
+                
+                // Spawn the NEXT challenger!
+                setTimeout(spawnEnemy, 2000);
+            }
+        }
+
         function checkCollisions() {
             if (window.gameControllerData.mode === 'sword') {
                 const basePos = new THREE.Vector3(), tipPos = new THREE.Vector3();
@@ -592,14 +712,11 @@
                     const enemy = enemies[i];
                     if (!enemy.userData.active) continue;
                     
-                    // Collision check: Distance from enemy center to the line created by the sword blade
-                    const dist = pointToLineDistance(enemy.position.x, enemy.position.y, enemy.position.z, basePos.x, basePos.y, basePos.z, tipPos.x, tipPos.y, tipPos.z);
+                    const dist = pointToLineDistance(enemy.position.x, enemy.position.y + 1, enemy.position.z, basePos.x, basePos.y, basePos.z, tipPos.x, tipPos.y, tipPos.z);
                     
-                    // TRUE COLLISION FIX: Removed the "swing" requirement. 
-                    // Now, if the enemy simply touches the blade, they die immediately!
-                    if (dist < enemy.userData.hitRadius) {
-                        killEnemy(enemy, i);
-                        scene.background = new THREE.Color(0x330000); setTimeout(() => { scene.background = new THREE.Color(0x050508); }, 50);
+                    // You must swing to damage them (AccMag > 5)
+                    if (dist < enemy.userData.hitRadius && window.gameControllerData.accMag > 5) {
+                        damageEnemy(enemy, i);
                     }
                 }
             }
@@ -610,20 +727,23 @@
                     const enemy = enemies[i];
                     if (!enemy.userData.active) continue;
                     if (b.position.distanceTo(enemy.position) < enemy.userData.hitRadius * 1.5) {
-                        killEnemy(enemy, i, true); hitSomething = true; break;
+                        damageEnemy(enemy, i); hitSomething = true; break;
                     }
                 }
                 if (hitSomething) { scene.remove(b); bullets.splice(bIdx, 1); }
             }
         }
 
-        function killEnemy(enemy, index, isBullet = false) {
-            enemy.userData.active = false; scene.remove(enemy); enemies.splice(index, 1);
-            createExplosion(enemy.position, isBullet);
-            score++; document.getElementById('score-display').innerText = score;
+        function angleDiff(a, b) {
+            let d = a - b;
+            while (d > 180) d -= 360;
+            while (d < -180) d += 360;
+            return d;
         }
 
-        // Main Loop
+        // ==========================================
+        // MAIN GAME LOOP
+        // ==========================================
         function gameLoop(timestamp) {
             if (gameState === 'PLAYING') {
                 const ctrl = window.gameControllerData;
@@ -643,11 +763,7 @@
                         ctrl.triggerRecenter = false;
                     }
 
-                    // 1. Calculate Calibrated Yaw (Matches your exact seating direction to "Forward")
                     let calAlpha = (ctrl.alpha || 0) - yawOffset;
-                    
-                    // 2. Build Target Quaternion from physical device orientation
-                    // Beta = Pitch (up/down), Alpha = Yaw (left/right), Gamma = Roll
                     eulerTemp.set(
                         THREE.MathUtils.degToRad(ctrl.beta || 0),
                         THREE.MathUtils.degToRad(calAlpha),
@@ -655,11 +771,8 @@
                         'YXZ'
                     );
                     qTarget.setFromEuler(eulerTemp);
-
-                    // 3. Smoothly Rotate Weapon (Prevents ALL 360-degree spinning glitches)
                     activeWeapon.quaternion.slerp(qTarget, 0.4);
 
-                    // 4. Positional Shifting (Simulates shoulder/elbow movement naturally)
                     eulerTemp.setFromQuaternion(activeWeapon.quaternion, 'YXZ');
                     let targetPosX = eulerTemp.y * -2.0; 
                     let targetPosY = 1.5 + (eulerTemp.x * 2.0);
@@ -673,15 +786,43 @@
                     }
                 }
 
-                // Entities update
+                // Civilians Wander Logic
+                civilians.forEach(civ => {
+                    civ.userData.changeTimer--;
+                    if (civ.userData.changeTimer <= 0) {
+                        civ.userData.targetX = civ.position.x + (Math.random() - 0.5) * 10;
+                        civ.userData.targetZ = civ.position.z + (Math.random() - 0.5) * 10;
+                        // Keep on street
+                        civ.userData.targetX = Math.max(-12, Math.min(12, civ.userData.targetX));
+                        civ.userData.targetZ = Math.max(-50, Math.min(-5, civ.userData.targetZ));
+                        civ.userData.changeTimer = 100 + Math.random() * 200;
+                    }
+                    civ.position.x += (civ.userData.targetX - civ.position.x) * civ.userData.speed * 0.1;
+                    civ.position.z += (civ.userData.targetZ - civ.position.z) * civ.userData.speed * 0.1;
+                });
+
+                // Knight Update
                 for (let i = enemies.length - 1; i >= 0; i--) {
                     const e = enemies[i];
-                    e.position.z += e.userData.speed; e.position.y = 1.5 + Math.sin(timestamp * 0.005 + i) * 0.5;
+                    e.position.z += e.userData.speed; 
+                    
+                    // Bobbing
+                    e.position.y = Math.sin(timestamp * 0.005) * 0.1;
+
+                    // Bleeding effects
+                    if (e.userData.isBleeding && Math.random() < 0.15) {
+                        spawnBloodDrop(e.position);
+                    }
+
+                    // Reached player
                     if (e.position.z > camera.position.z) {
                         scene.remove(e); enemies.splice(i, 1);
                         lives--; document.getElementById('lives-display').innerText = lives;
                         camera.position.x = (Math.random() - 0.5) * 1; setTimeout(() => { camera.position.x = 0; }, 50);
-                        if (lives <= 0) {
+                        
+                        if (lives > 0) {
+                            setTimeout(spawnEnemy, 2000); // Spawn next one if alive
+                        } else {
                             gameState = 'GAMEOVER';
                             uiLayer.classList.remove('hidden'); document.getElementById('screen-gameover').classList.remove('hidden');
                             document.getElementById('final-score').innerText = score;
@@ -689,16 +830,40 @@
                     }
                 }
 
+                // Bullets
                 for (let i = bullets.length - 1; i >= 0; i--) {
                     const b = bullets[i]; b.position.add(b.userData.velocity); b.userData.life--;
                     if (b.userData.life <= 0) { scene.remove(b); bullets.splice(i, 1); }
                 }
 
+                // Particles (Explosions)
                 for (let i = particles.length - 1; i >= 0; i--) {
                     const p = particles[i];
                     p.position.x += p.userData.vx; p.position.y += p.userData.vy; p.position.z += p.userData.vz;
-                    p.userData.vy -= 0.02; p.userData.life -= 0.05; p.scale.setScalar(p.userData.life);
+                    if (p.userData.isBlood) p.userData.vy -= 0.02; // Gravity for blood
+                    p.userData.life -= 0.05; p.scale.setScalar(p.userData.life);
                     if (p.userData.life <= 0) { scene.remove(p); particles.splice(i, 1); }
+                }
+                
+                // Blood Drops (Dripping onto floor)
+                for (let i = bloodDrops.length - 1; i >= 0; i--) {
+                    const drop = bloodDrops[i];
+                    if (drop.state === 'falling') {
+                        drop.mesh.position.y -= 0.1;
+                        if (drop.mesh.position.y <= 0.05) {
+                            drop.mesh.position.y = 0.05;
+                            drop.mesh.scale.set(3, 0.1, 3); // Flatten out into a puddle
+                            drop.state = 'puddle';
+                        }
+                    } else if (drop.state === 'puddle') {
+                        drop.life -= 0.005; // Fade away slowly
+                        drop.mesh.material.opacity = Math.max(0, drop.life);
+                        drop.mesh.material.transparent = true;
+                        if (drop.life <= 0) {
+                            scene.remove(drop.mesh);
+                            bloodDrops.splice(i, 1);
+                        }
+                    }
                 }
 
                 checkCollisions();
