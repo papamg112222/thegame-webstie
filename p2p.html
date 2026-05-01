@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Medieval Knight P2P Simulator</title>
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r152/three.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; overflow: hidden; background: #050505; color: white; font-family: 'Cinzel', serif; }
+        canvas { display: block; }
+        .medieval-border {
+            border: 3px solid #8b7355;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8), inset 0 0 15px rgba(139, 115, 85, 0.3);
+            background: rgba(20, 20, 25, 0.95);
+        }
+        .btn-medieval {
+            background: linear-gradient(to bottom, #c5a059, #8b7355);
+            color: #1a1a1a;
+            border: 1px solid #ffedbc;
+            font-weight: 900;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .btn-medieval:hover { filter: brightness(1.2); transform: scale(1.05); }
+        .btn-medieval:active { transform: scale(0.98); }
+        .server-item {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(139, 115, 85, 0.3);
+            transition: all 0.2s;
+        }
+        .server-item:hover {
+            background: rgba(139, 115, 85, 0.2);
+            border-color: #c5a059;
+        }
+        #crosshair {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 10px; height: 10px; border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 50%; pointer-events: none; z-index: 50;
+        }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #8b7355; border-radius: 2px; }
+    </style>
+</head>
+<body>
+
+    <div id="crosshair" class="hidden"></div>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer" class="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-10">
+        
+        <!-- Main Setup Menu -->
+        <div id="menu" class="medieval-border p-8 sm:p-12 max-w-lg w-full text-center rounded">
+            <h1 class="text-4xl sm:text-6xl font-black mb-2 text-[#c5a059] tracking-tighter italic">KNIGHT & SQUIRE</h1>
+            <p class="text-gray-500 text-[10px] sm:text-xs uppercase tracking-[0.2em] mb-10">Dual-Device Medieval Simulator</p>
+            
+            <div class="space-y-6">
+                <button id="btn-host" class="btn-medieval w-full py-5 rounded text-xl shadow-lg shadow-yellow-900/20">
+                    CREATE HOST SERVER
+                </button>
+                
+                <div class="flex items-center gap-4 py-2">
+                    <div class="flex-grow h-px bg-[#8b7355]/30"></div>
+                    <span class="text-[10px] text-[#8b7355] font-bold">JOIN REALM</span>
+                    <div class="flex-grow h-px bg-[#8b7355]/30"></div>
+                </div>
+
+                <div class="bg-black/40 p-6 rounded border border-[#8b7355]/20 text-left">
+                    <p class="text-[10px] text-gray-500 mb-4 tracking-widest uppercase font-sans text-center">Available Host Servers</p>
+                    
+                    <!-- Server List -->
+                    <div id="server-list" class="max-h-48 overflow-y-auto space-y-2 mb-4">
+                        <p class="text-[10px] text-center text-gray-600 animate-pulse py-4">Searching for active realms...</p>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <input id="room-input" type="tel" maxlength="4" placeholder="CODE" class="w-24 bg-transparent text-center text-xl font-mono text-[#c5a059] border border-[#8b7355]/40 rounded focus:outline-none placeholder:opacity-10">
+                        <button id="btn-join" class="flex-grow py-3 bg-white/5 hover:bg-white/10 border border-white/20 text-white text-xs font-bold rounded transition-all">
+                            MANUAL LINK
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <p id="error-msg" class="mt-6 text-red-500 text-xs font-sans"></p>
+        </div>
+
+        <!-- Host HUD (Laptop Only) -->
+        <div id="host-hud" class="hidden fixed top-8 left-8 pointer-events-none text-left">
+            <div class="medieval-border px-8 py-5 rounded">
+                <p class="text-[10px] text-[#c5a059] font-black uppercase mb-1 tracking-widest">Gate Access Code</p>
+                <h2 id="display-code" class="text-6xl font-black tracking-tighter text-white">----</h2>
+                <div class="mt-4 flex items-center gap-3">
+                    <div id="status-dot" class="w-3 h-3 rounded-full bg-red-600"></div>
+                    <span id="status-text" class="text-[10px] uppercase font-bold text-gray-400">Waiting for Squire...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controller UI (Phone Only) -->
+        <div id="controller-ui" class="hidden fixed inset-0 bg-[#0a0a0c] flex flex-col items-center justify-between p-12 text-center select-none">
+            <div class="mt-10">
+                <div class="w-32 h-32 bg-[#8b7355] rounded-full flex items-center justify-center mx-auto mb-8 border-4 border-[#c5a059] shadow-2xl animate-pulse">
+                    <svg class="w-16 h-16 text-black" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                </div>
+                <h3 class="text-3xl font-black text-[#c5a059]">HILT LINKED</h3>
+                <p id="controller-room" class="text-gray-500 text-xs font-sans mt-2 tracking-widest uppercase">Room ----</p>
+            </div>
+            
+            <div class="w-full space-y-4">
+                <div class="medieval-border p-8 text-left text-sm space-y-4 font-sans leading-relaxed">
+                    <p>⚔️ <strong>Grip phone vertically</strong> like a sword handle.</p>
+                    <p>🚶 <strong>Walk in place</strong> (shake phone) to move forward.</p>
+                    <p>⚡ <strong>Strike fast</strong> to swing your blade in-game.</p>
+                </div>
+                <button onclick="location.reload()" class="text-[10px] uppercase opacity-40 font-bold tracking-widest">Disconnect Quest</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Environment & Data Setup ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'med-p2p-v3';
+        const firebaseConfig = JSON.parse(`__firebase_config`);
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
+
+        let scene, camera, renderer, sword, npcs = [], walkSpeed = 0, isAttacking = false;
+        let swordTargetRot = new THREE.Euler(0, 0, 0);
+        let lastUpdateTime = 0;
+        let activeRoom = null;
+
+        // --- 3D Construction Functions ---
+        function createMedievalHouse(x, z) {
+            const group = new THREE.Group();
+            const h = 7 + Math.random() * 8;
+            
+            const base = new THREE.Mesh(
+                new THREE.BoxGeometry(6, h, 6),
+                new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 1 })
+            );
+            group.add(base);
+
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x221100 });
+            for(let i=0; i < h; i+=2.5) {
+                const beam = new THREE.Mesh(new THREE.BoxGeometry(6.2, 0.3, 6.2), frameMat);
+                beam.position.y = (i - h/2);
+                group.add(beam);
+            }
+
+            const roof = new THREE.Mesh(
+                new THREE.ConeGeometry(5, 5, 4),
+                new THREE.MeshStandardMaterial({ color: 0x552211, roughness: 1 })
+            );
+            roof.position.y = h/2 + 2.5;
+            roof.rotation.y = Math.PI / 4;
+            group.add(roof);
+
+            group.position.set(x, h/2, z);
+            return group;
+        }
+
+        function createBlade() {
+            const group = new THREE.Group();
+            const blade = new THREE.Mesh(
+                new THREE.BoxGeometry(0.12, 1.4, 0.04),
+                new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.9, roughness: 0.1, emissive: 0x333333 })
+            );
+            blade.position.y = 0.9;
+            group.add(blade);
+            const guard = new THREE.Mesh(
+                new THREE.BoxGeometry(0.6, 0.06, 0.12),
+                new THREE.MeshStandardMaterial({ color: 0xaa8844, metalness: 0.8 })
+            );
+            guard.position.y = 0.2;
+            group.add(guard);
+            const hilt = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8),
+                new THREE.MeshStandardMaterial({ color: 0x331100 })
+            );
+            group.add(hilt);
+            return group;
+        }
+
+        // --- Initialization ---
+        async function initGame(isHost) {
+            if (typeof THREE === 'undefined') return setTimeout(() => initGame(isHost), 500);
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xaaccff);
+            scene.fog = new THREE.FogExp2(0xaaccff, 0.04);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            const ambient = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+            scene.add(ambient);
+            const sun = new THREE.DirectionalLight(0xfff5e0, 1.3);
+            sun.position.set(50, 80, 50);
+            sun.castShadow = true;
+            scene.add(sun);
+
+            const ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(1000, 1000),
+                new THREE.MeshStandardMaterial({ color: 0x252525, roughness: 1 })
+            );
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            for(let i=0; i<100; i++) {
+                const x = (Math.random() - 0.5) * 200;
+                const z = (Math.random() - 0.5) * 200;
+                if (Math.abs(x) > 10 || Math.abs(z) > 10) {
+                    scene.add(createMedievalHouse(x, z));
+                }
+            }
+
+            for(let i=0; i<25; i++) {
+                const npc = new THREE.Mesh(
+                    new THREE.CapsuleGeometry(0.3, 1, 4, 8),
+                    new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff })
+                );
+                npc.position.set((Math.random()-0.5)*120, 0.8, (Math.random()-0.5)*120);
+                npcs.push({ 
+                    mesh: npc, 
+                    vel: new THREE.Vector3((Math.random()-0.5)*0.04, 0, (Math.random()-0.5)*0.04),
+                    timer: Math.random() * 100 
+                });
+                scene.add(npc);
+            }
+
+            sword = createBlade();
+            sword.position.set(0.6, -0.6, -0.8);
+            camera.add(sword);
+            scene.add(camera);
+
+            camera.position.set(0, 1.7, 0);
+            document.getElementById('crosshair').classList.remove('hidden');
+            animate();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            npcs.forEach(n => {
+                n.mesh.position.add(n.vel);
+                n.timer--;
+                if(n.timer <= 0) {
+                    n.vel.set((Math.random()-0.5)*0.04, 0, (Math.random()-0.5)*0.04);
+                    n.timer = 50 + Math.random() * 150;
+                }
+            });
+
+            if (walkSpeed > 0.01) {
+                camera.translateZ(-walkSpeed * 0.12);
+                camera.position.y = 1.7 + Math.sin(Date.now() * 0.008) * 0.06;
+                walkSpeed *= 0.94;
+            } else {
+                camera.position.y = THREE.MathUtils.lerp(camera.position.y, 1.7, 0.1);
+            }
+
+            sword.rotation.set(
+                THREE.MathUtils.lerp(sword.rotation.x, -Math.PI/3 + swordTargetRot.x, 0.15),
+                THREE.MathUtils.lerp(sword.rotation.y, swordTargetRot.y, 0.15),
+                THREE.MathUtils.lerp(sword.rotation.z, swordTargetRot.z, 0.15)
+            );
+
+            if (isAttacking) {
+                sword.position.z = THREE.MathUtils.lerp(sword.position.z, -1.8, 0.35);
+                sword.position.y = THREE.MathUtils.lerp(sword.position.y, -0.3, 0.35);
+                if (sword.position.z < -1.75) isAttacking = false;
+            } else {
+                sword.position.z = THREE.MathUtils.lerp(sword.position.z, -0.8, 0.1);
+                sword.position.y = THREE.MathUtils.lerp(sword.position.y, -0.6, 0.1);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Lobby & Server List Logic ---
+        function initLobby() {
+            // Wait for auth before listening
+            auth.onAuthStateChanged(async (user) => {
+                if (!user) {
+                    await auth.signInAnonymously();
+                    return;
+                }
+                
+                // Listen for active servers (Rule 1 & 2)
+                db.collection('artifacts').doc(appId).collection('public').doc('data').collection('lobby')
+                    .onSnapshot(snapshot => {
+                        const list = document.getElementById('server-list');
+                        list.innerHTML = "";
+                        
+                        if (snapshot.empty) {
+                            list.innerHTML = `<p class="text-[10px] text-center text-gray-600 py-4 italic">No realms found. Create one on your computer.</p>`;
+                            return;
+                        }
+
+                        snapshot.forEach(doc => {
+                            const data = doc.data();
+                            // Only show servers active in the last 10 minutes
+                            if (Date.now() - data.ts < 600000) {
+                                const el = document.createElement('div');
+                                el.className = "server-item p-3 flex justify-between items-center cursor-pointer rounded";
+                                el.innerHTML = `
+                                    <span class="text-xs font-bold text-[#c5a059]">REALM ${doc.id}</span>
+                                    <span class="text-[8px] bg-[#c5a059]/20 text-[#c5a059] px-2 py-1 rounded">JOIN</span>
+                                `;
+                                el.onclick = () => {
+                                    document.getElementById('room-input').value = doc.id;
+                                    startController(doc.id);
+                                };
+                                list.appendChild(el);
+                            }
+                        });
+                    });
+            });
+        }
+
+        // --- P2P Logic ---
+        async function startHost() {
+            const code = Math.floor(1000 + Math.random() * 9000).toString();
+            document.getElementById('menu').classList.add('hidden');
+            document.getElementById('host-hud').classList.remove('hidden');
+            document.getElementById('display-code').innerText = code;
+
+            if (!auth.currentUser) await auth.signInAnonymously();
+            
+            // Register server in Lobby (Rule 1)
+            const lobbyRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('lobby').doc(code);
+            await lobbyRef.set({ ts: Date.now(), active: true });
+
+            // Listen for squire inputs
+            const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms').doc(code);
+            docRef.onSnapshot(doc => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    if (data.type === 'step') walkSpeed = Math.min(1.5, walkSpeed + 0.6);
+                    if (data.type === 'swing') isAttacking = true;
+                    if (data.rot) {
+                        swordTargetRot.x = data.rot.x || 0;
+                        swordTargetRot.y = data.rot.y || 0;
+                        swordTargetRot.z = data.rot.z || 0;
+                    }
+                    document.getElementById('status-dot').className = "w-3 h-3 rounded-full bg-green-500 animate-pulse";
+                    document.getElementById('status-text').innerText = "Knight Linked";
+                }
+            });
+
+            initGame(true);
+            
+            // Heartbeat for Lobby
+            setInterval(() => lobbyRef.update({ ts: Date.now() }), 30000);
+        }
+
+        async function startController(manualCode) {
+            const code = manualCode || document.getElementById('room-input').value;
+            if (code.length !== 4) return alert("Please enter the 4-digit Room Code.");
+
+            try {
+                if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                    const res = await DeviceMotionEvent.requestPermission();
+                    if (res !== 'granted') return alert("Motion access required");
+                }
+
+                if (!auth.currentUser) await auth.signInAnonymously();
+
+                document.getElementById('menu').classList.add('hidden');
+                document.getElementById('controller-ui').classList.remove('hidden');
+                document.getElementById('controller-room').innerText = `Room ${code}`;
+
+                const docRef = db.collection('artifacts').doc(appId).collection('public').doc('data').collection('rooms').doc(code);
+
+                window.addEventListener('devicemotion', (e) => {
+                    const now = Date.now();
+                    if (now - lastUpdateTime < 120) return;
+                    lastUpdateTime = now;
+
+                    const acc = e.accelerationIncludingGravity;
+                    if (!acc) return;
+
+                    const force = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+                    const data = { 
+                        ts: now, 
+                        rot: { x: acc.z / 4, y: -acc.x / 4, z: acc.y / 8 } 
+                    };
+
+                    if (force > 15) data.type = 'step'; 
+                    if (force > 28) data.type = 'swing'; 
+
+                    docRef.set(data, { merge: true }).catch(console.error);
+                });
+            } catch (err) {
+                alert("Permission error: " + err.message);
+            }
+        }
+
+        // --- App Entry ---
+        window.onload = () => {
+            initLobby();
+            document.getElementById('btn-host').onclick = startHost;
+            document.getElementById('btn-join').onclick = () => startController();
+
+            window.onresize = () => {
+                if (camera && renderer) {
+                    camera.aspect = window.innerWidth / window.innerHeight;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                }
+            };
+        };
+    </script>
+</body>
+</html>
