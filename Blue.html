@@ -1,0 +1,223 @@
+```react
+import React, { useState, useEffect } from 'react';
+import { Bluetooth, BluetoothConnected, BluetoothSearching, Headphones, Smartphone, Loader2, AlertCircle, CheckCircle2, Info } from 'lucide-react';
+
+export default function App() {
+  const [isSupported, setIsSupported] = useState(true);
+  const [bluetoothState, setBluetoothState] = useState('idle'); // idle, requesting, syncing, connected, error
+  const [connectedDevice, setConnectedDevice] = useState(null);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  // Check if Web Bluetooth API is supported on mount
+  useEffect(() => {
+    if (!navigator.bluetooth) {
+      setIsSupported(false);
+      setErrorMessage("Your browser does not support the Web Bluetooth API. Please try using Google Chrome on Android or Desktop.");
+    }
+  }, []);
+
+  const handleConnect = async () => {
+    if (!isSupported) return;
+
+    setBluetoothState('requesting');
+    setErrorMessage('');
+    setConnectedDevice(null);
+
+    try {
+      // Request Bluetooth Device
+      // acceptAllDevices: true allows us to see all nearby BLE devices
+      const device = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: ['battery_service', 'device_information'] // Common optional services
+      });
+
+      // User selected a device from the browser's native prompt
+      setBluetoothState('syncing');
+      
+      // Simulate a "syncing" process since web browsers can't route audio
+      setTimeout(() => {
+        setConnectedDevice({
+          name: device.name || 'Unknown Earphones',
+          id: device.id,
+        });
+        setBluetoothState('connected');
+        
+        // Listen for disconnects
+        device.addEventListener('gattserverdisconnected', () => {
+          setBluetoothState('idle');
+          setConnectedDevice(null);
+          setErrorMessage('Device disconnected.');
+        });
+      }, 2500); // 2.5 second simulated sync delay
+
+    } catch (error) {
+      console.error("Bluetooth Error:", error);
+      setBluetoothState('error');
+      
+      if (error.name === 'NotFoundError') {
+        setErrorMessage("No device selected. You cancelled the pairing request.");
+      } else if (error.name === 'SecurityError') {
+        setErrorMessage("Permission denied. Ensure your site has permission to use Bluetooth.");
+      } else if (error.name === 'NotSupportedError') {
+        setErrorMessage("Bluetooth is not supported or not enabled on your device.");
+      } else {
+        setErrorMessage(error.message || "An unknown error occurred during pairing.");
+      }
+    }
+  };
+
+  const handleDisconnect = () => {
+    // In a full implementation, you would call device.gatt.disconnect()
+    // Here we reset the UI state
+    setBluetoothState('idle');
+    setConnectedDevice(null);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans text-slate-100">
+      {/* Mobile App Container */}
+      <div className="w-full max-w-md bg-slate-800 rounded-3xl shadow-2xl overflow-hidden border border-slate-700 relative">
+        
+        {/* App Header */}
+        <div className="bg-slate-900/50 p-6 text-center border-b border-slate-700">
+          <h1 className="text-xl font-semibold flex items-center justify-center gap-2">
+            <Bluetooth className="w-5 h-5 text-blue-400" />
+            Audio Sync Pro
+          </h1>
+          <p className="text-slate-400 text-sm mt-1">Connect your wireless earphones</p>
+        </div>
+
+        {/* Main Content Area */}
+        <div className="p-8 flex flex-col items-center min-h-[400px]">
+          
+          {/* Visual Device Representation */}
+          <div className="relative mb-8 flex justify-center items-center w-full">
+            <Smartphone className={`w-16 h-16 transition-colors duration-500 ${bluetoothState === 'connected' ? 'text-blue-400' : 'text-slate-500'}`} />
+            
+            {/* Animated Connection Line */}
+            <div className="flex-1 px-4 flex justify-center overflow-hidden">
+               <div className="flex items-center gap-1">
+                 {[0, 1, 2, 3, 4].map((i) => (
+                   <div 
+                     key={i}
+                     className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
+                       bluetoothState === 'connected' ? 'bg-blue-400' : 
+                       bluetoothState === 'syncing' ? 'bg-blue-400 animate-ping' : 'bg-slate-600'
+                     }`}
+                     style={{ animationDelay: `${i * 150}ms` }}
+                   />
+                 ))}
+               </div>
+            </div>
+
+            <Headphones className={`w-16 h-16 transition-colors duration-500 ${bluetoothState === 'connected' ? 'text-blue-400' : 'text-slate-500'}`} />
+          </div>
+
+          {/* Status and Controls */}
+          <div className="w-full text-center flex-1 flex flex-col justify-center">
+            
+            {!isSupported ? (
+              <div className="bg-red-900/30 border border-red-500/50 p-4 rounded-xl text-red-300 text-sm flex items-start gap-3 text-left">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p>{errorMessage}</p>
+              </div>
+            ) : (
+              <>
+                {/* Idle State */}
+                {bluetoothState === 'idle' && (
+                  <div className="animate-in fade-in zoom-in duration-300">
+                    <p className="text-slate-300 mb-6">Ready to pair with nearby earphones.</p>
+                    <button 
+                      onClick={handleConnect}
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-4 px-6 rounded-2xl flex items-center justify-center gap-3 transition-all active:scale-95 shadow-lg shadow-blue-900/20"
+                    >
+                      <BluetoothSearching className="w-5 h-5" />
+                      Scan for Earphones
+                    </button>
+                  </div>
+                )}
+
+                {/* Requesting State */}
+                {bluetoothState === 'requesting' && (
+                  <div className="animate-in fade-in duration-300 flex flex-col items-center">
+                    <BluetoothSearching className="w-12 h-12 text-blue-400 animate-pulse mb-4" />
+                    <h3 className="text-lg font-medium text-white mb-2">Scanning...</h3>
+                    <p className="text-slate-400 text-sm text-center max-w-[250px]">
+                      Please select your earphones from the browser prompt that appears.
+                    </p>
+                  </div>
+                )}
+
+                {/* Syncing State */}
+                {bluetoothState === 'syncing' && (
+                  <div className="animate-in fade-in duration-300 flex flex-col items-center">
+                    <Loader2 className="w-12 h-12 text-blue-400 animate-spin mb-4" />
+                    <h3 className="text-lg font-medium text-white mb-2">Syncing Device</h3>
+                    <p className="text-slate-400 text-sm">Establishing secure connection...</p>
+                  </div>
+                )}
+
+                {/* Connected State */}
+                {bluetoothState === 'connected' && connectedDevice && (
+                  <div className="animate-in slide-in-from-bottom-4 duration-500 w-full">
+                    <div className="bg-blue-900/20 border border-blue-500/30 rounded-2xl p-5 mb-6">
+                      <div className="flex items-center justify-center gap-2 mb-2 text-green-400">
+                        <CheckCircle2 className="w-6 h-6" />
+                        <span className="font-medium text-lg">Successfully Synced</span>
+                      </div>
+                      <p className="text-white font-semibold truncate text-xl mt-4">
+                        {connectedDevice.name}
+                      </p>
+                      <p className="text-slate-400 text-xs mt-1 font-mono break-all">
+                        ID: {connectedDevice.id}
+                      </p>
+                    </div>
+
+                    <button 
+                      onClick={handleDisconnect}
+                      className="w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-3 px-6 rounded-xl transition-all active:scale-95"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+
+                {/* Error State */}
+                {bluetoothState === 'error' && (
+                  <div className="animate-in fade-in duration-300 w-full">
+                    <div className="bg-red-900/20 border border-red-500/30 rounded-2xl p-5 mb-6">
+                      <AlertCircle className="w-8 h-8 text-red-400 mx-auto mb-3" />
+                      <h3 className="text-lg font-medium text-white mb-2">Connection Failed</h3>
+                      <p className="text-slate-300 text-sm">{errorMessage}</p>
+                    </div>
+                    
+                    <button 
+                      onClick={() => setBluetoothState('idle')}
+                      className="w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-3 px-6 rounded-xl transition-all active:scale-95"
+                    >
+                      Try Again
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Educational Disclaimer Footer */}
+        <div className="bg-slate-900/80 p-4 border-t border-slate-700">
+          <div className="flex items-start gap-2 text-xs text-slate-400">
+            <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-400" />
+            <p>
+              <strong>Note:</strong> Web apps can view and request data from Bluetooth devices (BLE), but audio routing (music/calls) must be configured in your phone's main OS settings.
+            </p>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+```
+ to
