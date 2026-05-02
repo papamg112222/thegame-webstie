@@ -123,7 +123,7 @@
             </div>
             <div class="text-right glass-panel px-6 py-4 rounded-xl">
                 <p class="text-sm text-yellow-500 font-bold uppercase tracking-widest">VR Movement</p>
-                <p class="text-md text-white mt-1">Jog Phone to Walk<br>Swipe Screen to Look</p>
+                <p class="text-md text-white mt-1">Jog Phone to Walk<br>Swipe Screen OR Turn (VR) to Look</p>
             </div>
         </div>
         
@@ -233,7 +233,7 @@
             <h2 class="text-3xl font-bold text-yellow-400 mb-4 title-text" id="ctrl-title">SWORD MASTERY</h2>
             <p class="text-xl text-gray-300 mb-8 font-serif" id="ctrl-desc">
                 <b>Walk:</b> Jog phone up & down.<br>
-                <b>Look:</b> Swipe screen (Trackpad).<br>
+                <b>Look:</b> Turn body (VR) or Swipe.<br>
                 <b>Throw:</b> Overhead slam!
             </p>
             
@@ -558,7 +558,7 @@
                 btnGun.className = "flex-1 bg-gradient-to-b from-gray-700 to-gray-900 rounded-2xl py-6 text-3xl font-bold border-4 border-gray-600 opacity-60 transition-all title-text";
                 gunUI.classList.add('hidden');
                 title.innerText = "SWORD MASTERY";
-                desc.innerHTML = "<b>Walk:</b> Jog phone up & down.<br><b>Look:</b> Swipe screen (Trackpad).<br><b>Throw:</b> Overhead slam!";
+                desc.innerHTML = "<b>Walk:</b> Jog phone up & down.<br><b>Look:</b> Turn body (VR) or Swipe.<br><b>Throw:</b> Overhead slam!";
             } else {
                 btnSword.className = "flex-1 bg-gradient-to-b from-gray-700 to-gray-900 rounded-2xl py-6 text-3xl font-bold border-4 border-gray-600 opacity-60 transition-all title-text";
                 btnGun.className = "flex-1 bg-gradient-to-b from-blue-500 to-blue-800 rounded-2xl py-6 text-3xl font-bold border-4 border-blue-300 shadow-[0_0_30px_rgba(0,150,255,0.6)] transition-all title-text";
@@ -1421,19 +1421,27 @@
                 let moveSpeed = 0.3; 
                 let isMoving = false;
                 
-                // Phone Trackpad Look
-                if (ctrl.lookDeltaX !== undefined || ctrl.lookDeltaY !== undefined) {
-                    camera.rotation.y -= (ctrl.lookDeltaX || 0);
-                    camera.rotation.x -= (ctrl.lookDeltaY || 0);
-                    
-                    // Clamp pitch to avoid doing backflips
-                    camera.rotation.x = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, camera.rotation.x));
-                    
-                    // Clear trackpad deltas so they don't apply twice
-                    ctrl.lookDeltaX = 0;
-                    ctrl.lookDeltaY = 0;
-                }
+                // Phone Trackpad Look (accumulated for base rotation)
+                window.cameraBaseYaw = (window.cameraBaseYaw || 0) - (ctrl.lookDeltaX || 0);
+                window.cameraBasePitch = (window.cameraBasePitch || 0) - (ctrl.lookDeltaY || 0);
                 
+                // Clamp trackpad pitch
+                window.cameraBasePitch = Math.max(-Math.PI/2.5, Math.min(Math.PI/2.5, window.cameraBasePitch));
+                
+                // Clear trackpad deltas so they don't apply twice
+                ctrl.lookDeltaX = 0;
+                ctrl.lookDeltaY = 0;
+
+                // True VR 360 Head Tracking Integration
+                let vrAlpha = angleDiff(ctrl.alpha || 0, yawOffset);
+                let vrYaw = THREE.MathUtils.degToRad(vrAlpha);
+                let vrPitch = THREE.MathUtils.degToRad((ctrl.beta || 90) - 90);
+
+                // Apply combined VR + Trackpad rotations to Camera
+                camera.rotation.order = 'YXZ';
+                camera.rotation.y = window.cameraBaseYaw + vrYaw;
+                camera.rotation.x = Math.max(-Math.PI/2.1, Math.min(Math.PI/2.1, window.cameraBasePitch + vrPitch));
+
                 // Phone Jog Walk
                 if (ctrl.isWalking) {
                     camera.position.x -= Math.sin(camera.rotation.y) * moveSpeed;
@@ -1471,15 +1479,18 @@
                     // Recenter baseline if requested
                     if (ctrl.triggerRecenter || !isCalibrated) { 
                         yawOffset = ctrl.alpha || 0; 
+                        window.cameraBaseYaw = 0; // Reset trackpad yaw
+                        window.cameraBasePitch = 0; // Reset trackpad pitch
                         isCalibrated = true; 
                         ctrl.triggerRecenter = false; 
                     }
 
                     // Apply true 1:1 Orientation Mapping via Quaternion
+                    // Since camera handles VR macro rotation, weapon applies only local roll/twist (gamma)
                     let calAlpha = angleDiff(ctrl.alpha || 0, yawOffset);
                     eulerTemp.set(
-                        THREE.MathUtils.degToRad(ctrl.beta || 0), 
-                        THREE.MathUtils.degToRad(calAlpha), 
+                        0, // Pitch is handled perfectly by the VR camera now
+                        0, // Yaw is handled perfectly by the VR camera now
                         THREE.MathUtils.degToRad(-(ctrl.gamma || 0)), 
                         'YXZ'
                     );
