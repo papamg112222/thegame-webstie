@@ -1,276 +1,291 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>P2P Wizard Duel</title>
+    <title>First Person Wizard Duel</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; touch-action: none; user-select: none; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; touch-action: none; user-select: none; font-family: 'Segoe UI', sans-serif; }
         
-        /* UI Overlays */
+        /* UI Layers */
         #ui-layer { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 10; display: none; }
-        #crosshair { position: absolute; width: 30px; height: 30px; border: 2px solid rgba(255, 255, 255, 0.8); border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; transition: background 0.2s; }
-        #crosshair::after { content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px; background: white; border-radius: 50%; transform: translate(-50%, -50%); }
-        .crosshair-drawing { background: rgba(0, 255, 255, 0.3); border-color: #0ff !important; box-shadow: 0 0 15px #0ff; }
         
-        #spell-status { position: absolute; top: 20%; left: 50%; transform: translateX(-50%); font-size: 3rem; font-weight: bold; color: #fff; text-shadow: 0 0 10px #0ff, 0 0 20px #0ff; text-transform: uppercase; text-align: center; }
+        /* Dynamic Crosshair */
+        #crosshair { position: absolute; width: 40px; height: 40px; border: 3px solid rgba(255, 255, 255, 0.5); border-radius: 50%; transform: translate(-50%, -50%); transition: border-color 0.2s, background 0.2s; }
+        #crosshair::after { content: ''; position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: white; border-radius: 50%; transform: translate(-50%, -50%); }
+        .crosshair-drawing { background: rgba(0, 255, 255, 0.2); border-color: #0ff !important; box-shadow: 0 0 20px #0ff; transform: translate(-50%, -50%) scale(1.2) !important; }
         
-        /* 2D Canvas for drawing magical ink */
+        #spell-status { position: absolute; top: 15%; left: 50%; transform: translateX(-50%); font-size: 3.5rem; font-weight: 900; color: #fff; text-shadow: 0 0 15px #0ff, 0 0 30px #0ff; text-align: center; letter-spacing: 2px; }
+        #sub-status { position: absolute; top: 25%; left: 50%; transform: translateX(-50%); font-size: 1.5rem; color: #fff; text-shadow: 0 0 10px #000; }
+        
         #drawCanvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 5; display: none; }
 
-        /* Health Bars */
-        .health-container { position: absolute; top: 20px; width: 300px; height: 25px; background: rgba(0,0,0,0.5); border: 2px solid white; border-radius: 15px; overflow: hidden; }
-        #player-health { left: 20px; }
-        #enemy-health { right: 20px; }
-        .health-bar { height: 100%; width: 100%; background: #0f0; transition: width 0.3s; }
-        .health-label { position: absolute; top: -25px; color: white; font-weight: bold; font-size: 1.2rem; text-shadow: 1px 1px 2px black; }
+        /* Health UI */
+        .health-wrapper { position: absolute; top: 20px; width: 400px; height: 30px; background: rgba(0,0,0,0.7); border: 3px solid #444; border-radius: 4px; overflow: hidden; box-shadow: 0 0 10px rgba(0,0,0,0.5); }
+        #player-health { left: 20px; border-color: #00ffff; }
+        #enemy-health { right: 20px; border-color: #ff0044; }
+        .health-fill { height: 100%; width: 100%; transition: width 0.3s; }
+        #player-hp-bar { background: linear-gradient(90deg, #0088ff, #00ffff); }
+        #enemy-hp-bar { background: linear-gradient(90deg, #aa0000, #ff0044); }
+        .health-text { position: absolute; top: 60px; color: white; font-weight: 900; font-size: 1.5rem; text-shadow: 2px 2px 4px black; }
 
-        /* Controller UI */
-        #controllerUI { display: none; height: 100vh; width: 100vw; background: #111; flex-direction: column; }
-        #trackpad { flex: 1; position: relative; background: radial-gradient(circle, #222 0%, #000 100%); border: 2px solid #333; margin: 10px; border-radius: 20px; display: flex; justify-content: center; align-items: center; }
-        #trackpad::before { content: 'WAND TRACKPAD (SWIPE)'; color: #444; font-weight: bold; font-size: 1.5rem; pointer-events: none; }
-        #btnCast { height: 150px; background: #004444; border: 4px solid #00ffff; border-radius: 20px; margin: 10px; font-size: 2rem; font-weight: bold; color: #00ffff; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 20px #00ffff inset; transition: all 0.1s; }
-        #btnCast.active { background: #00ffff; color: #000; transform: scale(0.98); box-shadow: 0 0 40px #00ffff; }
+        /* Mobile Controller View */
+        #controllerUI { display: none; height: 100vh; width: 100vw; background: #0a0a0a; flex-direction: column; justify-content: center; align-items: center; }
+        #btnCast { width: 90%; height: 60vh; background: linear-gradient(135deg, #004444, #002222); border: 6px solid #00ffff; border-radius: 40px; font-size: 3rem; font-weight: 900; color: #00ffff; display: flex; justify-content: center; align-items: center; box-shadow: 0 0 30px #00ffff inset, 0 10px 20px rgba(0,0,0,0.8); transition: all 0.1s; text-align: center; user-select: none; }
+        #btnCast.active { background: #00ffff; color: #000; transform: scale(0.95); box-shadow: 0 0 60px #00ffff; }
         
-        /* Debug Canvas (Hidden) */
         #debugCanvas { display: none; }
     </style>
 </head>
 <body>
 
     <!-- Setup / Main Menu -->
-    <div id="setupUI" class="absolute z-20 w-full h-full bg-gray-900 flex flex-col items-center justify-center text-white">
-        <h1 class="text-5xl md:text-7xl font-black mb-4 text-cyan-400 drop-shadow-[0_0_15px_rgba(0,255,255,0.8)]">MALDIVES DUEL</h1>
+    <div id="setupUI" class="absolute z-20 w-full h-full bg-[#050510] flex flex-col items-center justify-center text-white">
+        <h1 class="text-6xl md:text-8xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600 drop-shadow-[0_0_20px_rgba(0,255,255,0.5)]">VR DUEL</h1>
+        <p class="text-xl text-cyan-200 mb-8 tracking-widest">MOTION WAND EDITION</p>
         
-        <div id="roleSelection" class="flex flex-col gap-6 text-center mt-8">
-            <button onclick="startHost()" class="border-2 border-cyan-400 bg-cyan-900/30 px-8 py-4 rounded-xl text-2xl font-bold hover:bg-cyan-400 hover:text-black transition shadow-[0_0_15px_#0ff]">
-                Start Game Screen
+        <div id="roleSelection" class="flex flex-col gap-6 text-center mt-4">
+            <button onclick="startHost()" class="border-2 border-cyan-400 bg-cyan-900/40 px-10 py-5 rounded-2xl text-2xl font-bold hover:bg-cyan-400 hover:text-black transition-all shadow-[0_0_20px_#0ff]">
+                Start as Screen (Host)
             </button>
-            <p class="text-gray-400">- OR -</p>
-            <div class="flex gap-2 justify-center">
-                <input type="text" id="joinIdInput" placeholder="Game ID" class="bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-400 text-center uppercase text-xl" maxlength="6">
-                <button onclick="startJoinFromInput()" class="bg-gray-700 text-white px-6 py-2 rounded-lg font-bold">Join as Controller</button>
+            <div class="flex gap-2 justify-center mt-6">
+                <input type="text" id="joinIdInput" placeholder="GAME ID" class="bg-gray-900 border border-gray-600 rounded-xl px-4 py-3 text-white focus:border-cyan-400 text-center uppercase text-xl font-bold w-40">
+                <button onclick="startJoinFromInput()" class="bg-gray-700 text-white px-6 py-3 rounded-xl font-bold text-lg hover:bg-gray-600">Join Phone</button>
             </div>
         </div>
 
         <div id="hostWaitingUI" class="hidden flex-col items-center justify-center text-center mt-8">
-            <h2 class="text-2xl mb-4">Scan to Connect Phone</h2>
-            <div class="bg-white p-4 rounded-xl mb-4"><div id="qrcode"></div></div>
-            <p class="text-cyan-400 font-mono text-2xl">ID: <span id="displayGameId" class="font-bold text-white">---</span></p>
-            <p class="text-gray-500 mt-4 max-w-sm">Scan QR or enter ID on phone to play.</p>
+            <h2 class="text-3xl mb-6 font-bold">Scan to Connect Wand</h2>
+            <div class="bg-white p-4 rounded-2xl mb-6"><div id="qrcode"></div></div>
+            <p class="text-cyan-400 font-mono text-3xl tracking-widest">ID: <span id="displayGameId" class="font-black text-white">---</span></p>
         </div>
         
-        <div id="clientConnectingUI" class="hidden flex-col items-center mt-8">
-            <h2 class="text-2xl text-cyan-400 animate-pulse">Connecting to Screen...</h2>
+        <!-- Controller Sensor Permission Screen -->
+        <div id="clientSensorUI" class="hidden flex-col items-center mt-8 px-6 text-center">
+            <h2 class="text-3xl font-bold text-cyan-400 mb-6">Wand Ready</h2>
+            <p class="text-gray-300 text-xl mb-8">This game uses your phone's motion sensors. You will wave your phone to draw spells!</p>
+            <button onclick="requestSensorsAndConnect()" class="w-full bg-cyan-500 text-black px-8 py-6 rounded-2xl font-bold text-2xl shadow-[0_0_20px_#0ff]">
+                ENABLE MOTION WAND
+            </button>
         </div>
     </div>
 
-    <!-- Host UI Overlay (Game Screen) -->
+    <!-- First Person Screen UI Overlay -->
     <div id="ui-layer">
-        <div id="player-health" class="health-container">
-            <div class="health-label">YOU (Wizard)</div>
-            <div id="hp-bar-player" class="health-bar"></div>
+        <div id="player-health" class="health-wrapper">
+            <div id="player-hp-bar" class="health-fill"></div>
         </div>
-        <div id="enemy-health" class="health-container">
-            <div class="health-label">ENEMY DUMMY</div>
-            <div id="hp-bar-enemy" class="health-bar" style="background: #f00;"></div>
+        <div class="health-text" style="left: 20px;">YOUR HEALTH</div>
+        
+        <div id="enemy-health" class="health-wrapper">
+            <div id="enemy-hp-bar" class="health-fill"></div>
         </div>
+        <div class="health-text" style="right: 20px;">ENEMY WIZARD</div>
         
         <div id="crosshair"></div>
         <div id="spell-status"></div>
+        <div id="sub-status"></div>
     </div>
 
     <canvas id="drawCanvas"></canvas>
-    
-    <!-- Hidden canvas for gesture recognition processing -->
     <canvas id="debugCanvas" width="64" height="64"></canvas>
 
-    <!-- Client Controller UI -->
+    <!-- Client Controller UI (The Wand) -->
     <div id="controllerUI">
-        <div id="trackpad"></div>
-        <div id="btnCast">HOLD TO DRAW</div>
+        <p class="text-gray-400 mb-8 text-xl">Point phone at screen.</p>
+        <div id="btnCast">HOLD & WAVE<br>TO DRAW</div>
+        <p class="text-cyan-800 mt-8 font-bold" id="debugGyro">Gyro Active</p>
     </div>
 
     <script>
         // ==========================================
-        // P2P NETWORKING LOGIC
+        // PEERJS P2P NETWORKING
         // ==========================================
         let peer = null;
         let connection = null;
-        let isHost = false;
+        let pendingJoinId = null;
 
         window.onload = () => {
             const urlParams = new URLSearchParams(window.location.search);
             const joinId = urlParams.get('join');
-            if (joinId) startClient(joinId);
+            if (joinId) {
+                pendingJoinId = joinId;
+                document.getElementById('roleSelection').classList.add('hidden');
+                document.getElementById('clientSensorUI').classList.remove('hidden');
+                document.getElementById('clientSensorUI').style.display = 'flex';
+            }
         };
 
         function startHost() {
-            isHost = true;
             document.getElementById('roleSelection').classList.add('hidden');
             document.getElementById('hostWaitingUI').classList.remove('hidden');
             document.getElementById('hostWaitingUI').style.display = 'flex';
             
             const gameId = Math.random().toString(36).substring(2, 6).toUpperCase();
-            const fullPeerId = 'wizduel-' + gameId;
             document.getElementById('displayGameId').innerText = gameId;
 
             const joinUrl = `${window.location.href.split('?')[0]}?join=${gameId}`;
-            new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 200, height: 200 });
+            new QRCode(document.getElementById("qrcode"), { text: joinUrl, width: 250, height: 250 });
 
-            peer = new Peer(fullPeerId);
-            
+            peer = new Peer('vrwiz-' + gameId);
             peer.on('connection', (conn) => {
                 connection = conn;
                 document.getElementById('setupUI').style.display = 'none';
-                initGame(); // Start ThreeJS and Logic
+                initGame(); 
                 
                 conn.on('data', (data) => {
-                    if(data.type === 'input') handleControllerInput(data);
+                    if(data.type === 'gyro') handleControllerGyro(data);
+                    if(data.type === 'state') handleControllerState(data);
                 });
-                conn.on('close', () => alert("Controller disconnected."));
+                conn.on('close', () => alert("Wand disconnected. Refresh."));
             });
         }
 
         function startJoinFromInput() {
             const id = document.getElementById('joinIdInput').value.trim().toUpperCase();
-            if(id) startClient(id);
+            if(id) {
+                pendingJoinId = id;
+                document.getElementById('roleSelection').classList.add('hidden');
+                document.getElementById('clientSensorUI').classList.remove('hidden');
+                document.getElementById('clientSensorUI').style.display = 'flex';
+            }
         }
 
-        function startClient(gameId) {
-            document.getElementById('setupUI').classList.remove('hidden');
-            document.getElementById('roleSelection').classList.add('hidden');
-            document.getElementById('clientConnectingUI').classList.remove('hidden');
-            document.getElementById('clientConnectingUI').style.display = 'flex';
+        // ==========================================
+        // PHONE CONTROLLER (MOTION/GYRO SENSOR)
+        // ==========================================
+        function requestSensorsAndConnect() {
+            // iOS 13+ requires explicit permission for DeviceOrientation
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') connectController();
+                        else alert('Permission to access device orientation was denied.');
+                    })
+                    .catch(console.error);
+            } else {
+                connectController(); // Non-iOS or older devices
+            }
+        }
 
+        function connectController() {
+            document.getElementById('clientSensorUI').innerHTML = "<h2 class='text-3xl text-cyan-400 animate-pulse'>Linking Wand...</h2>";
+            
             peer = new Peer();
             peer.on('open', () => {
-                connection = peer.connect('wizduel-' + gameId, { reliable: false });
-                
+                connection = peer.connect('vrwiz-' + pendingJoinId, { reliable: false });
                 connection.on('open', () => {
                     document.getElementById('setupUI').style.display = 'none';
                     document.getElementById('controllerUI').style.display = 'flex';
-                    initController();
+                    initWandSensors();
                 });
-                connection.on('close', () => alert("Screen disconnected."));
             });
         }
 
-        // ==========================================
-        // CONTROLLER LOGIC (Phone)
-        // ==========================================
-        function initController() {
-            const trackpad = document.getElementById('trackpad');
+        function initWandSensors() {
             const btnCast = document.getElementById('btnCast');
-            
-            let isCasting = false;
-            let lastTouch = null;
+            let isDrawing = false;
 
-            // Touch Drag (Trackpad)
-            const handleTouch = (e) => {
-                e.preventDefault();
-                const touch = e.touches[0];
-                if (!lastTouch) {
-                    lastTouch = { x: touch.clientX, y: touch.clientY };
+            // Absolute Orientation handling to Delta Movement
+            let lastAlpha = null;
+            let lastBeta = null;
+
+            window.addEventListener('deviceorientation', (e) => {
+                if(!e.alpha || !e.beta) return; // No gyro data
+
+                if (!isDrawing) {
+                    // Just track the latest position to prevent jumping when we start drawing
+                    lastAlpha = e.alpha;
+                    lastBeta = e.beta;
                     return;
                 }
-                
-                // Calculate delta
-                const dx = touch.clientX - lastTouch.x;
-                const dy = touch.clientY - lastTouch.y;
-                lastTouch = { x: touch.clientX, y: touch.clientY };
 
+                // Calculate delta (Change in rotation)
+                let dAlpha = e.alpha - lastAlpha;
+                let dBeta = e.beta - lastBeta;
+
+                // Handle 360 degree wrap around for alpha (yaw)
+                if (dAlpha > 180) dAlpha -= 360;
+                else if (dAlpha < -180) dAlpha += 360;
+
+                lastAlpha = e.alpha;
+                lastBeta = e.beta;
+
+                // Send the orientation delta to move the cursor
+                // We multiply by sensitivity factor
                 connection.send({
-                    type: 'input',
-                    dx: dx * 2.5, // Sensitivity multiplier
-                    dy: dy * 2.5,
-                    drawing: isCasting
+                    type: 'gyro',
+                    dx: -dAlpha * 15, // Negative because rotating phone left (alpha increases) moves cursor left
+                    dy: -dBeta * 20   // Beta is pitch. Tilting phone up makes beta decrease
                 });
-            };
+            });
 
-            trackpad.addEventListener('touchstart', (e) => { lastTouch = null; handleTouch(e); }, {passive: false});
-            trackpad.addEventListener('touchmove', handleTouch, {passive: false});
-            trackpad.addEventListener('touchend', () => { lastTouch = null; });
+            const startDraw = (e) => { e.preventDefault(); isDrawing = true; btnCast.classList.add('active'); btnCast.innerHTML = "DRAWING IN<br>THE AIR!"; connection.send({ type: 'state', draw: 'start' }); };
+            const endDraw = (e) => { e.preventDefault(); isDrawing = false; btnCast.classList.remove('active'); btnCast.innerHTML = "HOLD & WAVE<br>TO DRAW"; connection.send({ type: 'state', draw: 'end' }); };
 
-            // Cast Button
-            const startCast = (e) => {
-                e.preventDefault();
-                isCasting = true;
-                btnCast.classList.add('active');
-                btnCast.innerText = "DRAWING ON SCREEN!";
-                connection.send({ type: 'input', drawingState: 'start' });
-            };
-            const endCast = (e) => {
-                e.preventDefault();
-                isCasting = false;
-                btnCast.classList.remove('active');
-                btnCast.innerText = "HOLD TO DRAW";
-                connection.send({ type: 'input', drawingState: 'end' });
-            };
-
-            btnCast.addEventListener('touchstart', startCast, {passive: false});
-            btnCast.addEventListener('touchend', endCast, {passive: false});
-            btnCast.addEventListener('touchcancel', endCast, {passive: false});
+            btnCast.addEventListener('touchstart', startDraw, {passive: false});
+            btnCast.addEventListener('touchend', endDraw, {passive: false});
+            btnCast.addEventListener('touchcancel', endDraw, {passive: false});
             
-            // Mouse fallback for testing
-            trackpad.addEventListener('mousedown', (e) => { lastTouch = {x: e.clientX, y: e.clientY}; trackpad.onmousemove = handleMouse; });
-            trackpad.addEventListener('mouseup', () => { trackpad.onmousemove = null; lastTouch = null; });
-            trackpad.addEventListener('mouseleave', () => { trackpad.onmousemove = null; lastTouch = null; });
-            const handleMouse = (e) => {
-                if(!lastTouch) return;
-                const dx = e.clientX - lastTouch.x;
-                const dy = e.clientY - lastTouch.y;
-                lastTouch = { x: e.clientX, y: e.clientY };
-                connection.send({ type: 'input', dx: dx*1.5, dy: dy*1.5, drawing: isCasting });
-            };
-            btnCast.addEventListener('mousedown', startCast);
-            btnCast.addEventListener('mouseup', endCast);
+            // Mouse fallback for desktop testing of the controller
+            let lastMouse = null;
+            btnCast.addEventListener('mousedown', (e) => { 
+                startDraw(e); lastMouse = {x: e.clientX, y: e.clientY}; 
+                btnCast.onmousemove = (ev) => {
+                    if(!isDrawing) return;
+                    connection.send({ type: 'gyro', dx: (ev.clientX - lastMouse.x)*1.5, dy: (ev.clientY - lastMouse.y)*1.5 });
+                    lastMouse = {x: ev.clientX, y: ev.clientY};
+                };
+            });
+            btnCast.addEventListener('mouseup', (e) => { endDraw(e); btnCast.onmousemove = null; });
+            btnCast.addEventListener('mouseleave', (e) => { if(isDrawing) endDraw(e); btnCast.onmousemove = null; });
         }
 
+
         // ==========================================
-        // HOST GAME LOGIC (Screen)
+        // HOST FIRST-PERSON GAME ENGINE (THREE.JS)
         // ==========================================
-        
-        // --- Globals ---
         let scene, camera, renderer;
-        let player, enemy;
-        let projectiles = [];
-        let ghosts = [];
+        let firstPersonWand; // The visual wand attached to camera
+        let enemyModel, enemyHitbox;
+        let projectiles = [], activeGhosts = [];
         let lastTime = 0;
         
-        // Health
         let pHealth = 100, eHealth = 100;
+        let isEnemyDead = false;
+        let enemyDeathTimer = 0;
         
-        // Cursor & Drawing
+        // Cursor Logic
         let cursorX = window.innerWidth / 2;
         let cursorY = window.innerHeight / 2;
+        
+        // Drawing Logic
         let isDrawing = false;
-        let currentStrokes = []; // Array of arrays of points: [ [{x,y}, {x,y}], [{x,y}] ]
+        let currentStrokes = []; 
         let currentStroke = [];
         let drawCtx;
 
         function initGame() {
-            // Unhide UIs
             document.getElementById('ui-layer').style.display = 'block';
             document.getElementById('drawCanvas').style.display = 'block';
             
             const dCanvas = document.getElementById('drawCanvas');
-            dCanvas.width = window.innerWidth;
-            dCanvas.height = window.innerHeight;
+            dCanvas.width = window.innerWidth; dCanvas.height = window.innerHeight;
             drawCtx = dCanvas.getContext('2d');
 
             // --- Three.js Setup ---
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // Maldives Sky Blue
-            scene.fog = new THREE.Fog(0x87CEEB, 20, 100);
+            scene.background = new THREE.Color(0x55ccff); // Bright Maldives Sky
+            scene.fog = new THREE.FogExp2(0x55ccff, 0.015);
 
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 5, 15);
-            camera.lookAt(0, 2, 0);
+            // First Person Camera
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 0); // Player standing height
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -278,120 +293,144 @@
             document.body.appendChild(renderer.domElement);
 
             // Lighting
-            const dLight = new THREE.DirectionalLight(0xffffff, 1);
-            dLight.position.set(10, 20, 10);
-            dLight.castShadow = true;
-            scene.add(dLight);
-            scene.add(new THREE.AmbientLight(0x404040, 1.5));
+            const sunLight = new THREE.DirectionalLight(0xffffff, 1.2);
+            sunLight.position.set(50, 100, 20);
+            sunLight.castShadow = true;
+            scene.add(sunLight);
+            scene.add(new THREE.AmbientLight(0x404040, 2.0));
 
-            // Map: Maldives Water & Sand
-            const waterGeo = new THREE.PlaneGeometry(200, 200);
-            const waterMat = new THREE.MeshPhongMaterial({ color: 0x0088ff, transparent: true, opacity: 0.8, shininess: 100 });
+            // Maldives Environment
+            // Water
+            const waterGeo = new THREE.PlaneGeometry(500, 500);
+            const waterMat = new THREE.MeshPhongMaterial({ color: 0x00aaff, transparent: true, opacity: 0.8, shininess: 150 });
             const water = new THREE.Mesh(waterGeo, waterMat);
             water.rotation.x = -Math.PI / 2;
-            water.position.y = -0.5;
+            water.position.y = -1;
             scene.add(water);
 
-            const islandGeo = new THREE.CylinderGeometry(15, 20, 1, 32);
-            const sandMat = new THREE.MeshLambertMaterial({ color: 0xf6d7b0 });
-            const island = new THREE.Mesh(islandGeo, sandMat);
-            island.position.y = -0.4;
-            island.receiveShadow = true;
-            scene.add(island);
+            // Sand Islands
+            const sandMat = new THREE.MeshLambertMaterial({ color: 0xffeebb });
+            // Player Island
+            const myIsland = new THREE.Mesh(new THREE.CylinderGeometry(10, 15, 2, 32), sandMat);
+            myIsland.position.set(0, -1, 0);
+            scene.add(myIsland);
+            
+            // Enemy Island (Far away)
+            const enemyIsland = new THREE.Mesh(new THREE.CylinderGeometry(15, 25, 2, 32), sandMat);
+            enemyIsland.position.set(0, -1, -50); // 50 units away!
+            scene.add(enemyIsland);
 
-            // Character Models (Diamond head, Pyramid body, Rect hands)
-            player = createWizard(0x00aaff);
-            player.position.set(0, 0, 5);
-            scene.add(player);
+            // First Person Wand (Attached to Camera view)
+            const wandMat = new THREE.MeshStandardMaterial({color: 0x3d2314, roughness: 0.9});
+            firstPersonWand = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.1, 1.5, 8), wandMat);
+            firstPersonWand.rotation.x = Math.PI / 2; // Point forward
+            firstPersonWand.position.set(1, -0.5, -1.5); // Bottom right of screen
+            camera.add(firstPersonWand);
+            scene.add(camera); // Add camera to scene so wand renders
 
-            enemy = createWizard(0xff4444);
-            enemy.position.set(0, 0, -5);
-            scene.add(enemy);
+            // Glowing tip
+            const tip = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({color: 0x00ffff}));
+            tip.position.y = 0.8;
+            firstPersonWand.add(tip);
 
-            // Generate Gesture Templates
-            generateTemplates();
+            // Create Enemy
+            createEnemy();
 
+            // Setup Gesture AI
+            generateGridTemplates();
+
+            updateHealthBars();
             requestAnimationFrame(gameLoop);
         }
 
-        function createWizard(colorHex) {
-            const group = new THREE.Group();
-            const mat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.5 });
+        function createEnemy() {
+            enemyModel = new THREE.Group();
             
             // Diamond Head
-            const head = new THREE.Mesh(new THREE.OctahedronGeometry(0.8), mat);
-            head.position.y = 3.5;
-            head.castShadow = true;
+            const headMat = new THREE.MeshStandardMaterial({ color: 0xaa00ff, roughness: 0.2, metalness: 0.8 });
+            const head = new THREE.Mesh(new THREE.OctahedronGeometry(1.5), headMat);
+            head.position.y = 6;
             
-            // Pyramid Body (Upside down)
-            const bodyGeo = new THREE.ConeGeometry(1.2, 2.5, 4);
-            const body = new THREE.Mesh(bodyGeo, mat);
-            body.rotation.z = Math.PI; // upside down
-            body.rotation.y = Math.PI / 4; // align corners
-            body.position.y = 1.5;
-            body.castShadow = true;
+            // Pyramid Body Upside Down
+            const bodyMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+            const bodyGeo = new THREE.ConeGeometry(2, 4, 4);
+            const body = new THREE.Mesh(bodyGeo, bodyMat);
+            body.rotation.z = Math.PI; 
+            body.rotation.y = Math.PI / 4; 
+            body.position.y = 3;
 
             // Rectangle Hands
-            const handGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4);
-            const lHand = new THREE.Mesh(handGeo, mat); lHand.position.set(-1.5, 1.5, 0);
-            const rHand = new THREE.Mesh(handGeo, mat); rHand.position.set(1.5, 1.5, 0);
-            lHand.castShadow = true; rHand.castShadow = true;
+            const handGeo = new THREE.BoxGeometry(0.6, 2, 0.6);
+            const lHand = new THREE.Mesh(handGeo, bodyMat); lHand.position.set(-2.5, 3, 0);
+            const rHand = new THREE.Mesh(handGeo, bodyMat); rHand.position.set(2.5, 3, 0);
 
-            group.add(head, body, lHand, rHand);
-            return group;
+            enemyModel.add(head, body, lHand, rHand);
+            enemyModel.position.set(0, 0, -50); // Far away
+            scene.add(enemyModel);
+
+            // Invisible Hitbox for easier targeting
+            enemyHitbox = new THREE.Mesh(new THREE.BoxGeometry(6, 8, 4), new THREE.MeshBasicMaterial({visible: false}));
+            enemyHitbox.position.copy(enemyModel.position).add(new THREE.Vector3(0, 3, 0));
+            scene.add(enemyHitbox);
         }
 
-        function handleControllerInput(data) {
-            // Move Cursor
-            if (data.dx !== undefined && data.dy !== undefined) {
-                cursorX += data.dx;
-                cursorY += data.dy;
-                // Clamp
-                cursorX = Math.max(0, Math.min(window.innerWidth, cursorX));
-                cursorY = Math.max(0, Math.min(window.innerHeight, cursorY));
-                
-                const cross = document.getElementById('crosshair');
-                cross.style.left = cursorX + 'px';
-                cross.style.top = cursorY + 'px';
+        // --- Host Input Handling ---
+        function handleControllerGyro(data) {
+            // Apply gyro movement to cursor on screen
+            cursorX += data.dx;
+            cursorY += data.dy;
+            
+            // Clamp to screen bounds
+            cursorX = Math.max(0, Math.min(window.innerWidth, cursorX));
+            cursorY = Math.max(0, Math.min(window.innerHeight, cursorY));
+            
+            // Update HTML crosshair
+            const cross = document.getElementById('crosshair');
+            cross.style.left = cursorX + 'px';
+            cross.style.top = cursorY + 'px';
 
-                if (data.drawing && isDrawing) {
-                    currentStroke.push({x: cursorX, y: cursorY});
-                    renderDrawing();
-                }
+            // Make the 3D wand point towards the 2D cursor projection
+            if(firstPersonWand) {
+                // Map cursor to Normalized Device Coordinates (-1 to +1)
+                const ndcX = (cursorX / window.innerWidth) * 2 - 1;
+                const ndcY = -(cursorY / window.innerHeight) * 2 + 1;
+                // Simple tilt of the wand based on screen position
+                firstPersonWand.rotation.y = -ndcX * 0.5;
+                firstPersonWand.rotation.x = Math.PI/2 + ndcY * 0.5;
             }
 
-            // Drawing State
-            if (data.drawingState === 'start') {
+            if (isDrawing) {
+                currentStroke.push({x: cursorX, y: cursorY});
+                renderDrawing();
+            }
+        }
+
+        function handleControllerState(data) {
+            if (data.draw === 'start') {
                 isDrawing = true;
                 currentStrokes = [];
                 currentStroke = [{x: cursorX, y: cursorY}];
                 document.getElementById('crosshair').classList.add('crosshair-drawing');
                 renderDrawing();
-            } else if (data.drawingState === 'end') {
+            } else if (data.draw === 'end') {
                 isDrawing = false;
                 if (currentStroke.length > 0) currentStrokes.push(currentStroke);
                 document.getElementById('crosshair').classList.remove('crosshair-drawing');
                 
-                // Recognize and cast!
-                if(currentStrokes.length > 0) recognizeAndCast();
-                
-                // Clear drawing after slight delay
-                setTimeout(() => {
-                    drawCtx.clearRect(0, 0, drawCtx.canvas.width, drawCtx.canvas.height);
-                }, 500);
+                recognizeGestureAndCast();
+                setTimeout(() => drawCtx.clearRect(0, 0, drawCtx.canvas.width, drawCtx.canvas.height), 300);
             }
         }
 
         function renderDrawing() {
             drawCtx.clearRect(0, 0, drawCtx.canvas.width, drawCtx.canvas.height);
             drawCtx.strokeStyle = '#0ff';
-            drawCtx.lineWidth = 6;
+            drawCtx.lineWidth = 8;
             drawCtx.lineCap = 'round';
             drawCtx.lineJoin = 'round';
-            drawCtx.shadowBlur = 15;
+            drawCtx.shadowBlur = 20;
             drawCtx.shadowColor = '#0ff';
 
-            // Draw completed strokes
             currentStrokes.forEach(stroke => {
                 if(stroke.length < 2) return;
                 drawCtx.beginPath();
@@ -400,7 +439,6 @@
                 drawCtx.stroke();
             });
 
-            // Draw current stroke
             if (currentStroke.length > 1) {
                 drawCtx.beginPath();
                 drawCtx.moveTo(currentStroke[0].x, currentStroke[0].y);
@@ -410,54 +448,74 @@
         }
 
         // ==========================================
-        // GESTURE RECOGNITION (Pixel Matching)
+        // GESTURE AI (Grid-Density Algorithm)
         // ==========================================
-        let templates = {}; // { fireball: ImageData, gun: ... }
-        const T_SIZE = 64;
+        const GRID_SIZE = 8;
+        let templates = {}; // Stores 64-element arrays representing shape density
 
-        function generateTemplates() {
+        function extractGridFeatures(ctx) {
+            const imgData = ctx.getImageData(0, 0, 64, 64).data;
+            const grid = new Array(GRID_SIZE * GRID_SIZE).fill(0);
+            let maxVal = 0;
+            
+            for (let y = 0; y < 64; y++) {
+                for (let x = 0; x < 64; x++) {
+                    const idx = (y * 64 + x) * 4;
+                    // If pixel is white
+                    if (imgData[idx] > 128) {
+                        const gridX = Math.floor(x / (64 / GRID_SIZE));
+                        const gridY = Math.floor(y / (64 / GRID_SIZE));
+                        grid[gridY * GRID_SIZE + gridX]++;
+                        if (grid[gridY * GRID_SIZE + gridX] > maxVal) maxVal = grid[gridY * GRID_SIZE + gridX];
+                    }
+                }
+            }
+            // Normalize
+            return grid.map(v => maxVal > 0 ? v / maxVal : 0);
+        }
+
+        function generateGridTemplates() {
             const canvas = document.getElementById('debugCanvas');
             const ctx = canvas.getContext('2d');
-            ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-            
-            const saveTemplate = (name, drawFunc) => {
-                ctx.fillStyle = 'black'; ctx.fillRect(0, 0, T_SIZE, T_SIZE);
-                ctx.strokeStyle = 'white'; ctx.beginPath();
-                drawFunc(ctx); ctx.stroke();
-                templates[name] = ctx.getImageData(0, 0, T_SIZE, T_SIZE);
+            ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.strokeStyle = 'white';
+
+            const saveTpl = (name, drawFunc) => {
+                ctx.fillStyle = 'black'; ctx.fillRect(0, 0, 64, 64);
+                ctx.beginPath(); drawFunc(ctx); ctx.stroke();
+                templates[name] = extractGridFeatures(ctx);
             };
 
             // 1. Fireball (Circle + Plus)
-            saveTemplate('fireball', (c) => {
-                c.arc(32, 32, 25, 0, Math.PI*2);
-                c.moveTo(32, 10); c.lineTo(32, 54); // V
-                c.moveTo(10, 32); c.lineTo(54, 32); // H
+            saveTpl('fireball', c => {
+                c.arc(32, 32, 28, 0, Math.PI*2);
+                c.moveTo(32, 10); c.lineTo(32, 54);
+                c.moveTo(10, 32); c.lineTo(54, 32);
             });
 
-            // 2. Gun (Circle + Sideways L / > shape)
-            saveTemplate('gun', (c) => {
-                c.arc(32, 32, 25, 0, Math.PI*2);
-                c.moveTo(20, 20); c.lineTo(40, 32); c.lineTo(20, 44);
+            // 2. Gun (Circle + Sideways L / _|)
+            saveTpl('gun', c => {
+                c.arc(32, 32, 28, 0, Math.PI*2);
+                c.moveTo(20, 44); c.lineTo(44, 44); c.lineTo(44, 20); // An L rotated or flipped
             });
 
             // 3. Ghost (Circle + Pacman)
-            saveTemplate('ghost', (c) => {
-                c.arc(32, 32, 25, 0, Math.PI*2);
-                c.arc(32, 26, 12, Math.PI, 0); // Head dome
-                c.lineTo(44, 46); c.lineTo(40, 42); c.lineTo(36, 46); c.lineTo(32, 42); 
-                c.lineTo(28, 46); c.lineTo(24, 42); c.lineTo(20, 46); c.closePath();
+            saveTpl('ghost', c => {
+                c.arc(32, 32, 28, 0, Math.PI*2);
+                c.arc(32, 26, 14, Math.PI, 0); // Head dome
+                c.lineTo(46, 48); c.lineTo(40, 42); c.lineTo(34, 48); 
+                c.lineTo(28, 42); c.lineTo(22, 48); c.lineTo(18, 42); c.closePath();
             });
 
-            // 4. Karma (Circle + S/Wave)
-            saveTemplate('karma', (c) => {
-                c.arc(32, 32, 25, 0, Math.PI*2);
-                c.arc(32, 20, 12, Math.PI/2, Math.PI*1.5); // Top curve
-                c.arc(32, 44, 12, -Math.PI/2, Math.PI/2);  // Bottom curve
+            // 4. Karma (Circle + YinYang wavy S)
+            saveTpl('karma', c => {
+                c.arc(32, 32, 28, 0, Math.PI*2);
+                c.arc(32, 20, 12, Math.PI/2, Math.PI*1.5);
+                c.arc(32, 44, 12, -Math.PI/2, Math.PI/2);
             });
         }
 
-        function recognizeAndCast() {
-            // Find Bounding Box of all drawing
+        function recognizeGestureAndCast() {
+            // Find Bounds
             let minX = 9999, minY = 9999, maxX = -9999, maxY = -9999;
             let ptsCount = 0;
             currentStrokes.forEach(s => s.forEach(p => {
@@ -465,265 +523,306 @@
                 if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
                 ptsCount++;
             }));
-            
-            if (ptsCount < 10) return; // Too small to be a spell
+            if (ptsCount < 15) return; // Ignore tiny accidental clicks
 
             const w = Math.max(maxX - minX, 1);
             const h = Math.max(maxY - minY, 1);
             const size = Math.max(w, h);
             
-            // Draw user strokes to 64x64 debug canvas scaled
+            // Draw to normalized 64x64 debug canvas
             const canvas = document.getElementById('debugCanvas');
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = 'black'; ctx.fillRect(0, 0, T_SIZE, T_SIZE);
-            ctx.strokeStyle = 'white'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+            ctx.fillStyle = 'black'; ctx.fillRect(0, 0, 64, 64);
+            ctx.strokeStyle = 'white'; ctx.lineWidth = 5; ctx.lineCap = 'round';
             
-            const scale = 50 / size; // leave margin
+            const scale = 50 / size; 
             const offsetX = 32 - (w * scale)/2;
             const offsetY = 32 - (h * scale)/2;
 
             currentStrokes.forEach(stroke => {
                 ctx.beginPath();
-                const sx = (stroke[0].x - minX) * scale + offsetX;
-                const sy = (stroke[0].y - minY) * scale + offsetY;
-                ctx.moveTo(sx, sy);
+                ctx.moveTo((stroke[0].x - minX) * scale + offsetX, (stroke[0].y - minY) * scale + offsetY);
                 for(let i=1; i<stroke.length; i++) {
                     ctx.lineTo((stroke[i].x - minX) * scale + offsetX, (stroke[i].y - minY) * scale + offsetY);
                 }
                 ctx.stroke();
             });
 
-            const userImg = ctx.getImageData(0, 0, T_SIZE, T_SIZE);
-            
-            // Compare
+            // Extract features and compare
+            const userGrid = extractGridFeatures(ctx);
             let bestMatch = null;
-            let bestScore = Infinity;
+            let lowestDistance = Infinity;
 
-            for (const [name, tempImg] of Object.entries(templates)) {
-                let diff = 0;
-                for (let i = 0; i < userImg.data.length; i += 4) {
-                    // Only care about white pixels diff
-                    const u = userImg.data[i] > 128 ? 1 : 0;
-                    const t = tempImg.data[i] > 128 ? 1 : 0;
-                    if (u !== t) diff++;
+            for (const [name, tplGrid] of Object.entries(templates)) {
+                let dist = 0;
+                for(let i=0; i<64; i++) {
+                    dist += Math.abs(userGrid[i] - tplGrid[i]); // Manhattan distance
                 }
-                if (diff < bestScore) {
-                    bestScore = diff;
+                if (dist < lowestDistance) {
+                    lowestDistance = dist;
                     bestMatch = name;
                 }
             }
 
-            // Threshold: If drawing is totally random, fizzle
-            // 64x64 = 4096 pixels. If > 800 pixels differ, it's messy.
             const uiStatus = document.getElementById('spell-status');
-            if (bestScore > 1000) {
+            const subStatus = document.getElementById('sub-status');
+            
+            // Threshold for completely random shapes
+            if (lowestDistance > 25) { 
                 uiStatus.innerText = "FIZZLED!";
                 uiStatus.style.color = "#888";
+                subStatus.innerText = "Drawing not recognized";
             } else {
-                castSpell(bestMatch);
+                executeSpell(bestMatch);
             }
-
-            setTimeout(() => uiStatus.innerText = "", 2000);
+            setTimeout(() => { uiStatus.innerText = ""; subStatus.innerText = ""; }, 2000);
         }
 
         // ==========================================
-        // SPELL LOGIC
+        // SPELL EXECUTION
         // ==========================================
-        function getWandTarget() {
-            // Raycast from camera using screen cursor
-            const mouse = new THREE.Vector2();
-            mouse.x = (cursorX / window.innerWidth) * 2 - 1;
-            mouse.y = -(cursorY / window.innerHeight) * 2 + 1;
+        function getWandTargetPosition() {
+            // Unproject 2D screen cursor into 3D world at depth of enemy
+            const mouse = new THREE.Vector2( (cursorX / window.innerWidth) * 2 - 1, -(cursorY / window.innerHeight) * 2 + 1 );
             const raycaster = new THREE.Raycaster();
             raycaster.setFromCamera(mouse, camera);
-            // Target point on z=enemy.z plane
-            const targetZ = enemy.position.z;
+            
+            // Find where ray intersects Z = -50 (enemy depth)
             const dir = raycaster.ray.direction;
-            const dist = (targetZ - raycaster.ray.origin.z) / dir.z;
+            const dist = (-50 - raycaster.ray.origin.z) / dir.z;
             return raycaster.ray.origin.clone().add(dir.multiplyScalar(dist));
         }
 
-        function castSpell(name) {
+        function executeSpell(name) {
             const uiStatus = document.getElementById('spell-status');
+            const subStatus = document.getElementById('sub-status');
             
+            // Base starting point for projectiles (Wand Tip in world space)
+            const getTipPos = () => {
+                const tipPos = new THREE.Vector3();
+                firstPersonWand.children[0].getWorldPosition(tipPos);
+                return tipPos;
+            };
+
             if (name === 'fireball') {
-                uiStatus.innerText = "SUMMONING FIREBALL...";
+                uiStatus.innerText = "FIREBALL";
                 uiStatus.style.color = "#ff4400";
+                subStatus.innerText = "Charging... (2s)";
                 
-                // Visual indicator of charging
-                const chargeMat = new THREE.MeshBasicMaterial({color: 0xff4400});
+                // Charge effect
+                const chargeMat = new THREE.MeshBasicMaterial({color: 0xffaa00});
                 const charge = new THREE.Mesh(new THREE.SphereGeometry(0.5), chargeMat);
-                charge.position.copy(player.position).add(new THREE.Vector3(1.5, 3, 0)); // at hand
                 scene.add(charge);
+                let chargeInterval = setInterval(() => { charge.position.copy(getTipPos()); }, 16);
 
                 setTimeout(() => {
+                    clearInterval(chargeInterval);
                     scene.remove(charge);
-                    const target = getWandTarget();
-                    uiStatus.innerText = "FIRE!";
+                    subStatus.innerText = "FIRE!";
                     
-                    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.8), new THREE.MeshBasicMaterial({color: 0xff2200}));
-                    ball.position.copy(player.position).add(new THREE.Vector3(1.5, 3, 0));
+                    const ball = new THREE.Mesh(new THREE.SphereGeometry(1.5), new THREE.MeshBasicMaterial({color: 0xff2200}));
+                    ball.position.copy(getTipPos());
                     
-                    const velocity = target.clone().sub(ball.position).normalize().multiplyScalar(15);
+                    const target = getWandTargetPosition();
+                    const velocity = target.sub(ball.position).normalize().multiplyScalar(40); // Fast!
+                    
                     scene.add(ball);
                     projectiles.push({ mesh: ball, vel: velocity, type: 'fireball', life: 5 });
-                }, 2000);
+                }, 2000); // Wait 2s
             }
+            
             else if (name === 'gun') {
-                uiStatus.innerText = "SUMMONING GUN...";
+                uiStatus.innerText = "WAND GUN";
                 uiStatus.style.color = "#ffff00";
+                subStatus.innerText = "Summoning... (3s)";
 
                 setTimeout(() => {
-                    uiStatus.innerText = "FIRING!";
-                    // Create floating gun mesh
-                    const gunMat = new THREE.MeshLambertMaterial({color: 0x444444});
-                    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.4, 1.5), gunMat);
-                    gun.position.copy(player.position).add(new THREE.Vector3(2, 4, 1));
+                    subStatus.innerText = "FIRING!";
+                    
+                    // Floating gun visual next to wand
+                    const gun = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.3, 1), new THREE.MeshLambertMaterial({color: 0x222222}));
                     scene.add(gun);
+                    let gunTrack = setInterval(() => {
+                        gun.position.copy(getTipPos()).add(new THREE.Vector3(0.5, 0.5, 0));
+                        gun.lookAt(getWandTargetPosition());
+                    }, 16);
 
                     let shots = 0;
                     const interval = setInterval(() => {
-                        if (shots >= 30) { clearInterval(interval); scene.remove(gun); return; }
+                        if (shots >= 30) { 
+                            clearInterval(interval); clearInterval(gunTrack); scene.remove(gun); 
+                            subStatus.innerText = ""; return; 
+                        }
                         
-                        // Shoot towards current cursor
-                        const target = getWandTarget();
-                        gun.lookAt(target);
-
-                        const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshBasicMaterial({color: 0xffff00}));
+                        const bullet = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({color: 0xffff00}));
                         bullet.position.copy(gun.position);
-                        const vel = target.clone().sub(gun.position).normalize().multiplyScalar(25);
+                        const target = getWandTargetPosition();
+                        const vel = target.sub(gun.position).normalize().multiplyScalar(60);
+                        
                         scene.add(bullet);
-                        projectiles.push({ mesh: bullet, vel: vel, type: 'bullet', life: 2 });
+                        projectiles.push({ mesh: bullet, vel: vel, type: 'bullet', life: 3 });
                         shots++;
-                    }, 500);
-                }, 3000);
+                    }, 500); // 1 bullet per 0.5 sec, total 30 bullets = 15 secs
+                }, 3000); // Wait 3s
             }
+            
             else if (name === 'ghost') {
-                uiStatus.innerText = "GHOST SUMMONED!";
+                uiStatus.innerText = "GHOST SUMMONED";
                 uiStatus.style.color = "#ffffff";
+                subStatus.innerText = "Haunting enemy... (10s)";
                 
                 const ghostGrp = new THREE.Group();
-                const gMat = new THREE.MeshLambertMaterial({color: 0xdddddd, transparent: true, opacity: 0.8});
-                const body = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 2, 16), gMat);
-                const head = new THREE.Mesh(new THREE.SphereGeometry(0.8), gMat);
-                head.position.y = 1;
+                const gMat = new THREE.MeshLambertMaterial({color: 0xdddddd, transparent: true, opacity: 0.7});
+                const body = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 3, 16), gMat);
+                const head = new THREE.Mesh(new THREE.SphereGeometry(1.5), gMat);
+                head.position.y = 1.5;
                 ghostGrp.add(body, head);
                 
-                ghostGrp.position.copy(player.position).add(new THREE.Vector3(0, 1, 2));
+                ghostGrp.position.copy(getTipPos());
                 scene.add(ghostGrp);
-                ghosts.push({ mesh: ghostGrp, life: 15, stuns: true });
+                
+                // Ghost needs to reach enemy (-50 Z) in 10 seconds. Distance is approx 50. Speed = 5 u/s
+                activeGhosts.push({ mesh: ghostGrp, speed: 5, life: 15 });
             }
+            
             else if (name === 'karma') {
-                uiStatus.innerText = "KARMA HEAL!";
+                uiStatus.innerText = "KARMA HEAL";
                 uiStatus.style.color = "#00ffaa";
+                subStatus.innerText = "+30 HP";
                 pHealth = Math.min(100, pHealth + 30);
                 updateHealthBars();
                 
-                // Ring visual
-                const ring = new THREE.Mesh(new THREE.RingGeometry(2, 2.5, 32), new THREE.MeshBasicMaterial({color: 0x00ffaa, side: THREE.DoubleSide}));
-                ring.rotation.x = Math.PI/2;
-                ring.position.copy(player.position).setY(0.1);
-                scene.add(ring);
-                setTimeout(() => scene.remove(ring), 1000);
+                document.getElementById('player-health').style.boxShadow = "0 0 30px #00ffaa";
+                setTimeout(() => document.getElementById('player-health').style.boxShadow = "", 1000);
             }
         }
 
         // ==========================================
-        // MAIN LOOP & PHYSICS
+        // GAME PHYSICS & RENDERING LOOP
         // ==========================================
         function updateHealthBars() {
-            document.getElementById('hp-bar-player').style.width = pHealth + '%';
-            document.getElementById('hp-bar-enemy').style.width = eHealth + '%';
+            document.getElementById('player-hp-bar').style.width = pHealth + '%';
+            document.getElementById('enemy-hp-bar').style.width = eHealth + '%';
+        }
+
+        function triggerEnemyDeath() {
+            if(isEnemyDead) return;
+            isEnemyDead = true;
+            eHealth = 0;
+            updateHealthBars();
+            
+            enemyModel.visible = false;
+            document.getElementById('spell-status').innerText = "ENEMY KILLED!";
+            document.getElementById('spell-status').style.color = "#ff0044";
+            document.getElementById('sub-status').innerText = "Respawning in 15 seconds...";
+            
+            // Kill for 15 seconds
+            enemyDeathTimer = 15;
         }
 
         function gameLoop(time) {
             requestAnimationFrame(gameLoop);
             const dt = (time - lastTime) / 1000;
             lastTime = time;
-            if(!scene) return; // Not init yet
+            if(!scene) return;
 
-            // Floating animations
-            player.position.y = Math.sin(time / 500) * 0.2;
-            enemy.position.y = Math.sin(time / 500 + Math.PI) * 0.2;
+            // Enemy Bobbing Animation (if alive)
+            if (!isEnemyDead && enemyModel) {
+                enemyModel.position.y = Math.sin(time / 1000) * 1.5;
+                enemyHitbox.position.copy(enemyModel.position).add(new THREE.Vector3(0, 3, 0));
+                
+                // AI Attacking (Randomly shoot back)
+                if (Math.random() < 0.01) {
+                    const blast = new THREE.Mesh(new THREE.SphereGeometry(1), new THREE.MeshBasicMaterial({color: 0xff00ff}));
+                    blast.position.copy(enemyModel.position).add(new THREE.Vector3(0, 5, 0));
+                    // Aim at player camera
+                    const vel = camera.position.clone().sub(blast.position).normalize().multiplyScalar(20);
+                    scene.add(blast);
+                    projectiles.push({ mesh: blast, vel: vel, type: 'enemy', life: 6 });
+                }
+            } else if (isEnemyDead) {
+                enemyDeathTimer -= dt;
+                if (enemyDeathTimer <= 0) {
+                    isEnemyDead = false;
+                    enemyModel.visible = true;
+                    eHealth = 100;
+                    updateHealthBars();
+                    document.getElementById('sub-status').innerText = "";
+                }
+            }
 
-            // Projectiles
+            // Update Projectiles
             for (let i = projectiles.length - 1; i >= 0; i--) {
                 let p = projectiles[i];
                 p.mesh.position.add(p.vel.clone().multiplyScalar(dt));
                 p.life -= dt;
                 
-                // Collision with enemy dummy
-                if (p.mesh.position.distanceTo(enemy.position) < 2) {
-                    scene.remove(p.mesh);
-                    projectiles.splice(i, 1);
-                    eHealth -= (p.type === 'fireball' ? 20 : 2);
-                    
-                    // Flash enemy red
-                    enemy.children.forEach(c => c.material.emissive.setHex(0xff0000));
-                    setTimeout(() => enemy.children.forEach(c => c.material.emissive.setHex(0x000000)), 200);
-                    
-                    updateHealthBars();
+                let hit = false;
+                if (p.type !== 'enemy' && !isEnemyDead) {
+                    // Check collision with enemy hitbox
+                    const box = new THREE.Box3().setFromObject(enemyHitbox);
+                    if (box.containsPoint(p.mesh.position)) {
+                        hit = true;
+                        eHealth -= (p.type === 'fireball' ? 25 : 5);
+                        
+                        // Flash enemy
+                        enemyModel.children.forEach(c => c.material.emissive && c.material.emissive.setHex(0xffffff));
+                        setTimeout(() => enemyModel.children.forEach(c => c.material.emissive && c.material.emissive.setHex(0x000000)), 100);
+                        
+                        if (eHealth <= 0) triggerEnemyDeath();
+                        else updateHealthBars();
+                    }
+                } else if (p.type === 'enemy') {
+                    // Hit player (Camera)
+                    if (p.mesh.position.z > -2 && Math.abs(p.mesh.position.x) < 3) {
+                        hit = true;
+                        pHealth -= 10;
+                        document.getElementById('ui-layer').style.background = "rgba(255,0,0,0.3)";
+                        setTimeout(() => document.getElementById('ui-layer').style.background = "none", 200);
+                        
+                        if (pHealth <= 0) {
+                            pHealth = 100;
+                            document.getElementById('spell-status').innerText = "YOU DIED!";
+                        }
+                        updateHealthBars();
+                    }
                 }
-                else if (p.life <= 0 || p.mesh.position.y < 0) {
+                
+                if (hit || p.life <= 0 || p.mesh.position.y < -5) {
                     scene.remove(p.mesh);
                     projectiles.splice(i, 1);
                 }
             }
 
-            // Ghosts
-            for (let i = ghosts.length - 1; i >= 0; i--) {
-                let g = ghosts[i];
-                // Move towards enemy over 10 seconds (Speed = dist / 10)
-                const dir = enemy.position.clone().sub(g.mesh.position).normalize();
-                g.mesh.position.add(dir.multiplyScalar(2 * dt)); // Slow speed
-                
-                // Bobbing
-                g.mesh.position.y = 1 + Math.sin(time/200)*0.5;
-                g.mesh.lookAt(enemy.position);
-
-                if (g.mesh.position.distanceTo(enemy.position) < 1.5) {
-                    scene.remove(g.mesh);
-                    ghosts.splice(i, 1);
-                    // "Kill enemy for 15s" -> Massive damage
-                    eHealth -= 50; 
-                    updateHealthBars();
+            // Update Ghosts
+            for (let i = activeGhosts.length - 1; i >= 0; i--) {
+                let g = activeGhosts[i];
+                if (!isEnemyDead) {
+                    // Move towards enemy
+                    const dir = enemyModel.position.clone().sub(g.mesh.position).normalize();
+                    g.mesh.position.add(dir.multiplyScalar(g.speed * dt));
+                    g.mesh.position.y = 2 + Math.sin(time/300); // Bob
+                    
+                    // Check collision
+                    const dist = g.mesh.position.distanceTo(enemyModel.position);
+                    if (dist < 5) {
+                        triggerEnemyDeath(); // Ghost insta-kills for 15s
+                        scene.remove(g.mesh);
+                        activeGhosts.splice(i, 1);
+                        continue;
+                    }
                 }
                 
                 g.life -= dt;
-                if(g.life <= 0) {
+                if (g.life <= 0) {
                     scene.remove(g.mesh);
-                    ghosts.splice(i, 1);
+                    activeGhosts.splice(i, 1);
                 }
             }
-
-            // Basic AI Attack (To make it a duel)
-            if (eHealth > 0 && Math.random() < 0.005) {
-                const p = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({color: 0xff00ff}));
-                p.position.copy(enemy.position).add(new THREE.Vector3(-1.5, 3, 0));
-                const vel = player.position.clone().sub(p.position).normalize().multiplyScalar(10);
-                scene.add(p);
-                projectiles.push({ mesh: p, vel: vel, type: 'enemy-blast', life: 5 });
-            }
-            
-            // Check Player collision from AI
-            for (let i = projectiles.length - 1; i >= 0; i--) {
-                let p = projectiles[i];
-                if (p.type === 'enemy-blast' && p.mesh.position.distanceTo(player.position) < 2) {
-                    scene.remove(p.mesh);
-                    projectiles.splice(i, 1);
-                    pHealth -= 10;
-                    updateHealthBars();
-                }
-            }
-
-            // Reset health if dead
-            if (eHealth <= 0) { eHealth = 100; document.getElementById('spell-status').innerText = "ENEMY DEFEATED! RESPAWNING"; }
-            if (pHealth <= 0) { pHealth = 100; document.getElementById('spell-status').innerText = "YOU DIED! RESPAWNING"; }
 
             renderer.render(scene, camera);
         }
 
-        // Handle Window Resize
         window.addEventListener('resize', () => {
             if(camera && renderer) {
                 camera.aspect = window.innerWidth / window.innerHeight;
@@ -735,7 +834,9 @@
                 }
             }
         });
-
     </script>
 </body>
 </html>
+
+
+```
