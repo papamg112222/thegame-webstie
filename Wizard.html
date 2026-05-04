@@ -1,0 +1,642 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>P2P Space Shooter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050510;
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Prevents pull-to-refresh and zooming on controller */
+            user-select: none;
+        }
+        
+        #gameCanvas {
+            display: none;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Neon effects */
+        .neon-text {
+            text-shadow: 0 0 5px #0ff, 0 0 10px #0ff, 0 0 20px #0ff;
+        }
+        .neon-border {
+            box-shadow: 0 0 5px #0ff, 0 0 10px #0ff inset;
+            border: 2px solid #0ff;
+        }
+        .neon-button {
+            transition: all 0.1s;
+        }
+        .neon-button:active {
+            transform: scale(0.95);
+            box-shadow: 0 0 15px #f0f, 0 0 25px #f0f inset;
+            border-color: #f0f;
+            background: rgba(255, 0, 255, 0.2);
+        }
+
+        /* Controller Layout */
+        #controllerUI {
+            display: none;
+            height: 100vh;
+            width: 100vw;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .controls-row {
+            display: flex;
+            flex: 1;
+            padding: 10px;
+        }
+        .control-btn {
+            flex: 1;
+            margin: 5px;
+            border-radius: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 2rem;
+            font-weight: bold;
+            background: rgba(0, 255, 255, 0.1);
+        }
+        #qrcode img {
+            margin: 0 auto;
+            border: 10px solid white;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Main Menu / Connection Screen -->
+    <div id="setupUI" class="flex flex-col items-center justify-center h-screen w-full absolute z-10 bg-[#050510]">
+        <h1 class="text-5xl md:text-7xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 neon-text">NEON DRIFT</h1>
+        
+        <div id="roleSelection" class="flex flex-col gap-4 text-center">
+            <p class="text-gray-400 mb-4 max-w-md">Play a P2P space shooter. Use this device as the screen, and connect your phone as the controller.</p>
+            <button onclick="startHost()" class="neon-border text-cyan-400 px-8 py-4 rounded-xl text-xl font-bold hover:bg-cyan-900/30 transition">
+                Start as Screen (Host)
+            </button>
+            <div class="mt-8 border-t border-gray-800 pt-8">
+                <p class="text-gray-500 mb-2">Or manually join an existing game:</p>
+                <div class="flex gap-2">
+                    <input type="text" id="joinIdInput" placeholder="Game ID" class="bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white outline-none focus:border-cyan-400 text-center uppercase" maxlength="6">
+                    <button onclick="startJoinFromInput()" class="bg-cyan-600 text-white px-6 py-2 rounded-lg font-bold">Join</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Host Waiting Screen -->
+        <div id="hostWaitingUI" class="hidden flex flex-col items-center justify-center text-center">
+            <h2 class="text-3xl font-bold text-white mb-2">Waiting for Controller...</h2>
+            <p class="text-cyan-400 mb-8 font-mono text-xl">Game ID: <span id="displayGameId" class="font-bold text-2xl text-white">---</span></p>
+            
+            <div class="bg-white p-2 rounded-xl mb-4">
+                <div id="qrcode"></div>
+            </div>
+            
+            <p class="text-gray-400 mt-4 max-w-sm">Scan this QR code with your phone's camera to connect instantly.</p>
+        </div>
+
+        <!-- Client Connecting Screen -->
+        <div id="clientConnectingUI" class="hidden flex flex-col items-center justify-center text-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-cyan-400 mb-4"></div>
+            <h2 class="text-2xl font-bold text-cyan-400 neon-text">Connecting to Screen...</h2>
+            <p class="text-gray-500 mt-2" id="connectionStatus">Initializing WebRTC...</p>
+        </div>
+    </div>
+
+    <!-- The Game Screen (Canvas) -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- The Controller UI (Mobile) -->
+    <div id="controllerUI">
+        <div class="flex justify-between items-center p-4 bg-gray-900 border-b border-gray-800">
+            <div class="text-cyan-400 font-bold">Controller Connected</div>
+            <div class="text-xs text-gray-500" id="pingDisplay">Status: Active</div>
+        </div>
+        
+        <!-- Controls area -->
+        <div class="flex-1 flex flex-col p-4 gap-4">
+            <!-- Top row for Thrust/Shoot -->
+            <div class="controls-row">
+                <div class="control-btn neon-border neon-button text-cyan-400" id="btnThrust">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                </div>
+                <div class="control-btn neon-border neon-button text-purple-500 border-purple-500" id="btnShoot">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="2"/></svg>
+                </div>
+            </div>
+            <!-- Bottom row for Left/Right -->
+            <div class="controls-row">
+                <div class="control-btn neon-border neon-button text-cyan-400" id="btnLeft">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                </div>
+                <div class="control-btn neon-border neon-button text-cyan-400" id="btnRight">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Globals & State ---
+        let peer = null;
+        let connection = null;
+        let isHost = false;
+        
+        // Input state shared between controller and game
+        let inputState = {
+            left: false,
+            right: false,
+            thrust: false,
+            shoot: false
+        };
+
+        // --- Routing / Initialization ---
+        window.onload = () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const joinId = urlParams.get('join');
+            
+            if (joinId) {
+                // We are opening a link from a QR code, become Controller immediately
+                startClient(joinId);
+            }
+        };
+
+        // --- Host (Screen) Logic ---
+        function startHost() {
+            document.getElementById('roleSelection').classList.add('hidden');
+            document.getElementById('hostWaitingUI').classList.remove('hidden');
+            
+            // Generate a simple 4-letter ID
+            const gameId = Math.random().toString(36).substring(2, 6).toUpperCase();
+            const fullPeerId = 'neondrift-' + gameId;
+            
+            document.getElementById('displayGameId').innerText = gameId;
+
+            // Generate QR Code URL
+            const currentUrl = window.location.href.split('?')[0];
+            const joinUrl = `${currentUrl}?join=${gameId}`;
+            
+            new QRCode(document.getElementById("qrcode"), {
+                text: joinUrl,
+                width: 200,
+                height: 200,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+
+            // Init PeerJS
+            peer = new Peer(fullPeerId);
+            
+            peer.on('open', (id) => {
+                console.log('Host ready. Peer ID:', id);
+            });
+
+            peer.on('connection', (conn) => {
+                console.log('Controller connected!');
+                connection = conn;
+                
+                // Hide Setup UI, Show Game Canvas
+                document.getElementById('setupUI').classList.add('hidden');
+                document.getElementById('gameCanvas').style.display = 'block';
+                
+                // Start Game Engine
+                initGame();
+
+                // Listen for controller inputs
+                conn.on('data', (data) => {
+                    if(data.type === 'input') {
+                        inputState = data.state;
+                    }
+                });
+
+                conn.on('close', () => {
+                    alert("Controller disconnected. Refresh to start a new game.");
+                    window.location.reload();
+                });
+            });
+
+            peer.on('error', (err) => {
+                console.error('PeerJS Error:', err);
+                alert("Connection error: " + err.type);
+            });
+        }
+
+        // --- Client (Controller) Logic ---
+        function startJoinFromInput() {
+            const id = document.getElementById('joinIdInput').value.trim().toUpperCase();
+            if(id.length > 0) {
+                startClient(id);
+            }
+        }
+
+        function startClient(gameId) {
+            isHost = false;
+            document.getElementById('setupUI').classList.remove('hidden');
+            document.getElementById('roleSelection').classList.add('hidden');
+            document.getElementById('hostWaitingUI').classList.add('hidden');
+            document.getElementById('clientConnectingUI').classList.remove('hidden');
+            document.getElementById('connectionStatus').innerText = `Connecting to ${gameId}...`;
+
+            const fullPeerId = 'neondrift-' + gameId;
+            peer = new Peer(); // Client doesn't need a specific ID
+
+            peer.on('open', (id) => {
+                // Connect to host
+                connection = peer.connect(fullPeerId, {
+                    reliable: false // Use UDP-like behavior for lower latency inputs
+                });
+
+                connection.on('open', () => {
+                    console.log('Connected to Screen!');
+                    // Hide setup UI, show Controller UI
+                    document.getElementById('setupUI').classList.add('hidden');
+                    document.getElementById('controllerUI').style.display = 'flex';
+                    
+                    // Setup touch listeners
+                    setupControllerInputs();
+                    
+                    // Ping loop to keep connection alive
+                    setInterval(() => {
+                        if(connection && connection.open) connection.send({type: 'ping'});
+                    }, 2000);
+                });
+
+                connection.on('close', () => {
+                    document.getElementById('pingDisplay').innerText = "Disconnected";
+                    document.getElementById('pingDisplay').classList.add('text-red-500');
+                    alert("Screen disconnected.");
+                });
+            });
+
+            peer.on('error', (err) => {
+                document.getElementById('connectionStatus').innerText = "Error: Could not find screen. Check ID.";
+                document.getElementById('connectionStatus').classList.add('text-red-500');
+            });
+        }
+
+        function setupControllerInputs() {
+            const bindBtn = (id, action) => {
+                const btn = document.getElementById(id);
+                
+                const press = (e) => { e.preventDefault(); inputState[action] = true; sendInput(); };
+                const release = (e) => { e.preventDefault(); inputState[action] = false; sendInput(); };
+
+                // Touch events for mobile
+                btn.addEventListener('touchstart', press, {passive: false});
+                btn.addEventListener('touchend', release, {passive: false});
+                btn.addEventListener('touchcancel', release, {passive: false});
+                
+                // Mouse events for testing on desktop
+                btn.addEventListener('mousedown', press);
+                btn.addEventListener('mouseup', release);
+                btn.addEventListener('mouseleave', release);
+            };
+
+            bindBtn('btnLeft', 'left');
+            bindBtn('btnRight', 'right');
+            bindBtn('btnThrust', 'thrust');
+            bindBtn('btnShoot', 'shoot');
+        }
+
+        function sendInput() {
+            if (connection && connection.open) {
+                connection.send({
+                    type: 'input',
+                    state: inputState
+                });
+            }
+        }
+
+
+        // ==========================================
+        //         GAME ENGINE (Runs on Host)
+        // ==========================================
+        let canvas, ctx;
+        let width, height;
+        let lastTime = 0;
+        
+        let player = {
+            x: 0, y: 0, 
+            vx: 0, vy: 0,
+            angle: -Math.PI/2,
+            radius: 15,
+            lastShot: 0
+        };
+        
+        let bullets = [];
+        let asteroids = [];
+        let particles = [];
+        let score = 0;
+        let gameOver = false;
+
+        function initGame() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            
+            // Handle resizing
+            window.addEventListener('resize', resizeCanvas);
+            resizeCanvas();
+
+            // Setup initial state
+            player.x = width / 2;
+            player.y = height / 2;
+            
+            // Spawn initial asteroids
+            for(let i=0; i<5; i++) spawnAsteroid();
+
+            // Start loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            width = canvas.width;
+            height = canvas.height;
+        }
+
+        function spawnAsteroid(x, y, radius) {
+            let ast = {
+                x: x || Math.random() * width,
+                y: y || Math.random() * height,
+                vx: (Math.random() - 0.5) * 3,
+                vy: (Math.random() - 0.5) * 3,
+                radius: radius || Math.random() * 30 + 20,
+                vertices: []
+            };
+            
+            // Don't spawn on top of player initially
+            if (!x && !y) {
+                while(Math.hypot(ast.x - player.x, ast.y - player.y) < 150) {
+                    ast.x = Math.random() * width;
+                    ast.y = Math.random() * height;
+                }
+            }
+
+            // Jagged edges
+            let numPoints = Math.floor(Math.random() * 5) + 7;
+            for(let i=0; i<numPoints; i++) {
+                let angle = (i / numPoints) * Math.PI * 2;
+                let r = ast.radius * (0.8 + Math.random() * 0.4);
+                ast.vertices.push({x: Math.cos(angle)*r, y: Math.sin(angle)*r});
+            }
+            asteroids.push(ast);
+        }
+
+        function spawnParticles(x, y, color) {
+            for(let i=0; i<15; i++) {
+                particles.push({
+                    x: x, y: y,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5,
+                    life: 1.0,
+                    color: color
+                });
+            }
+        }
+
+        function gameLoop(timestamp) {
+            let dt = (timestamp - lastTime) / 1000 || 0;
+            lastTime = timestamp;
+
+            update(dt, timestamp);
+            draw();
+
+            if (!gameOver) {
+                requestAnimationFrame(gameLoop);
+            } else {
+                // Game Over Screen
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, 0, width, height);
+                ctx.fillStyle = '#0ff';
+                ctx.font = '50px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('GAME OVER', width/2, height/2);
+                ctx.font = '24px sans-serif';
+                ctx.fillText(`Final Score: ${score}`, width/2, height/2 + 40);
+                ctx.fillText('Refresh page to restart', width/2, height/2 + 80);
+            }
+        }
+
+        function update(dt, time) {
+            // --- Player Physics ---
+            // Rotation
+            if (inputState.left) player.angle -= 4 * dt;
+            if (inputState.right) player.angle += 4 * dt;
+
+            // Thrust
+            if (inputState.thrust) {
+                player.vx += Math.cos(player.angle) * 300 * dt;
+                player.vy += Math.sin(player.angle) * 300 * dt;
+                
+                // Thrust particles
+                if (Math.random() > 0.5) {
+                    particles.push({
+                        x: player.x - Math.cos(player.angle) * player.radius,
+                        y: player.y - Math.sin(player.angle) * player.radius,
+                        vx: -player.vx*0.2 + (Math.random()-0.5)*2,
+                        vy: -player.vy*0.2 + (Math.random()-0.5)*2,
+                        life: 1.0,
+                        color: '#f97316' // Orange
+                    });
+                }
+            }
+
+            // Drag
+            player.vx *= 0.98;
+            player.vy *= 0.98;
+
+            // Apply velocity
+            player.x += player.vx * dt;
+            player.y += player.vy * dt;
+
+            // Screen Wrap (Player)
+            if (player.x < 0) player.x = width;
+            if (player.x > width) player.x = 0;
+            if (player.y < 0) player.y = height;
+            if (player.y > height) player.y = 0;
+
+            // Shooting
+            if (inputState.shoot && time - player.lastShot > 250) {
+                bullets.push({
+                    x: player.x + Math.cos(player.angle) * player.radius,
+                    y: player.y + Math.sin(player.angle) * player.radius,
+                    vx: player.vx + Math.cos(player.angle) * 600,
+                    vy: player.vy + Math.sin(player.angle) * 600,
+                    life: 2.0 // seconds
+                });
+                player.lastShot = time;
+            }
+
+            // --- Updates arrays ---
+            
+            // Bullets
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                let b = bullets[i];
+                b.x += b.vx * dt;
+                b.y += b.vy * dt;
+                b.life -= dt;
+                
+                // Wrap bullets
+                if (b.x < 0) b.x = width; if (b.x > width) b.x = 0;
+                if (b.y < 0) b.y = height; if (b.y > height) b.y = 0;
+
+                if (b.life <= 0) bullets.splice(i, 1);
+            }
+
+            // Asteroids
+            for (let i = asteroids.length - 1; i >= 0; i--) {
+                let a = asteroids[i];
+                a.x += a.vx;
+                a.y += a.vy;
+
+                // Screen Wrap (Asteroid)
+                if (a.x < -a.radius) a.x = width + a.radius;
+                if (a.x > width + a.radius) a.x = -a.radius;
+                if (a.y < -a.radius) a.y = height + a.radius;
+                if (a.y > height + a.radius) a.y = -a.radius;
+
+                // Player Collision
+                let dist = Math.hypot(player.x - a.x, player.y - a.y);
+                if (dist < player.radius + a.radius * 0.8) { // 0.8 is hitbox fudge factor
+                    gameOver = true;
+                    spawnParticles(player.x, player.y, '#fff');
+                }
+
+                // Bullet Collision
+                for (let j = bullets.length - 1; j >= 0; j--) {
+                    let b = bullets[j];
+                    let bDist = Math.hypot(b.x - a.x, b.y - a.y);
+                    if (bDist < a.radius) {
+                        // Hit!
+                        bullets.splice(j, 1);
+                        asteroids.splice(i, 1);
+                        score += 100;
+                        spawnParticles(a.x, a.y, '#0ff');
+                        
+                        // Split asteroid
+                        if (a.radius > 20) {
+                            spawnAsteroid(a.x, a.y, a.radius * 0.5);
+                            spawnAsteroid(a.x, a.y, a.radius * 0.5);
+                        }
+                        
+                        // Spawn new random asteroid to keep game going
+                        if(asteroids.length < 3) {
+                            spawnAsteroid();
+                        }
+                        break; // Move to next asteroid
+                    }
+                }
+            }
+
+            // Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= dt * 2;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            
+            // Keep game active - spawn asteroids occasionally
+            if(Math.random() < 0.002 * dt) spawnAsteroid();
+        }
+
+        function draw() {
+            // Clear screen
+            ctx.fillStyle = '#050510';
+            ctx.fillRect(0, 0, width, height);
+
+            // Draw Score
+            ctx.fillStyle = '#0ff';
+            ctx.font = '24px monospace';
+            ctx.textAlign = 'left';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#0ff';
+            ctx.fillText(`SCORE: ${score}`, 20, 40);
+            ctx.shadowBlur = 0; // reset
+
+            // Draw Asteroids
+            ctx.strokeStyle = '#0ff';
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#0ff';
+            
+            asteroids.forEach(a => {
+                ctx.beginPath();
+                for(let i=0; i<a.vertices.length; i++) {
+                    let vx = a.x + a.vertices[i].x;
+                    let vy = a.y + a.vertices[i].y;
+                    if(i === 0) ctx.moveTo(vx, vy);
+                    else ctx.lineTo(vx, vy);
+                }
+                ctx.closePath();
+                ctx.stroke();
+            });
+
+            // Draw Bullets
+            ctx.fillStyle = '#f0f';
+            ctx.shadowColor = '#f0f';
+            bullets.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, 3, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // Draw Particles
+            ctx.shadowBlur = 5;
+            particles.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2, 0, Math.PI*2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1.0;
+
+            // Draw Player
+            if (!gameOver) {
+                ctx.save();
+                ctx.translate(player.x, player.y);
+                ctx.rotate(player.angle);
+                
+                ctx.strokeStyle = '#fff';
+                ctx.shadowColor = '#fff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(player.radius, 0); // Nose
+                ctx.lineTo(-player.radius, player.radius * 0.7); // Left wing
+                ctx.lineTo(-player.radius * 0.5, 0); // Engine indentation
+                ctx.lineTo(-player.radius, -player.radius * 0.7); // Right wing
+                ctx.closePath();
+                ctx.stroke();
+
+                // Thrust flame visual
+                if (inputState.thrust) {
+                    ctx.strokeStyle = '#f97316';
+                    ctx.beginPath();
+                    ctx.moveTo(-player.radius * 0.6, 0);
+                    ctx.lineTo(-player.radius * 1.5 - Math.random() * 5, 0);
+                    ctx.stroke();
+                }
+                
+                ctx.restore();
+            }
+        }
+    </script>
+</body>
+</html>
+
+```
