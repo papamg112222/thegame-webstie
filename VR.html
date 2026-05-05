@@ -54,6 +54,20 @@
             display: none; pointer-events: none; backdrop-filter: blur(4px);
         }
         
+        /* Height Slider for Crouching */
+        #height-control {
+            position: absolute; left: 10px; top: 10%; bottom: 10%; width: 50px;
+            background: rgba(0,0,0,0.5); border-radius: 25px; border: 2px solid rgba(255,255,255,0.3);
+            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+            padding: 10px 0; z-index: 30; pointer-events: auto;
+        }
+        .height-label { color: white; font-size: 0.8rem; font-weight: bold; pointer-events: none; }
+        input[type=range][orient=vertical] {
+            writing-mode: bt-lr; /* IE */
+            -webkit-appearance: slider-vertical; /* WebKit */
+            width: 8px; height: 100%; padding: 0 5px;
+        }
+
         /* VR Overlay */
         #vr-overlay {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5;
@@ -120,7 +134,7 @@
             <p id="client-status" class="mt-4 text-red-400"></p>
         </div>
         
-        <!-- Screen 4: Host Start VR Button (Requires interaction for Gyro on iOS) -->
+        <!-- Screen 4: Host Start VR Button -->
         <div id="host-start-vr" class="hidden-ui flex flex-col items-center">
             <h2 class="text-2xl text-green-400 mb-4">Controller Connected!</h2>
             <p class="mb-6 text-gray-300 text-center max-w-sm">Put your device into a VR headset. You can look around 360 degrees.</p>
@@ -130,8 +144,15 @@
 
     <!-- Client Controller UI -->
     <div id="controller-ui">
+        <!-- Height Slider -->
+        <div id="height-control">
+            <div class="height-label">UP</div>
+            <input type="range" id="height-slider" orient="vertical" min="0.4" max="1.6" step="0.1" value="1.6">
+            <div class="height-label">DOWN</div>
+        </div>
+
         <div id="move-zone">
-            <div id="move-hint">WALK JOYSTICK<br>(Inverted L/R)</div>
+            <div id="move-hint">WALK JOYSTICK</div>
             <div id="joystick"></div>
         </div>
         <div id="grab-zone">TAP & HOLD<br>TO GRAB</div>
@@ -165,7 +186,6 @@
             switchScreen(clientLobby);
         }
 
-        // Generate random 4 digit code
         const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
 
         // --- HOST LOGIC ---
@@ -175,10 +195,7 @@
             document.getElementById('room-code-display').innerText = roomCode;
 
             peer = new Peer(PEER_PREFIX + roomCode);
-            
-            peer.on('open', (id) => {
-                console.log('Host created room:', id);
-            });
+            peer.on('open', (id) => console.log('Host created room:', id));
 
             peer.on('connection', (conn) => {
                 connection = conn;
@@ -186,39 +203,25 @@
                     console.log('Controller connected!');
                     switchScreen(hostStartVR);
                 });
-                
-                connection.on('data', (data) => {
-                    handleControllerData(data);
-                });
+                connection.on('data', handleControllerData);
             });
         }
 
         async function startVRMode() {
-            // Request device orientation permission for VR Look around
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
-                    const permissionState = await DeviceOrientationEvent.requestPermission();
-                    if (permissionState === 'granted') {
-                        window.addEventListener('deviceorientation', handleHostOrientation);
-                    }
+                    const perm = await DeviceOrientationEvent.requestPermission();
+                    if (perm === 'granted') window.addEventListener('deviceorientation', handleHostOrientation);
                 } catch (e) { console.error(e); }
             } else {
-                // Non-iOS or older devices
                 window.addEventListener('deviceorientation', handleHostOrientation);
             }
 
-            // Try to force fullscreen and landscape for the VR Host
             try {
-                if (document.documentElement.requestFullscreen) {
-                    await document.documentElement.requestFullscreen();
-                } else if (document.documentElement.webkitRequestFullscreen) {
-                    await document.documentElement.webkitRequestFullscreen();
-                }
-                
-                if (screen.orientation && screen.orientation.lock) {
-                    screen.orientation.lock("landscape").catch(e => console.log(e));
-                }
-            } catch(e) { console.log(e); }
+                if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+                else if (document.documentElement.webkitRequestFullscreen) await document.documentElement.webkitRequestFullscreen();
+                if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(e=>e);
+            } catch(e) {}
 
             uiLayer.style.display = 'none';
             gameCanvas.style.display = 'block';
@@ -237,13 +240,11 @@
 
             document.getElementById('client-status').innerText = "Connecting...";
             
-            // Important: Request orientation permission ON CLICK before opening network connection
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
-                    const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission === 'granted') {
-                        window.addEventListener('deviceorientation', sendOrientationData);
-                    } else {
+                    const perm = await DeviceOrientationEvent.requestPermission();
+                    if (perm === 'granted') window.addEventListener('deviceorientation', sendOrientationData);
+                    else {
                         document.getElementById('client-status').innerText = "Gyroscope permission required!";
                         return;
                     }
@@ -257,13 +258,12 @@
                 connection = peer.connect(PEER_PREFIX + inputCode);
                 
                 connection.on('open', () => {
-                    // Try to lock landscape and go fullscreen for best controller experience
                     try {
                         document.documentElement.requestFullscreen().then(() => {
                             if (screen.orientation && screen.orientation.lock) {
-                                screen.orientation.lock("landscape").catch(e => console.log(e));
+                                screen.orientation.lock("landscape").catch(e=>e);
                             }
-                        }).catch(e => console.log(e));
+                        }).catch(e=>e);
                     } catch(e) {}
 
                     uiLayer.style.display = 'none';
@@ -271,30 +271,31 @@
                     setupControllerInputs();
                 });
 
-                connection.on('error', (err) => {
+                connection.on('error', () => {
                     document.getElementById('client-status').innerText = "Connection failed.";
                 });
             });
         }
 
         // --- CONTROLLER INPUT HANDLING (CLIENT SIDE) ---
-        let ctrlState = { moveX: 0, moveY: 0, grab: false };
+        let ctrlState = { moveX: 0, moveY: 0, grab: false, height: 1.6 };
         
         function getScreenOrientation() {
-            if (screen.orientation && screen.orientation.angle !== undefined) {
-                return screen.orientation.angle * THREE.MathUtils.DEG2RAD;
+            let angle = 0;
+            if (screen.orientation && screen.orientation.angle !== undefined) angle = screen.orientation.angle;
+            else if (window.orientation !== undefined) angle = window.orientation;
+
+            if (angle === 0 && window.innerWidth > window.innerHeight) {
+                angle = 90; // Override for iframe/preview lying
             }
-            return (window.orientation || 0) * THREE.MathUtils.DEG2RAD;
+            return angle * THREE.MathUtils.DEG2RAD;
         }
 
         function sendOrientationData(e) {
             if(connection && connection.open) {
-                // Send raw euler angles from phone
                 connection.send({
                     type: 'gyro',
-                    alpha: e.alpha,
-                    beta: e.beta,
-                    gamma: e.gamma,
+                    alpha: e.alpha, beta: e.beta, gamma: e.gamma,
                     orient: getScreenOrientation()
                 });
             }
@@ -304,7 +305,14 @@
             const grabZone = document.getElementById('grab-zone');
             const moveZone = document.getElementById('move-zone');
             const joystick = document.getElementById('joystick');
+            const heightSlider = document.getElementById('height-slider');
             
+            // Height Slider logic
+            heightSlider.addEventListener('input', (e) => {
+                ctrlState.height = parseFloat(e.target.value);
+                connection.send({ type: 'height', val: ctrlState.height });
+            });
+
             // Grab Logic
             const setGrab = (val) => {
                 ctrlState.grab = val;
@@ -325,6 +333,8 @@
             const maxR = 60;
 
             moveZone.addEventListener('touchstart', (e) => {
+                // Ignore touches on the slider
+                if(e.target.id === 'height-slider') return; 
                 e.preventDefault();
                 const t = e.changedTouches[0];
                 joyId = t.identifier;
@@ -338,18 +348,18 @@
             }, {passive: false});
 
             moveZone.addEventListener('touchmove', (e) => {
-                e.preventDefault();
                 for(let i=0; i<e.changedTouches.length; i++) {
                     if(e.changedTouches[i].identifier === joyId) {
+                        e.preventDefault();
                         updateJoy(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
                     }
                 }
             }, {passive: false});
 
             const endJoy = (e) => {
-                e.preventDefault();
                 for(let i=0; i<e.changedTouches.length; i++) {
                     if(e.changedTouches[i].identifier === joyId) {
+                        e.preventDefault();
                         joyId = null;
                         joystick.style.display = 'none';
                         ctrlState.moveX = 0; ctrlState.moveY = 0;
@@ -368,10 +378,9 @@
                 
                 joystick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
                 
-                let nx = -(dx / maxR); // INVERTED X: walking left goes right, right goes left
+                let nx = dx / maxR; // STANDARD JOYSTICK: Push left = Move left
                 let ny = dy / maxR; // +1 is pulling backward
                 
-                // Only send if changed significantly to save bandwidth
                 if(Math.abs(nx - ctrlState.moveX) > 0.05 || Math.abs(ny - ctrlState.moveY) > 0.05) {
                     ctrlState.moveX = nx; ctrlState.moveY = ny;
                     connection.send({ type: 'move', x: nx, y: ny });
@@ -386,153 +395,160 @@
         let interactables = [];
         let grabbedObject = null;
         
-        // Host state received from controller
         let hostState = {
-            moveX: 0, moveY: 0, grab: false,
+            moveX: 0, moveY: 0, grab: false, height: 1.6,
             handRot: { alpha: 0, beta: 0, gamma: 0, orient: 0 },
-            headRot: { alpha: 0, beta: 0, gamma: 0 } // From host device
+            headRot: { alpha: 0, beta: 0, gamma: 0 }
         };
 
         function handleControllerData(data) {
             if(data.type === 'move') {
-                hostState.moveX = data.x;
-                hostState.moveY = data.y;
+                hostState.moveX = data.x; hostState.moveY = data.y;
             } else if (data.type === 'btn') {
-                hostState.grab = data.grab;
-                processGrabLogic();
+                hostState.grab = data.grab; processGrabLogic();
             } else if (data.type === 'gyro') {
-                hostState.handRot.alpha = data.alpha;
-                hostState.handRot.beta = data.beta;
-                hostState.handRot.gamma = data.gamma;
-                hostState.handRot.orient = data.orient || 0;
+                hostState.handRot = { alpha: data.alpha, beta: data.beta, gamma: data.gamma, orient: data.orient||0 };
+            } else if (data.type === 'height') {
+                hostState.height = data.val;
             }
         }
 
         function handleHostOrientation(e) {
-            hostState.headRot.alpha = e.alpha;
-            hostState.headRot.beta = e.beta;
-            hostState.headRot.gamma = e.gamma;
+            hostState.headRot = { alpha: e.alpha, beta: e.beta, gamma: e.gamma };
         }
 
         function initThreeJS() {
             renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.autoClear = false; // Important for split screen
+            renderer.autoClear = false;
 
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x87CEEB);
             scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
 
             // Lighting
-            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-            hemiLight.position.set(0, 10, 0);
-            scene.add(hemiLight);
-
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
             dirLight.position.set(5, 10, 7);
             scene.add(dirLight);
 
-            // Environment Floor
-            const gridHelper = new THREE.GridHelper(100, 100, 0x000000, 0x000000);
-            gridHelper.material.opacity = 0.2;
-            gridHelper.material.transparent = true;
-            scene.add(gridHelper);
-            
-            const floorGeo = new THREE.PlaneGeometry(100, 100);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x4a7c59 });
+            // Environment Floor (Grassy)
+            const floorGeo = new THREE.PlaneGeometry(200, 200);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d6e41 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
-            // Generate Interactable Objects
-            const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff];
-            for(let i=0; i<20; i++) {
-                const mat = new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random()*colors.length)] });
-                const mesh = new THREE.Mesh(boxGeo, mat);
-                mesh.position.set(
-                    (Math.random() - 0.5) * 15,
-                    0.25,
-                    (Math.random() - 0.5) * 15 - 5
-                );
-                scene.add(mesh);
-                interactables.push(mesh);
-            }
+            generateEnvironment();
 
             // --- Player Rig Setup ---
             playerGroup = new THREE.Group();
-            playerGroup.position.y = 1.6; // Human height
             scene.add(playerGroup);
 
-            // Head (Tracks Host VR Orientation)
             headGroup = new THREE.Group();
             playerGroup.add(headGroup);
 
-            // Stereoscopic Cameras
             const aspect = (window.innerWidth / 2) / window.innerHeight;
             cameraL = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
             cameraR = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
-            
-            // IPD (Interpupillary Distance) offset
-            cameraL.position.x = -0.03;
-            cameraR.position.x = 0.03;
-            
-            headGroup.add(cameraL);
-            headGroup.add(cameraR);
+            cameraL.position.x = -0.03; cameraR.position.x = 0.03;
+            headGroup.add(cameraL); headGroup.add(cameraR);
 
-            // Minecraft Hand (Tracks Controller Orientation)
             const handGeo = new THREE.BoxGeometry(0.15, 0.15, 0.4);
-            // Translate geometry so pivot is at the "wrist" (back end of the box)
             handGeo.translate(0, 0, -0.2); 
-            
-            const handMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d }); // Skin tone
-            handMesh = new THREE.Mesh(handGeo, handMat);
-            
-            // Attach hand to player body, but offset forward. 
-            // In a real tracked VR game it floats independently, but here we only have phone orientation.
-            // Placing it relative to the head gives a more intuitive feel.
+            handMesh = new THREE.Mesh(handGeo, new THREE.MeshStandardMaterial({ color: 0xf1c27d }));
             handMesh.position.set(0.3, -0.3, -0.4);
             headGroup.add(handMesh);
 
-            // Desktop Fallback controls for testing Host without Gyro
             setupHostDesktopFallback();
-
-            // Start Render Loop
             renderer.setAnimationLoop(renderLoop);
+        }
+
+        function generateEnvironment() {
+            // Trees
+            const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 3, 8);
+            const leavesGeo = new THREE.DodecahedronGeometry(2, 1);
+            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
+            const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228b22, flatShading: true });
+
+            // Rocks
+            const rockGeo = new THREE.DodecahedronGeometry(1.5, 0);
+            const rockMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
+
+            // Interactable Boxes
+            const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+            const boxMats = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00].map(c => new THREE.MeshStandardMaterial({color: c}));
+
+            // Arches (Caves)
+            const archGeo = new THREE.TorusGeometry(4, 1.5, 8, 16, Math.PI);
+            const archMat = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true });
+
+            for(let i=0; i<60; i++) {
+                const x = (Math.random() - 0.5) * 80;
+                const z = (Math.random() - 0.5) * 80;
+                
+                // Keep center clear for spawning
+                if (Math.abs(x) < 5 && Math.abs(z) < 5) continue;
+
+                const rand = Math.random();
+                if (rand < 0.4) {
+                    // Tree
+                    const tree = new THREE.Group();
+                    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+                    trunk.position.y = 1.5;
+                    const leaves = new THREE.Mesh(leavesGeo, leavesMat);
+                    leaves.position.y = 3.5;
+                    tree.add(trunk); tree.add(leaves);
+                    tree.position.set(x, 0, z);
+                    tree.scale.setScalar(0.8 + Math.random() * 0.6);
+                    scene.add(tree);
+                } else if (rand < 0.7) {
+                    // Rock
+                    const rock = new THREE.Mesh(rockGeo, rockMat);
+                    rock.position.set(x, 0.5, z);
+                    rock.rotation.set(Math.random(), Math.random(), Math.random());
+                    rock.scale.setScalar(0.5 + Math.random() * 1.5);
+                    scene.add(rock);
+                } else if (rand < 0.8) {
+                    // Arch (Cave)
+                    const arch = new THREE.Mesh(archGeo, archMat);
+                    arch.position.set(x, 0, z);
+                    arch.rotation.y = Math.random() * Math.PI;
+                    scene.add(arch);
+                } else {
+                    // Interactable box
+                    const box = new THREE.Mesh(boxGeo, boxMats[Math.floor(Math.random()*boxMats.length)]);
+                    box.position.set(x, 0.25, z);
+                    scene.add(box);
+                    interactables.push(box);
+                }
+            }
         }
 
         const _zee = new THREE.Vector3( 0, 0, 1 );
         const _euler = new THREE.Euler();
         const _q0 = new THREE.Quaternion();
-        const _q1 = new THREE.Quaternion( - Math.sqrt( 0.5 ), 0, 0, Math.sqrt( 0.5 ) ); // - PI/2 around the X-axis
+        const _q1 = new THREE.Quaternion( - Math.sqrt( 0.5 ), 0, 0, Math.sqrt( 0.5 ) );
 
-        // Convert DeviceOrientation to ThreeJS Quaternion, properly adjusting for Screen Rotation
         function applyDeviceOrientation(targetObj, alpha, beta, gamma, orient) {
             if (alpha === null || alpha === undefined) return;
-            
             const degToRad = THREE.MathUtils.degToRad;
-            const _alpha = alpha ? degToRad(alpha) : 0;
-            const _beta = beta ? degToRad(beta) : 0;
-            const _gamma = gamma ? degToRad(gamma) : 0;
-
-            _euler.set( _beta, _alpha, -_gamma, 'YXZ' ); // 'ZXY' for the device, but 'YXZ' for us
-            targetObj.quaternion.setFromEuler( _euler ); // orient the device
-            targetObj.quaternion.multiply( _q1 ); // camera looks out the back of the device, not the top
-            targetObj.quaternion.multiply( _q0.setFromAxisAngle( _zee, -orient ) ); // adjust for screen orientation (landscape/portrait)
+            _euler.set( beta ? degToRad(beta) : 0, alpha ? degToRad(alpha) : 0, -(gamma ? degToRad(gamma) : 0), 'YXZ' );
+            targetObj.quaternion.setFromEuler( _euler );
+            targetObj.quaternion.multiply( _q1 );
+            targetObj.quaternion.multiply( _q0.setFromAxisAngle( _zee, -orient ) );
         }
 
         function processGrabLogic() {
             if (!handMesh) return;
             
             if (hostState.grab && !grabbedObject) {
-                // Attempt to grab
-                // Get hand's world position
                 const handPos = new THREE.Vector3();
                 handMesh.getWorldPosition(handPos);
                 
-                // Find closest object
-                let closestDist = 1.0; // Reach distance
+                // DRASTICALLY INCREASED REACH DISTANCE (4 meters)
+                let closestDist = 4.0; 
                 let target = null;
                 
                 for(let obj of interactables) {
@@ -547,14 +563,14 @@
                 
                 if (target) {
                     grabbedObject = target;
-                    // Parent object to hand
+                    // Snap it slightly in front of the hand box so you can see it
                     THREE.SceneUtils.attach(grabbedObject, scene, handMesh);
+                    grabbedObject.position.set(0, 0, -0.3); 
                 }
             } 
             else if (!hostState.grab && grabbedObject) {
-                // Release object
                 THREE.SceneUtils.detach(grabbedObject, handMesh, scene);
-                // Snap to ground level for simplicity
+                // Drop to the floor
                 grabbedObject.position.y = 0.25;
                 grabbedObject.rotation.set(0,0,0);
                 grabbedObject = null;
@@ -562,49 +578,43 @@
         }
 
         function renderLoop() {
-            // 1. Update Player Movement (from Controller Joystick)
+            // Apply Height from controller slider
+            const targetHeight = hostState.height;
+            let currentHeight = playerGroup.position.y;
+            // Smooth crouch transition
+            currentHeight += (targetHeight - currentHeight) * 0.1;
+
             if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
-                const speed = 0.05;
+                const speed = 0.08; // slightly faster
                 
-                // Get the horizontal forward direction based on where the HEAD is looking
                 const headForward = new THREE.Vector3(0, 0, -1);
                 headForward.applyQuaternion(headGroup.quaternion);
-                headForward.y = 0; // Flatten to XZ plane
-                headForward.normalize();
+                headForward.y = 0; headForward.normalize();
 
                 const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0,1,0)).normalize();
 
-                // moveY is forward/backward, moveX is strafe
-                // moveX is now inverted from the controller directly
                 const moveVec = new THREE.Vector3()
                     .addScaledVector(headForward, -hostState.moveY * speed)
                     .addScaledVector(headRight, hostState.moveX * speed);
                 
                 playerGroup.position.add(moveVec);
                 
-                // Add slight head bobbing when walking
-                playerGroup.position.y = 1.6 + Math.sin(Date.now() * 0.01) * 0.05;
+                // Bobbing effect scales with walking
+                playerGroup.position.y = currentHeight + Math.sin(Date.now() * 0.01) * 0.05;
             } else {
-                playerGroup.position.y = 1.6;
+                playerGroup.position.y = currentHeight;
             }
 
-            // 2. Update Hand Rotation (from Controller Gyro)
             applyDeviceOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma, hostState.handRot.orient);
 
-            // 3. Update Head Rotation (from Host Gyro)
-            // If the host is a desktop (no gyro data), fallback controls handles `headGroup.rotation` directly.
             if (hostState.headRot.alpha !== null && hostState.headRot.alpha !== 0) {
                 const hostOrient = getScreenOrientation();
                 applyDeviceOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
 
-            // 4. Render Split Screen
-            const w = window.innerWidth;
-            const h = window.innerHeight;
-
+            const w = window.innerWidth; const h = window.innerHeight;
             renderer.clear();
 
-            // Left Eye
             renderer.setViewport(0, 0, w / 2, h);
             renderer.setScissor(0, 0, w / 2, h);
             renderer.setScissorTest(true);
@@ -612,7 +622,6 @@
             cameraL.updateProjectionMatrix();
             renderer.render(scene, cameraL);
 
-            // Right Eye
             renderer.setViewport(w / 2, 0, w / 2, h);
             renderer.setScissor(w / 2, 0, w / 2, h);
             cameraR.aspect = (w / 2) / h;
@@ -622,60 +631,35 @@
 
         function checkHostOrientation() {
             if (isHost && gameCanvas.style.display === 'block') {
-                if (window.innerHeight > window.innerWidth) {
-                    document.getElementById('rotate-prompt').style.display = 'flex';
-                } else {
-                    document.getElementById('rotate-prompt').style.display = 'none';
-                }
+                if (window.innerHeight > window.innerWidth) document.getElementById('rotate-prompt').style.display = 'flex';
+                else document.getElementById('rotate-prompt').style.display = 'none';
             }
         }
 
-        // Handle Window Resize
         window.addEventListener('resize', () => {
             checkHostOrientation();
             if (!renderer) return;
-            const w = window.innerWidth;
-            const h = window.innerHeight;
-            renderer.setSize(w, h);
+            renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Fallback for Desktop Host Testing (Drag mouse to look around)
         function setupHostDesktopFallback() {
-            let isDragging = false;
-            let prevX = 0, prevY = 0;
-            let yaw = 0;
-            let pitch = 0;
-
-            gameCanvas.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                prevX = e.clientX; prevY = e.clientY;
-            });
+            let isDragging = false, prevX = 0, prevY = 0, yaw = 0, pitch = 0;
+            gameCanvas.addEventListener('mousedown', (e) => { isDragging = true; prevX = e.clientX; prevY = e.clientY; });
             window.addEventListener('mouseup', () => isDragging = false);
             window.addEventListener('mousemove', (e) => {
                 if (!isDragging) return;
-                const dx = e.clientX - prevX;
-                const dy = e.clientY - prevY;
+                yaw -= (e.clientX - prevX) * 0.005; pitch -= (e.clientY - prevY) * 0.005;
                 prevX = e.clientX; prevY = e.clientY;
-
-                yaw -= dx * 0.005;
-                pitch -= dy * 0.005;
                 pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
-
-                // Apply to head group manually if gyro isn't doing it
                 if (hostState.headRot.alpha === 0) {
-                    headGroup.rotation.order = 'YXZ';
-                    headGroup.rotation.y = yaw;
-                    headGroup.rotation.x = pitch;
+                    headGroup.rotation.order = 'YXZ'; headGroup.rotation.y = yaw; headGroup.rotation.x = pitch;
                 }
             });
-            
-            // Also map keyboard arrows for easy debugging of joystick
             window.addEventListener('keydown', (e) => {
-                if(e.key==='w') hostState.moveY = -1;
-                if(e.key==='s') hostState.moveY = 1;
-                if(e.key==='a') hostState.moveX = 1; // Inverted for testing
-                if(e.key==='d') hostState.moveX = -1; // Inverted for testing
+                if(e.key==='w') hostState.moveY = -1; if(e.key==='s') hostState.moveY = 1;
+                if(e.key==='a') hostState.moveX = -1; if(e.key==='d') hostState.moveX = 1; // Standard WSAD
                 if(e.key===' ') { hostState.grab = true; processGrabLogic(); }
+                if(e.key==='c') hostState.height = hostState.height === 1.6 ? 0.6 : 1.6; // Desktop crouch toggle
             });
             window.addEventListener('keyup', (e) => {
                 if(['w','s'].includes(e.key)) hostState.moveY = 0;
@@ -686,8 +670,6 @@
     </script>
 </body>
 </html>
-
-
 
 
 ```
