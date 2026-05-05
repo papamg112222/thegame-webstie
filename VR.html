@@ -280,6 +280,13 @@
         // --- CONTROLLER INPUT HANDLING (CLIENT SIDE) ---
         let ctrlState = { moveX: 0, moveY: 0, grab: false };
         
+        function getScreenOrientation() {
+            if (screen.orientation && screen.orientation.angle !== undefined) {
+                return screen.orientation.angle * THREE.MathUtils.DEG2RAD;
+            }
+            return (window.orientation || 0) * THREE.MathUtils.DEG2RAD;
+        }
+
         function sendOrientationData(e) {
             if(connection && connection.open) {
                 // Send raw euler angles from phone
@@ -287,7 +294,8 @@
                     type: 'gyro',
                     alpha: e.alpha,
                     beta: e.beta,
-                    gamma: e.gamma
+                    gamma: e.gamma,
+                    orient: getScreenOrientation()
                 });
             }
         }
@@ -381,7 +389,7 @@
         // Host state received from controller
         let hostState = {
             moveX: 0, moveY: 0, grab: false,
-            handRot: { alpha: 0, beta: 0, gamma: 0 },
+            handRot: { alpha: 0, beta: 0, gamma: 0, orient: 0 },
             headRot: { alpha: 0, beta: 0, gamma: 0 } // From host device
         };
 
@@ -396,6 +404,7 @@
                 hostState.handRot.alpha = data.alpha;
                 hostState.handRot.beta = data.beta;
                 hostState.handRot.gamma = data.gamma;
+                hostState.handRot.orient = data.orient || 0;
             }
         }
 
@@ -493,23 +502,24 @@
             renderer.setAnimationLoop(renderLoop);
         }
 
-        // Convert DeviceOrientation (alpha, beta, gamma) to ThreeJS Euler
-        // The exact math depends heavily on phone model and grip. 
-        // This is a standard mapping for a phone held vertically (portrait).
-        function applyOrientation(targetObj, alpha, beta, gamma) {
-            if (alpha === null || alpha === undefined) return;
-            const degToRad = THREE.MathUtils.degToRad;
-            
-            // Convert to radians
-            const _x = degToRad(beta);
-            const _y = degToRad(alpha);
-            const _z = degToRad(-gamma);
+        const _zee = new THREE.Vector3( 0, 0, 1 );
+        const _euler = new THREE.Euler();
+        const _q0 = new THREE.Quaternion();
+        const _q1 = new THREE.Quaternion( - Math.sqrt( 0.5 ), 0, 0, Math.sqrt( 0.5 ) ); // - PI/2 around the X-axis
 
-            const euler = new THREE.Euler(_x, _y, _z, 'YXZ');
-            targetObj.quaternion.setFromEuler(euler);
+        // Convert DeviceOrientation to ThreeJS Quaternion, properly adjusting for Screen Rotation
+        function applyDeviceOrientation(targetObj, alpha, beta, gamma, orient) {
+            if (alpha === null || alpha === undefined) return;
             
-            // Compensate for screen orientation (assuming portrait grip)
-            targetObj.rotateX(-Math.PI / 2);
+            const degToRad = THREE.MathUtils.degToRad;
+            const _alpha = alpha ? degToRad(alpha) : 0;
+            const _beta = beta ? degToRad(beta) : 0;
+            const _gamma = gamma ? degToRad(gamma) : 0;
+
+            _euler.set( _beta, _alpha, -_gamma, 'YXZ' ); // 'ZXY' for the device, but 'YXZ' for us
+            targetObj.quaternion.setFromEuler( _euler ); // orient the device
+            targetObj.quaternion.multiply( _q1 ); // camera looks out the back of the device, not the top
+            targetObj.quaternion.multiply( _q0.setFromAxisAngle( _zee, -orient ) ); // adjust for screen orientation (landscape/portrait)
         }
 
         function processGrabLogic() {
@@ -579,13 +589,13 @@
             }
 
             // 2. Update Hand Rotation (from Controller Gyro)
-            applyOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
+            applyDeviceOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma, hostState.handRot.orient);
 
             // 3. Update Head Rotation (from Host Gyro)
             // If the host is a desktop (no gyro data), fallback controls handles `headGroup.rotation` directly.
             if (hostState.headRot.alpha !== null && hostState.headRot.alpha !== 0) {
-                applyOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma);
-                // For VR headset, looking straight should be neutral.
+                const hostOrient = getScreenOrientation();
+                applyDeviceOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
 
             // 4. Render Split Screen
@@ -676,6 +686,7 @@
     </script>
 </body>
 </html>
+
 
 
 
