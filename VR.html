@@ -167,14 +167,15 @@
             pointer-events: none;
         }
 
+        /* Fixed: Perfectly centered 2px divider line */
         #vr-divider {
             position: absolute; 
-            left: 50%; 
+            left: calc(50% - 1px); 
             top: 0; 
             bottom: 0; 
             width: 2px; 
             background: black;
-            transform: translateX(-50%);
+            z-index: 10;
         }
 
         #rotate-prompt {
@@ -264,7 +265,7 @@
         
         <div id="grab-zone">
             TAP & HOLD<br>TO GRAB<br>
-            <span style="font-size:1rem; opacity:0.7">(Swing arm to throw/chop)</span>
+            <span style="font-size:1rem; opacity:0.7">(Thrust phone to punch)</span>
         </div>
     </div>
 
@@ -356,6 +357,7 @@
             
             document.getElementById('client-status').innerText = "Connecting...";
             
+            // Gyroscope permission
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const perm = await DeviceOrientationEvent.requestPermission();
@@ -369,6 +371,16 @@
                 }
             } else {
                 window.addEventListener('deviceorientation', sendOrientationData);
+            }
+
+            // Accelerometer permission for punch tracking
+            if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+                try {
+                    const perm2 = await DeviceMotionEvent.requestPermission();
+                    if (perm2 === 'granted') window.addEventListener('devicemotion', sendMotionData);
+                } catch(e) {}
+            } else {
+                window.addEventListener('devicemotion', sendMotionData);
             }
 
             peer = new Peer();
@@ -406,7 +418,6 @@
                 angle = window.orientation;
             }
             
-            // Override for iframes if they report 0 but are visually wider than tall
             if (angle === 0 && window.innerWidth > window.innerHeight) {
                 angle = 90;
             }
@@ -421,6 +432,18 @@
                     beta: e.beta, 
                     gamma: e.gamma, 
                     orient: getScreenOrientation()
+                });
+            }
+        }
+
+        function sendMotionData(e) {
+            if (connection && connection.open && e.acceleration) {
+                // Send raw acceleration (gravity removed) to detect phone thrusts
+                connection.send({
+                    type: 'accel',
+                    x: e.acceleration.x || 0,
+                    y: e.acceleration.y || 0,
+                    z: e.acceleration.z || 0
                 });
             }
         }
@@ -533,7 +556,7 @@
         // --- THREE.JS ENGINE (HOST SIDE) ---
         let scene, renderer;
         let cameraL, cameraR;
-        let playerGroup, headGroup, armGroup, gripPoint, throwTracker;
+        let playerGroup, headGroup, armGroup, torso, gripPoint, throwTracker;
         let interactables = []; 
         let trees = []; 
         let rocks = [];
@@ -548,7 +571,10 @@
             handRot: { alpha: 0, beta: 0, gamma: 0, orient: 0 },
             headRot: { alpha: 0, beta: 0, gamma: 0 },
             prevTipPos: null,
-            handVelocity: new THREE.Vector3()
+            handVelocity: new THREE.Vector3(),
+            // Accelerometer tracking for punch mechanic
+            accelMag: 0,
+            handExtension: 0
         };
 
         function handleControllerData(data) {
@@ -570,6 +596,14 @@
             }
             else if (data.type === 'height') { 
                 hostState.height = data.val; 
+            }
+            else if (data.type === 'accel') {
+                // Calculate total thrust magnitude
+                const mag = Math.sqrt(data.x*data.x + data.y*data.y + data.z*data.z);
+                // Filter out noise, trigger a punch extension
+                if (mag > 4.0) {
+                    hostState.accelMag = 0.6; // Maximum reach extension (meters)
+                }
             }
         }
 
@@ -605,7 +639,6 @@
         function createTool(type) {
             const group = new THREE.Group();
             
-            // Handle points UP along the Y axis
             const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.6);
             const handleMat = new THREE.MeshStandardMaterial({ map: woodTex });
             const handle = new THREE.Mesh(handleGeo, handleMat);
@@ -615,7 +648,6 @@
                 const headGeo = new THREE.BoxGeometry(0.05, 0.25, 0.2);
                 const headMat = new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.5 });
                 const head = new THREE.Mesh(headGeo, headMat);
-                // Head points towards +Z
                 head.position.set(0, 0.2, 0.1); 
                 group.add(head);
             } else if (type === 'pickaxe') {
@@ -626,10 +658,7 @@
                 group.add(head);
             }
             
-            group.userData = { 
-                type: type, 
-                velocity: new THREE.Vector3() 
-            };
+            group.userData = { type: type, velocity: new THREE.Vector3() };
             return group;
         }
 
@@ -665,6 +694,13 @@
             headGroup = new THREE.Group();
             playerGroup.add(headGroup);
 
+            // Adding the Blue Shirt (Torso) so you have a body when looking down!
+            const shirtGeo = new THREE.BoxGeometry(0.4, 0.6, 0.2);
+            const shirtMat = new THREE.MeshStandardMaterial({ color: 0x2563eb }); // Blue shirt
+            torso = new THREE.Mesh(shirtGeo, shirtMat);
+            torso.position.set(0, -0.4, 0); // Positioned below the head
+            headGroup.add(torso);
+
             const aspect = (window.innerWidth / 2) / window.innerHeight;
             cameraL = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
             cameraR = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
@@ -675,51 +711,47 @@
             headGroup.add(cameraL); 
             headGroup.add(cameraR);
 
-            // --- THE NEW ARM & JOINT SYSTEM ---
+            // --- THE UPDATED "LONGER" ARM SYSTEM ---
             const skinMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d });
             const sleeveMat = new THREE.MeshStandardMaterial({ color: 0x2563eb });
 
-            // 1. Static Upper Arm (Shoulder to Elbow)
-            const upperArmGeo = new THREE.BoxGeometry(0.12, 0.25, 0.12);
-            const upperArm = new THREE.Mesh(upperArmGeo, sleeveMat);
-            upperArm.position.set(0.2, -0.3, -0.075);
-            // Angles down and forward to meet the elbow
-            upperArm.rotation.x = -0.64; 
-            headGroup.add(upperArm);
-
-            // 2. Forearm Group (Pivots at the Elbow)
+            // Fix: To prevent weird rotational conflicts, we add armGroup directly to playerGroup, NOT headGroup!
             armGroup = new THREE.Group();
-            // The exact elbow joint location
-            armGroup.position.set(0.2, -0.4, -0.15); 
-            
+            playerGroup.add(armGroup);
+
+            // 1. Static Upper Arm (Shoulder to Elbow) - LONGER
+            const upperArmGeo = new THREE.BoxGeometry(0.12, 0.12, 0.4);
+            const upperArm = new THREE.Mesh(upperArmGeo, sleeveMat);
+            upperArm.position.set(0, 0, -0.2);
+            armGroup.add(upperArm);
+
             // Visual Elbow Joint
-            const elbowGeo = new THREE.BoxGeometry(0.11, 0.11, 0.11);
+            const elbowGeo = new THREE.BoxGeometry(0.13, 0.13, 0.13);
             const elbowJoint = new THREE.Mesh(elbowGeo, sleeveMat);
+            elbowJoint.position.set(0, 0, -0.4);
             armGroup.add(elbowJoint);
 
-            // Lower Arm (extends forward from elbow)
-            const lowerArmGeo = new THREE.BoxGeometry(0.1, 0.1, 0.3);
+            // Lower Arm - LONGER
+            const lowerArmGeo = new THREE.BoxGeometry(0.1, 0.1, 0.4);
             const lowerArm = new THREE.Mesh(lowerArmGeo, skinMat);
-            lowerArm.position.set(0, 0, -0.15);
+            lowerArm.position.set(0, 0, -0.6);
             armGroup.add(lowerArm);
 
-            // Hand Block (At the end of the lower arm)
+            // Hand Block 
             const handGeo = new THREE.BoxGeometry(0.12, 0.12, 0.12);
             const handBlock = new THREE.Mesh(handGeo, skinMat);
-            handBlock.position.set(0, 0, -0.35);
+            handBlock.position.set(0, 0, -0.85);
             armGroup.add(handBlock);
 
             // The exact point where items are attached (palm of hand)
             gripPoint = new THREE.Object3D();
-            gripPoint.position.set(0, 0, -0.35);
+            gripPoint.position.set(0, 0, -0.85);
             armGroup.add(gripPoint);
 
             // Tracker for calculating swing arc/velocity for throwing
             throwTracker = new THREE.Object3D();
             throwTracker.position.set(0, 0, -1.0);
             armGroup.add(throwTracker);
-
-            headGroup.add(armGroup);
 
             // Spawn Tools
             const axe = createTool('axe'); 
@@ -758,54 +790,30 @@
                 
                 if (rand < 0.4) {
                     const tree = new THREE.Group();
-                    
                     const trunk = new THREE.Mesh(trunkGeo, trunkMat); 
                     trunk.position.y = 1.5;
-                    
                     const leaves = new THREE.Mesh(leavesGeo, leavesMat); 
                     leaves.position.y = 3.5;
-                    
                     tree.add(trunk); 
                     tree.add(leaves);
-                    
                     tree.position.set(x, 0, z); 
                     tree.scale.setScalar(0.8 + Math.random() * 0.6);
-                    
-                    tree.userData = { 
-                        type: 'tree', 
-                        hits: 0, 
-                        isFalling: false, 
-                        lastHitTime: 0 
-                    };
-                    
+                    tree.userData = { type: 'tree', hits: 0, isFalling: false, lastHitTime: 0 };
                     scene.add(tree); 
                     trees.push(tree);
-                    
                 } else if (rand < 0.7) {
                     const rock = new THREE.Mesh(rockGeo, rockMat);
                     rock.position.set(x, 0.5, z);
                     rock.rotation.set(Math.random(), Math.random(), Math.random());
                     rock.scale.setScalar(0.5 + Math.random() * 1.5);
-                    
-                    rock.userData = { 
-                        type: 'rock', 
-                        hits: 0, 
-                        lastHitTime: 0 
-                    };
-                    
+                    rock.userData = { type: 'rock', hits: 0, lastHitTime: 0 };
                     scene.add(rock); 
                     rocks.push(rock);
-                    
                 } else {
                     const randomMat = boxMats[Math.floor(Math.random() * boxMats.length)];
                     const box = new THREE.Mesh(boxGeo, randomMat);
                     box.position.set(x, 0.5, z);
-                    
-                    box.userData = { 
-                        type: 'box', 
-                        velocity: new THREE.Vector3() 
-                    };
-                    
+                    box.userData = { type: 'box', velocity: new THREE.Vector3() };
                     scene.add(box); 
                     interactables.push(box);
                 }
@@ -820,13 +828,7 @@
         function applyHeadOrientation(targetObj, alpha, beta, gamma, orient) {
             if (alpha === null || alpha === undefined) return;
             const degToRad = THREE.MathUtils.degToRad;
-            
-            const _beta = beta ? degToRad(beta) : 0;
-            const _alpha = alpha ? degToRad(alpha) : 0;
-            const _gamma = gamma ? degToRad(gamma) : 0;
-            
-            _euler.set(_beta, _alpha, -_gamma, 'YXZ');
-            
+            _euler.set(beta ? degToRad(beta) : 0, alpha ? degToRad(alpha) : 0, -(gamma ? degToRad(gamma) : 0), 'YXZ');
             targetObj.quaternion.setFromEuler(_euler);
             targetObj.quaternion.multiply(_q1);
             targetObj.quaternion.multiply(_q0.setFromAxisAngle(_zee, -orient));
@@ -835,13 +837,7 @@
         function applyHandOrientation(targetObj, alpha, beta, gamma) {
             if (alpha === null || alpha === undefined) return;
             const degToRad = THREE.MathUtils.degToRad;
-            
-            const _beta = beta ? degToRad(beta) : 0;
-            const _alpha = alpha ? degToRad(alpha) : 0;
-            const _gamma = gamma ? degToRad(gamma) : 0;
-            
-            _euler.set(_beta, _alpha, -_gamma, 'YXZ');
-            
+            _euler.set(beta ? degToRad(beta) : 0, alpha ? degToRad(alpha) : 0, -(gamma ? degToRad(gamma) : 0), 'YXZ');
             targetObj.quaternion.setFromEuler(_euler);
         }
 
@@ -870,16 +866,12 @@
                     grabbedObject.userData.velocity.set(0, 0, 0);
                     gripPoint.attach(grabbedObject);
                     
-                    // Specific Grip Poses based on Object Type
+                    // Specific Grip Poses
                     if (grabbedObject.userData.type === 'box') {
-                        // Offset by half box size so it is perfectly held IN FRONT of the hand block
                         grabbedObject.position.set(0, 0, -0.25);
                         grabbedObject.rotation.set(0, 0, 0);
                     } else {
-                        // Tools (Axe/Pickaxe)
-                        // Hold near the bottom of the handle
                         grabbedObject.position.set(0, 0.15, 0);
-                        // Tilt forward so the blade points out realistically
                         grabbedObject.rotation.set(-Math.PI/3, Math.PI, 0); 
                     }
                 }
@@ -887,9 +879,9 @@
             else if (!hostState.grab && grabbedObject) {
                 scene.attach(grabbedObject);
                 
-                // TRANSFER ROTATIONAL SWING VELOCITY FOR THROWING
+                // THROW PHYSICS
                 grabbedObject.userData.velocity.copy(hostState.handVelocity).multiplyScalar(3.0);
-                grabbedObject.userData.velocity.y += 0.05; // Upward arc
+                grabbedObject.userData.velocity.y += 0.05; 
                 
                 grabbedObject = null;
             }
@@ -902,10 +894,7 @@
                 const plank = new THREE.Mesh(plankGeo, plankMat);
                 
                 plank.position.set(x + (Math.random() - 0.5), 2, z + (Math.random() - 0.5));
-                plank.userData = { 
-                    type: 'plank', 
-                    velocity: new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.2, (Math.random() - 0.5) * 0.2) 
-                };
+                plank.userData = { type: 'plank', velocity: new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.2, (Math.random() - 0.5) * 0.2) };
                 
                 scene.add(plank); 
                 interactables.push(plank);
@@ -919,11 +908,7 @@
                 const drop = new THREE.Mesh(dropGeo, dropMat);
                 
                 drop.position.set(x + (Math.random() - 0.5), y + 0.5, z + (Math.random() - 0.5));
-                drop.userData = { 
-                    type: 'stone', 
-                    velocity: new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.2, (Math.random() - 0.5) * 0.2), 
-                    lifespan: 5.0 
-                };
+                drop.userData = { type: 'stone', velocity: new THREE.Vector3((Math.random() - 0.5) * 0.2, 0.2, (Math.random() - 0.5) * 0.2), lifespan: 5.0 };
                 
                 scene.add(drop); 
                 interactables.push(drop);
@@ -938,7 +923,6 @@
                 hostState.prevTipPos = currentTipPos.clone();
             }
             
-            // Track Velocity from the TIP of the hand to perfectly capture angular swings
             hostState.handVelocity.subVectors(currentTipPos, hostState.prevTipPos);
             const handSpeed = hostState.handVelocity.length();
             hostState.prevTipPos.copy(currentTipPos);
@@ -1069,8 +1053,32 @@
                 applyHeadOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
 
-            // Apply arm orientation to the forearm (pivots naturally on the elbow)
+            // Fixed: Anchor the arm to the right shoulder relative to the player's world position!
+            // First, get the player's yaw (compass direction) from the head
+            const headYaw = new THREE.Euler().setFromQuaternion(headGroup.quaternion, 'YXZ').y;
+            
+            // Calculate a shoulder offset (to the right and slightly down)
+            const shoulderOffset = new THREE.Vector3(0.3, -0.3, -0.1);
+            shoulderOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), headYaw);
+            
+            // Set arm position strictly to the shoulder
+            armGroup.position.copy(shoulderOffset);
+
+            // Forward extension "punch" math using phone accelerometer
+            if (hostState.accelMag > 0) {
+                hostState.handExtension += (hostState.accelMag - hostState.handExtension) * 0.2;
+                hostState.accelMag *= 0.8; // Decay back to 0
+                if(hostState.accelMag < 0.01) hostState.accelMag = 0;
+            } else {
+                hostState.handExtension *= 0.8; // Retract back to shoulder
+            }
+            
+            // Apply absolute rotation to arm
             applyHandOrientation(armGroup, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
+            
+            // Apply positional punch extension along the local Z axis of the arm
+            const forwardThrust = new THREE.Vector3(0, 0, -1).applyQuaternion(armGroup.quaternion);
+            armGroup.position.addScaledVector(forwardThrust, hostState.handExtension);
 
             processPunchMechanics();
             processPhysics();
