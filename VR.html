@@ -1,0 +1,628 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>P2P VR & Motion Controller Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #111; touch-action: none;
+            font-family: sans-serif; user-select: none;
+        }
+        #game-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1;
+            display: none;
+        }
+        #ui-layer {
+            position: absolute; inset: 0; z-index: 10;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #1f2937, #111827); color: white;
+        }
+        .btn {
+            background: #3b82f6; padding: 15px 30px; border-radius: 8px; font-size: 1.2rem;
+            font-weight: bold; cursor: pointer; transition: transform 0.1s, background 0.2s;
+            text-align: center; margin: 10px; width: 250px;
+        }
+        .btn:active { transform: scale(0.95); background: #2563eb; }
+        .hidden-ui { display: none !important; }
+        
+        /* Controller Specific UI */
+        #controller-ui {
+            position: absolute; inset: 0; z-index: 20; display: none; flex-direction: column;
+        }
+        #grab-zone {
+            flex: 1; background: rgba(239, 68, 68, 0.15); border-bottom: 2px solid rgba(255,255,255,0.2);
+            display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: bold;
+            color: rgba(255,255,255,0.5); transition: background 0.1s;
+        }
+        #grab-zone.active { background: rgba(239, 68, 68, 0.4); color: white; }
+        #move-zone {
+            flex: 1; background: rgba(59, 130, 246, 0.15); position: relative;
+        }
+        #move-hint {
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; font-weight: bold; color: rgba(255,255,255,0.3); pointer-events: none;
+        }
+        #joystick {
+            position: absolute; width: 80px; height: 80px; background: rgba(255,255,255,0.3);
+            border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%);
+            display: none; pointer-events: none; backdrop-filter: blur(4px);
+        }
+        
+        /* VR Overlay */
+        #vr-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5;
+            display: none; pointer-events: none;
+        }
+        #vr-divider {
+            position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: black;
+            transform: translateX(-50%);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- WebGL Canvas -->
+    <canvas id="game-canvas"></canvas>
+    
+    <!-- VR Split Screen Divider -->
+    <div id="vr-overlay"><div id="vr-divider"></div></div>
+
+    <!-- Main Menu UI -->
+    <div id="ui-layer">
+        <h1 class="text-4xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
+            P2P VR SYSTEM
+        </h1>
+        
+        <!-- Screen 1: Role Selection -->
+        <div id="role-selection" class="flex flex-col items-center">
+            <p class="mb-4 text-gray-400 text-center max-w-sm">Use one device as the VR Headset, and another phone as the Motion Controller.</p>
+            <div class="btn" onclick="initHost()">Create Game (VR Host)</div>
+            <div class="btn bg-purple-600 active:bg-purple-700" onclick="showJoinLobby()">Join Game (Controller)</div>
+        </div>
+
+        <!-- Screen 2: Host Lobby -->
+        <div id="host-lobby" class="hidden-ui flex flex-col items-center">
+            <h2 class="text-2xl mb-2">Your Room Code</h2>
+            <div id="room-code-display" class="text-6xl font-mono tracking-widest text-blue-400 mb-6 bg-gray-800 p-4 rounded-xl border border-gray-700">----</div>
+            <p class="text-gray-400 animate-pulse">Waiting for controller to join...</p>
+        </div>
+
+        <!-- Screen 3: Client Lobby -->
+        <div id="client-lobby" class="hidden-ui flex flex-col items-center">
+            <h2 class="text-2xl mb-4">Enter Room Code</h2>
+            <input type="number" id="room-code-input" class="text-center text-4xl p-4 w-64 bg-gray-800 text-white rounded-xl border border-gray-600 mb-6 focus:outline-none focus:border-purple-500" placeholder="0000" maxlength="4">
+            <div class="btn bg-purple-600" onclick="initClient()">Connect Controller</div>
+            <div class="mt-4 text-gray-400 text-sm cursor-pointer hover:text-white" onclick="location.reload()">Back</div>
+            <p id="client-status" class="mt-4 text-red-400"></p>
+        </div>
+        
+        <!-- Screen 4: Host Start VR Button (Requires interaction for Gyro on iOS) -->
+        <div id="host-start-vr" class="hidden-ui flex flex-col items-center">
+            <h2 class="text-2xl text-green-400 mb-4">Controller Connected!</h2>
+            <p class="mb-6 text-gray-300 text-center max-w-sm">Put your device into a VR headset. You can look around 360 degrees.</p>
+            <div class="btn bg-green-600" onclick="startVRMode()">Enter VR Mode</div>
+        </div>
+    </div>
+
+    <!-- Client Controller UI -->
+    <div id="controller-ui">
+        <div id="grab-zone">TAP & HOLD TO GRAB</div>
+        <div id="move-zone">
+            <div id="move-hint">WALK JOYSTICK</div>
+            <div id="joystick"></div>
+        </div>
+    </div>
+
+    <script>
+        const PEER_PREFIX = 'vrsystem-';
+        let peer = null;
+        let connection = null;
+        let isHost = false;
+        
+        // --- UI Flow Functions ---
+        const uiLayer = document.getElementById('ui-layer');
+        const roleSelection = document.getElementById('role-selection');
+        const hostLobby = document.getElementById('host-lobby');
+        const clientLobby = document.getElementById('client-lobby');
+        const hostStartVR = document.getElementById('host-start-vr');
+        const controllerUI = document.getElementById('controller-ui');
+        const gameCanvas = document.getElementById('game-canvas');
+        const vrOverlay = document.getElementById('vr-overlay');
+
+        function switchScreen(screen) {
+            roleSelection.classList.add('hidden-ui');
+            hostLobby.classList.add('hidden-ui');
+            clientLobby.classList.add('hidden-ui');
+            hostStartVR.classList.add('hidden-ui');
+            if(screen) screen.classList.remove('hidden-ui');
+        }
+
+        function showJoinLobby() {
+            switchScreen(clientLobby);
+        }
+
+        // Generate random 4 digit code
+        const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+
+        // --- HOST LOGIC ---
+        function initHost() {
+            isHost = true;
+            switchScreen(hostLobby);
+            document.getElementById('room-code-display').innerText = roomCode;
+
+            peer = new Peer(PEER_PREFIX + roomCode);
+            
+            peer.on('open', (id) => {
+                console.log('Host created room:', id);
+            });
+
+            peer.on('connection', (conn) => {
+                connection = conn;
+                connection.on('open', () => {
+                    console.log('Controller connected!');
+                    switchScreen(hostStartVR);
+                });
+                
+                connection.on('data', (data) => {
+                    handleControllerData(data);
+                });
+            });
+        }
+
+        async function startVRMode() {
+            // Request device orientation permission for VR Look around
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permissionState = await DeviceOrientationEvent.requestPermission();
+                    if (permissionState === 'granted') {
+                        window.addEventListener('deviceorientation', handleHostOrientation);
+                    }
+                } catch (e) { console.error(e); }
+            } else {
+                // Non-iOS or older devices
+                window.addEventListener('deviceorientation', handleHostOrientation);
+            }
+
+            uiLayer.style.display = 'none';
+            gameCanvas.style.display = 'block';
+            vrOverlay.style.display = 'block';
+            initThreeJS();
+        }
+
+        // --- CLIENT LOGIC ---
+        async function initClient() {
+            const inputCode = document.getElementById('room-code-input').value;
+            if(inputCode.length !== 4) {
+                document.getElementById('client-status').innerText = "Please enter a 4-digit code.";
+                return;
+            }
+
+            document.getElementById('client-status').innerText = "Connecting...";
+            
+            // Important: Request orientation permission ON CLICK before opening network connection
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission === 'granted') {
+                        window.addEventListener('deviceorientation', sendOrientationData);
+                    } else {
+                        document.getElementById('client-status').innerText = "Gyroscope permission required!";
+                        return;
+                    }
+                } catch (e) { console.error(e); }
+            } else {
+                window.addEventListener('deviceorientation', sendOrientationData);
+            }
+
+            peer = new Peer();
+            peer.on('open', (id) => {
+                connection = peer.connect(PEER_PREFIX + inputCode);
+                
+                connection.on('open', () => {
+                    uiLayer.style.display = 'none';
+                    controllerUI.style.display = 'flex';
+                    setupControllerInputs();
+                });
+
+                connection.on('error', (err) => {
+                    document.getElementById('client-status').innerText = "Connection failed.";
+                });
+            });
+        }
+
+        // --- CONTROLLER INPUT HANDLING (CLIENT SIDE) ---
+        let ctrlState = { moveX: 0, moveY: 0, grab: false };
+        
+        function sendOrientationData(e) {
+            if(connection && connection.open) {
+                // Send raw euler angles from phone
+                connection.send({
+                    type: 'gyro',
+                    alpha: e.alpha,
+                    beta: e.beta,
+                    gamma: e.gamma
+                });
+            }
+        }
+
+        function setupControllerInputs() {
+            const grabZone = document.getElementById('grab-zone');
+            const moveZone = document.getElementById('move-zone');
+            const joystick = document.getElementById('joystick');
+            
+            // Grab Logic
+            const setGrab = (val) => {
+                ctrlState.grab = val;
+                if(val) grabZone.classList.add('active');
+                else grabZone.classList.remove('active');
+                connection.send({ type: 'btn', grab: val });
+            };
+
+            grabZone.addEventListener('touchstart', (e) => { e.preventDefault(); setGrab(true); }, {passive: false});
+            grabZone.addEventListener('touchend', (e) => { e.preventDefault(); setGrab(false); }, {passive: false});
+            grabZone.addEventListener('mousedown', (e) => { setGrab(true); });
+            grabZone.addEventListener('mouseup', (e) => { setGrab(false); });
+            grabZone.addEventListener('mouseleave', (e) => { setGrab(false); });
+
+            // Joystick Logic
+            let joyCenter = { x: 0, y: 0 };
+            let joyId = null;
+            const maxR = 60;
+
+            moveZone.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const t = e.changedTouches[0];
+                joyId = t.identifier;
+                const rect = moveZone.getBoundingClientRect();
+                joyCenter = { x: t.clientX, y: t.clientY };
+                
+                joystick.style.display = 'block';
+                joystick.style.left = (t.clientX) + 'px';
+                joystick.style.top = (t.clientY - rect.top) + 'px';
+                updateJoy(t.clientX, t.clientY);
+            }, {passive: false});
+
+            moveZone.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                for(let i=0; i<e.changedTouches.length; i++) {
+                    if(e.changedTouches[i].identifier === joyId) {
+                        updateJoy(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+                    }
+                }
+            }, {passive: false});
+
+            const endJoy = (e) => {
+                e.preventDefault();
+                for(let i=0; i<e.changedTouches.length; i++) {
+                    if(e.changedTouches[i].identifier === joyId) {
+                        joyId = null;
+                        joystick.style.display = 'none';
+                        ctrlState.moveX = 0; ctrlState.moveY = 0;
+                        connection.send({ type: 'move', x: 0, y: 0 });
+                    }
+                }
+            };
+            moveZone.addEventListener('touchend', endJoy, {passive: false});
+            moveZone.addEventListener('touchcancel', endJoy, {passive: false});
+
+            function updateJoy(cx, cy) {
+                let dx = cx - joyCenter.x;
+                let dy = cy - joyCenter.y;
+                let dist = Math.sqrt(dx*dx + dy*dy);
+                if(dist > maxR) { dx = (dx/dist)*maxR; dy = (dy/dist)*maxR; }
+                
+                joystick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                
+                let nx = dx / maxR;
+                let ny = dy / maxR; // +1 is pulling backward
+                
+                // Only send if changed significantly to save bandwidth
+                if(Math.abs(nx - ctrlState.moveX) > 0.05 || Math.abs(ny - ctrlState.moveY) > 0.05) {
+                    ctrlState.moveX = nx; ctrlState.moveY = ny;
+                    connection.send({ type: 'move', x: nx, y: ny });
+                }
+            }
+        }
+
+        // --- THREE.JS ENGINE (HOST SIDE) ---
+        let scene, renderer;
+        let cameraL, cameraR;
+        let playerGroup, headGroup, handMesh;
+        let interactables = [];
+        let grabbedObject = null;
+        
+        // Host state received from controller
+        let hostState = {
+            moveX: 0, moveY: 0, grab: false,
+            handRot: { alpha: 0, beta: 0, gamma: 0 },
+            headRot: { alpha: 0, beta: 0, gamma: 0 } // From host device
+        };
+
+        function handleControllerData(data) {
+            if(data.type === 'move') {
+                hostState.moveX = data.x;
+                hostState.moveY = data.y;
+            } else if (data.type === 'btn') {
+                hostState.grab = data.grab;
+                processGrabLogic();
+            } else if (data.type === 'gyro') {
+                hostState.handRot.alpha = data.alpha;
+                hostState.handRot.beta = data.beta;
+                hostState.handRot.gamma = data.gamma;
+            }
+        }
+
+        function handleHostOrientation(e) {
+            hostState.headRot.alpha = e.alpha;
+            hostState.headRot.beta = e.beta;
+            hostState.headRot.gamma = e.gamma;
+        }
+
+        function initThreeJS() {
+            renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.autoClear = false; // Important for split screen
+
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+
+            // Lighting
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+            hemiLight.position.set(0, 10, 0);
+            scene.add(hemiLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(5, 10, 7);
+            scene.add(dirLight);
+
+            // Environment Floor
+            const gridHelper = new THREE.GridHelper(100, 100, 0x000000, 0x000000);
+            gridHelper.material.opacity = 0.2;
+            gridHelper.material.transparent = true;
+            scene.add(gridHelper);
+            
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x4a7c59 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            // Generate Interactable Objects
+            const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff];
+            for(let i=0; i<20; i++) {
+                const mat = new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random()*colors.length)] });
+                const mesh = new THREE.Mesh(boxGeo, mat);
+                mesh.position.set(
+                    (Math.random() - 0.5) * 15,
+                    0.25,
+                    (Math.random() - 0.5) * 15 - 5
+                );
+                scene.add(mesh);
+                interactables.push(mesh);
+            }
+
+            // --- Player Rig Setup ---
+            playerGroup = new THREE.Group();
+            playerGroup.position.y = 1.6; // Human height
+            scene.add(playerGroup);
+
+            // Head (Tracks Host VR Orientation)
+            headGroup = new THREE.Group();
+            playerGroup.add(headGroup);
+
+            // Stereoscopic Cameras
+            const aspect = (window.innerWidth / 2) / window.innerHeight;
+            cameraL = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
+            cameraR = new THREE.PerspectiveCamera(75, aspect, 0.1, 100);
+            
+            // IPD (Interpupillary Distance) offset
+            cameraL.position.x = -0.03;
+            cameraR.position.x = 0.03;
+            
+            headGroup.add(cameraL);
+            headGroup.add(cameraR);
+
+            // Minecraft Hand (Tracks Controller Orientation)
+            const handGeo = new THREE.BoxGeometry(0.15, 0.15, 0.4);
+            // Translate geometry so pivot is at the "wrist" (back end of the box)
+            handGeo.translate(0, 0, -0.2); 
+            
+            const handMat = new THREE.MeshStandardMaterial({ color: 0xf1c27d }); // Skin tone
+            handMesh = new THREE.Mesh(handGeo, handMat);
+            
+            // Attach hand to player body, but offset forward. 
+            // In a real tracked VR game it floats independently, but here we only have phone orientation.
+            // Placing it relative to the head gives a more intuitive feel.
+            handMesh.position.set(0.3, -0.3, -0.4);
+            headGroup.add(handMesh);
+
+            // Desktop Fallback controls for testing Host without Gyro
+            setupHostDesktopFallback();
+
+            // Start Render Loop
+            renderer.setAnimationLoop(renderLoop);
+        }
+
+        // Convert DeviceOrientation (alpha, beta, gamma) to ThreeJS Euler
+        // The exact math depends heavily on phone model and grip. 
+        // This is a standard mapping for a phone held vertically (portrait).
+        function applyOrientation(targetObj, alpha, beta, gamma) {
+            if (alpha === null || alpha === undefined) return;
+            const degToRad = THREE.MathUtils.degToRad;
+            
+            // Convert to radians
+            const _x = degToRad(beta);
+            const _y = degToRad(alpha);
+            const _z = degToRad(-gamma);
+
+            const euler = new THREE.Euler(_x, _y, _z, 'YXZ');
+            targetObj.quaternion.setFromEuler(euler);
+            
+            // Compensate for screen orientation (assuming portrait grip)
+            targetObj.rotateX(-Math.PI / 2);
+        }
+
+        function processGrabLogic() {
+            if (!handMesh) return;
+            
+            if (hostState.grab && !grabbedObject) {
+                // Attempt to grab
+                // Get hand's world position
+                const handPos = new THREE.Vector3();
+                handMesh.getWorldPosition(handPos);
+                
+                // Find closest object
+                let closestDist = 1.0; // Reach distance
+                let target = null;
+                
+                for(let obj of interactables) {
+                    const objPos = new THREE.Vector3();
+                    obj.getWorldPosition(objPos);
+                    const dist = handPos.distanceTo(objPos);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        target = obj;
+                    }
+                }
+                
+                if (target) {
+                    grabbedObject = target;
+                    // Parent object to hand
+                    THREE.SceneUtils.attach(grabbedObject, scene, handMesh);
+                }
+            } 
+            else if (!hostState.grab && grabbedObject) {
+                // Release object
+                THREE.SceneUtils.detach(grabbedObject, handMesh, scene);
+                // Snap to ground level for simplicity
+                grabbedObject.position.y = 0.25;
+                grabbedObject.rotation.set(0,0,0);
+                grabbedObject = null;
+            }
+        }
+
+        function renderLoop() {
+            // 1. Update Player Movement (from Controller Joystick)
+            if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
+                const speed = 0.05;
+                
+                // Get the horizontal forward direction based on where the HEAD is looking
+                const headForward = new THREE.Vector3(0, 0, -1);
+                headForward.applyQuaternion(headGroup.quaternion);
+                headForward.y = 0; // Flatten to XZ plane
+                headForward.normalize();
+
+                const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0,1,0)).normalize();
+
+                // moveY is forward/backward, moveX is strafe
+                // Multiply right by -moveX to match joystick natural feel
+                const moveVec = new THREE.Vector3()
+                    .addScaledVector(headForward, -hostState.moveY * speed)
+                    .addScaledVector(headRight, -hostState.moveX * speed);
+                
+                playerGroup.position.add(moveVec);
+                
+                // Add slight head bobbing when walking
+                playerGroup.position.y = 1.6 + Math.sin(Date.now() * 0.01) * 0.05;
+            } else {
+                playerGroup.position.y = 1.6;
+            }
+
+            // 2. Update Hand Rotation (from Controller Gyro)
+            applyOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
+
+            // 3. Update Head Rotation (from Host Gyro)
+            // If the host is a desktop (no gyro data), fallback controls handles `headGroup.rotation` directly.
+            if (hostState.headRot.alpha !== null && hostState.headRot.alpha !== 0) {
+                applyOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma);
+                // For VR headset, looking straight should be neutral.
+            }
+
+            // 4. Render Split Screen
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+
+            renderer.clear();
+
+            // Left Eye
+            renderer.setViewport(0, 0, w / 2, h);
+            renderer.setScissor(0, 0, w / 2, h);
+            renderer.setScissorTest(true);
+            cameraL.aspect = (w / 2) / h;
+            cameraL.updateProjectionMatrix();
+            renderer.render(scene, cameraL);
+
+            // Right Eye
+            renderer.setViewport(w / 2, 0, w / 2, h);
+            renderer.setScissor(w / 2, 0, w / 2, h);
+            cameraR.aspect = (w / 2) / h;
+            cameraR.updateProjectionMatrix();
+            renderer.render(scene, cameraR);
+        }
+
+        // Handle Window Resize
+        window.addEventListener('resize', () => {
+            if (!renderer) return;
+            const w = window.innerWidth;
+            const h = window.innerHeight;
+            renderer.setSize(w, h);
+        });
+
+        // Fallback for Desktop Host Testing (Drag mouse to look around)
+        function setupHostDesktopFallback() {
+            let isDragging = false;
+            let prevX = 0, prevY = 0;
+            let yaw = 0;
+            let pitch = 0;
+
+            gameCanvas.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                prevX = e.clientX; prevY = e.clientY;
+            });
+            window.addEventListener('mouseup', () => isDragging = false);
+            window.addEventListener('mousemove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - prevX;
+                const dy = e.clientY - prevY;
+                prevX = e.clientX; prevY = e.clientY;
+
+                yaw -= dx * 0.005;
+                pitch -= dy * 0.005;
+                pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, pitch));
+
+                // Apply to head group manually if gyro isn't doing it
+                if (hostState.headRot.alpha === 0) {
+                    headGroup.rotation.order = 'YXZ';
+                    headGroup.rotation.y = yaw;
+                    headGroup.rotation.x = pitch;
+                }
+            });
+            
+            // Also map keyboard arrows for easy debugging of joystick
+            window.addEventListener('keydown', (e) => {
+                if(e.key==='w') hostState.moveY = -1;
+                if(e.key==='s') hostState.moveY = 1;
+                if(e.key==='a') hostState.moveX = -1;
+                if(e.key==='d') hostState.moveX = 1;
+                if(e.key===' ') { hostState.grab = true; processGrabLogic(); }
+            });
+            window.addEventListener('keyup', (e) => {
+                if(['w','s'].includes(e.key)) hostState.moveY = 0;
+                if(['a','d'].includes(e.key)) hostState.moveX = 0;
+                if(e.key===' ') { hostState.grab = false; processGrabLogic(); }
+            });
+        }
+    </script>
+</body>
+</html>
+
+```
