@@ -419,8 +419,9 @@
             
             handMesh.add(armMesh);
             handMesh.add(sleeveMesh);
-            handMesh.position.set(0.3, -0.3, -0.4);
-            headGroup.add(handMesh);
+            
+            // Fix: Add hand to the main player body, NOT the head, so rotations don't conflict
+            playerGroup.add(handMesh);
 
             setupHostDesktopFallback();
             renderer.setAnimationLoop(renderLoop);
@@ -524,12 +525,15 @@
                 
                 if (target) {
                     grabbedObject = target;
-                    THREE.SceneUtils.attach(grabbedObject, scene, handMesh);
+                    // Fix: Use native ThreeJS .attach() to handle the physics correctly
+                    handMesh.attach(grabbedObject);
                     grabbedObject.position.set(0, 0, -0.3); 
+                    grabbedObject.rotation.set(0, 0, 0);
                 }
             } 
             else if (!hostState.grab && grabbedObject) {
-                THREE.SceneUtils.detach(grabbedObject, handMesh, scene);
+                // Fix: Attach back to the main world scene when dropping
+                scene.attach(grabbedObject);
                 grabbedObject.position.y = 0.25;
                 grabbedObject.rotation.set(0,0,0);
                 grabbedObject = null;
@@ -611,13 +615,19 @@
                 playerGroup.position.y = currentHeight;
             }
 
-            // Apply distinct orientations: Hand (hardware top) vs Head (screen rotation)
-            applyHandOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
-
             if (hostState.headRot.alpha !== null && hostState.headRot.alpha !== 0) {
                 const hostOrient = getScreenOrientation();
                 applyHeadOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
+
+            // Fix: Calculate the hand's position so it perfectly orbits your body based on where you look
+            const headEulerYaw = new THREE.Euler().setFromQuaternion(headGroup.quaternion, 'YXZ').y;
+            const handOffset = new THREE.Vector3(0.3, -0.3, -0.4);
+            handOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), headEulerYaw);
+            handMesh.position.copy(handOffset);
+
+            // Apply absolute hand orientation from the controller perfectly
+            applyHandOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
 
             processPunchMechanics();
 
@@ -679,6 +689,7 @@
     </script>
 </body>
 </html>
+
 
 
 ```
