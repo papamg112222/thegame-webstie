@@ -93,13 +93,9 @@
 </head>
 <body>
 
-    <!-- WebGL Canvas -->
     <canvas id="game-canvas"></canvas>
-    
-    <!-- VR Split Screen Divider -->
     <div id="vr-overlay"><div id="vr-divider"></div></div>
 
-    <!-- Rotate Prompt -->
     <div id="rotate-prompt">
         <svg class="rotate-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
         <p>Please rotate your phone<br>to Landscape mode for VR</p>
@@ -110,22 +106,18 @@
         <h1 class="text-4xl font-bold mb-8 text-center bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">
             P2P VR SYSTEM
         </h1>
-        
-        <!-- Screen 1: Role Selection -->
         <div id="role-selection" class="flex flex-col items-center">
             <p class="mb-4 text-gray-400 text-center max-w-sm">Use one device as the VR Headset, and another phone as the Motion Controller.</p>
             <div class="btn" onclick="initHost()">Create Game (VR Host)</div>
             <div class="btn bg-purple-600 active:bg-purple-700" onclick="showJoinLobby()">Join Game (Controller)</div>
         </div>
 
-        <!-- Screen 2: Host Lobby -->
         <div id="host-lobby" class="hidden-ui flex flex-col items-center">
             <h2 class="text-2xl mb-2">Your Room Code</h2>
             <div id="room-code-display" class="text-6xl font-mono tracking-widest text-blue-400 mb-6 bg-gray-800 p-4 rounded-xl border border-gray-700">----</div>
             <p class="text-gray-400 animate-pulse">Waiting for controller to join...</p>
         </div>
 
-        <!-- Screen 3: Client Lobby -->
         <div id="client-lobby" class="hidden-ui flex flex-col items-center">
             <h2 class="text-2xl mb-4">Enter Room Code</h2>
             <input type="number" id="room-code-input" class="text-center text-4xl p-4 w-64 bg-gray-800 text-white rounded-xl border border-gray-600 mb-6 focus:outline-none focus:border-purple-500" placeholder="0000" maxlength="4">
@@ -134,7 +126,6 @@
             <p id="client-status" class="mt-4 text-red-400"></p>
         </div>
         
-        <!-- Screen 4: Host Start VR Button -->
         <div id="host-start-vr" class="hidden-ui flex flex-col items-center">
             <h2 class="text-2xl text-green-400 mb-4">Controller Connected!</h2>
             <p class="mb-6 text-gray-300 text-center max-w-sm">Put your device into a VR headset. You can look around 360 degrees.</p>
@@ -144,18 +135,16 @@
 
     <!-- Client Controller UI -->
     <div id="controller-ui">
-        <!-- Height Slider -->
         <div id="height-control">
             <div class="height-label">UP</div>
             <input type="range" id="height-slider" orient="vertical" min="0.4" max="1.6" step="0.1" value="1.6">
             <div class="height-label">DOWN</div>
         </div>
-
         <div id="move-zone">
             <div id="move-hint">WALK JOYSTICK</div>
             <div id="joystick"></div>
         </div>
-        <div id="grab-zone">TAP & HOLD<br>TO GRAB</div>
+        <div id="grab-zone">TAP & HOLD<br>TO GRAB<br><span style="font-size:1rem; opacity:0.7">(Shake phone to punch)</span></div>
     </div>
 
     <script>
@@ -182,9 +171,7 @@
             if(screen) screen.classList.remove('hidden-ui');
         }
 
-        function showJoinLobby() {
-            switchScreen(clientLobby);
-        }
+        function showJoinLobby() { switchScreen(clientLobby); }
 
         const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
 
@@ -196,13 +183,9 @@
 
             peer = new Peer(PEER_PREFIX + roomCode);
             peer.on('open', (id) => console.log('Host created room:', id));
-
             peer.on('connection', (conn) => {
                 connection = conn;
-                connection.on('open', () => {
-                    console.log('Controller connected!');
-                    switchScreen(hostStartVR);
-                });
+                connection.on('open', () => switchScreen(hostStartVR));
                 connection.on('data', handleControllerData);
             });
         }
@@ -233,36 +216,24 @@
         // --- CLIENT LOGIC ---
         async function initClient() {
             const inputCode = document.getElementById('room-code-input').value;
-            if(inputCode.length !== 4) {
-                document.getElementById('client-status').innerText = "Please enter a 4-digit code.";
-                return;
-            }
-
+            if(inputCode.length !== 4) return;
             document.getElementById('client-status').innerText = "Connecting...";
             
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const perm = await DeviceOrientationEvent.requestPermission();
                     if (perm === 'granted') window.addEventListener('deviceorientation', sendOrientationData);
-                    else {
-                        document.getElementById('client-status').innerText = "Gyroscope permission required!";
-                        return;
-                    }
-                } catch (e) { console.error(e); }
-            } else {
-                window.addEventListener('deviceorientation', sendOrientationData);
-            }
+                    else return;
+                } catch (e) {}
+            } else window.addEventListener('deviceorientation', sendOrientationData);
 
             peer = new Peer();
             peer.on('open', (id) => {
                 connection = peer.connect(PEER_PREFIX + inputCode);
-                
                 connection.on('open', () => {
                     try {
                         document.documentElement.requestFullscreen().then(() => {
-                            if (screen.orientation && screen.orientation.lock) {
-                                screen.orientation.lock("landscape").catch(e=>e);
-                            }
+                            if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(e=>e);
                         }).catch(e=>e);
                     } catch(e) {}
 
@@ -270,24 +241,17 @@
                     controllerUI.style.display = 'flex';
                     setupControllerInputs();
                 });
-
-                connection.on('error', () => {
-                    document.getElementById('client-status').innerText = "Connection failed.";
-                });
             });
         }
 
-        // --- CONTROLLER INPUT HANDLING (CLIENT SIDE) ---
+        // --- CONTROLLER INPUT HANDLING ---
         let ctrlState = { moveX: 0, moveY: 0, grab: false, height: 1.6 };
         
         function getScreenOrientation() {
             let angle = 0;
             if (screen.orientation && screen.orientation.angle !== undefined) angle = screen.orientation.angle;
             else if (window.orientation !== undefined) angle = window.orientation;
-
-            if (angle === 0 && window.innerWidth > window.innerHeight) {
-                angle = 90; // Override for iframe/preview lying
-            }
+            if (angle === 0 && window.innerWidth > window.innerHeight) angle = 90;
             return angle * THREE.MathUtils.DEG2RAD;
         }
 
@@ -307,17 +271,14 @@
             const joystick = document.getElementById('joystick');
             const heightSlider = document.getElementById('height-slider');
             
-            // Height Slider logic
             heightSlider.addEventListener('input', (e) => {
                 ctrlState.height = parseFloat(e.target.value);
                 connection.send({ type: 'height', val: ctrlState.height });
             });
 
-            // Grab Logic
             const setGrab = (val) => {
                 ctrlState.grab = val;
-                if(val) grabZone.classList.add('active');
-                else grabZone.classList.remove('active');
+                if(val) grabZone.classList.add('active'); else grabZone.classList.remove('active');
                 connection.send({ type: 'btn', grab: val });
             };
 
@@ -325,24 +286,20 @@
             grabZone.addEventListener('touchend', (e) => { e.preventDefault(); setGrab(false); }, {passive: false});
             grabZone.addEventListener('mousedown', (e) => { setGrab(true); });
             grabZone.addEventListener('mouseup', (e) => { setGrab(false); });
-            grabZone.addEventListener('mouseleave', (e) => { setGrab(false); });
 
-            // Joystick Logic
             let joyCenter = { x: 0, y: 0 };
             let joyId = null;
             const maxR = 60;
 
             moveZone.addEventListener('touchstart', (e) => {
-                // Ignore touches on the slider
                 if(e.target.id === 'height-slider') return; 
                 e.preventDefault();
                 const t = e.changedTouches[0];
                 joyId = t.identifier;
                 const rect = moveZone.getBoundingClientRect();
                 joyCenter = { x: t.clientX, y: t.clientY };
-                
                 joystick.style.display = 'block';
-                joystick.style.left = (t.clientX) + 'px';
+                joystick.style.left = t.clientX + 'px';
                 joystick.style.top = (t.clientY - rect.top) + 'px';
                 updateJoy(t.clientX, t.clientY);
             }, {passive: false});
@@ -375,12 +332,9 @@
                 let dy = cy - joyCenter.y;
                 let dist = Math.sqrt(dx*dx + dy*dy);
                 if(dist > maxR) { dx = (dx/dist)*maxR; dy = (dy/dist)*maxR; }
-                
                 joystick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
-                
-                let nx = dx / maxR; // STANDARD JOYSTICK: Push left = Move left
-                let ny = dy / maxR; // +1 is pulling backward
-                
+                let nx = dx / maxR;
+                let ny = dy / maxR;
                 if(Math.abs(nx - ctrlState.moveX) > 0.05 || Math.abs(ny - ctrlState.moveY) > 0.05) {
                     ctrlState.moveX = nx; ctrlState.moveY = ny;
                     connection.send({ type: 'move', x: nx, y: ny });
@@ -393,12 +347,14 @@
         let cameraL, cameraR;
         let playerGroup, headGroup, handMesh;
         let interactables = [];
+        let trees = [];
         let grabbedObject = null;
         
         let hostState = {
             moveX: 0, moveY: 0, grab: false, height: 1.6,
             handRot: { alpha: 0, beta: 0, gamma: 0, orient: 0 },
-            headRot: { alpha: 0, beta: 0, gamma: 0 }
+            headRot: { alpha: 0, beta: 0, gamma: 0 },
+            prevHandPos: null // For punch tracking
         };
 
         function handleControllerData(data) {
@@ -413,9 +369,7 @@
             }
         }
 
-        function handleHostOrientation(e) {
-            hostState.headRot = { alpha: e.alpha, beta: e.beta, gamma: e.gamma };
-        }
+        function handleHostOrientation(e) { hostState.headRot = { alpha: e.alpha, beta: e.beta, gamma: e.gamma }; }
 
         function initThreeJS() {
             renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
@@ -427,22 +381,17 @@
             scene.background = new THREE.Color(0x87CEEB);
             scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
 
-            // Lighting
             scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
             dirLight.position.set(5, 10, 7);
             scene.add(dirLight);
 
-            // Environment Floor (Grassy)
-            const floorGeo = new THREE.PlaneGeometry(200, 200);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x3d6e41 });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(200, 200), new THREE.MeshStandardMaterial({ color: 0x3d6e41 }));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
             generateEnvironment();
 
-            // --- Player Rig Setup ---
             playerGroup = new THREE.Group();
             scene.add(playerGroup);
 
@@ -455,9 +404,21 @@
             cameraL.position.x = -0.03; cameraR.position.x = 0.03;
             headGroup.add(cameraL); headGroup.add(cameraR);
 
-            const handGeo = new THREE.BoxGeometry(0.15, 0.15, 0.4);
-            handGeo.translate(0, 0, -0.2); 
-            handMesh = new THREE.Mesh(handGeo, new THREE.MeshStandardMaterial({ color: 0xf1c27d }));
+            // Minecraft Hand Group Construction
+            handMesh = new THREE.Group();
+            
+            // Skin arm
+            const armGeo = new THREE.BoxGeometry(0.1, 0.1, 0.35);
+            armGeo.translate(0, 0, -0.175); 
+            const armMesh = new THREE.Mesh(armGeo, new THREE.MeshStandardMaterial({ color: 0xf1c27d }));
+            
+            // Blue sleeve
+            const sleeveGeo = new THREE.BoxGeometry(0.12, 0.12, 0.15);
+            sleeveGeo.translate(0, 0, -0.075);
+            const sleeveMesh = new THREE.Mesh(sleeveGeo, new THREE.MeshStandardMaterial({ color: 0x2563eb }));
+            
+            handMesh.add(armMesh);
+            handMesh.add(sleeveMesh);
             handMesh.position.set(0.3, -0.3, -0.4);
             headGroup.add(handMesh);
 
@@ -466,34 +427,24 @@
         }
 
         function generateEnvironment() {
-            // Trees
             const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 3, 8);
             const leavesGeo = new THREE.DodecahedronGeometry(2, 1);
             const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
             const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228b22, flatShading: true });
-
-            // Rocks
             const rockGeo = new THREE.DodecahedronGeometry(1.5, 0);
             const rockMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
-
-            // Interactable Boxes
             const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
             const boxMats = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00].map(c => new THREE.MeshStandardMaterial({color: c}));
-
-            // Arches (Caves)
             const archGeo = new THREE.TorusGeometry(4, 1.5, 8, 16, Math.PI);
             const archMat = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true });
 
             for(let i=0; i<60; i++) {
                 const x = (Math.random() - 0.5) * 80;
                 const z = (Math.random() - 0.5) * 80;
-                
-                // Keep center clear for spawning
                 if (Math.abs(x) < 5 && Math.abs(z) < 5) continue;
 
                 const rand = Math.random();
                 if (rand < 0.4) {
-                    // Tree
                     const tree = new THREE.Group();
                     const trunk = new THREE.Mesh(trunkGeo, trunkMat);
                     trunk.position.y = 1.5;
@@ -502,22 +453,24 @@
                     tree.add(trunk); tree.add(leaves);
                     tree.position.set(x, 0, z);
                     tree.scale.setScalar(0.8 + Math.random() * 0.6);
+                    
+                    // Metadata for punching mechanics
+                    tree.userData = { type: 'tree', hits: 0, isFalling: false, lastHitTime: 0 };
                     scene.add(tree);
+                    trees.push(tree);
+
                 } else if (rand < 0.7) {
-                    // Rock
                     const rock = new THREE.Mesh(rockGeo, rockMat);
                     rock.position.set(x, 0.5, z);
                     rock.rotation.set(Math.random(), Math.random(), Math.random());
                     rock.scale.setScalar(0.5 + Math.random() * 1.5);
                     scene.add(rock);
                 } else if (rand < 0.8) {
-                    // Arch (Cave)
                     const arch = new THREE.Mesh(archGeo, archMat);
                     arch.position.set(x, 0, z);
                     arch.rotation.y = Math.random() * Math.PI;
                     scene.add(arch);
                 } else {
-                    // Interactable box
                     const box = new THREE.Mesh(boxGeo, boxMats[Math.floor(Math.random()*boxMats.length)]);
                     box.position.set(x, 0.25, z);
                     scene.add(box);
@@ -531,13 +484,23 @@
         const _q0 = new THREE.Quaternion();
         const _q1 = new THREE.Quaternion( - Math.sqrt( 0.5 ), 0, 0, Math.sqrt( 0.5 ) );
 
-        function applyDeviceOrientation(targetObj, alpha, beta, gamma, orient) {
+        function applyHeadOrientation(targetObj, alpha, beta, gamma, orient) {
             if (alpha === null || alpha === undefined) return;
             const degToRad = THREE.MathUtils.degToRad;
             _euler.set( beta ? degToRad(beta) : 0, alpha ? degToRad(alpha) : 0, -(gamma ? degToRad(gamma) : 0), 'YXZ' );
             targetObj.quaternion.setFromEuler( _euler );
             targetObj.quaternion.multiply( _q1 );
             targetObj.quaternion.multiply( _q0.setFromAxisAngle( _zee, -orient ) );
+        }
+
+        function applyHandOrientation(targetObj, alpha, beta, gamma) {
+            if (alpha === null || alpha === undefined) return;
+            const degToRad = THREE.MathUtils.degToRad;
+            
+            // For the hand, we want the physical top of the phone to equal Forward. 
+            // We use raw Euler without the screen rotation modifiers.
+            _euler.set( beta ? degToRad(beta) : 0, alpha ? degToRad(alpha) : 0, -(gamma ? degToRad(gamma) : 0), 'YXZ' );
+            targetObj.quaternion.setFromEuler( _euler );
         }
 
         function processGrabLogic() {
@@ -547,46 +510,91 @@
                 const handPos = new THREE.Vector3();
                 handMesh.getWorldPosition(handPos);
                 
-                // DRASTICALLY INCREASED REACH DISTANCE (4 meters)
                 let closestDist = 4.0; 
                 let target = null;
                 
                 for(let obj of interactables) {
                     const objPos = new THREE.Vector3();
                     obj.getWorldPosition(objPos);
-                    const dist = handPos.distanceTo(objPos);
-                    if (dist < closestDist) {
-                        closestDist = dist;
+                    if (handPos.distanceTo(objPos) < closestDist) {
+                        closestDist = handPos.distanceTo(objPos);
                         target = obj;
                     }
                 }
                 
                 if (target) {
                     grabbedObject = target;
-                    // Snap it slightly in front of the hand box so you can see it
                     THREE.SceneUtils.attach(grabbedObject, scene, handMesh);
                     grabbedObject.position.set(0, 0, -0.3); 
                 }
             } 
             else if (!hostState.grab && grabbedObject) {
                 THREE.SceneUtils.detach(grabbedObject, handMesh, scene);
-                // Drop to the floor
                 grabbedObject.position.y = 0.25;
                 grabbedObject.rotation.set(0,0,0);
                 grabbedObject = null;
             }
         }
 
+        function processPunchMechanics() {
+            if (!hostState.prevHandPos) hostState.prevHandPos = new THREE.Vector3();
+            
+            const currentHandPos = new THREE.Vector3();
+            handMesh.getWorldPosition(currentHandPos);
+            
+            const handSpeed = currentHandPos.distanceTo(hostState.prevHandPos);
+            hostState.prevHandPos.copy(currentHandPos);
+
+            // If hand is moving fast enough (jerk / shake)
+            if (handSpeed > 0.08) {
+                for(let tree of trees) {
+                    if (tree.userData.isFalling) continue;
+
+                    const treePos = new THREE.Vector3();
+                    tree.getWorldPosition(treePos);
+                    treePos.y += 1.5; // Offset to center of trunk
+                    
+                    // Hitbox check
+                    if (currentHandPos.distanceTo(treePos) < 2.5) {
+                        // Cooldown to prevent spam hits (200ms)
+                        if (Date.now() - tree.userData.lastHitTime > 200) {
+                            tree.userData.lastHitTime = Date.now();
+                            tree.userData.hits++;
+                            
+                            // Visual shake feedback
+                            tree.rotation.z = (Math.random() - 0.5) * 0.3;
+                            tree.rotation.x = (Math.random() - 0.5) * 0.3;
+
+                            // 10 Hits = Timber!
+                            if (tree.userData.hits >= 10) {
+                                tree.userData.isFalling = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Animate falling trees
+            for(let tree of trees) {
+                if (tree.userData.isFalling) {
+                    if (tree.rotation.x < Math.PI / 2) {
+                        tree.rotation.x += 0.05;
+                    }
+                } else {
+                    // Smoothly return upright if it was shaken
+                    tree.rotation.z += (0 - tree.rotation.z) * 0.1;
+                    tree.rotation.x += (0 - tree.rotation.x) * 0.1;
+                }
+            }
+        }
+
         function renderLoop() {
-            // Apply Height from controller slider
             const targetHeight = hostState.height;
             let currentHeight = playerGroup.position.y;
-            // Smooth crouch transition
             currentHeight += (targetHeight - currentHeight) * 0.1;
 
             if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
-                const speed = 0.08; // slightly faster
-                
+                const speed = 0.08;
                 const headForward = new THREE.Vector3(0, 0, -1);
                 headForward.applyQuaternion(headGroup.quaternion);
                 headForward.y = 0; headForward.normalize();
@@ -598,19 +606,20 @@
                     .addScaledVector(headRight, hostState.moveX * speed);
                 
                 playerGroup.position.add(moveVec);
-                
-                // Bobbing effect scales with walking
                 playerGroup.position.y = currentHeight + Math.sin(Date.now() * 0.01) * 0.05;
             } else {
                 playerGroup.position.y = currentHeight;
             }
 
-            applyDeviceOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma, hostState.handRot.orient);
+            // Apply distinct orientations: Hand (hardware top) vs Head (screen rotation)
+            applyHandOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
 
             if (hostState.headRot.alpha !== null && hostState.headRot.alpha !== 0) {
                 const hostOrient = getScreenOrientation();
-                applyDeviceOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
+                applyHeadOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
+
+            processPunchMechanics();
 
             const w = window.innerWidth; const h = window.innerHeight;
             renderer.clear();
@@ -657,9 +666,9 @@
             });
             window.addEventListener('keydown', (e) => {
                 if(e.key==='w') hostState.moveY = -1; if(e.key==='s') hostState.moveY = 1;
-                if(e.key==='a') hostState.moveX = -1; if(e.key==='d') hostState.moveX = 1; // Standard WSAD
+                if(e.key==='a') hostState.moveX = -1; if(e.key==='d') hostState.moveX = 1;
                 if(e.key===' ') { hostState.grab = true; processGrabLogic(); }
-                if(e.key==='c') hostState.height = hostState.height === 1.6 ? 0.6 : 1.6; // Desktop crouch toggle
+                if(e.key==='c') hostState.height = hostState.height === 1.6 ? 0.6 : 1.6;
             });
             window.addEventListener('keyup', (e) => {
                 if(['w','s'].includes(e.key)) hostState.moveY = 0;
