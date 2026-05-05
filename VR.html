@@ -144,7 +144,7 @@
             <div id="move-hint">WALK JOYSTICK</div>
             <div id="joystick"></div>
         </div>
-        <div id="grab-zone">TAP & HOLD<br>TO GRAB<br><span style="font-size:1rem; opacity:0.7">(Shake phone to punch)</span></div>
+        <div id="grab-zone">TAP & HOLD<br>TO GRAB<br><span style="font-size:1rem; opacity:0.7">(Shake phone to punch/chop)</span></div>
     </div>
 
     <script>
@@ -346,15 +346,18 @@
         let scene, renderer;
         let cameraL, cameraR;
         let playerGroup, headGroup, handMesh;
-        let interactables = [];
+        let interactables = []; // List of all things with physics
         let trees = [];
+        let rocks = [];
         let grabbedObject = null;
+        let woodTex; // Generated wood texture
         
         let hostState = {
             moveX: 0, moveY: 0, grab: false, height: 1.6,
             handRot: { alpha: 0, beta: 0, gamma: 0, orient: 0 },
             headRot: { alpha: 0, beta: 0, gamma: 0 },
-            prevHandPos: null // For punch tracking
+            prevHandPos: null,
+            handVelocity: new THREE.Vector3()
         };
 
         function handleControllerData(data) {
@@ -370,6 +373,42 @@
         }
 
         function handleHostOrientation(e) { hostState.headRot = { alpha: e.alpha, beta: e.beta, gamma: e.gamma }; }
+
+        // Generate Wood Texture for Planks
+        function createWoodTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256; canvas.height = 256;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#8B5A2B'; ctx.fillRect(0,0,256,256);
+            ctx.strokeStyle = '#603311'; ctx.lineWidth = 3;
+            for(let i=0; i<30; i++) {
+                ctx.beginPath();
+                ctx.moveTo(Math.random()*256, 0);
+                ctx.lineTo(Math.random()*256, 256);
+                ctx.stroke();
+            }
+            const tex = new THREE.CanvasTexture(canvas);
+            return tex;
+        }
+
+        function createTool(type) {
+            const group = new THREE.Group();
+            const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.6), new THREE.MeshStandardMaterial({map: woodTex}));
+            handle.rotation.x = Math.PI/2;
+            
+            if (type === 'axe') {
+                const head = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.25, 0.2), new THREE.MeshStandardMaterial({color: 0x777777, metalness: 0.5}));
+                head.position.set(0, 0.1, 0.2);
+                group.add(head);
+            } else if (type === 'pickaxe') {
+                const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.05), new THREE.MeshStandardMaterial({color: 0x555555, metalness: 0.5}));
+                head.position.set(0, 0, 0.25);
+                group.add(head);
+            }
+            group.add(handle);
+            group.userData = { type: type, velocity: new THREE.Vector3() };
+            return group;
+        }
 
         function initThreeJS() {
             renderer = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
@@ -390,6 +429,7 @@
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
 
+            woodTex = createWoodTexture();
             generateEnvironment();
 
             playerGroup = new THREE.Group();
@@ -406,22 +446,25 @@
 
             // Minecraft Hand Group Construction
             handMesh = new THREE.Group();
-            
-            // Skin arm
             const armGeo = new THREE.BoxGeometry(0.1, 0.1, 0.35);
             armGeo.translate(0, 0, -0.175); 
             const armMesh = new THREE.Mesh(armGeo, new THREE.MeshStandardMaterial({ color: 0xf1c27d }));
-            
-            // Blue sleeve
             const sleeveGeo = new THREE.BoxGeometry(0.12, 0.12, 0.15);
             sleeveGeo.translate(0, 0, -0.075);
             const sleeveMesh = new THREE.Mesh(sleeveGeo, new THREE.MeshStandardMaterial({ color: 0x2563eb }));
-            
             handMesh.add(armMesh);
             handMesh.add(sleeveMesh);
             
-            // Fix: Add hand to the main player body, NOT the head, so rotations don't conflict
             playerGroup.add(handMesh);
+
+            // Spawn Tools in front of player
+            const axe = createTool('axe');
+            axe.position.set(-1, 0.5, -2);
+            scene.add(axe); interactables.push(axe);
+
+            const pickaxe = createTool('pickaxe');
+            pickaxe.position.set(1, 0.5, -2);
+            scene.add(pickaxe); interactables.push(pickaxe);
 
             setupHostDesktopFallback();
             renderer.setAnimationLoop(renderLoop);
@@ -430,19 +473,19 @@
         function generateEnvironment() {
             const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 3, 8);
             const leavesGeo = new THREE.DodecahedronGeometry(2, 1);
-            const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
+            const trunkMat = new THREE.MeshStandardMaterial({ map: woodTex });
             const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228b22, flatShading: true });
+            
             const rockGeo = new THREE.DodecahedronGeometry(1.5, 0);
             const rockMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
+            
             const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
             const boxMats = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00].map(c => new THREE.MeshStandardMaterial({color: c}));
-            const archGeo = new THREE.TorusGeometry(4, 1.5, 8, 16, Math.PI);
-            const archMat = new THREE.MeshStandardMaterial({ color: 0x555555, flatShading: true });
 
-            for(let i=0; i<60; i++) {
+            for(let i=0; i<80; i++) {
                 const x = (Math.random() - 0.5) * 80;
                 const z = (Math.random() - 0.5) * 80;
-                if (Math.abs(x) < 5 && Math.abs(z) < 5) continue;
+                if (Math.abs(x) < 4 && Math.abs(z) < 4) continue;
 
                 const rand = Math.random();
                 if (rand < 0.4) {
@@ -455,7 +498,6 @@
                     tree.position.set(x, 0, z);
                     tree.scale.setScalar(0.8 + Math.random() * 0.6);
                     
-                    // Metadata for punching mechanics
                     tree.userData = { type: 'tree', hits: 0, isFalling: false, lastHitTime: 0 };
                     scene.add(tree);
                     trees.push(tree);
@@ -465,15 +507,14 @@
                     rock.position.set(x, 0.5, z);
                     rock.rotation.set(Math.random(), Math.random(), Math.random());
                     rock.scale.setScalar(0.5 + Math.random() * 1.5);
+                    
+                    rock.userData = { type: 'rock', hits: 0, lastHitTime: 0 };
                     scene.add(rock);
-                } else if (rand < 0.8) {
-                    const arch = new THREE.Mesh(archGeo, archMat);
-                    arch.position.set(x, 0, z);
-                    arch.rotation.y = Math.random() * Math.PI;
-                    scene.add(arch);
+                    rocks.push(rock);
                 } else {
                     const box = new THREE.Mesh(boxGeo, boxMats[Math.floor(Math.random()*boxMats.length)]);
-                    box.position.set(x, 0.25, z);
+                    box.position.set(x, 0.5, z);
+                    box.userData = { type: 'box', velocity: new THREE.Vector3() };
                     scene.add(box);
                     interactables.push(box);
                 }
@@ -497,9 +538,6 @@
         function applyHandOrientation(targetObj, alpha, beta, gamma) {
             if (alpha === null || alpha === undefined) return;
             const degToRad = THREE.MathUtils.degToRad;
-            
-            // For the hand, we want the physical top of the phone to equal Forward. 
-            // We use raw Euler without the screen rotation modifiers.
             _euler.set( beta ? degToRad(beta) : 0, alpha ? degToRad(alpha) : 0, -(gamma ? degToRad(gamma) : 0), 'YXZ' );
             targetObj.quaternion.setFromEuler( _euler );
         }
@@ -525,18 +563,45 @@
                 
                 if (target) {
                     grabbedObject = target;
-                    // Fix: Use native ThreeJS .attach() to handle the physics correctly
+                    // Reset its velocity when picked up
+                    grabbedObject.userData.velocity.set(0,0,0);
                     handMesh.attach(grabbedObject);
+                    // Snap position slightly forward, but keep current rotation to look natural
                     grabbedObject.position.set(0, 0, -0.3); 
-                    grabbedObject.rotation.set(0, 0, 0);
                 }
             } 
             else if (!hostState.grab && grabbedObject) {
-                // Fix: Attach back to the main world scene when dropping
                 scene.attach(grabbedObject);
-                grabbedObject.position.y = 0.25;
-                grabbedObject.rotation.set(0,0,0);
+                // TRANSFER REAL VELOCITY FOR THROWING
+                // Multiply to make it feel powerful, add a little UP arc
+                grabbedObject.userData.velocity.copy(hostState.handVelocity).multiplyScalar(5.0);
+                grabbedObject.userData.velocity.y += 0.05; 
+                
                 grabbedObject = null;
+            }
+        }
+
+        function spawnPlanks(x, z) {
+            for(let i=0; i<3; i++) {
+                const plank = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.1, 0.3), new THREE.MeshStandardMaterial({map: woodTex}));
+                plank.position.set(x + (Math.random()-0.5), 2, z + (Math.random()-0.5));
+                plank.userData = { type: 'plank', velocity: new THREE.Vector3((Math.random()-0.5)*0.2, 0.2, (Math.random()-0.5)*0.2) };
+                scene.add(plank);
+                interactables.push(plank);
+            }
+        }
+
+        function spawnMinedRocks(x, y, z) {
+            for(let i=0; i<3; i++) {
+                const drop = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2, 0), new THREE.MeshStandardMaterial({color: 0x888888, flatShading: true}));
+                drop.position.set(x + (Math.random()-0.5), y + 0.5, z + (Math.random()-0.5));
+                drop.userData = {
+                    type: 'stone', 
+                    velocity: new THREE.Vector3((Math.random()-0.5)*0.2, 0.2, (Math.random()-0.5)*0.2),
+                    lifespan: 5.0 // Will disappear after 5 seconds
+                };
+                scene.add(drop);
+                interactables.push(drop);
             }
         }
 
@@ -546,32 +611,61 @@
             const currentHandPos = new THREE.Vector3();
             handMesh.getWorldPosition(currentHandPos);
             
-            const handSpeed = currentHandPos.distanceTo(hostState.prevHandPos);
+            // Track Velocity for throwing and punching
+            hostState.handVelocity.subVectors(currentHandPos, hostState.prevHandPos);
+            const handSpeed = hostState.handVelocity.length();
             hostState.prevHandPos.copy(currentHandPos);
 
-            // If hand is moving fast enough (jerk / shake)
-            if (handSpeed > 0.08) {
+            const toolType = grabbedObject ? grabbedObject.userData.type : 'hand';
+
+            // Lowered speed threshold to make it easier to register a hit
+            if (handSpeed > 0.04) {
+                // Check Trees (Chopping)
                 for(let tree of trees) {
                     if (tree.userData.isFalling) continue;
-
                     const treePos = new THREE.Vector3();
                     tree.getWorldPosition(treePos);
-                    treePos.y += 1.5; // Offset to center of trunk
+                    treePos.y += 1.5; 
                     
-                    // Hitbox check
-                    if (currentHandPos.distanceTo(treePos) < 2.5) {
-                        // Cooldown to prevent spam hits (200ms)
-                        if (Date.now() - tree.userData.lastHitTime > 200) {
+                    // Increased hit distance to 3.5 meters
+                    if (currentHandPos.distanceTo(treePos) < 3.5) {
+                        if (Date.now() - tree.userData.lastHitTime > 250) {
                             tree.userData.lastHitTime = Date.now();
-                            tree.userData.hits++;
+                            // Axe breaks trees 3x faster
+                            const damage = toolType === 'axe' ? 3 : 1;
+                            tree.userData.hits += damage;
                             
-                            // Visual shake feedback
                             tree.rotation.z = (Math.random() - 0.5) * 0.3;
                             tree.rotation.x = (Math.random() - 0.5) * 0.3;
 
-                            // 10 Hits = Timber!
                             if (tree.userData.hits >= 10) {
                                 tree.userData.isFalling = true;
+                                spawnPlanks(treePos.x, treePos.z);
+                            }
+                        }
+                    }
+                }
+
+                // Check Rocks (Mining)
+                for(let i = rocks.length - 1; i >= 0; i--) {
+                    let rock = rocks[i];
+                    const rockPos = new THREE.Vector3();
+                    rock.getWorldPosition(rockPos);
+                    
+                    if (currentHandPos.distanceTo(rockPos) < 3.5) {
+                        if (Date.now() - rock.userData.lastHitTime > 250) {
+                            rock.userData.lastHitTime = Date.now();
+                            // Pickaxe is required to effectively mine
+                            const damage = toolType === 'pickaxe' ? 3 : 0.5;
+                            rock.userData.hits += damage;
+                            
+                            rock.rotation.y += 0.2; // Visual flinch
+                            rock.scale.multiplyScalar(0.95);
+
+                            if (rock.userData.hits >= 10) {
+                                scene.remove(rock);
+                                rocks.splice(i, 1);
+                                spawnMinedRocks(rockPos.x, rockPos.y, rockPos.z);
                             }
                         }
                     }
@@ -585,9 +679,42 @@
                         tree.rotation.x += 0.05;
                     }
                 } else {
-                    // Smoothly return upright if it was shaken
                     tree.rotation.z += (0 - tree.rotation.z) * 0.1;
                     tree.rotation.x += (0 - tree.rotation.x) * 0.1;
+                }
+            }
+        }
+
+        // Custom Simple Physics Engine
+        function processPhysics() {
+            for(let i = interactables.length - 1; i >= 0; i--) {
+                let obj = interactables[i];
+                if(obj === grabbedObject) continue; // Don't drop things being held!
+
+                // Apply Gravity
+                obj.userData.velocity.y -= 0.008; 
+                
+                // Apply Velocity to Position
+                obj.position.add(obj.userData.velocity);
+                
+                // Simple Ground Collision & Bounce
+                if(obj.position.y < 0.25) {
+                    obj.position.y = 0.25;
+                    obj.userData.velocity.y *= -0.5; // Bounce
+                    obj.userData.velocity.x *= 0.8;  // Ground friction
+                    obj.userData.velocity.z *= 0.8;
+                }
+
+                // Handle items with a lifespan (Mined stones)
+                if(obj.userData.lifespan !== undefined) {
+                    obj.userData.lifespan -= 0.016; // Approx 60fps delta
+                    if(obj.userData.lifespan <= 0) {
+                        scene.remove(obj);
+                        interactables.splice(i, 1);
+                    } else if (obj.userData.lifespan < 1.0) {
+                        // Smoothly shrink away in the last second
+                        obj.scale.setScalar(obj.userData.lifespan);
+                    }
                 }
             }
         }
@@ -620,16 +747,15 @@
                 applyHeadOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
 
-            // Fix: Calculate the hand's position so it perfectly orbits your body based on where you look
             const headEulerYaw = new THREE.Euler().setFromQuaternion(headGroup.quaternion, 'YXZ').y;
             const handOffset = new THREE.Vector3(0.3, -0.3, -0.4);
             handOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), headEulerYaw);
             handMesh.position.copy(handOffset);
 
-            // Apply absolute hand orientation from the controller perfectly
             applyHandOrientation(handMesh, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
 
             processPunchMechanics();
+            processPhysics();
 
             const w = window.innerWidth; const h = window.innerHeight;
             renderer.clear();
@@ -689,7 +815,6 @@
     </script>
 </body>
 </html>
-
 
 
 ```
