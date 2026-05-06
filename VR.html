@@ -559,7 +559,8 @@
                 joyCenter = { x: t.clientX, y: t.clientY };
                 
                 joystick.style.display = 'block';
-                joystick.style.left = t.clientX + 'px';
+                // FIXED: Calculates visually correctly relative to the move zone
+                joystick.style.left = (t.clientX - rect.left) + 'px';
                 joystick.style.top = (t.clientY - rect.top) + 'px';
                 
                 updateJoy(t.clientX, t.clientY);
@@ -604,11 +605,14 @@
                 
                 joystick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
                 
-                // standard portrait map: dx is left/right, dy is up/down
                 let nx = dx / maxR; 
                 let ny = dy / maxR;
                 
-                if (Math.abs(nx - ctrlState.moveX) > 0.05 || Math.abs(ny - ctrlState.moveY) > 0.05) {
+                // FIXED: Apply a perfect deadzone so drifting is eliminated, and update every frame for smoothness
+                if (Math.abs(nx) < 0.05) nx = 0;
+                if (Math.abs(ny) < 0.05) ny = 0;
+                
+                if (nx !== ctrlState.moveX || ny !== ctrlState.moveY) {
                     ctrlState.moveX = nx; 
                     ctrlState.moveY = ny;
                     connection.send({ type: 'move', x: nx, y: ny });
@@ -960,6 +964,7 @@
                     
                     tree.position.set(x, 0, z); 
                     tree.scale.setScalar(0.8 + Math.random() * 0.6);
+                    
                     tree.userData = { 
                         type: 'tree', 
                         hits: 0, 
@@ -995,6 +1000,7 @@
                     box.position.set(x, 0.5, z);
                     box.castShadow = true; 
                     box.receiveShadow = true;
+                    
                     box.userData = { 
                         type: 'box', 
                         velocity: new THREE.Vector3() 
@@ -1094,9 +1100,11 @@
                     gripPoint.attach(grabbedObject);
                     
                     if (grabbedObject.userData.type === 'box') {
+                        // Hold box right against the palm, enveloped by fingers
                         grabbedObject.position.set(0, 0, -0.3);
                         grabbedObject.rotation.set(0, 0, 0);
                     } else {
+                        // Tools perfectly gripped inside the curled fingers
                         grabbedObject.position.set(0, 0.05, -0.05);
                         grabbedObject.rotation.set(-Math.PI/2.5, Math.PI, 0); 
                     }
@@ -1136,7 +1144,7 @@
             for (let i = 0; i < 3; i++) {
                 const dropGeo = new THREE.DodecahedronGeometry(0.2, 0);
                 const dropMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
-                const drop = new Mesh(dropGeo, dropMat);
+                const drop = new THREE.Mesh(dropGeo, dropMat);
                 
                 drop.position.set(x + (Math.random() - 0.5), y + 0.5, z + (Math.random() - 0.5));
                 drop.castShadow = true; 
@@ -1270,13 +1278,18 @@
 
             if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
                 const speed = 0.08;
-                const headForward = new THREE.Vector3(0, 0, -1);
                 
-                headForward.applyQuaternion(headGroup.quaternion);
-                headForward.y = 0; 
-                headForward.normalize();
+                // FIXED BUG: Extract pure Yaw from the Head's rotation to prevent Gimbal Lock
+                // This ensures "Forward" is always perfectly mapped to where the user is facing,
+                // even if they look straight up or straight down.
+                const headEuler = new THREE.Euler().setFromQuaternion(headGroup.quaternion, 'YXZ');
+                const headYaw = headEuler.y;
 
-                const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0, 1, 0)).normalize();
+                const headForward = new THREE.Vector3(0, 0, -1);
+                headForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), headYaw);
+
+                const headRight = new THREE.Vector3(1, 0, 0);
+                headRight.applyAxisAngle(new THREE.Vector3(0, 1, 0), headYaw);
                 
                 const moveVec = new THREE.Vector3()
                     .addScaledVector(headForward, -hostState.moveY * speed)
@@ -1442,7 +1455,6 @@
     </script>
 </body>
 </html>
-
 
 
 ```
