@@ -413,11 +413,21 @@
         let playerGroup, headGroup, armGroup, torso, gripPoint, throwTracker;
         let fingers = []; let thumb;
         let interactables = []; let trees = []; let rocks = [];
-        let collisionObstacles = []; // For universal collisions
-        let theNPC = { group: null, limbs: [] }; // The dynamic NPC rig
+        let collisionObstacles = []; 
+        let mountain;
+        
+        // Verlet Ragdoll Physics System
+        let theNPC = { group: null, isDead: false, jointDefs: [] }; 
+        let ragdollLimbs = [];
+        let ragdollJoints = [];
         
         let grabbedObject = null;
         let woodTex, groundTex;
+        
+        // Player Physics for Climbing
+        let playerVelocity = new THREE.Vector3();
+        let isClimbing = false;
+        let climbAnchorWorld = new THREE.Vector3();
         
         let hostState = {
             moveX: 0, moveY: 0, grab: false, height: 1.6,
@@ -425,9 +435,7 @@
             headRot: { alpha: 0, beta: 0, gamma: 0 },
             prevTipPos: null,
             handVelocity: new THREE.Vector3(),
-            accelZ: 0,
-            armVelocity: 0,
-            handExtension: 0
+            accelZ: 0, armVelocity: 0, handExtension: 0
         };
 
         function handleControllerData(data) {
@@ -468,115 +476,140 @@
 
         function createTool(type) {
             const group = new THREE.Group();
-            const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.6);
-            const handleMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8 });
-            const handle = new THREE.Mesh(handleGeo, handleMat);
-            handle.castShadow = true; handle.receiveShadow = true;
-            group.add(handle);
-            
             group.userData = { 
                 type: type, velocity: new THREE.Vector3(), 
                 baseOffset: new THREE.Vector3(0,-0.2,0), 
                 tipOffset: new THREE.Vector3(0,0.3,0) 
             };
 
-            if (type === 'axe') {
-                const headGeo = new THREE.BoxGeometry(0.05, 0.25, 0.2);
-                const headMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.8, roughness: 0.2 });
-                const head = new THREE.Mesh(headGeo, headMat);
-                head.position.set(0, 0.2, 0.1); 
-                head.castShadow = true; head.receiveShadow = true;
-                group.add(head);
-                group.userData.tipOffset.set(0, 0.2, 0.2); // Center of head
-            } else if (type === 'pickaxe') {
-                const headGeo = new THREE.BoxGeometry(0.4, 0.05, 0.05);
-                const headMat = new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.8, roughness: 0.3 });
-                const head = new THREE.Mesh(headGeo, headMat);
-                head.position.set(0, 0.25, 0); 
-                head.castShadow = true; head.receiveShadow = true;
-                group.add(head);
-            } else if (type === 'sword') {
-                // The newly requested Dword (Sword)
-                const guardGeo = new THREE.BoxGeometry(0.18, 0.02, 0.04);
-                const guardMat = new THREE.MeshStandardMaterial({color: 0xcca43b, metalness: 0.9, roughness: 0.2});
-                const guard = new THREE.Mesh(guardGeo, guardMat);
-                guard.position.set(0, 0.3, 0);
-                guard.castShadow = true;
+            if (type === 'axe' || type === 'pickaxe') {
+                const handleGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.6);
+                const handleMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.8 });
+                const handle = new THREE.Mesh(handleGeo, handleMat);
+                handle.castShadow = true; handle.receiveShadow = true;
+                group.add(handle);
                 
-                const bladeGeo = new THREE.BoxGeometry(0.04, 0.8, 0.01);
-                const bladeMat = new THREE.MeshStandardMaterial({color: 0xe2e8f0, metalness: 1.0, roughness: 0.1});
+                if (type === 'axe') {
+                    const headGeo = new THREE.BoxGeometry(0.05, 0.25, 0.2);
+                    const headMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.8, roughness: 0.2 });
+                    const head = new THREE.Mesh(headGeo, headMat);
+                    head.position.set(0, 0.2, 0.1); 
+                    head.castShadow = true; head.receiveShadow = true;
+                    group.add(head);
+                    group.userData.tipOffset.set(0, 0.2, 0.2);
+                } else {
+                    const headGeo = new THREE.BoxGeometry(0.4, 0.05, 0.05);
+                    const headMat = new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.8, roughness: 0.3 });
+                    const head = new THREE.Mesh(headGeo, headMat);
+                    head.position.set(0, 0.25, 0); 
+                    head.castShadow = true; head.receiveShadow = true;
+                    group.add(head);
+                }
+            } else if (type === 'sword') {
+                // High-Quality Aesthetic Sword Model
+                const bladeGeo = new THREE.CylinderGeometry(0.002, 0.035, 0.9, 4);
+                const bladeMat = new THREE.MeshStandardMaterial({color: 0xe2e8f0, metalness: 1.0, roughness: 0.15, flatShading: true});
                 const blade = new THREE.Mesh(bladeGeo, bladeMat);
-                blade.position.set(0, 0.7, 0); 
+                blade.position.set(0, 0.55, 0); 
+                blade.rotation.y = Math.PI / 4;
                 blade.castShadow = true;
                 
-                group.add(guard);
-                group.add(blade);
-                group.userData.baseOffset.set(0, 0.3, 0); // Base of blade
-                group.userData.tipOffset.set(0, 1.1, 0); // Tip of blade
+                const guardGeo = new THREE.BoxGeometry(0.28, 0.02, 0.05);
+                const goldMat = new THREE.MeshStandardMaterial({color: 0xd4af37, metalness: 0.9, roughness: 0.2});
+                const guard = new THREE.Mesh(guardGeo, goldMat);
+                guard.position.set(0, 0.1, 0);
+                guard.castShadow = true;
+                
+                const gripGeo = new THREE.CylinderGeometry(0.018, 0.015, 0.15, 8);
+                const leatherMat = new THREE.MeshStandardMaterial({color: 0x3e1f04, roughness: 0.9});
+                const grip = new THREE.Mesh(gripGeo, leatherMat);
+                grip.position.set(0, 0.01, 0);
+                grip.castShadow = true;
+
+                const pommelGeo = new THREE.SphereGeometry(0.03, 16, 16);
+                const pommel = new THREE.Mesh(pommelGeo, goldMat);
+                pommel.position.set(0, -0.08, 0);
+                pommel.castShadow = true;
+                
+                group.add(blade); group.add(guard); group.add(grip); group.add(pommel);
+                group.userData.baseOffset.set(0, 0.1, 0); 
+                group.userData.tipOffset.set(0, 1.0, 0); 
             }
             return group;
         }
 
-        // Creates a severable NPC body part
-        function createLimb(geo, color, name) {
+        function createLimb(geo, color, name, radius) {
             const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({color: color, roughness: 0.8}));
             mesh.castShadow = true; mesh.receiveShadow = true;
-            mesh.userData = { type: 'limb', name: name, isDetached: false, hits: 0 };
+            mesh.userData = { type: 'limb', name: name, hits: 0, prevPos: new THREE.Vector3(), radius: radius };
+            ragdollLimbs.push(mesh);
+            interactables.push(mesh); // Make limbs grabable from the start
             return mesh;
         }
 
         function initNPC() {
             theNPC.group = new THREE.Group();
             theNPC.group.position.set(0, 1.0, -5);
-            theNPC.group.userData = { radius: 0.4, isDead: false };
+            theNPC.group.userData = { radius: 0.4 };
             scene.add(theNPC.group);
             collisionObstacles.push(theNPC.group);
 
-            const skinColor = 0xffccaa;
-            const shirtColor = 0x2563eb;
-            const pantsColor = 0x333333;
+            const skinColor = 0xffccaa; const shirtColor = 0x2563eb; const pantsColor = 0x333333;
 
-            // Torso (Main anchor)
-            const torsoGeo = new THREE.BoxGeometry(0.5, 0.7, 0.25);
-            let torsoMesh = createLimb(torsoGeo, shirtColor, 'torso');
-            theNPC.group.add(torsoMesh);
-            theNPC.limbs.push(torsoMesh);
+            // Highly Segmented 10-part Ragdoll Structure
+            let torso = createLimb(new THREE.BoxGeometry(0.4, 0.6, 0.25), shirtColor, 'torso', 0.2);
+            theNPC.group.add(torso);
 
-            // Head
-            const headGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-            headGeo.translate(0, 0.15, 0);
-            let headMesh = createLimb(headGeo, skinColor, 'head');
-            headMesh.position.set(0, 0.35, 0);
-            torsoMesh.add(headMesh);
-            theNPC.limbs.push(headMesh);
+            let head = createLimb(new THREE.BoxGeometry(0.25, 0.25, 0.25), skinColor, 'head', 0.15);
+            head.position.set(0, 0.45, 0); torso.add(head);
 
-            // Arms
-            const armGeo = new THREE.BoxGeometry(0.15, 0.6, 0.15);
-            armGeo.translate(0, -0.25, 0); // pivot near shoulder
-            
-            let armL = createLimb(armGeo, skinColor, 'armL');
-            armL.position.set(-0.35, 0.3, 0);
-            torsoMesh.add(armL);
-            theNPC.limbs.push(armL);
+            let armLU = createLimb(new THREE.BoxGeometry(0.12, 0.35, 0.12), shirtColor, 'armLU', 0.1);
+            armLU.position.set(-0.3, 0.15, 0); torso.add(armLU);
+            let armLL = createLimb(new THREE.BoxGeometry(0.1, 0.35, 0.1), skinColor, 'armLL', 0.1);
+            armLL.position.set(0, -0.35, 0); armLU.add(armLL);
 
-            let armR = createLimb(armGeo, skinColor, 'armR');
-            armR.position.set(0.35, 0.3, 0);
-            torsoMesh.add(armR);
-            theNPC.limbs.push(armR);
+            let armRU = createLimb(new THREE.BoxGeometry(0.12, 0.35, 0.12), shirtColor, 'armRU', 0.1);
+            armRU.position.set(0.3, 0.15, 0); torso.add(armRU);
+            let armRL = createLimb(new THREE.BoxGeometry(0.1, 0.35, 0.1), skinColor, 'armRL', 0.1);
+            armRL.position.set(0, -0.35, 0); armRU.add(armRL);
 
-            // Legs
-            const legGeo = new THREE.BoxGeometry(0.2, 0.7, 0.2);
-            legGeo.translate(0, -0.35, 0); // pivot near hip
+            let legLU = createLimb(new THREE.BoxGeometry(0.18, 0.4, 0.18), pantsColor, 'legLU', 0.1);
+            legLU.position.set(-0.12, -0.5, 0); torso.add(legLU);
+            let legLL = createLimb(new THREE.BoxGeometry(0.15, 0.4, 0.15), skinColor, 'legLL', 0.1);
+            legLL.position.set(0, -0.4, 0); legLU.add(legLL);
 
-            let legL = createLimb(legGeo, pantsColor, 'legL');
-            legL.position.set(-0.15, -0.35, 0);
-            torsoMesh.add(legL);
-            theNPC.limbs.push(legL);
+            let legRU = createLimb(new THREE.BoxGeometry(0.18, 0.4, 0.18), pantsColor, 'legRU', 0.1);
+            legRU.position.set(0.12, -0.5, 0); torso.add(legRU);
+            let legRL = createLimb(new THREE.BoxGeometry(0.15, 0.4, 0.15), skinColor, 'legRL', 0.1);
+            legRL.position.set(0, -0.4, 0); legRU.add(legRL);
 
-            let legR = createLimb(legGeo, pantsColor, 'legR');
-            legR.position.set(0.15, -0.35, 0);
-            torsoMesh.add(legR);
-            theNPC.limbs.push(legR);
+            // Define Verlet Physics Joints (Parent, Child, ParentAnchor(Local), ChildAnchor(Local))
+            theNPC.jointDefs = [
+                { p: torso, c: head, pA: new THREE.Vector3(0,0.3,0), cA: new THREE.Vector3(0,-0.12,0) },
+                { p: torso, c: armLU, pA: new THREE.Vector3(-0.25,0.25,0), cA: new THREE.Vector3(0,0.15,0) },
+                { p: armLU, c: armLL, pA: new THREE.Vector3(0,-0.15,0), cA: new THREE.Vector3(0,0.15,0) },
+                { p: torso, c: armRU, pA: new THREE.Vector3(0.25,0.25,0), cA: new THREE.Vector3(0,0.15,0) },
+                { p: armRU, c: armRL, pA: new THREE.Vector3(0,-0.15,0), cA: new THREE.Vector3(0,0.15,0) },
+                { p: torso, c: legLU, pA: new THREE.Vector3(-0.12,-0.3,0), cA: new THREE.Vector3(0,0.2,0) },
+                { p: legLU, c: legLL, pA: new THREE.Vector3(0,-0.2,0), cA: new THREE.Vector3(0,0.2,0) },
+                { p: torso, c: legRU, pA: new THREE.Vector3(0.12,-0.3,0), cA: new THREE.Vector3(0,0.2,0) },
+                { p: legRU, c: legLL, pA: new THREE.Vector3(0,-0.2,0), cA: new THREE.Vector3(0,0.2,0) }
+            ];
+        }
+
+        function triggerRagdoll() {
+            if(theNPC.isDead) return;
+            theNPC.isDead = true;
+            ragdollJoints = [...theNPC.jointDefs]; // Copy joints to active solver
+
+            // Unparent all limbs to world space for independent physics
+            ragdollLimbs.forEach(limb => {
+                scene.attach(limb);
+                limb.userData.prevPos.copy(limb.position);
+                // Add slight explosive slump
+                limb.userData.prevPos.x += (Math.random() - 0.5) * 0.05;
+                limb.userData.prevPos.z += (Math.random() - 0.5) * 0.05;
+            });
         }
 
         let isThreeJSInitialized = false;
@@ -603,12 +636,9 @@
             dirLight.castShadow = true;
             dirLight.shadow.mapSize.width = 2048;
             dirLight.shadow.mapSize.height = 2048;
-            dirLight.shadow.camera.near = 0.5;
-            dirLight.shadow.camera.far = 100;
-            dirLight.shadow.camera.left = -30;
-            dirLight.shadow.camera.right = 30;
-            dirLight.shadow.camera.top = 30;
-            dirLight.shadow.camera.bottom = -30;
+            dirLight.shadow.camera.near = 0.5; dirLight.shadow.camera.far = 150;
+            dirLight.shadow.camera.left = -50; dirLight.shadow.camera.right = 50;
+            dirLight.shadow.camera.top = 50; dirLight.shadow.camera.bottom = -50;
             scene.add(dirLight);
 
             createTextures();
@@ -701,25 +731,30 @@
         }
 
         function generateEnvironment() {
+            // Massive Climbable Mountain
+            const mGeo = new THREE.DodecahedronGeometry(25, 1);
+            const mMat = new THREE.MeshStandardMaterial({color: 0x555555, roughness: 1.0, flatShading: true});
+            mountain = new THREE.Mesh(mGeo, mMat);
+            mountain.position.set(0, -5, -40);
+            mountain.scale.set(1.5, 2.0, 1.0);
+            mountain.castShadow = true; mountain.receiveShadow = true;
+            scene.add(mountain);
+
             const trunkGeo = new THREE.CylinderGeometry(0.3, 0.4, 3, 8);
             const leavesGeo = new THREE.DodecahedronGeometry(2, 1);
             const trunkMat = new THREE.MeshStandardMaterial({ map: woodTex, roughness: 1.0 });
             const leavesMat = new THREE.MeshStandardMaterial({ color: 0x228b22, flatShading: true, roughness: 0.9 });
-            
             const rockGeo = new THREE.DodecahedronGeometry(1.5, 0);
             const rockMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true, roughness: 0.8 });
-            
             const boxGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
             const boxMats = [0xff3333, 0x33ff33, 0x3333ff, 0xffff33].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.4 }));
 
             for (let i = 0; i < 60; i++) {
                 const x = (Math.random() - 0.5) * 80; 
                 const z = (Math.random() - 0.5) * 80;
-                
                 if (Math.abs(x) < 4 && Math.abs(z) < 4) continue;
-
-                const rand = Math.random();
                 
+                const rand = Math.random();
                 if (rand < 0.4) {
                     const tree = new THREE.Group();
                     const trunk = new THREE.Mesh(trunkGeo, trunkMat); 
@@ -731,7 +766,7 @@
                     tree.position.set(x, 0, z); tree.scale.setScalar(0.8 + Math.random() * 0.6);
                     tree.userData = { type: 'tree', hits: 0, isFalling: false, lastHitTime: 0, radius: 0.5 };
                     scene.add(tree); trees.push(tree);
-                    collisionObstacles.push(tree); // Add to collisions
+                    collisionObstacles.push(tree);
                 } else if (rand < 0.7) {
                     const rock = new THREE.Mesh(rockGeo, rockMat);
                     rock.position.set(x, 0.5, z);
@@ -740,7 +775,7 @@
                     rock.castShadow = true; rock.receiveShadow = true;
                     rock.userData = { type: 'rock', hits: 0, lastHitTime: 0, radius: 1.0 * rock.scale.x };
                     scene.add(rock); rocks.push(rock);
-                    collisionObstacles.push(rock); // Add to collisions
+                    collisionObstacles.push(rock);
                 } else {
                     const randomMat = boxMats[Math.floor(Math.random() * boxMats.length)];
                     const box = new THREE.Mesh(boxGeo, randomMat);
@@ -773,24 +808,33 @@
             targetObj.quaternion.setFromEuler(_euler);
         }
 
-        // Universal Collision Checking
         function checkCollisions(newPos, ignoreNPC=false) {
             for(let obs of collisionObstacles) {
                 if(ignoreNPC && obs === theNPC.group) continue;
                 let dist2D = Math.hypot(newPos.x - obs.position.x, newPos.z - obs.position.z);
-                if(dist2D < (obs.userData.radius || 0.5) + 0.3) {
-                    return true;
-                }
+                if(dist2D < (obs.userData.radius || 0.5) + 0.3) return true;
             }
             return false;
         }
 
         function processGrabLogic() {
             if (!gripPoint) return;
-            if (hostState.grab && !grabbedObject) {
+            if (hostState.grab && !grabbedObject && !isClimbing) {
                 const handPos = new THREE.Vector3();
                 gripPoint.getWorldPosition(handPos);
                 
+                // 1. Check Mountain Climbing
+                if (handPos.distanceTo(mountain.position) < 30) {
+                    let ray = new THREE.Raycaster(handPos, new THREE.Vector3(0,0,-1).applyQuaternion(headGroup.quaternion), 0, 1.5);
+                    if(ray.intersectObject(mountain).length > 0 || handPos.distanceTo(mountain.position) < 26) {
+                        isClimbing = true;
+                        gripPoint.getWorldPosition(climbAnchorWorld);
+                        playerVelocity.set(0,0,0);
+                        return;
+                    }
+                }
+
+                // 2. Check Objects & Ragdoll Limbs
                 let closestDist = 3.0; 
                 let target = null;
                 for (let obj of interactables) {
@@ -803,27 +847,36 @@
                 
                 if (target) {
                     grabbedObject = target;
-                    grabbedObject.userData.velocity.set(0, 0, 0);
-                    gripPoint.attach(grabbedObject);
-                    
-                    if (grabbedObject.userData.type === 'box' || grabbedObject.userData.type === 'limb') {
-                        grabbedObject.position.set(0, 0, -0.3);
-                        grabbedObject.rotation.set(0, 0, 0);
-                    } else if (grabbedObject.userData.type === 'sword') {
-                        // Sword specific grip
-                        grabbedObject.position.set(0, 0.05, -0.05);
-                        grabbedObject.rotation.set(-Math.PI/2, Math.PI, 0); 
+                    if(grabbedObject.userData.type !== 'limb') { // Normal items attach
+                        grabbedObject.userData.velocity.set(0, 0, 0);
+                        gripPoint.attach(grabbedObject);
+                        
+                        if (grabbedObject.userData.type === 'box') {
+                            grabbedObject.position.set(0, 0, -0.3);
+                            grabbedObject.rotation.set(0, 0, 0);
+                        } else if (grabbedObject.userData.type === 'sword') {
+                            grabbedObject.position.set(0, 0.05, -0.05);
+                            grabbedObject.rotation.set(-Math.PI/2, Math.PI, 0); 
+                        } else {
+                            grabbedObject.position.set(0, 0.05, -0.05);
+                            grabbedObject.rotation.set(-Math.PI/2.5, Math.PI, 0); 
+                        }
                     } else {
-                        grabbedObject.position.set(0, 0.05, -0.05);
-                        grabbedObject.rotation.set(-Math.PI/2.5, Math.PI, 0); 
+                        // Dragging a ragdoll limb triggers death if alive
+                        triggerRagdoll(); 
                     }
                 }
             } 
-            else if (!hostState.grab && grabbedObject) {
-                scene.attach(grabbedObject);
-                grabbedObject.userData.velocity.copy(hostState.handVelocity).multiplyScalar(2.0);
-                grabbedObject.userData.velocity.y += 0.05; 
-                grabbedObject = null;
+            else if (!hostState.grab) {
+                isClimbing = false;
+                if(grabbedObject) {
+                    if(grabbedObject.userData.type !== 'limb') {
+                        scene.attach(grabbedObject);
+                        grabbedObject.userData.velocity.copy(hostState.handVelocity).multiplyScalar(2.0);
+                        grabbedObject.userData.velocity.y += 0.05; 
+                    }
+                    grabbedObject = null;
+                }
             }
         }
 
@@ -847,127 +900,130 @@
             }
         }
 
-        // Realistic Slicing: Detach Limb
-        function detachLimb(limb, weaponVelocity) {
-            if(limb.userData.isDetached || limb.userData.name === 'torso') return;
-            limb.userData.isDetached = true;
-            
-            // Add a blood stump to the parent where it got detached
-            let stumpGeo = new THREE.BoxGeometry(0.1, 0.02, 0.1);
-            let stump = new THREE.Mesh(stumpGeo, new THREE.MeshBasicMaterial({color: 0x880000}));
-            stump.position.copy(limb.position); // Same local pos
-            limb.parent.add(stump);
+        // Ragdoll Verlet Solver
+        function updateRagdoll() {
+            if(!theNPC.isDead) return;
 
-            // Detach and throw the limb
-            let wPos = new THREE.Vector3(); let wQuat = new THREE.Quaternion();
-            limb.getWorldPosition(wPos); limb.getWorldQuaternion(wQuat);
-            
-            limb.parent.remove(limb);
-            scene.add(limb);
-            limb.position.copy(wPos); limb.quaternion.copy(wQuat);
-            
-            limb.userData.velocity = weaponVelocity.clone().multiplyScalar(0.4);
-            limb.userData.velocity.y += 0.1; // Toss up slightly
-            interactables.push(limb); // Become interactive physics object
-            
-            if(limb.userData.name === 'head') theNPC.group.userData.isDead = true;
-        }
+            // 1. Integration (Gravity & Damping)
+            ragdollLimbs.forEach(limb => {
+                if(limb === grabbedObject) {
+                    // PBD constraint pulls rest of body toward grabbed hand!
+                    gripPoint.getWorldPosition(limb.position);
+                    limb.userData.prevPos.copy(limb.position); 
+                    limb.updateMatrixWorld();
+                    return;
+                }
 
-        // Realistic Stabbing: Wounds
-        function stabLimb(limb, worldHitPoint) {
-            // Create a small, embedded red box representing a deep stab wound
-            let wound = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), new THREE.MeshBasicMaterial({color: 0xaa0000}));
-            let localHit = new THREE.Vector3();
-            limb.worldToLocal(localHit.copy(worldHitPoint));
-            wound.position.copy(localHit);
-            limb.add(wound);
-            
-            limb.userData.hits++;
-            if(limb.userData.hits > 3) theNPC.group.userData.isDead = true; // Too many stabs = dead
+                let temp = limb.position.clone();
+                let vel = limb.position.clone().sub(limb.userData.prevPos);
+                vel.y -= 0.006; // Gravity
+                
+                limb.position.add(vel);
+                limb.userData.prevPos.copy(temp);
+
+                // Floor Collision & Friction
+                if (limb.position.y < limb.userData.radius) {
+                    limb.position.y = limb.userData.radius;
+                    limb.position.x = limb.userData.prevPos.x + (limb.position.x - limb.userData.prevPos.x)*0.8;
+                    limb.position.z = limb.userData.prevPos.z + (limb.position.z - limb.userData.prevPos.z)*0.8;
+                }
+                limb.updateMatrixWorld();
+            });
+
+            // 2. Solve Constraints (3 iterations for stability)
+            for(let i=0; i<3; i++) {
+                ragdollJoints.forEach(j => {
+                    let pW = j.p.localToWorld(j.pA.clone());
+                    let cW = j.c.localToWorld(j.cA.clone());
+                    let delta = cW.sub(pW);
+                    
+                    let pWeight = (j.p === grabbedObject) ? 0 : 0.5;
+                    let cWeight = (j.c === grabbedObject) ? 0 : 0.5;
+                    if(pWeight===0 && cWeight===0) return;
+
+                    let pMove = delta.clone().multiplyScalar(pWeight / (pWeight+cWeight));
+                    let cMove = delta.clone().multiplyScalar(-cWeight / (pWeight+cWeight));
+
+                    j.p.position.add(pMove);
+                    j.c.position.add(cMove);
+                    
+                    j.p.updateMatrixWorld();
+                    j.c.updateMatrixWorld();
+                });
+            }
         }
 
         function processPunchMechanics() {
-            // Find base and tip of the weapon (or hand)
-            let baseW = new THREE.Vector3();
-            let tipW = new THREE.Vector3();
-            
+            let baseW = new THREE.Vector3(); let tipW = new THREE.Vector3();
             if (grabbedObject && grabbedObject.userData.baseOffset) {
                 grabbedObject.localToWorld(baseW.copy(grabbedObject.userData.baseOffset));
                 grabbedObject.localToWorld(tipW.copy(grabbedObject.userData.tipOffset));
             } else {
-                gripPoint.getWorldPosition(baseW);
-                throwTracker.getWorldPosition(tipW);
+                gripPoint.getWorldPosition(baseW); throwTracker.getWorldPosition(tipW);
             }
 
             if (!hostState.prevTipPos) hostState.prevTipPos = tipW.clone();
-            
-            // Velocity calculation
             hostState.handVelocity.subVectors(tipW, hostState.prevTipPos);
             const handSpeed = hostState.handVelocity.length();
             hostState.prevTipPos.copy(tipW);
-
             const toolType = grabbedObject ? grabbedObject.userData.type : 'hand';
 
             if (handSpeed > 0.05) {
-                // 1. Raycast for NPC Combat Physics (Sword/Axe hits)
+                // Slicing physics
                 if (toolType === 'sword' || toolType === 'axe') {
-                    // Create a ray along the blade
                     let bladeVec = new THREE.Vector3().subVectors(tipW, baseW);
-                    let bladeLen = bladeVec.length();
                     let bladeDir = bladeVec.clone().normalize();
+                    let ray = new THREE.Raycaster(baseW, bladeDir, 0, bladeVec.length());
                     
-                    let ray = new THREE.Raycaster(baseW, bladeDir, 0, bladeLen);
-                    // Check intersection against all NPC limbs that aren't detached
-                    let activeLimbs = theNPC.limbs.filter(l => !l.userData.isDetached);
-                    let hits = ray.intersectObjects(activeLimbs, false);
-                    
+                    let hits = ray.intersectObjects(ragdollLimbs, false);
                     if(hits.length > 0) {
                         let hitLimb = hits[0].object;
-                        let hitPoint = hits[0].point;
+                        triggerRagdoll(); // Force to ragdoll state
                         
-                        // Calculate Attack Angle (Dot product between weapon movement direction and blade direction)
                         let moveDir = hostState.handVelocity.clone().normalize();
                         let dot = Math.abs(moveDir.dot(bladeDir));
                         
-                        // If moving along the blade axis > Stab. If moving perpendicular > Slice.
-                        if (dot > 0.7) {
-                            stabLimb(hitLimb, hitPoint);
-                        } else {
-                            detachLimb(hitLimb, hostState.handVelocity);
+                        // Slice Severing!
+                        if (dot < 0.8 && hitLimb.userData.name !== 'torso') {
+                            // Find and remove joint attaching this limb
+                            let jIndex = ragdollJoints.findIndex(j => j.c === hitLimb);
+                            if(jIndex !== -1) {
+                                ragdollJoints.splice(jIndex, 1);
+                                // Add explosive cut velocity via Verlet prevPos manipulation
+                                hitLimb.userData.prevPos.sub(hostState.handVelocity.clone().multiplyScalar(1.5));
+                                
+                                // Blood box
+                                let wound = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshBasicMaterial({color: 0xaa0000}));
+                                hitLimb.worldToLocal(wound.position.copy(hits[0].point));
+                                hitLimb.add(wound);
+                            }
                         }
                     }
                 }
 
-                // 2. Tree and Rock Mechanics
                 for (let tree of trees) {
                     if (tree.userData.isFalling) continue;
                     const treePos = new THREE.Vector3(); tree.getWorldPosition(treePos); treePos.y += 1.5; 
-                    
                     if (tipW.distanceTo(treePos) < 2.0) {
                         if (Date.now() - tree.userData.lastHitTime > 250) {
                             tree.userData.lastHitTime = Date.now();
                             tree.userData.hits += (toolType === 'axe' || toolType === 'sword' ? 3 : 1);
                             tree.rotation.z = (Math.random() - 0.5) * 0.3; tree.rotation.x = (Math.random() - 0.5) * 0.3;
-                            
                             if (tree.userData.hits >= 10) { 
-                                tree.userData.isFalling = true; 
-                                spawnPlanks(treePos.x, treePos.z); 
+                                tree.userData.isFalling = true; spawnPlanks(treePos.x, treePos.z); 
                             }
                         }
                     }
                 }
                 for (let i = rocks.length - 1; i >= 0; i--) {
                     let rock = rocks[i]; const rockPos = new THREE.Vector3(); rock.getWorldPosition(rockPos);
-                    
                     if (tipW.distanceTo(rockPos) < 2.0) {
                         if (Date.now() - rock.userData.lastHitTime > 250) {
                             rock.userData.lastHitTime = Date.now();
                             rock.userData.hits += (toolType === 'pickaxe' ? 3 : 0.5);
                             rock.rotation.y += 0.2; rock.scale.multiplyScalar(0.95);
-                            
                             if (rock.userData.hits >= 10) {
-                                scene.remove(rock); rocks.splice(i, 1);
-                                spawnMinedRocks(rockPos.x, rockPos.y, rockPos.z);
+                                scene.remove(rock); rocks.splice(i, 1); spawnMinedRocks(rockPos.x, rockPos.y, rockPos.z);
                             }
                         }
                     }
@@ -975,163 +1031,139 @@
             }
 
             for (let tree of trees) {
-                if (tree.userData.isFalling) {
-                    if (tree.rotation.x < Math.PI / 2) tree.rotation.x += 0.05;
-                } else {
-                    tree.rotation.z += (0 - tree.rotation.z) * 0.1; tree.rotation.x += (0 - tree.rotation.x) * 0.1;
-                }
+                if (tree.userData.isFalling) { if (tree.rotation.x < Math.PI / 2) tree.rotation.x += 0.05; } 
+                else { tree.rotation.z += (0 - tree.rotation.z) * 0.1; tree.rotation.x += (0 - tree.rotation.x) * 0.1; }
             }
         }
 
         function processPhysics() {
             for (let i = interactables.length - 1; i >= 0; i--) {
                 let obj = interactables[i];
-                if (obj === grabbedObject) continue;
+                if (obj === grabbedObject || obj.userData.type === 'limb') continue;
 
-                obj.userData.velocity.y -= 0.008; // Gravity
+                obj.userData.velocity.y -= 0.008; 
                 let nextPos = obj.position.clone().add(obj.userData.velocity);
                 
-                // Advanced Collisions for Physics items against trees/rocks
                 let bounced = false;
                 for(let obs of collisionObstacles) {
+                    if(obs === theNPC.group && theNPC.isDead) continue;
                     let dist2D = Math.hypot(nextPos.x - obs.position.x, nextPos.z - obs.position.z);
                     if(dist2D < (obs.userData.radius || 0.5)) {
-                        // Reflect velocity based on normal
                         let normal = new THREE.Vector3(nextPos.x - obs.position.x, 0, nextPos.z - obs.position.z).normalize();
-                        obj.userData.velocity.reflect(normal).multiplyScalar(0.5); // bounce and damp
-                        nextPos.add(normal.multiplyScalar(0.1)); // push out
+                        obj.userData.velocity.reflect(normal).multiplyScalar(0.5); 
+                        nextPos.add(normal.multiplyScalar(0.1)); 
                         bounced = true;
                     }
                 }
 
                 obj.position.copy(nextPos);
-
-                // Floor Collision
                 if (obj.position.y < 0.25) {
                     obj.position.y = 0.25;
-                    obj.userData.velocity.y *= -0.5; // Bounce
-                    obj.userData.velocity.x *= 0.8;  // Friction
-                    obj.userData.velocity.z *= 0.8;
-                    
-                    // Add some rolling to detached limbs
-                    if(obj.userData.type === 'limb') {
-                        obj.rotation.x += obj.userData.velocity.z * 0.5;
-                        obj.rotation.z -= obj.userData.velocity.x * 0.5;
-                    }
+                    obj.userData.velocity.y *= -0.5; obj.userData.velocity.x *= 0.8; obj.userData.velocity.z *= 0.8;
                 }
 
                 if (obj.userData.lifespan !== undefined) {
                     obj.userData.lifespan -= 0.016;
-                    if (obj.userData.lifespan <= 0) {
-                        scene.remove(obj); interactables.splice(i, 1);
-                    } else if (obj.userData.lifespan < 1.0) {
-                        obj.scale.setScalar(obj.userData.lifespan);
-                    }
+                    if (obj.userData.lifespan <= 0) { scene.remove(obj); interactables.splice(i, 1); } 
+                    else if (obj.userData.lifespan < 1.0) obj.scale.setScalar(obj.userData.lifespan);
                 }
             }
         }
 
         let npcTime = 0;
-        function updateNPC() {
-            if(theNPC.group && !theNPC.group.userData.isDead) {
-                npcTime += 0.05;
-                let forward = new THREE.Vector3(0,0,1).applyQuaternion(theNPC.group.quaternion);
-                let nextPos = theNPC.group.position.clone().addScaledVector(forward, 0.02);
-                
-                // NPC AI pathing (bounce off obstacles)
-                if(checkCollisions(nextPos, true)) {
-                    theNPC.group.rotation.y += Math.PI + (Math.random() - 0.5); // Turn around
-                } else {
-                    theNPC.group.position.copy(nextPos);
-                }
+        function updateNPCKinematics() {
+            if(!theNPC.group || theNPC.isDead) return;
+            npcTime += 0.05;
+            let forward = new THREE.Vector3(0,0,1).applyQuaternion(theNPC.group.quaternion);
+            let nextPos = theNPC.group.position.clone().addScaledVector(forward, 0.02);
+            
+            if(checkCollisions(nextPos, true)) theNPC.group.rotation.y += Math.PI + (Math.random() - 0.5); 
+            else theNPC.group.position.copy(nextPos);
 
-                // Walking animation (if limbs are still attached)
-                let limbs = theNPC.limbs;
-                let walkSwing = Math.sin(npcTime) * 0.5;
-                
-                if(!limbs[4].userData.isDetached) limbs[4].rotation.x = walkSwing;  // legL
-                if(!limbs[5].userData.isDetached) limbs[5].rotation.x = -walkSwing; // legR
-                if(!limbs[2].userData.isDetached) limbs[2].rotation.x = -walkSwing; // armL
-                if(!limbs[3].userData.isDetached) limbs[3].rotation.x = walkSwing;  // armR
-                
-                // Slight torso bob
-                limbs[0].position.y = Math.abs(Math.cos(npcTime)) * 0.05;
-            } else if (theNPC.group && theNPC.group.userData.isDead) {
-                // Fall over animation
-                if (theNPC.group.rotation.x < Math.PI / 2) {
-                    theNPC.group.rotation.x += 0.05;
-                    theNPC.group.position.y -= 0.02;
-                }
-            }
+            // Sine wave procedural animation for living NPC
+            let walkSwing = Math.sin(npcTime) * 0.5;
+            ragdollLimbs[5].rotation.x = walkSwing;  // LegLU
+            ragdollLimbs[7].rotation.x = -walkSwing; // LegRU
+            ragdollLimbs[2].rotation.x = -walkSwing; // ArmLU
+            ragdollLimbs[3].rotation.x = walkSwing;  // ArmRU
+            ragdollLimbs[0].position.y = Math.abs(Math.cos(npcTime)) * 0.05;
         }
 
         function renderLoop() {
-            // Player Movement & Universal Collision
+            // Player Movement & Gravity/Climbing
             const targetHeight = hostState.height;
-            let currentHeight = playerGroup.position.y;
-            currentHeight += (targetHeight - currentHeight) * 0.1;
+            
+            if(isClimbing) {
+                // Exact hand-to-wall translation formula
+                let handRelToPlayer = new THREE.Vector3();
+                gripPoint.getWorldPosition(handRelToPlayer);
+                handRelToPlayer.sub(playerGroup.position);
 
-            if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
-                const speed = 0.08;
-                const headForward = new THREE.Vector3(0, 0, -1);
-                headForward.applyQuaternion(headGroup.quaternion);
-                headForward.y = 0; headForward.normalize();
+                let targetPlayerPos = climbAnchorWorld.clone().sub(handRelToPlayer);
+                playerVelocity.copy(targetPlayerPos).sub(playerGroup.position); // Save velocity for flinging
+                playerGroup.position.copy(targetPlayerPos);
+            } else {
+                // Standard Locomotion
+                if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
+                    const speed = 0.08;
+                    const headForward = new THREE.Vector3(0, 0, -1);
+                    headForward.applyQuaternion(headGroup.quaternion);
+                    headForward.y = 0; headForward.normalize();
 
-                const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0, 1, 0)).normalize();
-                const moveVec = new THREE.Vector3()
-                    .addScaledVector(headForward, -hostState.moveY * speed)
-                    .addScaledVector(headRight, hostState.moveX * speed);
-                
-                // Check universal collisions before moving
-                let nextPos = playerGroup.position.clone().add(moveVec);
-                if (!checkCollisions(nextPos)) {
-                    playerGroup.position.x = nextPos.x;
-                    playerGroup.position.z = nextPos.z;
+                    const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0, 1, 0)).normalize();
+                    const moveVec = new THREE.Vector3()
+                        .addScaledVector(headForward, -hostState.moveY * speed)
+                        .addScaledVector(headRight, hostState.moveX * speed);
+                    
+                    let nextPos = playerGroup.position.clone().add(moveVec);
+                    if (!checkCollisions(nextPos)) {
+                        playerGroup.position.x = nextPos.x;
+                        playerGroup.position.z = nextPos.z;
+                    }
                 }
                 
-                playerGroup.position.y = currentHeight + Math.sin(Date.now() * 0.01) * 0.05;
-            } else {
-                playerGroup.position.y = currentHeight;
+                // Falling Physics
+                playerVelocity.y -= 0.008; // Gravity
+                playerGroup.position.add(playerVelocity);
+                playerVelocity.x *= 0.95; playerVelocity.z *= 0.95; // Air drag
+
+                if(playerGroup.position.y < targetHeight) {
+                    playerGroup.position.y = targetHeight + (Math.abs(hostState.moveX)>0 || Math.abs(hostState.moveY)>0 ? Math.sin(Date.now() * 0.01) * 0.05 : 0);
+                    playerVelocity.set(0,0,0);
+                }
             }
 
-            // Head Rotation
+            // Head & Arm Rotation
             if (hostState.headRot.alpha !== null && hostState.headRot.alpha !== 0) {
                 const hostOrient = getScreenOrientation();
                 applyHeadOrientation(headGroup, hostState.headRot.alpha, hostState.headRot.beta, hostState.headRot.gamma, hostOrient);
             }
 
-            // Arm Positioning & Push/Pull
             const headYaw = new THREE.Euler().setFromQuaternion(headGroup.quaternion, 'YXZ').y;
             const shoulderOffset = new THREE.Vector3(0.3, -0.3, -0.1);
             shoulderOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), headYaw);
             armGroup.position.copy(shoulderOffset);
 
-            if (Math.abs(hostState.accelZ) > 0.5) {
-                hostState.armVelocity += hostState.accelZ * 0.005; 
-            }
+            if (Math.abs(hostState.accelZ) > 0.5) hostState.armVelocity += hostState.accelZ * 0.005; 
             hostState.armVelocity *= 0.85; 
             hostState.handExtension += hostState.armVelocity;
             hostState.handExtension += (0 - hostState.handExtension) * 0.15; 
             hostState.handExtension = Math.max(-0.2, Math.min(0.6, hostState.handExtension));
 
             applyHandOrientation(armGroup, hostState.handRot.alpha, hostState.handRot.beta, hostState.handRot.gamma);
-            
             const forwardThrust = new THREE.Vector3(0, 0, -1).applyQuaternion(armGroup.quaternion);
             armGroup.position.addScaledVector(forwardThrust, hostState.handExtension);
 
             const targetCurl = hostState.grab ? Math.PI / 2.2 : 0;
-            for(let f of fingers) {
-                f.rotation.x += (targetCurl - f.rotation.x) * 0.2;
-            }
-            const targetThumbCurl = hostState.grab ? -Math.PI / 4 : 0;
-            thumb.rotation.z += (targetThumbCurl - thumb.rotation.z) * 0.2;
-
+            for(let f of fingers) f.rotation.x += (targetCurl - f.rotation.x) * 0.2;
+            thumb.rotation.z += (hostState.grab ? -Math.PI / 4 : 0 - thumb.rotation.z) * 0.2;
 
             processPunchMechanics();
             processPhysics();
-            updateNPC();
+            updateNPCKinematics();
+            updateRagdoll();
 
-            // Render Stereoscopic or Single Lens
+            // Render
             const w = window.innerWidth; const h = window.innerHeight;
             renderer.clear();
 
@@ -1190,8 +1222,7 @@
                 if (e.key === 'a') hostState.moveX = -1; if (e.key === 'd') hostState.moveX = 1;
                 if (e.key === ' ') { hostState.grab = true; processGrabLogic(); }
                 if (e.key === 'c') hostState.height = hostState.height === 1.6 ? 0.6 : 1.6;
-                // Add left click simulating rapid hand extension for testing stab in solo
-                if (e.key === 'e') { hostState.armVelocity = 0.5; }
+                if (e.key === 'e') hostState.armVelocity = 0.5; 
             });
             window.addEventListener('keyup', (e) => {
                 if (['w', 's'].includes(e.key)) hostState.moveY = 0;
@@ -1202,5 +1233,6 @@
     </script>
 </body>
 </html>
+
 
 ```
