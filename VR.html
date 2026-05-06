@@ -416,15 +416,13 @@
         let collisionObstacles = []; 
         let mountain;
         
-        // Verlet Ragdoll Physics System
-        let theNPC = { group: null, isDead: false, jointDefs: [] }; 
+        let theNPC = { group: null, isDead: false }; 
         let ragdollLimbs = [];
-        let ragdollJoints = [];
         
         let grabbedObject = null;
         let woodTex, groundTex;
         
-        // Player Physics for Climbing
+        // Player Physics for Climbing & Flinging
         let playerVelocity = new THREE.Vector3();
         let isClimbing = false;
         let climbAnchorWorld = new THREE.Vector3();
@@ -541,9 +539,9 @@
         function createLimb(geo, color, name, radius) {
             const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({color: color, roughness: 0.8}));
             mesh.castShadow = true; mesh.receiveShadow = true;
-            mesh.userData = { type: 'limb', name: name, hits: 0, prevPos: new THREE.Vector3(), radius: radius };
+            mesh.userData = { type: 'limb', name: name, hits: 0, radius: radius, isDetached: false, velocity: new THREE.Vector3() };
             ragdollLimbs.push(mesh);
-            interactables.push(mesh); // Make limbs grabable from the start
+            interactables.push(mesh);
             return mesh;
         }
 
@@ -556,7 +554,6 @@
 
             const skinColor = 0xffccaa; const shirtColor = 0x2563eb; const pantsColor = 0x333333;
 
-            // Highly Segmented 10-part Ragdoll Structure
             let torso = createLimb(new THREE.BoxGeometry(0.4, 0.6, 0.25), shirtColor, 'torso', 0.2);
             theNPC.group.add(torso);
 
@@ -582,34 +579,31 @@
             legRU.position.set(0.12, -0.5, 0); torso.add(legRU);
             let legRL = createLimb(new THREE.BoxGeometry(0.15, 0.4, 0.15), skinColor, 'legRL', 0.1);
             legRL.position.set(0, -0.4, 0); legRU.add(legRL);
-
-            // Define Verlet Physics Joints (Parent, Child, ParentAnchor(Local), ChildAnchor(Local))
-            theNPC.jointDefs = [
-                { p: torso, c: head, pA: new THREE.Vector3(0,0.3,0), cA: new THREE.Vector3(0,-0.12,0) },
-                { p: torso, c: armLU, pA: new THREE.Vector3(-0.25,0.25,0), cA: new THREE.Vector3(0,0.15,0) },
-                { p: armLU, c: armLL, pA: new THREE.Vector3(0,-0.15,0), cA: new THREE.Vector3(0,0.15,0) },
-                { p: torso, c: armRU, pA: new THREE.Vector3(0.25,0.25,0), cA: new THREE.Vector3(0,0.15,0) },
-                { p: armRU, c: armRL, pA: new THREE.Vector3(0,-0.15,0), cA: new THREE.Vector3(0,0.15,0) },
-                { p: torso, c: legLU, pA: new THREE.Vector3(-0.12,-0.3,0), cA: new THREE.Vector3(0,0.2,0) },
-                { p: legLU, c: legLL, pA: new THREE.Vector3(0,-0.2,0), cA: new THREE.Vector3(0,0.2,0) },
-                { p: torso, c: legRU, pA: new THREE.Vector3(0.12,-0.3,0), cA: new THREE.Vector3(0,0.2,0) },
-                { p: legRU, c: legLL, pA: new THREE.Vector3(0,-0.2,0), cA: new THREE.Vector3(0,0.2,0) }
-            ];
         }
 
+        // True Hierarchical Ragdoll Trigger
         function triggerRagdoll() {
             if(theNPC.isDead) return;
             theNPC.isDead = true;
-            ragdollJoints = [...theNPC.jointDefs]; // Copy joints to active solver
-
-            // Unparent all limbs to world space for independent physics
-            ragdollLimbs.forEach(limb => {
-                scene.attach(limb);
-                limb.userData.prevPos.copy(limb.position);
-                // Add slight explosive slump
-                limb.userData.prevPos.x += (Math.random() - 0.5) * 0.05;
-                limb.userData.prevPos.z += (Math.random() - 0.5) * 0.05;
-            });
+            
+            // Unparent Torso into world space to act as physical root
+            let torso = theNPC.group.children[0]; 
+            torso.userData.isDetached = true; 
+            torso.userData.isRootRagdoll = true;
+            
+            let wPos = new THREE.Vector3(); let wQuat = new THREE.Quaternion();
+            torso.getWorldPosition(wPos); torso.getWorldQuaternion(wQuat);
+            
+            scene.add(torso);
+            torso.position.copy(wPos); torso.quaternion.copy(wQuat);
+            
+            // Give it an initial tumble velocity away from player
+            let throwDir = new THREE.Vector3(0, 0, -1).applyQuaternion(headGroup.quaternion).multiplyScalar(-0.1);
+            torso.userData.velocity.copy(throwDir);
+            torso.userData.velocity.y = 0.15;
+            
+            // Give it some initial rotation to look like collapsing
+            torso.rotation.x += 0.5;
         }
 
         let isThreeJSInitialized = false;
@@ -829,12 +823,11 @@
                     if(ray.intersectObject(mountain).length > 0 || handPos.distanceTo(mountain.position) < 26) {
                         isClimbing = true;
                         gripPoint.getWorldPosition(climbAnchorWorld);
-                        playerVelocity.set(0,0,0);
                         return;
                     }
                 }
 
-                // 2. Check Objects & Ragdoll Limbs
+                // 2. Check Objects & Detached Ragdoll Limbs
                 let closestDist = 3.0; 
                 let target = null;
                 for (let obj of interactables) {
@@ -847,7 +840,7 @@
                 
                 if (target) {
                     grabbedObject = target;
-                    if(grabbedObject.userData.type !== 'limb') { // Normal items attach
+                    if(grabbedObject.userData.type !== 'limb' || grabbedObject.userData.isDetached) { // Normal items attach
                         grabbedObject.userData.velocity.set(0, 0, 0);
                         gripPoint.attach(grabbedObject);
                         
@@ -862,7 +855,7 @@
                             grabbedObject.rotation.set(-Math.PI/2.5, Math.PI, 0); 
                         }
                     } else {
-                        // Dragging a ragdoll limb triggers death if alive
+                        // Dragging an attached limb triggers ragdoll death instantly
                         triggerRagdoll(); 
                     }
                 }
@@ -870,7 +863,7 @@
             else if (!hostState.grab) {
                 isClimbing = false;
                 if(grabbedObject) {
-                    if(grabbedObject.userData.type !== 'limb') {
+                    if(grabbedObject.userData.type !== 'limb' || grabbedObject.userData.isDetached) {
                         scene.attach(grabbedObject);
                         grabbedObject.userData.velocity.copy(hostState.handVelocity).multiplyScalar(2.0);
                         grabbedObject.userData.velocity.y += 0.05; 
@@ -900,59 +893,6 @@
             }
         }
 
-        // Ragdoll Verlet Solver
-        function updateRagdoll() {
-            if(!theNPC.isDead) return;
-
-            // 1. Integration (Gravity & Damping)
-            ragdollLimbs.forEach(limb => {
-                if(limb === grabbedObject) {
-                    // PBD constraint pulls rest of body toward grabbed hand!
-                    gripPoint.getWorldPosition(limb.position);
-                    limb.userData.prevPos.copy(limb.position); 
-                    limb.updateMatrixWorld();
-                    return;
-                }
-
-                let temp = limb.position.clone();
-                let vel = limb.position.clone().sub(limb.userData.prevPos);
-                vel.y -= 0.006; // Gravity
-                
-                limb.position.add(vel);
-                limb.userData.prevPos.copy(temp);
-
-                // Floor Collision & Friction
-                if (limb.position.y < limb.userData.radius) {
-                    limb.position.y = limb.userData.radius;
-                    limb.position.x = limb.userData.prevPos.x + (limb.position.x - limb.userData.prevPos.x)*0.8;
-                    limb.position.z = limb.userData.prevPos.z + (limb.position.z - limb.userData.prevPos.z)*0.8;
-                }
-                limb.updateMatrixWorld();
-            });
-
-            // 2. Solve Constraints (3 iterations for stability)
-            for(let i=0; i<3; i++) {
-                ragdollJoints.forEach(j => {
-                    let pW = j.p.localToWorld(j.pA.clone());
-                    let cW = j.c.localToWorld(j.cA.clone());
-                    let delta = cW.sub(pW);
-                    
-                    let pWeight = (j.p === grabbedObject) ? 0 : 0.5;
-                    let cWeight = (j.c === grabbedObject) ? 0 : 0.5;
-                    if(pWeight===0 && cWeight===0) return;
-
-                    let pMove = delta.clone().multiplyScalar(pWeight / (pWeight+cWeight));
-                    let cMove = delta.clone().multiplyScalar(-cWeight / (pWeight+cWeight));
-
-                    j.p.position.add(pMove);
-                    j.c.position.add(cMove);
-                    
-                    j.p.updateMatrixWorld();
-                    j.c.updateMatrixWorld();
-                });
-            }
-        }
-
         function processPunchMechanics() {
             let baseW = new THREE.Vector3(); let tipW = new THREE.Vector3();
             if (grabbedObject && grabbedObject.userData.baseOffset) {
@@ -969,34 +909,62 @@
             const toolType = grabbedObject ? grabbedObject.userData.type : 'hand';
 
             if (handSpeed > 0.05) {
-                // Slicing physics
+                // Highly accurate continuous line-segment intersection for slicing
                 if (toolType === 'sword' || toolType === 'axe') {
                     let bladeVec = new THREE.Vector3().subVectors(tipW, baseW);
+                    let bladeLen = bladeVec.length();
                     let bladeDir = bladeVec.clone().normalize();
-                    let ray = new THREE.Raycaster(baseW, bladeDir, 0, bladeVec.length());
                     
-                    let hits = ray.intersectObjects(ragdollLimbs, false);
-                    if(hits.length > 0) {
-                        let hitLimb = hits[0].object;
+                    let hitLimb = null;
+                    let hitPoint = null;
+
+                    // Manual mathematical distance check from each limb to the sword's blade line
+                    for (let limb of ragdollLimbs) {
+                        if (limb.userData.isDetached || limb.userData.name === 'torso') continue;
+                        let limbW = new THREE.Vector3(); limb.getWorldPosition(limbW);
+                        
+                        // Vector from blade base to limb
+                        let toLimb = new THREE.Vector3().subVectors(limbW, baseW);
+                        // Project onto blade line segment
+                        let t = Math.max(0, Math.min(bladeLen, toLimb.dot(bladeDir)));
+                        let closestPoint = baseW.clone().add(bladeDir.clone().multiplyScalar(t));
+                        
+                        if (closestPoint.distanceTo(limbW) < (limb.userData.radius || 0.15)) {
+                            hitLimb = limb;
+                            hitPoint = closestPoint;
+                            break;
+                        }
+                    }
+
+                    if (hitLimb) {
                         triggerRagdoll(); // Force to ragdoll state
                         
                         let moveDir = hostState.handVelocity.clone().normalize();
                         let dot = Math.abs(moveDir.dot(bladeDir));
                         
-                        // Slice Severing!
-                        if (dot < 0.8 && hitLimb.userData.name !== 'torso') {
-                            // Find and remove joint attaching this limb
-                            let jIndex = ragdollJoints.findIndex(j => j.c === hitLimb);
-                            if(jIndex !== -1) {
-                                ragdollJoints.splice(jIndex, 1);
-                                // Add explosive cut velocity via Verlet prevPos manipulation
-                                hitLimb.userData.prevPos.sub(hostState.handVelocity.clone().multiplyScalar(1.5));
-                                
-                                // Blood box
-                                let wound = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshBasicMaterial({color: 0xaa0000}));
-                                hitLimb.worldToLocal(wound.position.copy(hits[0].point));
-                                hitLimb.add(wound);
-                            }
+                        // Clean Slice Mechanics!
+                        if (dot < 0.8) {
+                            hitLimb.userData.isDetached = true;
+                            let wPos = new THREE.Vector3(); let wQuat = new THREE.Quaternion();
+                            hitLimb.getWorldPosition(wPos); hitLimb.getWorldQuaternion(wQuat);
+                            
+                            // 1. Spawns physical blood stump attached to the parent joint
+                            let stump = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.02, 0.12), new THREE.MeshBasicMaterial({color: 0x880000}));
+                            hitLimb.parent.add(stump);
+                            stump.position.copy(hitLimb.position);
+                            
+                            // 2. Unparents limb completely and places it in world physics
+                            scene.add(hitLimb);
+                            hitLimb.position.copy(wPos); hitLimb.quaternion.copy(wQuat);
+                            
+                            // 3. Explodes outward based on swing velocity
+                            hitLimb.userData.velocity.copy(hostState.handVelocity).multiplyScalar(1.2);
+                            hitLimb.userData.velocity.y += 0.15;
+                            
+                            // 4. Create embedded wound decal on the sliced part
+                            let wound = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.02, 0.06), new THREE.MeshBasicMaterial({color: 0xaa0000}));
+                            hitLimb.worldToLocal(wound.position.copy(hitPoint));
+                            hitLimb.add(wound);
                         }
                     }
                 }
@@ -1039,7 +1007,10 @@
         function processPhysics() {
             for (let i = interactables.length - 1; i >= 0; i--) {
                 let obj = interactables[i];
-                if (obj === grabbedObject || obj.userData.type === 'limb') continue;
+                if (obj === grabbedObject) continue;
+                
+                // Exclude limbs that are still attached to the ragdoll hierarchy
+                if (obj.userData.type === 'limb' && !obj.userData.isDetached && !obj.userData.isRootRagdoll) continue;
 
                 obj.userData.velocity.y -= 0.008; 
                 let nextPos = obj.position.clone().add(obj.userData.velocity);
@@ -1057,9 +1028,16 @@
                 }
 
                 obj.position.copy(nextPos);
+                
                 if (obj.position.y < 0.25) {
                     obj.position.y = 0.25;
                     obj.userData.velocity.y *= -0.5; obj.userData.velocity.x *= 0.8; obj.userData.velocity.z *= 0.8;
+                }
+
+                // Smooth rotation mechanics for detached ragdoll physics & tools
+                if (obj.userData.type === 'limb' || obj.userData.isRootRagdoll || obj.userData.type === 'axe') {
+                    obj.rotation.x += obj.userData.velocity.z * 0.2;
+                    obj.rotation.z -= obj.userData.velocity.x * 0.2;
                 }
 
                 if (obj.userData.lifespan !== undefined) {
@@ -1090,46 +1068,61 @@
         }
 
         function renderLoop() {
-            // Player Movement & Gravity/Climbing
             const targetHeight = hostState.height;
             
+            // Player Momentum, Gravity & Climbing Simulation
             if(isClimbing) {
-                // Exact hand-to-wall translation formula
                 let handRelToPlayer = new THREE.Vector3();
                 gripPoint.getWorldPosition(handRelToPlayer);
                 handRelToPlayer.sub(playerGroup.position);
 
                 let targetPlayerPos = climbAnchorWorld.clone().sub(handRelToPlayer);
-                playerVelocity.copy(targetPlayerPos).sub(playerGroup.position); // Save velocity for flinging
+                
+                // Anti-Clip Push Out (Mountain is at 0, -5, -40, radius ~35)
+                let toMountainCenter = targetPlayerPos.clone().sub(mountain.position);
+                if(toMountainCenter.length() < 34) {
+                    toMountainCenter.normalize().multiplyScalar(34);
+                    targetPlayerPos.copy(mountain.position).add(toMountainCenter);
+                    // Correct the hand anchor so you don't accumulate invisible sliding force
+                    climbAnchorWorld.copy(targetPlayerPos).add(handRelToPlayer);
+                }
+
+                // Preserve & smooth exact velocity for explosive release flings
+                let instantVel = targetPlayerPos.clone().sub(playerGroup.position);
+                playerVelocity.lerp(instantVel, 0.6); 
                 playerGroup.position.copy(targetPlayerPos);
             } else {
-                // Standard Locomotion
-                if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
-                    const speed = 0.08;
-                    const headForward = new THREE.Vector3(0, 0, -1);
-                    headForward.applyQuaternion(headGroup.quaternion);
-                    headForward.y = 0; headForward.normalize();
-
-                    const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0, 1, 0)).normalize();
-                    const moveVec = new THREE.Vector3()
-                        .addScaledVector(headForward, -hostState.moveY * speed)
-                        .addScaledVector(headRight, hostState.moveX * speed);
-                    
-                    let nextPos = playerGroup.position.clone().add(moveVec);
-                    if (!checkCollisions(nextPos)) {
-                        playerGroup.position.x = nextPos.x;
-                        playerGroup.position.z = nextPos.z;
-                    }
-                }
-                
-                // Falling Physics
+                // Falling / Flinging Physics
                 playerVelocity.y -= 0.008; // Gravity
                 playerGroup.position.add(playerVelocity);
-                playerVelocity.x *= 0.95; playerVelocity.z *= 0.95; // Air drag
+                playerVelocity.x *= 0.98; // Low air drag for massive flings
+                playerVelocity.z *= 0.98; 
 
-                if(playerGroup.position.y < targetHeight) {
+                // Floor Collision
+                if(playerGroup.position.y <= targetHeight && playerVelocity.y <= 0) {
                     playerGroup.position.y = targetHeight + (Math.abs(hostState.moveX)>0 || Math.abs(hostState.moveY)>0 ? Math.sin(Date.now() * 0.01) * 0.05 : 0);
-                    playerVelocity.set(0,0,0);
+                    playerVelocity.y = 0;
+                    playerVelocity.x *= 0.8; // Ground friction
+                    playerVelocity.z *= 0.8;
+                    
+                    // Standard Joystick Locomotion (Only applies tightly on the ground)
+                    if (Math.abs(hostState.moveX) > 0 || Math.abs(hostState.moveY) > 0) {
+                        const speed = 0.08;
+                        const headForward = new THREE.Vector3(0, 0, -1);
+                        headForward.applyQuaternion(headGroup.quaternion);
+                        headForward.y = 0; headForward.normalize();
+
+                        const headRight = new THREE.Vector3().crossVectors(headForward, new THREE.Vector3(0, 1, 0)).normalize();
+                        const moveVec = new THREE.Vector3()
+                            .addScaledVector(headForward, -hostState.moveY * speed)
+                            .addScaledVector(headRight, hostState.moveX * speed);
+                        
+                        let nextPos = playerGroup.position.clone().add(moveVec);
+                        if (!checkCollisions(nextPos)) {
+                            playerGroup.position.x = nextPos.x;
+                            playerGroup.position.z = nextPos.z;
+                        }
+                    }
                 }
             }
 
@@ -1161,7 +1154,6 @@
             processPunchMechanics();
             processPhysics();
             updateNPCKinematics();
-            updateRagdoll();
 
             // Render
             const w = window.innerWidth; const h = window.innerHeight;
