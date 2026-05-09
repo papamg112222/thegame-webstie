@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMQX Screen Hoster</title>
+    <!-- We use MQTT.js to connect to the EMQX broker -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #ffffff; margin: 0; padding: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        .panel { background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; }
+        h2, h3 { margin-top: 0; color: #00b074; }
+        input { padding: 10px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 4px; width: calc(100% - 22px); margin-bottom: 10px; }
+        button { padding: 10px 15px; background: #00b074; border: none; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-bottom: 10px; }
+        button:hover { background: #008f5d; }
+        .join-btn { background: #007bff; width: auto; margin: 0; }
+        .join-btn:hover { background: #0056b3; }
+        ul { list-style: none; padding: 0; }
+        li { background: #2a2a2a; margin-bottom: 8px; padding: 12px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+        video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16/9; }
+        #status { font-size: 0.9em; color: #aaa; margin-bottom: 15px; display: block; }
+    </style>
+</head>
+<body>
+
+<div class="grid">
+    <!-- Left Panel: Controls & Server List -->
+    <div class="panel">
+        <h2>EMQX Hoster</h2>
+        <span id="status">Connecting to EMQX Broker...</span>
+        
+        <input type="text" id="serverNameInput" placeholder="Enter a name for your server...">
+        <button id="hostBtn">Host My Screen</button>
+
+        <h3>Live Servers</h3>
+        <ul id="serverList">
+            <!-- Active hosts will appear here -->
+        </ul>
+    </div>
+
+    <!-- Right Panel: Video Display -->
+    <div class="panel">
+        <h3 id="videoTitle">Video Feed</h3>
+        <!-- autoPlay is required for WebRTC video to show up -->
+        <video id="videoPlayer" autoplay playsinline controls></video>
+    </div>
+</div>
+
+<script>
+    // 1. Connect to EMQX Public Broker via Secure WebSockets (WSS)
+    const mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    const myId = 'user_' + Math.random().toString(36).substring(2, 9);
+    
+    // MQTT Topics
+    const TOPIC_SERVERS = 'emqx_webrtc_app/servers/';
+    const TOPIC_SIGNALING = 'emqx_webrtc_app/signaling/';
+
+    // WebRTC Variables
+    let peerConnection;
+    let localStream;
+    let isHosting = false;
+    let activeServers = {};
+
+    // Standard Google STUN servers to bypass firewalls for P2P
+    const rtcConfig = {
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    };
+
+    const statusEl = document.getElementById('status');
+    const serverListEl = document.getElementById('serverList');
+    const videoPlayer = document.getElementById('videoPlayer');
+
+    // --- MQTT Connection Logic ---
+    mqttClient.on('connect', () => {
+        statusEl.innerText = `Connected to EMQX! (ID: ${myId})`;
+        statusEl.style.color = '#00b074';
+        
+        // Subscribe to see all active servers
+        mqttClient.subscribe(TOPIC_SERVERS + '+');
+        // Subscribe to my own signaling channel
+        mqttClient.subscribe(TOPIC_SIGNALING + myId);
+    });
+
+    mqttClient.on('message', async (topic, message) => {
+        const payload = JSON.parse(message.toString());
+
+        // Handle Server List Updates
+        if (topic.startsWith(TOPIC_SERVERS)) {
+            const serverName = topic.split('/').pop();
+            if (payload.action === 'online') {
+                activeServers[serverName] = payload.hostId;
+                updateServerList();
+            } else if (payload.action === 'offline') {
+                delete activeServers[serverName];
+                updateServerList();
+            }
+        }
+
+        // Handle WebRTC Signaling (Offers, Answers, ICE Candidates)
+        if (topic === TOPIC_SIGNALING + myId) {
+            if (payload.type === 'offer' && isHosting) {
+                // Host receives an offer from a client, sends an answer
+                handleReceiveOffer(payload);
+            } else if (payload.type === 'answer' && !isHosting) {
+                // Client receives an answer from the host
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+            } else if (payload.type === 'candidate' && peerConnection) {
+                // Both sides exchange ICE candidates to find the best network route
+                await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+            }
+        }
+    });
+
+    function updateServerList() {
+        serverListEl.innerHTML = '';
+        for (const [name, hostId] of Object.entries(activeServers)) {
+            if (hostId === myId) continue; // Don't show our own server to ourselves
+            
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <span>🖥️ ${name}</span>
+                <button class="join-btn" onclick="joinServer('${name}', '${hostId}')">Join</button>
+            `;
+            serverListEl.appendChild(li);
+        }
+    }
+
+    // --- Host Logic ---
+    document.getElementById('hostBtn').onclick = async () => {
+        const serverName = document.getElementById('serverNameInput').value || 'Unnamed Server';
+        
+        try {
+            // Ask user for screen recording permission
+            localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            videoPlayer.srcObject = localStream;
+            videoPlayer.muted = true; // Mute locally to prevent feedback
+            document.getElementById('videoTitle').innerText = `Hosting: ${serverName}`;
+            isHosting = true;
+
+            // Announce server to EMQX (Using Retain so new clients see it immediately)
+            mqttClient.publish(TOPIC_SERVERS + serverName, JSON.stringify({
+                action: 'online',
+                hostId: myId
+            }), { retain: true });
+
+            // If the user stops screen sharing, remove the server
+            localStream.getVideoTracks()[0].onended = () => {
+                mqttClient.publish(TOPIC_SERVERS + serverName, JSON.stringify({ action: 'offline' }), { retain: true });
+                isHosting = false;
+                videoPlayer.srcObject = null;
+                document.getElementById('videoTitle').innerText = 'Video Feed';
+            };
+
+        } catch (err) {
+            console.error("Error capturing screen:", err);
+            alert("Could not access display. Permission denied?");
+        }
+    };
+
+    async function handleReceiveOffer(payload) {
+        peerConnection = new RTCPeerConnection(rtcConfig);
+        
+        // Add our local screen stream to the connection so the client can see it
+        localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+        // Send ICE candidates to the client
+        peerConnection.onicecandidate = event => {
+            if (event.candidate) {
+                mqttClient.publish(TOPIC_SIGNALING + payload.from, JSON.stringify({
+                    type: 'candidate',
+                    candidate: event.candidate,
+                    from: myId
+                }));
+            }
+        };
+
+        // Accept offer and create answer
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        // Send answer back to client
+        mqttClient.publish(TOPIC_SIGNALING + payload.from, JSON.stringify({
+            type: 'answer',
+            sdp: answer,
+            from: myId
+        }));
+    }
+
+    // --- Client (Join) Logic ---
+    async function joinServer(serverName, targetHostId) {
+        document.getElementById('videoTitle').innerText = `Watching: ${serverName}`;
+        
+        peerConnection = new RTCPeerConnection(rtcConfig);
+
+        // When the host's video track arrives, attach it to our video player
+        peerConnection.ontrack = event => {
+            videoPlayer.srcObject = event.streams[0];
+        };
+
+        // Send ICE candidates to the host
+        peerConnection.onicecandidate = event => {
+            if (event.candidate) {
+                mqttClient.publish(TOPIC_SIGNALING + targetHostId, JSON.stringify({
+                    type: 'candidate',
+                    candidate: event.candidate,
+                    from: myId
+                }));
+            }
+        };
+
+        // Create an offer to connect and send it via EMQX
+        const offer = await peerConnection.createOffer({ offerToReceiveVideo: true });
+        await peerConnection.setLocalDescription(offer);
+
+        mqttClient.publish(TOPIC_SIGNALING + targetHostId, JSON.stringify({
+            type: 'offer',
+            sdp: offer,
+            from: myId
+        }));
+    }
+</script>
+</body>
+</html>
