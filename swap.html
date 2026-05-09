@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EMQX Walkie-Talkie Camera</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #ffffff; margin: 0; padding: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 2fr; gap: 20px; max-width: 1200px; margin: 0 auto; }
+        .panel { background: #1e1e1e; padding: 20px; border-radius: 8px; border: 1px solid #333; }
+        h2, h3 { margin-top: 0; color: #00b074; }
+        input { padding: 10px; background: #2a2a2a; border: 1px solid #444; color: white; border-radius: 4px; width: calc(100% - 22px); margin-bottom: 10px; }
+        button { padding: 10px 15px; background: #00b074; border: none; color: white; border-radius: 4px; cursor: pointer; font-weight: bold; width: 100%; margin-bottom: 10px; transition: 0.1s; }
+        button:hover { background: #008f5d; }
+        .camera-btn { background: #ff4757; width: auto; margin: 0; }
+        .camera-btn:hover { background: #ff253a; }
+        
+        ul { list-style: none; padding: 0; }
+        li { background: #2a2a2a; margin-bottom: 8px; padding: 12px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; }
+        
+        .video-container { position: relative; width: 100%; }
+        video { width: 100%; background: #000; border-radius: 8px; aspect-ratio: 16/9; object-fit: cover; }
+        
+        /* New UI Elements */
+        #status { font-size: 0.9em; color: #aaa; margin-bottom: 15px; display: block; }
+        .controls-row { display: flex; gap: 10px; margin-top: 10px; }
+        
+        #fullscreenBtn { background: #333; border: 1px solid #555; display: none; }
+        #fullscreenBtn:hover { background: #444; }
+        
+        /* Push To Talk Button */
+        #pttBtn { 
+            background: #007bff; 
+            display: none; 
+            font-size: 1.1em; 
+            padding: 15px; 
+            user-select: none; /* Prevents text highlighting on mobile when holding */
+            -webkit-user-select: none;
+        }
+        #pttBtn.active { background: #ff4757; transform: scale(0.98); }
+    </style>
+</head>
+<body>
+
+<div class="grid">
+    <div class="panel">
+        <h2>EMQX Router</h2>
+        <span id="status">Connecting to EMQX...</span>
+        
+        <input type="text" id="serverNameInput" placeholder="Name your display...">
+        <button id="hostBtn">Host Display Monitor</button>
+
+        <h3>Available Monitors</h3>
+        <ul id="serverList"></ul>
+    </div>
+
+    <div class="panel">
+        <h3 id="videoTitle">Waiting for connection...</h3>
+        <div class="video-container">
+            <video id="videoPlayer" autoplay playsinline></video>
+            
+            <!-- Hidden Audio Element to catch incoming voice on the Camera side -->
+            <audio id="remoteAudio" autoplay></audio>
+
+            <div class="controls-row">
+                <button id="pttBtn">🎤 Hold to Talk</button>
+                <button id="fullscreenBtn">📺 Fullscreen</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt');
+    const myId = 'device_' + Math.random().toString(36).substring(2, 9);
+    
+    const TOPIC_SERVERS = 'emqx_webrtc_cam/monitors/';
+    const TOPIC_SIGNALING = 'emqx_webrtc_cam/signaling/';
+
+    let peerConnection;
+    let localStream;      // For video
+    let localAudioStream; // For host microphone
+    let localAudioTrack;  // The actual microphone track to mute/unmute
+    let isMonitor = false;
+    let activeServers = {};
+
+    const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+    // DOM Elements
+    const statusEl = document.getElementById('status');
+    const serverListEl = document.getElementById('serverList');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const remoteAudio = document.getElementById('remoteAudio');
+    const videoTitle = document.getElementById('videoTitle');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const pttBtn = document.getElementById('pttBtn');
+
+    // --- Push-To-Talk Logic ---
+    function startTalking(e) {
+        if (e) e.preventDefault(); // Prevents mobile from firing duplicate events
+        if (localAudioTrack) {
+            localAudioTrack.enabled = true; // Unmute
+            pttBtn.classList.add('active');
+            pttBtn.innerText = '🗣️ Talking...';
+        }
+    }
+
+    function stopTalking(e) {
+        if (e) e.preventDefault();
+        if (localAudioTrack) {
+            localAudioTrack.enabled = false; // Mute
+            pttBtn.classList.remove('active');
+            pttBtn.innerText = '🎤 Hold to Talk';
+        }
+    }
+
+    // Mouse events for PC
+    pttBtn.addEventListener('mousedown', startTalking);
+    pttBtn.addEventListener('mouseup', stopTalking);
+    pttBtn.addEventListener('mouseleave', stopTalking);
+    // Touch events for Mobile
+    pttBtn.addEventListener('touchstart', startTalking, { passive: false });
+    pttBtn.addEventListener('touchend', stopTalking);
+    pttBtn.addEventListener('touchcancel', stopTalking);
+
+    // --- Fullscreen Logic ---
+    fullscreenBtn.onclick = () => {
+        if (videoPlayer.requestFullscreen) videoPlayer.requestFullscreen();
+        else if (videoPlayer.webkitRequestFullscreen) videoPlayer.webkitRequestFullscreen();
+    };
+
+    // --- MQTT Connection ---
+    mqttClient.on('connect', () => {
+        statusEl.innerText = `Connected! (ID: ${myId})`;
+        statusEl.style.color = '#00b074';
+        mqttClient.subscribe(TOPIC_SERVERS + '+');
+        mqttClient.subscribe(TOPIC_SIGNALING + myId);
+    });
+
+    mqttClient.on('message', async (topic, message) => {
+        const payload = JSON.parse(message.toString());
+
+        if (topic.startsWith(TOPIC_SERVERS)) {
+            const serverName = topic.split('/').pop();
+            if (payload.action === 'online') {
+                activeServers[serverName] = payload.hostId;
+                updateServerList();
+            } else if (payload.action === 'offline') {
+                delete activeServers[serverName];
+                updateServerList();
+            }
+        }
+
+        if (topic === TOPIC_SIGNALING + myId) {
+            if (payload.type === 'offer' && isMonitor) handleReceiveCameraOffer(payload);
+            else if (payload.type === 'answer' && !isMonitor) await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+            else if (payload.type === 'candidate' && peerConnection) await peerConnection.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        }
+    });
+
+    function updateServerList() {
+        serverListEl.innerHTML = '';
+        for (const [name, hostId] of Object.entries(activeServers)) {
+            if (hostId === myId) continue; 
+            const li = document.createElement('li');
+            li.innerHTML = `<span>🖥️ ${name}</span><button class="camera-btn" onclick="sendCameraTo('${name}', '${hostId}')">Send Camera</button>`;
+            serverListEl.appendChild(li);
+        }
+    }
+
+    // --- Device A: Hosting the Display Monitor ---
+    document.getElementById('hostBtn').onclick = async () => {
+        const serverName = document.getElementById('serverNameInput').value || 'My Screen';
+        isMonitor = true;
+        videoTitle.innerText = `Hosting Monitor: ${serverName}`;
+
+        // Get Host Microphone for Walkie-Talkie
+        try {
+            localAudioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            localAudioTrack = localAudioStream.getAudioTracks()[0];
+            localAudioTrack.enabled = false; // Muted by default
+        } catch (e) {
+            console.warn("Host microphone not found or permission denied.");
+        }
+
+        mqttClient.publish(TOPIC_SERVERS + serverName, JSON.stringify({ action: 'online', hostId: myId }), { retain: true });
+        window.addEventListener('beforeunload', () => mqttClient.publish(TOPIC_SERVERS + serverName, JSON.stringify({ action: 'offline' }), { retain: true }));
+    };
+
+    async function handleReceiveCameraOffer(payload) {
+        peerConnection = new RTCPeerConnection(rtcConfig);
+        
+        // If Host has a mic, add it to the connection so the Camera can hear
+        if (localAudioTrack) {
+            peerConnection.addTrack(localAudioTrack, localAudioStream);
+        }
+        
+        peerConnection.ontrack = event => {
+            // The Host receives the video AND audio from the camera here
+            videoPlayer.srcObject = event.streams[0];
+            videoPlayer.muted = false; // Make sure host can hear the camera
+            
+            videoTitle.innerText = `Live Camera Connected`;
+            fullscreenBtn.style.display = 'block';
+            if (localAudioTrack) pttBtn.style.display = 'block'; // Show PTT if host has a mic
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+            if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed') {
+                fullscreenBtn.style.display = 'none';
+                pttBtn.style.display = 'none';
+                videoTitle.innerText = `Camera Disconnected`;
+            }
+        };
+
+        peerConnection.onicecandidate = event => {
+            if (event.candidate) mqttClient.publish(TOPIC_SIGNALING + payload.from, JSON.stringify({ type: 'candidate', candidate: event.candidate, from: myId }));
+        };
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        mqttClient.publish(TOPIC_SIGNALING + payload.from, JSON.stringify({ type: 'answer', sdp: answer, from: myId }));
+    }
+
+    // --- Device B: Sending the Camera ---
+    async function sendCameraTo(serverName, targetHostId) {
+        try {
+            // Request BOTH Camera and Microphone
+            localStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment' }, 
+                audio: true // <-- NOW SET TO TRUE
+            });
+            
+            // Get the mic track and mute it by default
+            localAudioTrack = localStream.getAudioTracks()[0];
+            localAudioTrack.enabled = false;
+            
+            videoPlayer.srcObject = localStream;
+            videoPlayer.muted = true; // Mute locally so you don't hear your own echo!
+            videoTitle.innerText = `Streaming to: ${serverName}`;
+            
+            pttBtn.style.display = 'block'; // Show Walkie Talkie button
+
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            // Add our Video and Audio tracks to send to the host
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+            // When the host talks, play it through the hidden audio element
+            peerConnection.ontrack = event => {
+                remoteAudio.srcObject = event.streams[0];
+            };
+
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) mqttClient.publish(TOPIC_SIGNALING + targetHostId, JSON.stringify({ type: 'candidate', candidate: event.candidate, from: myId }));
+            };
+
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+
+            mqttClient.publish(TOPIC_SIGNALING + targetHostId, JSON.stringify({ type: 'offer', sdp: offer, from: myId }));
+
+        } catch (err) {
+            console.error("Media error:", err);
+            alert("Could not access camera/mic. Are you on HTTPS?");
+        }
+    }
+</script>
+</body>
+</html>
