@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>JS-Only Face Mask</title>
-    <!-- Load face-api.js directly from a CDN -->
-    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <!-- Loading face-api.js synchronously to ensure it's ready before our script runs -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             text-align: center;
-            background: #222;
-            color: white;
+            background: #1a1a1a;
+            color: #ffffff;
             margin: 0;
             padding: 20px;
         }
@@ -22,133 +22,151 @@
         }
         /* Video and Canvas sit exactly on top of each other */
         video {
-            border-radius: 10px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.8);
             width: 640px;
             height: 480px;
             background: #000;
+            object-fit: cover;
         }
         canvas {
             position: absolute;
             top: 0;
             left: 0;
-            border-radius: 10px;
+            border-radius: 12px;
+            pointer-events: none; /* Let clicks pass through to the video if needed */
         }
         .controls {
             margin-bottom: 20px;
-            padding: 15px;
-            background: #333;
-            border-radius: 8px;
+            padding: 20px;
+            background: #2a2a2a;
+            border-radius: 10px;
             display: inline-block;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+        }
+        input[type="file"] {
+            margin-top: 10px;
+            color: #ccc;
         }
         #status {
-            color: #ffcc00;
+            color: #ffaa00;
             font-weight: bold;
-            margin-top: 10px;
+            margin-top: 15px;
+            font-size: 1.1em;
         }
     </style>
 </head>
 <body>
 
-    <h1>Simple JS Face Mask</h1>
+    <h1>Real-Time Face Mask</h1>
     
     <div class="controls">
-        <label for="imageUpload">Upload a Face to Wear:</label>
+        <label for="imageUpload">Upload a Face to Wear:</label><br>
         <input type="file" id="imageUpload" accept="image/*">
-        <div id="status">Status: Waiting for models to load...</div>
+        <div id="status">Status: Initializing AI models...</div>
     </div>
 
     <div class="video-container">
         <video id="webcam" autoplay muted playsinline></video>
-        <!-- The canvas is where we draw the fake face -->
         <canvas id="overlay"></canvas>
     </div>
 
     <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('overlay');
-        const ctx = canvas.getContext('2d');
-        const statusText = document.getElementById('status');
-        const imageUpload = document.getElementById('imageUpload');
-        
-        let maskImage = new Image();
-        let maskLoaded = false;
+        // Wait for the entire window to load before starting
+        window.onload = async () => {
+            const video = document.getElementById('webcam');
+            const canvas = document.getElementById('overlay');
+            const ctx = canvas.getContext('2d');
+            const statusText = document.getElementById('status');
+            const imageUpload = document.getElementById('imageUpload');
+            
+            let maskImage = new Image();
+            let maskLoaded = false;
 
-        // 1. Load the AI Models for face tracking
-        // (We point to a public Github repository that hosts the model files)
-        const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-        
-        Promise.all([
-            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL)
-        ]).then(startVideo).catch(err => {
-            console.error(err);
-            statusText.innerText = "Error loading AI models. Check console.";
-        });
-
-        // 2. Start the Webcam
-        function startVideo() {
-            statusText.innerText = "Status: Models loaded. Starting camera...";
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(stream => {
-                    video.srcObject = stream;
-                    statusText.innerText = "Status: Ready! Upload a face.";
-                })
-                .catch(err => {
-                    console.error("Webcam error:", err);
-                    statusText.innerText = "Error: Could not access webcam.";
-                });
-        }
-
-        // 3. Handle User Uploading a Face
-        imageUpload.addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    maskImage.src = event.target.result;
-                    maskImage.onload = () => {
-                        maskLoaded = true;
-                        statusText.innerText = "Status: Face loaded. Tracking...";
-                    }
-                };
-                reader.readAsDataURL(file);
+            // 1. Load the AI Models
+            const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+            
+            try {
+                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+                statusText.innerText = "Status: Models loaded. Requesting camera...";
+                statusText.style.color = "#00ffcc";
+                startVideo();
+            } catch (err) {
+                console.error("Model Loading Error:", err);
+                statusText.innerText = "Error: Failed to load models. Check browser console (F12).";
+                statusText.style.color = "#ff4444";
             }
-        });
 
-        // 4. The Real-Time Tracking Loop
-        video.addEventListener('play', () => {
-            // Make canvas exact same size as video
-            canvas.width = video.width || 640;
-            canvas.height = video.height || 480;
+            // 2. Start the Webcam
+            function startVideo() {
+                navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+                    .then(stream => {
+                        video.srcObject = stream;
+                        statusText.innerText = "Status: Camera Active! Upload a face to begin.";
+                        statusText.style.color = "#00ffcc";
+                    })
+                    .catch(err => {
+                        console.error("Webcam error:", err);
+                        statusText.innerText = "Error: Could not access webcam. Ensure permissions are granted.";
+                        statusText.style.color = "#ff4444";
+                    });
+            }
 
-            setInterval(async () => {
-                // Detect the face in the webcam video
-                const detections = await faceapi.detectSingleFace(
-                    video, 
-                    new faceapi.TinyFaceDetectorOptions()
-                );
-
-                // Clear the previous frame
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                if (detections && maskLoaded) {
-                    // Get the box around the user's face
-                    const box = detections.box;
-
-                    // Draw the uploaded image over that box
-                    // We expand the box slightly so it covers the whole face better
-                    const expansion = 20; 
-                    ctx.drawImage(
-                        maskImage, 
-                        box.x - expansion, 
-                        box.y - expansion * 2, 
-                        box.width + (expansion * 2), 
-                        box.height + (expansion * 3)
-                    );
+            // 3. Handle Image Upload
+            imageUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        maskImage.src = event.target.result;
+                        maskImage.onload = () => {
+                            maskLoaded = true;
+                            statusText.innerText = "Status: Mask loaded and tracking actively.";
+                        }
+                    };
+                    reader.readAsDataURL(file);
                 }
-            }, 50); // Runs roughly 20 times per second
-        });
-    </script>
+            });
 
+            // 4. Smooth Real-Time Tracking Loop
+            video.addEventListener('play', () => {
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+
+                async function processFrame() {
+                    if (video.paused || video.ended) return;
+
+                    const detections = await faceapi.detectSingleFace(
+                        video, 
+                        new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
+                    );
+
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    if (detections && maskLoaded) {
+                        const box = detections.box;
+                        
+                        // Dynamic expansion based on face size for a more accurate fit
+                        const expansionX = box.width * 0.15;
+                        const expansionY = box.height * 0.25;
+
+                        ctx.drawImage(
+                            maskImage, 
+                            box.x - expansionX, 
+                            box.y - expansionY * 1.2, 
+                            box.width + (expansionX * 2), 
+                            box.height + (expansionY * 2)
+                        );
+                    }
+                    
+                    // Uses the browser's native render cycle for smoother execution
+                    requestAnimationFrame(processFrame);
+                }
+
+                // Kick off the loop
+                processFrame();
+            });
+        };
+    </script>
 </body>
 </html>
