@@ -3,170 +3,116 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JS-Only Face Mask</title>
-    <!-- Loading face-api.js synchronously to ensure it's ready before our script runs -->
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <title>My Meshy 3D Model</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            text-align: center;
-            background: #1a1a1a;
-            color: #ffffff;
-            margin: 0;
-            padding: 20px;
+        /* CSS to make the 3D canvas take up the whole screen */
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #2c2c2c; /* Dark grey background */
+            font-family: Arial, sans-serif;
         }
-        .video-container {
-            position: relative;
-            display: inline-block;
-            margin-top: 20px;
-        }
-        /* Video and Canvas sit exactly on top of each other */
-        video {
-            border-radius: 12px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.8);
-            width: 640px;
-            height: 480px;
-            background: #000;
-            object-fit: cover;
-        }
-        canvas {
+        #ui {
             position: absolute;
-            top: 0;
-            left: 0;
-            border-radius: 12px;
-            pointer-events: none; /* Let clicks pass through to the video if needed */
-        }
-        .controls {
-            margin-bottom: 20px;
-            padding: 20px;
-            background: #2a2a2a;
-            border-radius: 10px;
-            display: inline-block;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.5);
-        }
-        input[type="file"] {
-            margin-top: 10px;
-            color: #ccc;
-        }
-        #status {
-            color: #ffaa00;
-            font-weight: bold;
-            margin-top: 15px;
-            font-size: 1.1em;
+            top: 15px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            pointer-events: none; /* Lets you click through the text to drag the model */
+            text-shadow: 1px 1px 2px black;
         }
     </style>
+
+    <!-- Import Map: This tells the browser where to find the Three.js library -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
 
-    <h1>Real-Time Face Mask</h1>
-    
-    <div class="controls">
-        <label for="imageUpload">Upload a Face to Wear:</label><br>
-        <input type="file" id="imageUpload" accept="image/*">
-        <div id="status">Status: Initializing AI models...</div>
+    <!-- Small UI Overlay -->
+    <div id="ui">
+        <h2>My 3D Model Viewer</h2>
+        <p>Left Click + Drag to rotate | Scroll to zoom</p>
     </div>
 
-    <div class="video-container">
-        <video id="webcam" autoplay muted playsinline></video>
-        <canvas id="overlay"></canvas>
-    </div>
+    <!-- JavaScript starts here -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-    <script>
-        // Wait for the entire window to load before starting
-        window.onload = async () => {
-            const video = document.getElementById('webcam');
-            const canvas = document.getElementById('overlay');
-            const ctx = canvas.getContext('2d');
-            const statusText = document.getElementById('status');
-            const imageUpload = document.getElementById('imageUpload');
-            
-            let maskImage = new Image();
-            let maskLoaded = false;
+        // 1. Set up the Scene, Camera, and Renderer
+        const scene = new THREE.Scene();
+        
+        // The Camera acts as our eyes
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 5); // Move camera back so we can see the model
 
-            // 1. Load the AI Models
-            const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-            
-            try {
-                await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-                statusText.innerText = "Status: Models loaded. Requesting camera...";
-                statusText.style.color = "#00ffcc";
-                startVideo();
-            } catch (err) {
-                console.error("Model Loading Error:", err);
-                statusText.innerText = "Error: Failed to load models. Check browser console (F12).";
-                statusText.style.color = "#ff4444";
+        // The Renderer draws the 3D scene to the screen
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // 2. Add Lighting (Crucial so we can see the colors and textures)
+        const ambientLight = new THREE.AmbientLight(0xffffff, 1.5); // Soft white light everywhere
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 2); // Like the sun
+        directionalLight.position.set(5, 10, 7.5);
+        scene.add(directionalLight);
+
+        // 3. Add Orbit Controls (Lets the user interact with the mouse)
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; // Makes the camera movement smooth
+
+        // 4. Load the downloaded Meshy Model
+        const loader = new GLTFLoader();
+
+        // NOTE: Make sure your file is actually named 'model.glb' and is in the same folder!
+        loader.load(
+            'model.glb', 
+            function (gltf) {
+                const myModel = gltf.scene;
+                
+                // Automatically center the model on the screen
+                const box = new THREE.Box3().setFromObject(myModel);
+                const center = box.getCenter(new THREE.Vector3());
+                myModel.position.sub(center); 
+
+                scene.add(myModel);
+                console.log("Model loaded successfully!");
+            },
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded'); // Shows loading progress in console
+            },
+            function (error) {
+                console.error('Error loading model. Check the file name and path!', error);
             }
+        );
 
-            // 2. Start the Webcam
-            function startVideo() {
-                navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
-                    .then(stream => {
-                        video.srcObject = stream;
-                        statusText.innerText = "Status: Camera Active! Upload a face to begin.";
-                        statusText.style.color = "#00ffcc";
-                    })
-                    .catch(err => {
-                        console.error("Webcam error:", err);
-                        statusText.innerText = "Error: Could not access webcam. Ensure permissions are granted.";
-                        statusText.style.color = "#ff4444";
-                    });
-            }
+        // 5. Handle resizing if the user changes their browser window size
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
 
-            // 3. Handle Image Upload
-            imageUpload.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        maskImage.src = event.target.result;
-                        maskImage.onload = () => {
-                            maskLoaded = true;
-                            statusText.innerText = "Status: Mask loaded and tracking actively.";
-                        }
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
-
-            // 4. Smooth Real-Time Tracking Loop
-            video.addEventListener('play', () => {
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
-
-                async function processFrame() {
-                    if (video.paused || video.ended) return;
-
-                    const detections = await faceapi.detectSingleFace(
-                        video, 
-                        new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })
-                    );
-
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                    if (detections && maskLoaded) {
-                        const box = detections.box;
-                        
-                        // Dynamic expansion based on face size for a more accurate fit
-                        const expansionX = box.width * 0.15;
-                        const expansionY = box.height * 0.25;
-
-                        ctx.drawImage(
-                            maskImage, 
-                            box.x - expansionX, 
-                            box.y - expansionY * 1.2, 
-                            box.width + (expansionX * 2), 
-                            box.height + (expansionY * 2)
-                        );
-                    }
-                    
-                    // Uses the browser's native render cycle for smoother execution
-                    requestAnimationFrame(processFrame);
-                }
-
-                // Kick off the loop
-                processFrame();
-            });
-        };
+        // 6. The Animation Loop (Redraws the screen 60 times a second)
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // Required for the smooth damping effect
+            renderer.render(scene, camera);
+        }
+        
+        // Start the loop!
+        animate();
     </script>
 </body>
 </html>
