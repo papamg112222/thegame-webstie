@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Rear Camera AR Interface</title>
+    <title>Stabilized AR Interface</title>
     
     <!-- MediaPipe AI Models -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
@@ -19,62 +19,65 @@
             touch-action: none;
         }
 
-        /* 1. Camera Feed (NO MIRROR FOR BACK CAMERA) */
+        /* Camera Feed - Rear Camera (No Mirror) */
         .video-background {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
             object-fit: cover;
-            /* Removed scaleX(-1) because rear camera should not be mirrored */
             z-index: 0;
-            opacity: 0.8; /* Dim to emphasize AR elements */
+            opacity: 0.85;
         }
 
-        /* 2. Gyroscope 3D World Container */
+        /* 3D World Container */
         #world-container {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
             perspective: 1200px;
             z-index: 5;
             transform-style: preserve-3d;
+            will-change: transform; /* Hardware acceleration for smooth rendering */
         }
 
-        /* 3. The Interactive Glass Bubble */
+        /* Interactive Glass Bubble */
         #bubble {
             position: absolute;
             width: 340px; height: 520px;
-            background: rgba(20, 20, 25, 0.4);
+            background: rgba(15, 15, 20, 0.4);
             backdrop-filter: blur(25px) saturate(200%);
             -webkit-backdrop-filter: blur(25px) saturate(200%);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 40px;
-            box-shadow: 0 40px 80px rgba(0,0,0,0.8), inset 0 2px 20px rgba(255,255,255,0.1);
+            box-shadow: 0 40px 80px rgba(0,0,0,0.8), inset 0 2px 20px rgba(255,255,255,0.05);
             display: flex; flex-direction: column; overflow: hidden;
             transform-origin: center center;
+            will-change: transform;
             display: none; 
         }
 
-        /* 4. AR Pointer Cursor */
+        /* AR Pointer Cursor */
         #ar-cursor {
             position: fixed;
-            width: 20px; height: 20px;
-            background: rgba(255, 255, 255, 0.8);
+            width: 22px; height: 22px;
+            background: rgba(255, 255, 255, 0.9);
             border: 2px solid #00ffcc;
             border-radius: 50%;
-            pointer-events: none; /* Must be none so elementFromPoint works through it */
+            pointer-events: none; 
             z-index: 100;
             transform: translate(-50%, -50%);
-            transition: width 0.1s, height 0.1s, background 0.1s;
-            box-shadow: 0 0 15px #00ffcc;
+            transition: width 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.15s;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.8);
             display: none;
+            will-change: left, top; /* crucial for smooth cursor */
         }
 
         #ar-cursor.pinching {
             width: 12px; height: 12px;
             background: #00ffcc;
-            box-shadow: 0 0 30px #00ffcc;
+            box-shadow: 0 0 35px #00ffcc;
+            border-color: #fff;
         }
 
-        /* 5. AR Hologram Hand Overlay (NO MIRROR) */
+        /* Hologram Overlay */
         .hand-overlay {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
@@ -85,53 +88,58 @@
         /* UI Elements */
         .header {
             padding: 25px 20px 20px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0));
+            background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0));
             text-align: center; border-bottom: 1px solid rgba(255,255,255,0.05);
             className: drag-zone; 
         }
-        .header h3 { margin: 0; font-size: 20px; font-weight: 600; }
-        .header p { margin: 5px 0 0; font-size: 12px; opacity: 0.7; }
+        .header h3 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: 0.5px;}
+        .header p { margin: 5px 0 0; font-size: 12px; opacity: 0.6; }
 
         .song-list {
             flex: 1; overflow-y: hidden; 
             padding: 10px;
+            /* Smooth momentum scrolling triggered by JS */
+            scroll-behavior: auto; 
         }
 
         .song-item {
             padding: 16px 20px; margin-bottom: 6px;
-            background: rgba(255,255,255,0.03); border-radius: 20px;
+            background: rgba(255,255,255,0.02); border-radius: 20px;
             font-size: 16px; transition: 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
             border: 1px solid transparent;
         }
         
         .song-item.ar-hover {
-            background: rgba(255,255,255,0.15);
-            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(0, 255, 204, 0.4);
             transform: scale(1.02);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.2);
         }
 
         .song-title { font-weight: 600; display: block; pointer-events: none; }
-        .song-artist { font-size: 13px; color: #00ffcc; pointer-events: none; }
+        .song-artist { font-size: 13px; color: #00ffcc; opacity: 0.8; pointer-events: none; }
 
         /* Start Screen */
         #start-screen {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.8); backdrop-filter: blur(20px); z-index: 200;
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(25px); z-index: 200;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
         .launch-btn {
             background: #00ffcc; color: black; border: none;
-            padding: 18px 40px; font-size: 18px; font-weight: bold; border-radius: 30px;
-            cursor: pointer; margin-top: 30px;
+            padding: 18px 45px; font-size: 18px; font-weight: bold; border-radius: 30px;
+            cursor: pointer; margin-top: 30px; transition: transform 0.2s;
         }
+        .launch-btn:active { transform: scale(0.95); }
 
-        /* Now Playing Toast */
+        /* Toast Notification */
         #toast {
             position: fixed; top: -100px; left: 50%; transform: translateX(-50%);
-            background: rgba(0, 255, 204, 0.2); border: 1px solid #00ffcc;
-            backdrop-filter: blur(10px); padding: 15px 30px; border-radius: 30px;
-            z-index: 150; font-weight: bold; transition: top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-            box-shadow: 0 10px 30px rgba(0, 255, 204, 0.3);
+            background: rgba(0, 20, 15, 0.8); border: 1px solid #00ffcc;
+            backdrop-filter: blur(15px); padding: 16px 32px; border-radius: 30px;
+            z-index: 150; font-weight: 500; transition: top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 15px 40px rgba(0, 255, 204, 0.2);
+            color: white;
         }
     </style>
 </head>
@@ -142,12 +150,13 @@
             <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M12 16V12M12 8H12.01" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <h2 style="margin: 0;">Rear Camera AR</h2>
-        <p style="opacity: 0.7; text-align: center; max-width: 320px; line-height: 1.5; margin-top: 10px;">
-            Place your hand in front of the back camera.<br><br>
-            Point to aim. Pinch to interact.
+        <h2 style="margin: 0; letter-spacing: 1px;">Stabilized AR Mode</h2>
+        <p style="opacity: 0.7; text-align: center; max-width: 320px; line-height: 1.6; margin-top: 15px;">
+            Smooth tracking enabled.<br>
+            Point to aim. Pinch to interact.<br>
+            Make sure your room is well lit.
         </p>
-        <button class="launch-btn" onclick="initAR()">Start Experience</button>
+        <button class="launch-btn" onclick="initAR()">Launch Experience</button>
     </div>
 
     <div id="toast">🎵 Playing Song</div>
@@ -157,8 +166,8 @@
     <div id="world-container">
         <div id="bubble">
             <div class="header drag-zone">
-                <h3>Library</h3>
-                <p>Air-Pinch to interact</p>
+                <h3>Music Library</h3>
+                <p>Air-Pinch header to move</p>
             </div>
             <div class="song-list drag-zone" id="songList"></div>
         </div>
@@ -178,14 +187,22 @@
         const startScreen = document.getElementById('start-screen');
         const toast = document.getElementById('toast');
 
-        // 3D Parallax
+        // --- 1. STABILIZED 3D PARALLAX STATE ---
         let baseGamma = 0, baseBeta = 0;
         let isCalibrated = false;
-        let parallaxX = 0, parallaxY = 0, targetParX = 0, targetParY = 0, targetRotX = 0, targetRotY = 0;
+        
+        // Target values (Where the phone is actually pointing)
+        let targetParX = 0, targetParY = 0, targetRotX = 0, targetRotY = 0;
+        // Current values (Smoothed over time to prevent jitter)
+        let currentParX = 0, currentParY = 0, currentRotX = 0, currentRotY = 0;
         
         let bubbleX = window.innerWidth / 2 - 170; 
         let bubbleY = window.innerHeight / 2 - 260;
 
+        // --- 2. STABILIZED CURSOR STATE ---
+        let smoothCursorX = window.innerWidth / 2;
+        let smoothCursorY = window.innerHeight / 2;
+        
         // Gestures
         let isPinching = false;
         let pinchStartX = 0, pinchStartY = 0;
@@ -210,32 +227,44 @@
             songList.appendChild(div);
         }
 
-        // Gyroscope
+        // --- GYROSCOPE LOGIC ---
         function handleOrientation(e) {
             if (!isCalibrated) { baseGamma = e.gamma; baseBeta = e.beta; isCalibrated = true; }
             let dG = e.gamma - baseGamma; let dB = e.beta - baseBeta;
-            if (dG > 90) dG = 90; if (dG < -90) dG = -90;
-            if (dB > 90) dB = 90; if (dB < -90) dB = -90;
-            targetParX = -dG * 15; targetParY = -dB * 15;
-            targetRotY = dG * 0.3; targetRotX = -dB * 0.3;
+            
+            // Clamp extreme values
+            if (dG > 60) dG = 60; if (dG < -60) dG = -60;
+            if (dB > 60) dB = 60; if (dB < -60) dB = -60;
+            
+            targetParX = -dG * 12; 
+            targetParY = -dB * 12;
+            targetRotY = dG * 0.25; 
+            targetRotX = -dB * 0.25;
         }
 
+        // --- ANIMATION LOOP (The Magic Jitter Fixer) ---
         function animate3D() {
-            parallaxX += (targetParX - parallaxX) * 0.1;
-            parallaxY += (targetParY - parallaxY) * 0.1;
-            worldContainer.style.transform = `translate3d(${parallaxX}px, ${parallaxY}px, 0) rotateX(${targetRotX}deg) rotateY(${targetRotY}deg)`;
+            // HIGH SMOOTHING: We only move 8% of the way to the target each frame.
+            // This completely eliminates gyroscope vibrations and makes it glide.
+            currentParX += (targetParX - currentParX) * 0.08;
+            currentParY += (targetParY - currentParY) * 0.08;
+            currentRotX += (targetRotX - currentRotX) * 0.08;
+            currentRotY += (targetRotY - currentRotY) * 0.08;
+
+            worldContainer.style.transform = `translate3d(${currentParX}px, ${currentParY}px, 0) rotateX(${currentRotX}deg) rotateY(${currentRotY}deg)`;
             bubble.style.transform = `translate3d(${bubbleX}px, ${bubbleY}px, 0)`;
+            
             requestAnimationFrame(animate3D);
         }
 
         function showToast(title, artist) {
-            toast.innerHTML = `▶️ Playing: <b>${title}</b> by ${artist}`;
-            toast.style.top = "40px";
-            clearTimeout(toastTimeout);
-            var toastTimeout = setTimeout(() => { toast.style.top = "-100px"; }, 3000);
+            toast.innerHTML = `<span style="color:#00ffcc; margin-right:8px;">▶</span> <b>${title}</b> <span style="opacity:0.6; margin-left:4px;">by ${artist}</span>`;
+            toast.style.top = "45px";
+            clearTimeout(window.toastTimeout);
+            window.toastTimeout = setTimeout(() => { toast.style.top = "-100px"; }, 3000);
         }
 
-        // Tracking Logic
+        // --- TRACKING LOGIC ---
         function onResults(results) {
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
@@ -244,30 +273,35 @@
                 cursor.style.display = "block";
                 const landmarks = results.multiHandLandmarks[0];
                 
-                // Draw Wireframe
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: 'rgba(255, 255, 255, 0.2)', lineWidth: 2});
-                drawLandmarks(canvasCtx, landmarks, {color: 'rgba(0, 255, 204, 0.8)', lineWidth: 1, radius: 3});
+                // Draw elegant, thin wireframe
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: 'rgba(255, 255, 255, 0.15)', lineWidth: 1.5});
+                drawLandmarks(canvasCtx, landmarks, {color: 'rgba(0, 255, 204, 0.6)', lineWidth: 0, radius: 2.5});
 
                 const index = landmarks[8];
                 const thumb = landmarks[4];
                 
-                // --- CRITICAL CHANGE FOR BACK CAMERA ---
-                // We no longer invert X! Screen maps directly to reality.
-                const cursorX = index.x * window.innerWidth;
-                const cursorY = index.y * window.innerHeight;
+                // Raw Screen Coordinates
+                const rawX = index.x * window.innerWidth;
+                const rawY = index.y * window.innerHeight;
 
-                cursor.style.left = cursorX + 'px';
-                cursor.style.top = cursorY + 'px';
+                // CURSOR SMOOTHING (Interpolation removes AI hand shaking)
+                smoothCursorX += (rawX - smoothCursorX) * 0.35;
+                smoothCursorY += (rawY - smoothCursorY) * 0.35;
 
-                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
-                const currentlyPinching = dist < 0.045; 
+                cursor.style.left = smoothCursorX + 'px';
+                cursor.style.top = smoothCursorY + 'px';
 
-                // Raycast
+                // Hysteresis threshold to prevent flickering pinch state
+                const currentDist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+                const pinchThreshold = isPinching ? 0.055 : 0.040; // Easier to hold once pinched
+                const currentlyPinching = currentDist < pinchThreshold; 
+
+                // Raycast using smoothed cursor
                 cursor.style.pointerEvents = 'none'; 
-                const hitElement = document.elementFromPoint(cursorX, cursorY);
+                const hitElement = document.elementFromPoint(smoothCursorX, smoothCursorY);
 
                 document.querySelectorAll('.ar-hover').forEach(el => el.classList.remove('ar-hover'));
-                if (hitElement && hitElement.closest('.song-item')) {
+                if (hitElement && hitElement.closest('.song-item') && !isPinching) {
                     hitElement.closest('.song-item').classList.add('ar-hover');
                 }
 
@@ -275,8 +309,8 @@
                 if (currentlyPinching && !isPinching) {
                     isPinching = true;
                     cursor.classList.add('pinching');
-                    pinchStartX = cursorX;
-                    pinchStartY = cursorY;
+                    pinchStartX = smoothCursorX;
+                    pinchStartY = smoothCursorY;
                     pinchStartTime = Date.now();
 
                     if (hitElement) {
@@ -294,14 +328,14 @@
                     }
                 } 
                 else if (currentlyPinching && isPinching) {
-                    const deltaX = cursorX - pinchStartX;
-                    const deltaY = cursorY - pinchStartY;
+                    const deltaX = smoothCursorX - pinchStartX;
+                    const deltaY = smoothCursorY - pinchStartY;
 
                     if (activeAction === 'drag') {
                         bubbleX = initialBubbleX + deltaX;
                         bubbleY = initialBubbleY + deltaY;
                     } else if (activeAction === 'scroll') {
-                        songList.scrollTop = initialScrollTop - (deltaY * 2.5);
+                        songList.scrollTop = initialScrollTop - (deltaY * 2.0);
                     }
                 } 
                 else if (!currentlyPinching && isPinching) {
@@ -309,13 +343,13 @@
                     cursor.classList.remove('pinching');
                     
                     const pinchDuration = Date.now() - pinchStartTime;
-                    const deltaMath = Math.hypot(cursorX - pinchStartX, cursorY - pinchStartY);
+                    const deltaMath = Math.hypot(smoothCursorX - pinchStartX, smoothCursorY - pinchStartY);
 
                     if (pinchDuration < 400 && deltaMath < 30) {
                         if (hitElement && hitElement.closest('.song-item')) {
                             const song = hitElement.closest('.song-item');
-                            song.style.background = "rgba(0, 255, 204, 0.4)";
-                            setTimeout(() => song.style.background = "", 300);
+                            song.style.background = "rgba(0, 255, 204, 0.3)";
+                            setTimeout(() => song.style.background = "", 250);
                             showToast(song.dataset.title, song.dataset.artist);
                         }
                     }
@@ -339,7 +373,7 @@
 
         // Boot
         async function initAR() {
-            startScreen.innerHTML = "<h3>Initializing Tracker...</h3><p>Ensure back camera isn't covered.</p>";
+            startScreen.innerHTML = "<h3>Calibrating Stability...</h3><p>Ensure back camera isn't covered.</p>";
 
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
@@ -351,14 +385,21 @@
             }
 
             const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.65, minTrackingConfidence: 0.65 });
+            
+            // INCREASED CONFIDENCE FOR MAXIMUM STABILITY
+            hands.setOptions({ 
+                maxNumHands: 1, 
+                modelComplexity: 1, 
+                minDetectionConfidence: 0.85,  // Strict detection
+                minTrackingConfidence: 0.85    // Strict tracking removes AI shaking
+            });
             hands.onResults(onResults);
 
             try {
                 // FORCE REAR CAMERA
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: {
-                        facingMode: "environment", // <--- Back camera command
+                        facingMode: "environment",
                         width: { ideal: 1280 },
                         height: { ideal: 720 }
                     }
