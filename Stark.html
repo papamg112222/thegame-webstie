@@ -4,260 +4,348 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Holographic Song Selector</title>
+    <title>Vision Pro AR Interface</title>
     
     <!-- MediaPipe AI Models -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <!-- Drawing Utilities for the Hologram Hand -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 
     <style>
         body {
             margin: 0; padding: 0; overflow: hidden;
             background: #000;
-            font-family: 'Inter', -apple-system, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             color: white;
             touch-action: none;
         }
 
-        /* 1. The Real Camera Feed (Background) */
+        /* 1. Camera Feed */
         .video-background {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
             object-fit: cover;
-            transform: scaleX(-1); /* Mirror for front camera */
+            transform: scaleX(-1); /* Mirror */
             z-index: 0;
-            opacity: 0.8; /* Slightly dim to make AR pop */
+            opacity: 0.6; /* Dim to emphasize AR elements */
         }
 
-        /* 2. The 3D World (Locks to real world via Gyroscope) */
+        /* 2. Gyroscope 3D World Container */
         #world-container {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
-            perspective: 1000px;
+            perspective: 1200px;
             z-index: 5;
-            pointer-events: none; /* Let touches pass to the bubble */
             transform-style: preserve-3d;
         }
 
         /* 3. The Interactive Glass Bubble */
         #bubble {
             position: absolute;
-            width: 320px; height: 480px;
-            background: rgba(10, 10, 15, 0.2); /* Very transparent so you see your real hand behind */
-            backdrop-filter: blur(15px) saturate(150%);
-            -webkit-backdrop-filter: blur(15px) saturate(150%);
+            width: 340px; height: 520px;
+            background: rgba(20, 20, 25, 0.4);
+            backdrop-filter: blur(25px) saturate(200%);
+            -webkit-backdrop-filter: blur(25px) saturate(200%);
             border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 30px;
-            box-shadow: 0 30px 60px rgba(0,0,0,0.8), inset 0 0 20px rgba(255,255,255,0.05);
+            border-radius: 40px;
+            box-shadow: 0 40px 80px rgba(0,0,0,0.8), inset 0 2px 20px rgba(255,255,255,0.1);
             display: flex; flex-direction: column; overflow: hidden;
-            pointer-events: auto; /* ALLOW NATIVE SCROLLING */
             transform-origin: center center;
-            will-change: transform;
-            /* Starts hidden until AR starts */
             display: none; 
         }
 
-        /* Glow effect when clawing/grabbing */
-        #bubble.grabbed {
-            border-color: #00ffcc;
-            box-shadow: 0 0 50px rgba(0, 255, 204, 0.4), inset 0 0 30px rgba(0, 255, 204, 0.2);
+        /* 4. AR Pointer Cursor */
+        #ar-cursor {
+            position: fixed;
+            width: 20px; height: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px solid #00f2ff;
+            border-radius: 50%;
+            pointer-events: none; /* Must be none so elementFromPoint works through it */
+            z-index: 100;
+            transform: translate(-50%, -50%);
+            transition: width 0.1s, height 0.1s, background 0.1s;
+            box-shadow: 0 0 15px #00f2ff;
+            display: none;
         }
 
-        /* 4. The AR Hologram Hand Overlay (Always in front) */
+        /* Cursor state when pinching */
+        #ar-cursor.pinching {
+            width: 12px; height: 12px;
+            background: #00f2ff;
+            box-shadow: 0 0 30px #00f2ff;
+        }
+
+        /* 5. AR Hologram Hand Overlay */
         .hand-overlay {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
-            z-index: 10;
+            z-index: 50;
             pointer-events: none;
-            transform: scaleX(-1); /* Mirror to match camera */
+            transform: scaleX(-1);
         }
 
         /* UI Elements */
         .header {
-            padding: 20px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.15), rgba(255,255,255,0));
-            text-align: center; border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding: 25px 20px 20px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0));
+            text-align: center; border-bottom: 1px solid rgba(255,255,255,0.05);
+            /* Identifying class for raycasting */
+            className: drag-zone; 
         }
-        .header h3 { margin: 0; font-size: 18px; letter-spacing: 1px; }
-        .header p { margin: 4px 0 0; font-size: 11px; opacity: 0.6; text-transform: uppercase; }
+        .header h3 { margin: 0; font-size: 20px; font-weight: 600; }
+        .header p { margin: 5px 0 0; font-size: 12px; opacity: 0.7; }
 
         .song-list {
-            flex: 1; overflow-y: auto; padding: 10px;
-            scrollbar-width: none; /* Hide scrollbar for clean look */
+            flex: 1; overflow-y: hidden; /* We scroll this via JS */
+            padding: 10px;
         }
-        .song-list::-webkit-scrollbar { display: none; }
 
         .song-item {
-            padding: 15px; margin-bottom: 8px;
-            background: rgba(255,255,255,0.05); border-radius: 16px;
-            font-size: 15px; transition: 0.2s;
+            padding: 16px 20px; margin-bottom: 6px;
+            background: rgba(255,255,255,0.03); border-radius: 20px;
+            font-size: 16px; transition: 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+            border: 1px solid transparent;
         }
-        .song-item:active { background: rgba(0, 255, 204, 0.3); }
-        .song-title { font-weight: 600; display: block; }
-        .song-artist { font-size: 12px; color: #00ffcc; opacity: 0.8; }
+        
+        /* Fake hover state triggered by JS Raycaster */
+        .song-item.ar-hover {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.3);
+            transform: scale(1.02);
+        }
+
+        .song-title { font-weight: 600; display: block; pointer-events: none; }
+        .song-artist { font-size: 13px; color: #00f2ff; pointer-events: none; }
 
         /* Start Screen */
         #start-screen {
             position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0,0,0,0.9); z-index: 100;
+            background: rgba(0,0,0,0.8); backdrop-filter: blur(20px); z-index: 200;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
-        button.launch-btn {
-            background: #00ffcc; color: #000; border: none;
-            padding: 15px 40px; font-size: 18px; font-weight: bold; border-radius: 30px;
-            cursor: pointer; box-shadow: 0 0 30px rgba(0, 255, 204, 0.5);
+        .launch-btn {
+            background: white; color: black; border: none;
+            padding: 18px 40px; font-size: 18px; font-weight: bold; border-radius: 30px;
+            cursor: pointer; margin-top: 30px;
+        }
+
+        /* Now Playing Toast */
+        #toast {
+            position: fixed; top: -100px; left: 50%; transform: translateX(-50%);
+            background: rgba(0, 242, 255, 0.2); border: 1px solid #00f2ff;
+            backdrop-filter: blur(10px); padding: 15px 30px; border-radius: 30px;
+            z-index: 150; font-weight: bold; transition: top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 10px 30px rgba(0, 242, 255, 0.3);
         }
     </style>
 </head>
 <body>
 
-    <!-- Start Screen (Required for iOS Gyro & Camera permissions) -->
     <div id="start-screen">
-        <h2 style="margin-bottom: 10px;">3D AR Environment</h2>
-        <p style="opacity: 0.7; margin-bottom: 30px; text-align: center; max-width: 300px;">
-            Uses Front Camera & Gyroscope. <br><br>
-            Pinch to grab. Look around to see it float in your room.
+        <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.5" style="margin-bottom:20px;">
+            <path d="M9 10C9 10 11.5 10 12 10C12.5 10 15 10 15 10M12 10V4M12 4C12 4 10 6 10 6M12 4C12 4 14 6 14 6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5 14C5 14 6 14 6 16C6 18 8 20 12 20C16 20 18 18 18 16C18 14 19 14 19 14" stroke-linecap="round"/>
+        </svg>
+        <h2 style="margin: 0;">Spatial Hand Tracking</h2>
+        <p style="opacity: 0.7; text-align: center; max-width: 320px; line-height: 1.5; margin-top: 10px;">
+            1. Point with your index finger.<br>
+            2. Pinch header to move window.<br>
+            3. Pinch list to scroll.<br>
+            4. Quick pinch to Air Tap songs.
         </p>
-        <button class="launch-btn" onclick="initAR()">LAUNCH AR</button>
+        <button class="launch-btn" onclick="initAR()">Enable AR Camera</button>
     </div>
 
-    <!-- Layers -->
+    <div id="toast">🎵 Playing Song</div>
+
     <video class="video-background" playsinline autoplay muted></video>
     
     <div id="world-container">
         <div id="bubble">
-            <div class="header">
-                <h3>Vibe Player</h3>
-                <p>Scroll or Grab to Move</p>
+            <div class="header drag-zone">
+                <h3>Library</h3>
+                <p>Air-Pinch to interact</p>
             </div>
-            <div class="song-list" id="songList"></div>
+            <div class="song-list drag-zone" id="songList"></div>
         </div>
     </div>
 
     <canvas class="hand-overlay"></canvas>
+    <div id="ar-cursor"></div>
 
     <script>
+        // DOM Elements
         const videoElement = document.querySelector('.video-background');
         const canvasElement = document.querySelector('.hand-overlay');
         const canvasCtx = canvasElement.getContext('2d');
         const worldContainer = document.getElementById('world-container');
         const bubble = document.getElementById('bubble');
+        const songList = document.getElementById('songList');
+        const cursor = document.getElementById('ar-cursor');
         const startScreen = document.getElementById('start-screen');
+        const toast = document.getElementById('toast');
 
-        // State Variables
-        let isGrabbed = false;
-        let bubbleX = window.innerWidth / 2 - 160;
-        let bubbleY = window.innerHeight / 2 - 240;
-        
-        // Parallax / Gyro Variables
+        // 3D Parallax & Position State
         let baseGamma = 0, baseBeta = 0;
         let isCalibrated = false;
-        let parallaxX = 0, parallaxY = 0;
-        let targetParX = 0, targetParY = 0, targetRotX = 0, targetRotY = 0;
+        let parallaxX = 0, parallaxY = 0, targetParX = 0, targetParY = 0, targetRotX = 0, targetRotY = 0;
+        
+        let bubbleX = window.innerWidth / 2 - 170; // Center screen
+        let bubbleY = window.innerHeight / 2 - 260;
+
+        // Gesture Interaction State
+        let isPinching = false;
+        let pinchStartX = 0, pinchStartY = 0;
+        let pinchStartTime = 0;
+        let activeAction = null; // 'drag', 'scroll', or null
+        let initialBubbleX = 0, initialBubbleY = 0;
+        let initialScrollTop = 0;
 
         // 1. Generate 500 Songs
-        const artists = ["Kendrick Lamar", "Malcolm Todd", "Laufey", "Steve Lacy", "Treehouse", "Steve Lacy", "Frank Ocean", "Tyler, The Creator"];
-        const tracks = ["Money Trees", "Room Service", "Valentine", "Dark Red", "Evergreen", "Bad Habit", "Nights", "See You Again"];
-        const songList = document.getElementById('songList');
+        const artists = ["Kendrick Lamar", "Malcolm Todd", "Laufey", "Steve Lacy", "Treehouse", "Frank Ocean", "Tyler, The Creator", "SZA", "Childish Gambino", "Mac DeMarco"];
+        const tracks = ["Money Trees", "Room Service", "Valentine", "Dark Red", "Evergreen", "Pink + White", "EARFQUAKE", "Kill Bill", "Redbone", "Chamber Of Reflection"];
         
         for (let i = 1; i <= 500; i++) {
             const div = document.createElement('div');
             div.className = 'song-item';
+            div.dataset.title = tracks[i % tracks.length];
+            div.dataset.artist = artists[i % artists.length];
             div.innerHTML = `
-                <span class="song-title">${tracks[i % tracks.length]} (Vol ${i})</span>
-                <span class="song-artist">${artists[i % artists.length]}</span>
+                <span class="song-title">${div.dataset.title}</span>
+                <span class="song-artist">${div.dataset.artist}</span>
             `;
             songList.appendChild(div);
         }
 
-        // 2. Gyroscope Logic (The World Lock)
+        // 2. Gyroscope Logic (Keeps it locked in physical space)
         function handleOrientation(e) {
-            if (!isCalibrated) {
-                baseGamma = e.gamma;
-                baseBeta = e.beta;
-                isCalibrated = true;
-            }
-            
-            // Calculate difference from starting position
-            let diffGamma = e.gamma - baseGamma;
-            let diffBeta = e.beta - baseBeta;
-
-            // Constrain rotation
-            if (diffGamma > 90) diffGamma = 90; if (diffGamma < -90) diffGamma = -90;
-            if (diffBeta > 90) diffBeta = 90; if (diffBeta < -90) diffBeta = -90;
-
-            // Map physical rotation to 3D movement (Opposite direction to simulate floating)
-            targetParX = -diffGamma * 20; 
-            targetParY = -diffBeta * 20;
-            targetRotY = diffGamma * 0.4;
-            targetRotX = -diffBeta * 0.4;
+            if (!isCalibrated) { baseGamma = e.gamma; baseBeta = e.beta; isCalibrated = true; }
+            let dG = e.gamma - baseGamma; let dB = e.beta - baseBeta;
+            if (dG > 90) dG = 90; if (dG < -90) dG = -90;
+            if (dB > 90) dB = 90; if (dB < -90) dB = -90;
+            targetParX = -dG * 15; targetParY = -dB * 15;
+            targetRotY = dG * 0.3; targetRotX = -dB * 0.3;
         }
 
-        // Smooth Animation Loop
         function animate3D() {
-            // Lerp for smooth hovering effect
             parallaxX += (targetParX - parallaxX) * 0.1;
             parallaxY += (targetParY - parallaxY) * 0.1;
-            
-            // Move the whole world container to fake 6DoF tracking
             worldContainer.style.transform = `translate3d(${parallaxX}px, ${parallaxY}px, 0) rotateX(${targetRotX}deg) rotateY(${targetRotY}deg)`;
-            
-            // Position the bubble inside the world container
             bubble.style.transform = `translate3d(${bubbleX}px, ${bubbleY}px, 0)`;
-            
             requestAnimationFrame(animate3D);
         }
 
-        // Desktop Fallback (if no gyroscope)
-        window.addEventListener('mousemove', (e) => {
-            if (!isCalibrated) {
-                let mx = (e.clientX / window.innerWidth - 0.5) * 60;
-                let my = (e.clientY / window.innerHeight - 0.5) * 60;
-                targetParX = -mx * 10;
-                targetParY = -my * 10;
-                targetRotY = mx;
-                targetRotX = -my;
-            }
-        });
+        // Notification System
+        let toastTimeout;
+        function showToast(title, artist) {
+            toast.innerHTML = `▶️ Playing: <b>${title}</b> by ${artist}`;
+            toast.style.top = "40px";
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => { toast.style.top = "-100px"; }, 3000);
+        }
 
-        // 3. Hand Tracking & Claw Logic
+        // 3. Hand Tracking & Air Interaction Logic
         function onResults(results) {
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                cursor.style.display = "block";
                 const landmarks = results.multiHandLandmarks[0];
                 
-                // --- DRAW AR HOLOGRAM HAND ---
-                // This draws a futuristic green wireframe OVER the bubble
-                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: 'rgba(0, 255, 204, 0.5)', lineWidth: 3});
-                drawLandmarks(canvasCtx, landmarks, {color: '#00ffcc', lineWidth: 1, radius: 4});
+                // Draw Hologram Wireframe
+                drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: 'rgba(255, 255, 255, 0.2)', lineWidth: 2});
+                drawLandmarks(canvasCtx, landmarks, {color: 'rgba(0, 242, 255, 0.8)', lineWidth: 1, radius: 3});
 
-                // --- CLAW LOGIC ---
                 const index = landmarks[8];
                 const thumb = landmarks[4];
-                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
                 
-                // Map to screen (Inverted X because mirror)
-                const screenX = (1 - index.x) * window.innerWidth;
-                const screenY = index.y * window.innerHeight;
+                // Screen Mapping (Inverted X due to front camera mirror)
+                const cursorX = (1 - index.x) * window.innerWidth;
+                const cursorY = index.y * window.innerHeight;
 
-                if (dist < 0.05) { // Pinched!
-                    isGrabbed = true;
-                    bubble.classList.add('grabbed');
+                // Move Cursor
+                cursor.style.left = cursorX + 'px';
+                cursor.style.top = cursorY + 'px';
+
+                // Check Pinch
+                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+                const currentlyPinching = dist < 0.045; // Threshold
+
+                // --- 3D RAYCASTING (Find what we are pointing at) ---
+                // We briefly hide the cursor so document.elementFromPoint hits the UI underneath it
+                cursor.style.pointerEvents = 'none'; 
+                const hitElement = document.elementFromPoint(cursorX, cursorY);
+
+                // Handle Hover Effects
+                document.querySelectorAll('.ar-hover').forEach(el => el.classList.remove('ar-hover'));
+                if (hitElement && hitElement.closest('.song-item')) {
+                    hitElement.closest('.song-item').classList.add('ar-hover');
+                }
+
+                // --- STATE MACHINE ---
+                if (currentlyPinching && !isPinching) {
+                    // PINCH START
+                    isPinching = true;
+                    cursor.classList.add('pinching');
+                    pinchStartX = cursorX;
+                    pinchStartY = cursorY;
+                    pinchStartTime = Date.now();
+
+                    if (hitElement) {
+                        const header = hitElement.closest('.header');
+                        const list = hitElement.closest('.song-list');
+                        
+                        if (header) {
+                            activeAction = 'drag';
+                            initialBubbleX = bubbleX;
+                            initialBubbleY = bubbleY;
+                        } else if (list) {
+                            activeAction = 'scroll';
+                            initialScrollTop = songList.scrollTop;
+                        }
+                    }
+                } 
+                else if (currentlyPinching && isPinching) {
+                    // PINCH HOLD/MOVE
+                    const deltaX = cursorX - pinchStartX;
+                    const deltaY = cursorY - pinchStartY;
+
+                    if (activeAction === 'drag') {
+                        bubbleX = initialBubbleX + deltaX;
+                        bubbleY = initialBubbleY + deltaY;
+                    } else if (activeAction === 'scroll') {
+                        // Inverse scroll: pulling hand up pulls list up (scrolls down)
+                        songList.scrollTop = initialScrollTop - (deltaY * 2.5); // 2.5 is sensitivity multiplier
+                    }
+                } 
+                else if (!currentlyPinching && isPinching) {
+                    // PINCH RELEASE
+                    isPinching = false;
+                    cursor.classList.remove('pinching');
                     
-                    // Complex Math: We must subtract the World's parallax offset 
-                    // so the bubble stays locked to your finger, not the room, while dragging.
-                    bubbleX = screenX - parallaxX - 160; // 160 is half width
-                    bubbleY = screenY - parallaxY - 40;  // 40 is top offset
-                } else {
-                    isGrabbed = false;
-                    bubble.classList.remove('grabbed');
+                    const pinchDuration = Date.now() - pinchStartTime;
+                    const deltaMath = Math.hypot(cursorX - pinchStartX, cursorY - pinchStartY);
+
+                    // If it was a short pinch and didn't move much -> AIR TAP / CLICK
+                    if (pinchDuration < 400 && deltaMath < 30) {
+                        if (hitElement && hitElement.closest('.song-item')) {
+                            const song = hitElement.closest('.song-item');
+                            // Trigger selection!
+                            song.style.background = "rgba(0, 242, 255, 0.4)";
+                            setTimeout(() => song.style.background = "", 300);
+                            showToast(song.dataset.title, song.dataset.artist);
+                        }
+                    }
+                    activeAction = null;
                 }
             } else {
-                bubble.classList.remove('grabbed');
+                // Hand lost
+                cursor.style.display = "none";
+                isPinching = false;
+                activeAction = null;
+                cursor.classList.remove('pinching');
             }
             canvasCtx.restore();
         }
@@ -269,41 +357,41 @@
         window.addEventListener('resize', resize);
         resize();
 
-        // 4. Initialization (Permissions + AI Load)
+        // 4. Start Engine
         async function initAR() {
-            startScreen.innerHTML = "<h3 style='color:#00ffcc'>Loading AI Models...</h3>";
+            startScreen.innerHTML = "<h3>Initializing Tracking...</h3><p>Please wait a moment.</p>";
 
-            // Request Gyroscope (Mandatory for iOS)
+            // Request Gyro
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
                     const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission === 'granted') {
-                        window.addEventListener('deviceorientation', handleOrientation);
-                    }
-                } catch(e) { console.warn("Gyro permission denied", e); }
+                    if (permission === 'granted') window.addEventListener('deviceorientation', handleOrientation);
+                } catch(e) { console.log(e); }
             } else {
-                window.addEventListener('deviceorientation', handleOrientation); // Android/Desktop
+                window.addEventListener('deviceorientation', handleOrientation); 
             }
 
-            // Start 3D Engine
             animate3D();
-            bubble.style.display = "flex"; // Show bubble
+            bubble.style.display = "flex";
 
-            // Setup MediaPipe
+            // Init MediaPipe
             const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+            hands.setOptions({ 
+                maxNumHands: 1, 
+                modelComplexity: 1, // Use 1 for better accuracy on spatial targeting
+                minDetectionConfidence: 0.65, 
+                minTrackingConfidence: 0.65 
+            });
             hands.onResults(onResults);
 
-            // Start Front Camera
             const camera = new Camera(videoElement, {
                 onFrame: async () => { await hands.send({image: videoElement}); },
-                width: 1280, height: 720,
-                facingMode: 'user' // Front camera requested
+                width: 1280, height: 720, facingMode: 'user'
             });
 
             camera.start().then(() => {
                 startScreen.style.display = "none";
-            }).catch(e => {
+            }).catch(() => {
                 startScreen.innerHTML = "<h3 style='color:red'>Camera Access Denied</h3>";
             });
         }
