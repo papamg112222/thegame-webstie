@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VR Spatial OS</title>
+    <title>VR Spatial OS - Depth Physics</title>
     
     <!-- MediaPipe AI Models -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
@@ -32,10 +32,9 @@
             width: 50vw; height: 100vh;
             position: relative;
             overflow: hidden;
-            border-right: 1px solid #000; /* Separator line for VR lenses */
+            border-right: 1px solid #000; 
         }
 
-        /* Camera Feed (Stretched to match hand tracking 1:1) */
         .bg-video {
             position: absolute; top: 0; left: 0;
             width: 100%; height: 100%;
@@ -44,7 +43,6 @@
             opacity: 0.8;
         }
 
-        /* Hidden Processing Elements */
         #hidden-processor { display: none; }
         #yt-container { position: fixed; top: -100px; opacity: 0; pointer-events: none; }
 
@@ -52,7 +50,7 @@
         .scene {
             position: absolute; top: 0; left: 0;
             width: 100%; height: 100%;
-            perspective: 800px; /* Stronger perspective for VR */
+            perspective: 700px; /* Enhanced depth perception */
             z-index: 5;
             pointer-events: none; 
         }
@@ -71,7 +69,7 @@
             position: absolute;
             left: 50%; top: 50%;
             width: 320px; height: 500px;
-            /* Default transform, will be overwritten by JS for Stereoscopic offset */
+            /* Z-axis (-500px) is manipulated by hand pushing/pulling */
             transform: translate(-50%, -50%) translate3d(0px, 0px, -500px);
             background: rgba(15, 15, 20, 0.6);
             backdrop-filter: blur(20px) saturate(180%);
@@ -87,7 +85,7 @@
 
         .bubble.bubble-dragging {
             border-color: #00ffcc;
-            box-shadow: 0 0 60px rgba(0, 255, 204, 0.3), inset 0 0 25px rgba(0, 255, 204, 0.2);
+            box-shadow: 0 0 80px rgba(0, 255, 204, 0.4), inset 0 0 30px rgba(0, 255, 204, 0.2);
         }
 
         /* AR Pointer Cursor */
@@ -182,7 +180,6 @@
         }
         .launch-btn:active { transform: scale(0.95); }
 
-        /* Recenter Button (Centered perfectly between eyes) */
         #recenter-btn {
             position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
             background: rgba(0,0,0,0.8); border: 2px solid #00ffcc; color: #00ffcc;
@@ -211,17 +208,15 @@
 
     <div id="start-screen">
         <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#00ffcc" stroke-width="1.5" style="margin-bottom:20px;">
-            <path d="M2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12Z" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M9 12C9 13.6569 7.65685 15 6 15C4.34315 15 3 13.6569 3 12C3 10.3431 4.34315 9 6 9C7.65685 9 9 10.3431 9 12Z" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M21 12C21 13.6569 19.6569 15 18 15C16.3431 15 15 13.6569 15 12C15 10.3431 16.3431 9 18 9C19.6569 9 21 10.3431 21 12Z" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3" stroke-linecap="round"/>
+            <path d="M12 9L12 15M9 12H15" stroke-linecap="round"/>
         </svg>
-        <h2 style="margin: 0;">VR Spatial Audio</h2>
+        <h2 style="margin: 0;">VR Spatial OS - Depth Map</h2>
         <p style="opacity: 0.7; text-align: center; max-width: 320px; line-height: 1.6; margin-top: 15px;">
-            <b>1.</b> Insert phone into VR headset.<br>
-            <b>2.</b> Look around (True Inverse Lock).<br>
-            <b>3.</b> Pinch in the air to scroll/play.
+            <b>Push/Pull:</b> Grab header and extend your arm to push window into 3D space.<br>
+            <b>Stereo Lock:</b> True Head Tracking Active.
         </p>
-        <button class="launch-btn" onclick="initVR()">Enter VR Mode</button>
+        <button class="launch-btn" onclick="initVR()">Enter VR OS</button>
     </div>
 
     <video id="hidden-processor" playsinline autoplay muted></video>
@@ -246,7 +241,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Pinch to drag</p>
+                            <p>Push/Pull to scale Z-Depth</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-left"></div>
                     </div>
@@ -265,7 +260,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Pinch to drag</p>
+                            <p>Push/Pull to scale Z-Depth</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-right"></div>
                     </div>
@@ -280,25 +275,13 @@
     <script>
         // --- DOM Elements ---
         const procVideo = document.getElementById('hidden-processor');
-        const vidLeft = document.getElementById('video-left');
-        const vidRight = document.getElementById('video-right');
-        
-        const ctxLeft = document.getElementById('canvas-left').getContext('2d');
-        const ctxRight = document.getElementById('canvas-right').getContext('2d');
-        
-        const worldLeft = document.getElementById('world-left');
-        const worldRight = document.getElementById('world-right');
-        const bubbleLeft = document.getElementById('bubble-left');
-        const bubbleRight = document.getElementById('bubble-right');
-        const listLeft = document.getElementById('songList-left');
-        const listRight = document.getElementById('songList-right');
-        
-        const curLeft = document.getElementById('cursor-left');
-        const curRight = document.getElementById('cursor-right');
-        
-        const startScreen = document.getElementById('start-screen');
-        const toast = document.getElementById('toast');
-        const toastText = document.getElementById('toast-text');
+        const vidLeft = document.getElementById('video-left'), vidRight = document.getElementById('video-right');
+        const ctxLeft = document.getElementById('canvas-left').getContext('2d'), ctxRight = document.getElementById('canvas-right').getContext('2d');
+        const worldLeft = document.getElementById('world-left'), worldRight = document.getElementById('world-right');
+        const bubbleLeft = document.getElementById('bubble-left'), bubbleRight = document.getElementById('bubble-right');
+        const listLeft = document.getElementById('songList-left'), listRight = document.getElementById('songList-right');
+        const curLeft = document.getElementById('cursor-left'), curRight = document.getElementById('cursor-right');
+        const startScreen = document.getElementById('start-screen'), toast = document.getElementById('toast'), toastText = document.getElementById('toast-text');
 
         // --- YOUTUBE API ---
         let ytPlayer;
@@ -310,22 +293,22 @@
         }
 
         // --- TRUE INVERSE 3D SPATIAL SYSTEM ---
-        let baseAlpha = 0, baseBeta = 0, baseGamma = 0;
-        let isCalibrated = false;
+        let baseAlpha = 0, baseBeta = 0, baseGamma = 0, isCalibrated = false;
         let targetRotX = 0, targetRotY = 0, targetRotZ = 0;
         let currentRotX = 0, currentRotY = 0, currentRotZ = 0;
-        let bubbleX = 0, bubbleY = 0; 
-
-        // --- SMOOTH CURSOR ---
-        // Coordinates are relative to a single EYE container (0 to 50vw)
-        let smoothCursorX = window.innerWidth / 4; 
-        let smoothCursorY = window.innerHeight / 2;
         
-        // --- GESTURES ---
+        let bubbleX = 0, bubbleY = 0; 
+        let bubbleZ = -500; // Base Z-Depth distance
+        let targetBubbleZ = -500;
+
+        let smoothCursorX = window.innerWidth / 4, smoothCursorY = window.innerHeight / 2;
+        
+        // --- GESTURE STATE ---
         let isPinching = false;
         let pinchStartX = 0, pinchStartY = 0, pinchStartTime = 0;
         let activeAction = null; 
-        let initialBubbleX = 0, initialBubbleY = 0, initialScrollTop = 0;
+        let initialBubbleX = 0, initialBubbleY = 0, initialBubbleZ = 0, initialScrollTop = 0;
+        let initialHandSize = 0; // Tracks arm extension for pushing/pulling
 
         // --- MUSIC LIBRARY POPULATION ---
         const library = [
@@ -346,54 +329,49 @@
                 const track = library[i % library.length];
                 const div = document.createElement('div');
                 div.className = 'song-item';
-                div.dataset.index = i; // Crucial for syncing left and right eyes
-                div.dataset.title = track.title;
-                div.dataset.artist = track.artist;
-                div.dataset.ytid = track.ytid;
+                div.dataset.index = i;
+                div.dataset.title = track.title; div.dataset.artist = track.artist; div.dataset.ytid = track.ytid;
                 div.innerHTML = `<span class="song-title">${track.title}</span><span class="song-artist">${track.artist}</span>`;
                 listElement.appendChild(div);
             }
         }
-        populateList(listLeft);
-        populateList(listRight);
+        populateList(listLeft); populateList(listRight);
 
-        // --- GYROSCOPE (INVERSE LOCK FIXED) ---
+        // --- GYROSCOPE (INVERSE LOCK) ---
         function handleOrientation(e) {
             if (!isCalibrated) { 
                 baseAlpha = e.alpha || 0; baseBeta = e.beta || 0; baseGamma = e.gamma || 0; 
                 isCalibrated = true; 
             }
-            let dA = (e.alpha || 0) - baseAlpha;
-            let dB = (e.beta || 0) - baseBeta;
-            let dG = (e.gamma || 0) - baseGamma;
-            
+            let dA = (e.alpha || 0) - baseAlpha; let dB = (e.beta || 0) - baseBeta; let dG = (e.gamma || 0) - baseGamma;
             if (dA > 180) dA -= 360; if (dA < -180) dA += 360;
             
-            // OPPOSITE MATH: Turn phone Right (+dA) -> Turn World Left (-dA). Perfect Lock.
             if (e.alpha !== null) {
-                targetRotY = -dA; 
-                targetRotX = -dB; 
-                targetRotZ = -dG;  
+                targetRotY = -dA; targetRotX = -dB; targetRotZ = -dG;  
             }
         }
 
-        function recenterAR() { isCalibrated = false; bubbleX = 0; bubbleY = 0; }
+        function recenterAR() { 
+            isCalibrated = false; bubbleX = 0; bubbleY = 0; 
+            targetBubbleZ = -500; // Reset depth
+        }
 
-        // --- RENDER ENGINE (STEREOSCOPIC OFFSET) ---
+        // --- RENDER ENGINE (Z-DEPTH & STEREOSCOPIC OFFSET) ---
         function animate3D() {
             currentRotX += (targetRotX - currentRotX) * 0.5;
             currentRotY += (targetRotY - currentRotY) * 0.5;
             currentRotZ += (targetRotZ - currentRotZ) * 0.5;
+            
+            // Smoothly interpolate Z-depth Push/Pull
+            bubbleZ += (targetBubbleZ - bubbleZ) * 0.2;
 
-            // Rotate both worlds
             const rotTransform = `rotateX(${currentRotX}deg) rotateY(${currentRotY}deg) rotateZ(${currentRotZ}deg)`;
             worldLeft.style.transform = rotTransform;
             worldRight.style.transform = rotTransform;
             
-            // VR DEPTH OFFSET (Parallax): 
-            // We shift the bubble slightly right in the Left Eye, and slightly left in the Right Eye.
-            // This tricks the brain into seeing 3D depth inside the headset.
-            const baseBubbleTransform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, -500px)`;
+            // Apply Dynamic Z-Depth 
+            // Parallax offset (15px) scales naturally with Z-depth thanks to CSS perspective!
+            const baseBubbleTransform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px)`;
             
             bubbleLeft.style.transform = baseBubbleTransform + ` translateX(15px)`;
             bubbleRight.style.transform = baseBubbleTransform + ` translateX(-15px)`;
@@ -403,21 +381,14 @@
 
         function playSong(element) {
             const index = element.dataset.index;
-            const itemsLeft = listLeft.children;
-            const itemsRight = listRight.children;
-
-            // Sync visual states
+            const itemsLeft = listLeft.children; const itemsRight = listRight.children;
             for(let i=0; i<itemsLeft.length; i++) {
-                itemsLeft[i].classList.remove('playing');
-                itemsRight[i].classList.remove('playing');
+                itemsLeft[i].classList.remove('playing'); itemsRight[i].classList.remove('playing');
             }
-            itemsLeft[index].classList.add('playing');
-            itemsRight[index].classList.add('playing');
+            itemsLeft[index].classList.add('playing'); itemsRight[index].classList.add('playing');
 
-            // Play Audio
             if(ytPlayer && ytPlayer.loadVideoById) ytPlayer.loadVideoById(element.dataset.ytid);
 
-            // Toast
             toastText.innerHTML = `<b>${element.dataset.title}</b> <span style="opacity:0.7; margin-left:8px;">${element.dataset.artist}</span>`;
             toast.style.top = "60px";
         }
@@ -429,43 +400,38 @@
             
             ctxLeft.canvas.width = eyeWidth; ctxLeft.canvas.height = eyeHeight;
             ctxRight.canvas.width = eyeWidth; ctxRight.canvas.height = eyeHeight;
-            
-            ctxLeft.clearRect(0, 0, eyeWidth, eyeHeight);
-            ctxRight.clearRect(0, 0, eyeWidth, eyeHeight);
+            ctxLeft.clearRect(0, 0, eyeWidth, eyeHeight); ctxRight.clearRect(0, 0, eyeWidth, eyeHeight);
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 curLeft.style.display = "block"; curRight.style.display = "block";
                 const landmarks = results.multiHandLandmarks[0];
                 
-                // Draw to both eyes
                 drawConnectors(ctxLeft, landmarks, HAND_CONNECTIONS, {color: 'rgba(255,255,255,0.2)', lineWidth: 2});
                 drawLandmarks(ctxLeft, landmarks, {color: '#00ffcc', lineWidth: 0, radius: 3});
-                
                 drawConnectors(ctxRight, landmarks, HAND_CONNECTIONS, {color: 'rgba(255,255,255,0.2)', lineWidth: 2});
                 drawLandmarks(ctxRight, landmarks, {color: '#00ffcc', lineWidth: 0, radius: 3});
 
                 const index = landmarks[8];
                 const thumb = landmarks[4];
+                const wrist = landmarks[0];
+                const middleBase = landmarks[9];
                 
-                // Map hand coordinates to the Eye Container size
-                const rawX = index.x * eyeWidth;
-                const rawY = index.y * eyeHeight;
+                // --- 1. CALCULATE HAND DISTANCE (For Push/Pull Z-Depth) ---
+                // Distance from wrist to middle finger knuckle changes based on how far your arm is extended.
+                const currentHandSize = Math.hypot(wrist.x - middleBase.x, wrist.y - middleBase.y);
 
-                smoothCursorX += (rawX - smoothCursorX) * 0.35;
-                smoothCursorY += (rawY - smoothCursorY) * 0.35;
+                const rawX = index.x * eyeWidth; const rawY = index.y * eyeHeight;
+                smoothCursorX += (rawX - smoothCursorX) * 0.35; smoothCursorY += (rawY - smoothCursorY) * 0.35;
 
-                // Move cursors in both eyes
                 curLeft.style.left = smoothCursorX + 'px'; curLeft.style.top = smoothCursorY + 'px';
                 curRight.style.left = smoothCursorX + 'px'; curRight.style.top = smoothCursorY + 'px';
 
                 const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
                 const currentlyPinching = dist < (isPinching ? 0.055 : 0.040);
 
-                // Raycast ONLY on Left Eye (since UI logic syncs automatically)
                 curLeft.style.pointerEvents = 'none'; 
                 const hitElement = document.elementFromPoint(smoothCursorX, smoothCursorY);
 
-                // Sync Hover state between both eyes
                 document.querySelectorAll('.ar-hover').forEach(el => el.classList.remove('ar-hover'));
                 if (hitElement && hitElement.closest('.song-item') && !isPinching) {
                     const songIndex = hitElement.closest('.song-item').dataset.index;
@@ -473,17 +439,21 @@
                     listRight.children[songIndex].classList.add('ar-hover');
                 }
 
-                // ================== GESTURES ==================
+                // ================== PUSH/PULL GESTURES ==================
                 if (currentlyPinching && !isPinching) {
                     isPinching = true;
                     curLeft.classList.add('pinching'); curRight.classList.add('pinching');
                     pinchStartX = smoothCursorX; pinchStartY = smoothCursorY; pinchStartTime = Date.now();
+                    
+                    // Lock in the baseline hand size to measure pushing/pulling
+                    initialHandSize = currentHandSize; 
 
                     if (hitElement) {
                         if (hitElement.closest('.header')) {
                             activeAction = 'drag';
                             bubbleLeft.classList.add('bubble-dragging'); bubbleRight.classList.add('bubble-dragging');
                             initialBubbleX = bubbleX; initialBubbleY = bubbleY;
+                            initialBubbleZ = bubbleZ; 
                         } else if (hitElement.closest('.song-list')) {
                             activeAction = 'scroll';
                             listLeft.classList.add('list-scrolling'); listRight.classList.add('list-scrolling');
@@ -496,13 +466,27 @@
                     const deltaY = smoothCursorY - pinchStartY;
 
                     if (activeAction === 'drag') {
+                        // X & Y Dragging
                         bubbleX = initialBubbleX + (deltaX * 1.8);
                         bubbleY = initialBubbleY + (deltaY * 1.8);
+                        
+                        // --- Z-DEPTH PUSH/PULL ---
+                        // If currentHandSize is SMALLER than initial, you pushed your arm AWAY (-Z)
+                        // If currentHandSize is LARGER, you pulled it CLOSER (+Z)
+                        const sizeDiff = currentHandSize - initialHandSize;
+                        
+                        // Multiplier to convert hand scale delta into deep Z-space translation
+                        let newZ = initialBubbleZ + (sizeDiff * 9000); 
+                        
+                        // Clamp bounds so you don't push it too far or pull it through the camera
+                        if (newZ > -250) newZ = -250;   // Max Close (Huge)
+                        if (newZ < -1500) newZ = -1500; // Max Far (Tiny)
+                        
+                        targetBubbleZ = newZ;
+
                     } else if (activeAction === 'scroll') {
-                        // ZERO EFFORT SCROLL: 8.0x Multiplier!
                         const newScroll = initialScrollTop - (deltaY * 8.0);
-                        listLeft.scrollTop = newScroll;
-                        listRight.scrollTop = newScroll; // Sync scroll
+                        listLeft.scrollTop = newScroll; listRight.scrollTop = newScroll;
                     }
                 } 
                 else if (!currentlyPinching && isPinching) {
@@ -515,9 +499,7 @@
                     const moveDist = Math.hypot(smoothCursorX - pinchStartX, smoothCursorY - pinchStartY);
 
                     if (activeAction !== 'drag' && pinchTime < 400 && moveDist < 30) {
-                        if (hitElement && hitElement.closest('.song-item')) {
-                            playSong(hitElement.closest('.song-item'));
-                        }
+                        if (hitElement && hitElement.closest('.song-item')) playSong(hitElement.closest('.song-item'));
                     }
                     activeAction = null;
                 }
@@ -533,7 +515,6 @@
         // --- SYSTEM BOOT ---
         async function initVR() {
             startScreen.innerHTML = "<h3>Booting VR Engine...</h3><p>Please wait.</p>";
-
             if(ytPlayer && ytPlayer.playVideo) { ytPlayer.playVideo(); setTimeout(() => ytPlayer.pauseVideo(), 100); }
 
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -554,10 +535,7 @@
                     video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
                 });
                 
-                // Route stream to all 3 video elements
-                procVideo.srcObject = stream;
-                vidLeft.srcObject = stream;
-                vidRight.srcObject = stream;
+                procVideo.srcObject = stream; vidLeft.srcObject = stream; vidRight.srcObject = stream;
                 
                 procVideo.onloadedmetadata = () => {
                     procVideo.play();
