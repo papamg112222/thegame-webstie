@@ -6,17 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>VisionOS Spatial - MeTube Edition</title>
     
-    <!-- External Spatial Intelligence Libraries -->
+    <!-- Spatial Engine Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <style>
         :root {
-            --avp-glass: rgba(25, 25, 25, 0.6);
-            --avp-border: rgba(255, 255, 255, 0.2);
+            --avp-glass: rgba(20, 20, 20, 0.7);
+            --avp-border: rgba(255, 255, 255, 0.25);
             --avp-accent: #ff0033;
-            --avp-text: #ffffff;
+            --avp-white: #ffffff;
         }
 
         * {
@@ -33,12 +33,12 @@
             height: 100%;
             overflow: hidden;
             background-color: #000;
-            color: var(--avp-text);
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--avp-white);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
         }
 
-        /* The Spatial Rendering Layer */
-        #vision-canvas {
+        /* Rendering Layers */
+        #main-canvas {
             display: block;
             width: 100vw;
             height: 100vh;
@@ -48,8 +48,7 @@
             z-index: 1;
         }
 
-        /* The Hand Occlusion Layer (Always on Top) */
-        #occlusion-overlay {
+        #occlusion-canvas {
             position: fixed;
             top: 0;
             left: 0;
@@ -57,11 +56,11 @@
             height: 100vh;
             z-index: 5000;
             pointer-events: none;
-            filter: drop-shadow(0 0 8px rgba(255,255,255,0.15));
+            filter: brightness(1.1) contrast(1.1);
         }
 
-        /* Video Feed processing (Hidden) */
-        #webcam-feed {
+        /* Hidden Assets */
+        video#raw-feed {
             position: absolute;
             width: 1px;
             height: 1px;
@@ -69,44 +68,64 @@
             pointer-events: none;
         }
 
-        /* AVP Style HUD for Now Playing */
-        #playback-hud {
+        /* VisionOS UI Elements */
+        #hud-now-playing {
             position: fixed;
             top: 40px;
             left: 50%;
             transform: translateX(-50%);
             background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(30px);
-            -webkit-backdrop-filter: blur(30px);
-            padding: 20px 40px;
+            backdrop-filter: blur(35px) saturate(180%);
+            -webkit-backdrop-filter: blur(35px) saturate(180%);
+            padding: 20px 45px;
             border-radius: 40px;
-            border: 1px solid rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
             z-index: 1000;
             display: none;
             text-align: center;
-            min-width: 300px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            min-width: 320px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.5);
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        #playback-hud h3 { font-size: 16px; margin-bottom: 4px; font-weight: 600; }
-        #playback-hud p { font-size: 12px; opacity: 0.6; margin-bottom: 12px; }
+        #hud-now-playing h3 { font-size: 17px; margin-bottom: 6px; font-weight: 700; letter-spacing: -0.5px; }
+        #hud-now-playing p { font-size: 13px; opacity: 0.6; margin-bottom: 15px; }
         
-        .progress-container {
+        .progress-track {
             width: 100%;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 2px;
+            height: 5px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
             overflow: hidden;
+            position: relative;
         }
-        #progress-bar {
+        #progress-fill {
             width: 0%;
             height: 100%;
             background: var(--avp-accent);
-            transition: width 0.1s linear;
+            box-shadow: 0 0 10px var(--avp-accent);
         }
 
-        /* Startup Boot UI */
-        #boot-interface {
+        /* Interactive Hand Guide */
+        #hand-interaction-guide {
+            position: fixed;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1500;
+            background: rgba(0,0,0,0.7);
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            opacity: 0;
+            transition: opacity 0.5s;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* Startup & Permissions Engine */
+        #vision-boot-screen {
             position: fixed;
             top: 0;
             left: 0;
@@ -119,480 +138,471 @@
             align-items: center;
             justify-content: center;
             cursor: pointer;
+            transition: opacity 0.8s ease;
         }
 
-        .vision-logo {
-            width: 100px;
-            height: 100px;
+        .boot-symbol {
+            width: 110px;
+            height: 110px;
             border: 1px solid rgba(255,255,255,0.4);
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 40px;
+            margin-bottom: 50px;
             position: relative;
         }
-        .vision-logo::after {
+        
+        .boot-symbol::before {
             content: "";
             position: absolute;
-            width: 120%;
-            height: 120%;
+            inset: -15px;
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 50%;
-            animation: ripple 2s infinite;
+            animation: bootRipple 3s infinite;
         }
 
-        @keyframes ripple {
-            0% { transform: scale(1); opacity: 1; }
-            100% { transform: scale(1.5); opacity: 0; }
+        @keyframes bootRipple {
+            0% { transform: scale(0.9); opacity: 1; }
+            100% { transform: scale(1.6); opacity: 0; }
         }
 
-        .boot-text {
-            text-align: center;
-        }
-        .boot-text h2 { font-weight: 200; letter-spacing: 12px; font-size: 16px; margin-bottom: 10px; }
-        .boot-text p { font-size: 10px; opacity: 0.4; letter-spacing: 2px; }
+        .boot-title { text-align: center; }
+        .boot-title h1 { font-weight: 200; letter-spacing: 15px; font-size: 18px; margin-bottom: 15px; }
+        .boot-title p { font-size: 10px; opacity: 0.4; letter-spacing: 3px; }
 
-        /* Interaction Tooltips */
-        #interaction-tooltip {
+        /* Error/Status Overlay (Fixed to avoid Alert loop) */
+        #system-status-msg {
             position: fixed;
-            bottom: 40px;
+            top: 50%;
             left: 50%;
-            transform: translateX(-50%);
-            z-index: 1000;
-            font-size: 11px;
-            background: rgba(0,0,0,0.6);
-            padding: 10px 20px;
+            transform: translate(-50%, -50%);
+            background: rgba(40, 0, 0, 0.8);
+            backdrop-filter: blur(20px);
+            padding: 30px;
             border-radius: 20px;
-            opacity: 0;
-            transition: opacity 0.5s;
-            pointer-events: none;
+            border: 1px solid #ff0033;
+            z-index: 10000;
+            display: none;
+            text-align: center;
+            width: 80%;
+            max-width: 400px;
+        }
+        #system-status-msg button {
+            background: #ff0033;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 12px;
+            margin-top: 20px;
+            font-weight: bold;
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
 
-    <!-- BOOT SYSTEM -->
-    <div id="boot-interface" onclick="unlockSpatialSystem()">
-        <div class="vision-logo">
-            <div style="width: 30px; height: 30px; background: #fff; border-radius: 50%;"></div>
+    <!-- BOOT & PERMISSION HANDLER -->
+    <div id="vision-boot-screen" onclick="requestSystemEntry()">
+        <div class="boot-symbol">
+            <div style="width: 40px; height: 40px; background: #fff; border-radius: 50%; box-shadow: 0 0 30px #fff;"></div>
         </div>
-        <div class="boot-text">
-            <h2>VISION_OS_2.0</h2>
-            <p>TAP TO CALIBRATE ENVIRONMENT</p>
-        </div>
-    </div>
-
-    <!-- HUD ELEMENTS -->
-    <div id="playback-hud">
-        <h3 id="current-track-name">Not Playing</h3>
-        <p id="current-artist-name">Select a track from MeTube</p>
-        <div class="progress-container">
-            <div id="progress-bar"></div>
+        <div class="boot-title">
+            <h1>VISION_OS_3.0</h1>
+            <p>TAP TO SYNC SPATIAL MAPPING</p>
         </div>
     </div>
 
-    <div id="interaction-tooltip">PINCH TO SELECT • PALM OPEN TO DRAG</div>
+    <div id="system-status-msg">
+        <h3 id="status-title">Permission Required</h3>
+        <p id="status-body" style="margin-top: 10px; opacity: 0.7;">We need camera and motion sensor access to lock the app in your room.</p>
+        <button onclick="requestSystemEntry()">ALLOW ACCESS</button>
+    </div>
 
-    <!-- MAIN RENDERING PIPELINE -->
-    <canvas id="vision-canvas"></canvas>
-    <canvas id="occlusion-overlay"></canvas>
-    <video id="webcam-feed" playsinline></video>
+    <!-- HUD LAYERS -->
+    <div id="hud-now-playing">
+        <h3 id="ui-track-name">No Media Loaded</h3>
+        <p id="ui-artist-name">Select a track to begin playback</p>
+        <div class="progress-track">
+            <div id="progress-fill"></div>
+        </div>
+    </div>
+
+    <div id="hand-interaction-guide">PINCH TO SELECT • PALM OPEN TO MOVE WINDOW</div>
+
+    <!-- MAIN ENGINE -->
+    <canvas id="main-canvas"></canvas>
+    <canvas id="occlusion-canvas"></canvas>
+    <video id="raw-feed" playsinline></video>
 
     <script>
         /**
-         * SPATIAL DATA: THE METUBE LIBRARY (100+ Songs)
+         * SPATIAL DATA CORE: THE 100+ SONG LIBRARY
          */
-        const ARTISTS = ["Kendrick Lamar", "Laufey", "Arctic Monkeys", "Mild High Club", "Home", "Tame Impala", "Steve Lacy", "Tyler, The Creator", "Mac DeMarco", "TV Girl", "Joji", "Clairo", "Beach House", "Mitski", "Frank Ocean"];
-        const TITLES = ["Not Like Us", "From The Start", "505", "Homage", "Resonance", "Treehouse", "Valentine", "Dreamcore", "Money Trees", "Swimming Pools", "Bad Habit", "After the Storm", "See You Again", "Chamber of Reflection", "Blue Hair", "Glimpse of Us", "Bags", "Borderline", "Myth", "Pink in the Night", "Pink + White", "Thinking Bout You"];
+        const ARTIST_POOLED = ["Kendrick Lamar", "Laufey", "Arctic Monkeys", "Mild High Club", "Home", "Tame Impala", "Steve Lacy", "Tyler, The Creator", "Mac DeMarco", "TV Girl", "Joji", "Clairo", "Beach House", "Mitski", "Frank Ocean", "Slowdive", "Aphex Twin", "Thundercat"];
+        const TRACK_POOLED = ["Not Like Us", "From The Start", "505", "Homage", "Resonance", "Treehouse", "Valentine", "Dreamcore", "Money Trees", "Swimming Pools", "Bad Habit", "After the Storm", "See You Again", "Chamber of Reflection", "Blue Hair", "Glimpse of Us", "Bags", "Borderline", "Myth", "First Love / Late Spring", "White Ferrari", "Pyramids", "Alison", "Xtal", "Them Changes"];
         
-        const METUBE_LIBRARY = [];
-        for(let i=0; i<115; i++) {
-            METUBE_LIBRARY.push({
-                title: TITLES[i % TITLES.length],
-                artist: ARTISTS[i % ARTISTS.length],
-                color: `hsl(${i * 13.7}, 65%, 45%)`,
+        const MASTER_LIBRARY = [];
+        for(let i=0; i<120; i++) {
+            MASTER_LIBRARY.push({
+                title: TRACK_POOLED[i % TRACK_POOLED.length],
+                artist: ARTIST_POOLED[i % ARTIST_POOLED.length],
+                color: `hsl(${i * 11.3}, 60%, 45%)`,
                 id: i
             });
         }
 
         /**
-         * GLOBAL ENGINE STATE
+         * GLOBAL SPATIAL ENGINE STATE
          */
-        let scene, camera, renderer, videoTexture;
-        let worldGroup, uiWindow, launchOrb;
-        let isSystemInitialized = false;
+        let scene, camera, renderer, bgTexture;
+        let worldAnchor, floatingWindow, launchBubble;
+        let isEngineInitialized = false;
         let isMeTubeOpen = false;
-        let audioContext, activeOscillator;
-        let playbackInterval;
+        let audioContext, activeOsc;
+        let trackInterval;
 
         // Interaction State
-        let lastHandPos = { x: 0, y: 0 };
-        let windowPosition = { x: 0, y: 0, z: -5 };
-        let isDraggingWindow = false;
-        let scrollOffset = 0;
-        let scrollVelocity = 0;
+        let lastHandCoords = { x: 0, y: 0 };
+        let worldWindowPos = { x: 0, y: 0, z: -6 }; // Floating 6 meters away
+        let draggingState = false;
+        let scrollY = 0;
+        let scrollVel = 0;
 
-        const videoElement = document.getElementById('webcam-feed');
-        const occlusionCanvas = document.getElementById('occlusion-overlay');
-        const oCtx = occlusionCanvas.getContext('2d');
+        const videoEl = document.getElementById('raw-feed');
+        const occCanvas = document.getElementById('occlusion-canvas');
+        const oCtx = occCanvas.getContext('2d');
 
         /**
-         * 1. SPATIAL INITIALIZATION (Three.js)
+         * 1. 3D SPATIAL ARCHITECTURE (Three.js Engine)
          */
-        function initSpatialEngine() {
+        function initialize3DWorld() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
             renderer = new THREE.WebGLRenderer({ 
-                canvas: document.getElementById('vision-canvas'), 
+                canvas: document.getElementById('main-canvas'), 
                 antialias: true,
                 alpha: true 
             });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
 
-            // Pass-through Background (Sphere)
-            videoTexture = new THREE.VideoTexture(videoElement);
-            const passThroughGeo = new THREE.SphereGeometry(100, 32, 32);
-            passThroughGeo.scale(-1, 1, 1);
-            const passThroughMat = new THREE.MeshBasicMaterial({ map: videoTexture });
-            const passThroughSphere = new THREE.Mesh(passThroughGeo, passThroughMat);
-            scene.add(passThroughSphere);
+            // Pass-through Camera View (Skybox Sphere)
+            bgTexture = new THREE.VideoTexture(videoEl);
+            const skyGeo = new THREE.SphereGeometry(200, 32, 32);
+            skyGeo.scale(-1, 1, 1); // Invert to look inside
+            const skyMat = new THREE.MeshBasicMaterial({ map: bgTexture });
+            const skySphere = new THREE.Mesh(skyGeo, skyMat);
+            scene.add(skySphere);
 
-            // The World Anchor (This stays fixed in the room)
-            worldGroup = new THREE.Group();
-            scene.add(worldGroup);
+            // The World Anchor - This allows objects to stay in place while you move
+            worldAnchor = new THREE.Group();
+            scene.add(worldAnchor);
 
-            // Initial Launch Orb (Placed low, near hip)
-            createLaunchOrb();
+            // Setup Floating App Launcher
+            spawnLauncher();
 
             camera.position.set(0, 0, 0.01);
         }
 
-        function createLaunchOrb() {
-            const geometry = new THREE.SphereGeometry(0.3, 32, 32);
-            const material = new THREE.MeshBasicMaterial({ 
-                color: 0xff0033, 
-                transparent: true, 
-                opacity: 0.8 
-            });
-            launchOrb = new THREE.Mesh(geometry, material);
-            // Place it down and to the right
-            launchOrb.position.set(1.5, -2, -3);
-            worldGroup.add(launchOrb);
+        function spawnLauncher() {
+            const geo = new THREE.SphereGeometry(0.35, 32, 32);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xff0033, transparent: true, opacity: 0.9 });
+            launchBubble = new THREE.Mesh(geo, mat);
+            // Placement: Lower-right hip area in 3D space
+            launchBubble.position.set(2, -2.5, -4);
+            worldAnchor.add(launchBubble);
 
-            // Add text label to Orb
-            const canvas = document.createElement('canvas');
-            canvas.width = 256; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = "white";
-            ctx.font = "bold 40px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText("MeTube", 128, 80);
-            const txtTex = new THREE.CanvasTexture(canvas);
-            const txtMat = new THREE.MeshBasicMaterial({ map: txtTex, transparent: true });
-            const txtMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.4), txtMat);
-            txtMesh.position.set(1.5, -1.5, -3);
-            worldGroup.add(txtMesh);
+            // Label Canvas
+            const lblCanv = document.createElement('canvas');
+            lblCanv.width = 300; lblCanv.height = 100;
+            const lctx = lblCanv.getContext('2d');
+            lctx.fillStyle = "#fff"; lctx.font = "bold 50px sans-serif";
+            lctx.textAlign = "center"; lctx.fillText("MeTube", 150, 70);
+            const lblTex = new THREE.CanvasTexture(lblCanv);
+            const lblMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.4), new THREE.MeshBasicMaterial({ map: lblTex, transparent: true }));
+            lblMesh.position.set(2, -1.8, -4);
+            worldAnchor.add(lblMesh);
         }
 
         /**
-         * 2. METUBE WINDOW GENERATION (Canvas Texture)
+         * 2. METUBE INTERFACE GENERATION (High-Fidelity Textures)
          */
-        function createMeTubeWindow() {
-            const uiCanvas = document.createElement('canvas');
-            uiCanvas.width = 1024;
-            uiCanvas.height = 1400;
-            const ctx = uiCanvas.getContext('2d');
+        function generateMeTubeWindow() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024;
+            canvas.height = 1500;
+            const ctx = canvas.getContext('2d');
 
-            function renderUITexture() {
-                ctx.clearRect(0, 0, 1024, 1400);
+            function updateFrame() {
+                ctx.clearRect(0, 0, 1024, 1500);
                 
-                // Main Glass Shell
-                ctx.fillStyle = "rgba(15, 15, 15, 0.85)";
-                drawRoundedRect(ctx, 40, 40, 944, 1320, 80, true);
-                ctx.strokeStyle = "rgba(255,255,255,0.15)";
-                ctx.lineWidth = 4;
-                drawRoundedRect(ctx, 40, 40, 944, 1320, 80, false);
+                // Deep Glass Container
+                ctx.fillStyle = "rgba(12, 12, 12, 0.88)";
+                drawRoundedBox(ctx, 40, 40, 944, 1420, 90, true);
+                ctx.strokeStyle = "rgba(255,255,255,0.2)";
+                ctx.lineWidth = 6;
+                drawRoundedBox(ctx, 40, 40, 944, 1420, 90, false);
 
-                // App Header
+                // Branding
                 ctx.fillStyle = "#ff0033";
-                ctx.font = "800 70px sans-serif";
-                ctx.fillText("MeTube", 120, 180);
-                
-                ctx.fillStyle = "rgba(255,255,255,0.3)";
-                ctx.font = "30px sans-serif";
-                ctx.fillText("SPATIAL LIBRARY v2.0", 620, 175);
+                ctx.font = "800 85px sans-serif";
+                ctx.fillText("MeTube", 130, 200);
+                ctx.fillStyle = "rgba(255,255,255,0.4)";
+                ctx.font = "35px sans-serif";
+                ctx.fillText("Spatial Engine 3.0", 630, 195);
 
-                // Song List (Rendering visible items based on scrollOffset)
-                const itemHeight = 130;
-                METUBE_LIBRARY.forEach((song, i) => {
-                    const yPos = 280 + (i * itemHeight) - scrollOffset;
-                    if(yPos < 200 || yPos > 1250) return; // Cull hidden items
+                // List Rendering (Scroll Logic)
+                const rowH = 140;
+                MASTER_LIBRARY.forEach((song, i) => {
+                    const y = 300 + (i * rowH) - scrollY;
+                    if(y < 200 || y > 1350) return;
 
-                    // Track Background
-                    ctx.fillStyle = "rgba(255,255,255,0.05)";
-                    drawRoundedRect(ctx, 100, yPos, 824, 110, 25, true);
-
-                    // Album Art
-                    ctx.fillStyle = song.color;
-                    drawRoundedRect(ctx, 130, yPos + 15, 80, 80, 15, true);
+                    ctx.fillStyle = "rgba(255,255,255,0.06)";
+                    drawRoundedBox(ctx, 110, y, 804, 120, 30, true);
                     
-                    // Text
+                    ctx.fillStyle = song.color;
+                    drawRoundedBox(ctx, 140, y + 15, 90, 90, 18, true);
+                    
                     ctx.fillStyle = "#fff";
-                    ctx.font = "bold 38px sans-serif";
-                    ctx.fillText(song.title, 250, yPos + 55);
+                    ctx.font = "bold 42px sans-serif";
+                    ctx.fillText(song.title, 260, y + 60);
                     
                     ctx.fillStyle = "rgba(255,255,255,0.5)";
-                    ctx.font = "28px sans-serif";
-                    ctx.fillText(song.artist, 250, yPos + 90);
+                    ctx.font = "30px sans-serif";
+                    ctx.fillText(song.artist, 260, y + 100);
                 });
 
-                // Bottom Drag Bar
-                ctx.fillStyle = "rgba(255,255,255,0.2)";
-                drawRoundedRect(ctx, 362, 1280, 300, 12, 6, true);
+                // Grab Handle (AVP Style)
+                ctx.fillStyle = "rgba(255,255,255,0.3)";
+                drawRoundedBox(ctx, 362, 1380, 300, 14, 7, true);
 
-                if(window.uiTexture) window.uiTexture.needsUpdate = true;
+                if(window.sharedTexture) window.sharedTexture.needsUpdate = true;
             }
 
-            const texture = new THREE.CanvasTexture(uiCanvas);
-            window.uiTexture = texture;
-            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-            const geometry = new THREE.PlaneGeometry(4, 5.5);
-            uiWindow = new THREE.Mesh(geometry, material);
+            const tex = new THREE.CanvasTexture(canvas);
+            window.sharedTexture = tex;
+            const material = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+            floatingWindow = new THREE.Mesh(new THREE.PlaneGeometry(4.5, 6.5), material);
             
-            uiWindow.position.set(0, 0, -5);
-            uiWindow.visible = false;
-            worldGroup.add(uiWindow);
+            floatingWindow.position.set(0, 0, -6);
+            floatingWindow.visible = false;
+            worldAnchor.add(floatingWindow);
 
-            // Set up a loop to re-render the UI only when needed
-            setInterval(renderUITexture, 30);
+            setInterval(updateFrame, 32);
         }
 
-        function drawRoundedRect(ctx, x, y, width, height, radius, fill) {
+        function drawRoundedBox(ctx, x, y, w, h, r, f) {
             ctx.beginPath();
-            ctx.moveTo(x + radius, y);
-            ctx.lineTo(x + width - radius, y);
-            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-            ctx.lineTo(x + width, y + height - radius);
-            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-            ctx.lineTo(x + radius, y + height);
-            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-            ctx.lineTo(x, y + radius);
-            ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+            ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+            ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+            ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
             ctx.closePath();
-            if (fill) ctx.fill(); else ctx.stroke();
+            if(f) ctx.fill(); else ctx.stroke();
         }
 
         /**
-         * 3. NEURAL HAND OCCLUSION & INTERACTION (MediaPipe)
+         * 3. NEURAL DEPTH & INTERACTION (MediaPipe AI)
          */
-        const handsEngine = new Hands({
+        const handAI = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
 
-        handsEngine.setOptions({
-            maxNumHands: 2,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.75,
-            minTrackingConfidence: 0.75
-        });
+        handAI.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
 
-        handsEngine.onResults(results => {
-            // A. UPDATE HAND OCCLUSION (Hand over UI)
-            occlusionCanvas.width = window.innerWidth;
-            occlusionCanvas.height = window.innerHeight;
-            oCtx.clearRect(0, 0, occlusionCanvas.width, occlusionCanvas.height);
+        handAI.onResults(results => {
+            // A. UPDATE OCCLUSION MASK
+            occCanvas.width = window.innerWidth;
+            occCanvas.height = window.innerHeight;
+            oCtx.clearRect(0, 0, occCanvas.width, occCanvas.height);
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                document.getElementById('interaction-tooltip').style.opacity = 1;
+                document.getElementById('hand-interaction-guide').style.opacity = 1;
                 
-                results.multiHandLandmarks.forEach((landmarks, handIndex) => {
-                    // Draw occlusion mask
+                results.multiHandLandmarks.forEach((marks, idx) => {
+                    // Neural Stencil Rendering
                     oCtx.save();
                     oCtx.beginPath();
-                    
-                    // Simple path for palm and fingers
-                    const points = [0, 1, 2, 3, 4, 3, 2, 1, 0, 5, 6, 7, 8, 7, 6, 5, 0, 9, 10, 11, 12, 11, 10, 9, 0, 13, 14, 15, 16, 15, 14, 13, 0, 17, 18, 19, 20];
-                    points.forEach((idx, i) => {
-                        const p = landmarks[idx];
-                        if(i === 0) oCtx.moveTo(p.x * occlusionCanvas.width, p.y * occlusionCanvas.height);
-                        else oCtx.lineTo(p.x * occlusionCanvas.width, p.y * occlusionCanvas.height);
+                    // Connect landmarks to create hand silhouette
+                    const joints = [0, 1, 2, 3, 4, 3, 2, 1, 0, 5, 6, 7, 8, 7, 6, 5, 0, 9, 10, 11, 12, 11, 10, 9, 0, 13, 14, 15, 16, 15, 14, 13, 0, 17, 18, 19, 20];
+                    joints.forEach((j, i) => {
+                        const p = marks[j];
+                        if(i === 0) oCtx.moveTo(p.x * occCanvas.width, p.y * occCanvas.height);
+                        else oCtx.lineTo(p.x * occCanvas.width, p.y * occCanvas.height);
                     });
-                    
                     oCtx.closePath();
                     oCtx.clip();
 
-                    // Fill the clipped shape with the real camera feed (Occlusion!)
-                    oCtx.drawImage(videoElement, 0, 0, occlusionCanvas.width, occlusionCanvas.height);
+                    // Re-render raw camera feed inside hand shape (Occlusion Bypass)
+                    oCtx.drawImage(videoEl, 0, 0, occCanvas.width, occCanvas.height);
                     oCtx.restore();
 
-                    // B. INTERACTION LOGIC
-                    const index = landmarks[8];
-                    const thumb = landmarks[4];
-                    const x = index.x * 100, y = index.y * 100;
-                    const pinchDist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
-                    const isPinching = pinchDist < 0.045;
+                    // B. SPATIAL INTERACTION LOGIC
+                    const tip = marks[8];
+                    const thumb = marks[4];
+                    const x = tip.x * 100, y = tip.y * 100;
+                    const pinchDist = Math.hypot(tip.x - thumb.x, tip.y - thumb.y);
+                    const isPinching = pinchDist < 0.05;
 
-                    // I. Summon MeTube (Orb near hip)
-                    if (!isMeTubeOpen && x > 60 && y > 60) {
-                        if (isPinching) openMeTube();
+                    // Orb Interaction
+                    if (!isMeTubeOpen && x > 65 && y > 60) {
+                        if (isPinching) triggerDeployment();
                     }
 
                     if (isMeTubeOpen) {
-                        // II. Move Window (Grab bottom bar with palm open)
-                        const palmOpen = Math.hypot(landmarks[8].x - landmarks[0].x, landmarks[8].y - landmarks[0].y) > 0.3;
-                        if (palmOpen && y > 80 && x > 30 && x < 70) {
-                            isDraggingWindow = true;
+                        // Drag Window Logic (Palm Open)
+                        const palmExpansion = Math.hypot(marks[8].x - marks[0].x, marks[8].y - marks[0].y);
+                        const palmOpen = palmExpansion > 0.32;
+                        
+                        if (palmOpen && y > 82 && x > 35 && x < 65) {
+                            draggingState = true;
                         } else if (!palmOpen) {
-                            isDraggingWindow = false;
+                            draggingState = false;
                         }
 
-                        if (isDraggingWindow) {
-                            // Map 2D hand movement to 3D window position
-                            uiWindow.position.x = (index.x - 0.5) * 10;
-                            uiWindow.position.y = (0.5 - index.y) * 8;
+                        if (draggingState) {
+                            floatingWindow.position.x = (tip.x - 0.5) * 12;
+                            floatingWindow.position.y = (0.5 - tip.y) * 10;
                         }
 
-                        // III. Scroll & Select
-                        if (!isDraggingWindow) {
-                            const dy = (index.y * 100 - lastHandPos.y);
-                            if (Math.abs(dy) > 0.5) {
-                                scrollVelocity = dy * 12;
+                        // Air-Swipe Scrolling
+                        if (!draggingState) {
+                            const diffY = (tip.y * 100 - lastHandCoords.y);
+                            if (Math.abs(diffY) > 0.6) {
+                                scrollVel = diffY * 15;
                             }
                             
-                            // Select Song via Pinch
-                            if (isPinching && x > 25 && x < 75 && y > 20 && y < 80) {
-                                const songIndex = Math.floor((scrollOffset + (y - 20) * 14) / 130);
-                                if (songIndex >= 0 && songIndex < METUBE_LIBRARY.length) {
-                                    handleSongPlay(METUBE_LIBRARY[songIndex]);
+                            // Pinch Track Select
+                            if (isPinching && x > 20 && x < 80 && y > 25 && y < 75) {
+                                const songIdx = Math.floor((scrollY + (y - 25) * 18) / 140);
+                                if (songIdx >= 0 && songIdx < MASTER_LIBRARY.length) {
+                                    startSpatialAudio(MASTER_LIBRARY[songIdx]);
                                 }
                             }
                         }
                     }
-                    lastHandPos = { x, y };
+                    lastHandCoords = { x, y };
                 });
             } else {
-                document.getElementById('interaction-tooltip').style.opacity = 0;
+                document.getElementById('hand-interaction-guide').style.opacity = 0;
             }
         });
 
         /**
-         * 4. WORLD LOCKING ENGINE (Sensor Fusion)
+         * 4. WORLD ANCHORING (Sensor Fusion)
          */
         window.addEventListener('deviceorientation', (e) => {
-            if(!isSystemInitialized) return;
+            if(!isEngineInitialized) return;
             
-            // Apply phone rotation to the scene in reverse to keep worldGroup stable
+            // Quaternion rotation to counter phone movement
             const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
             const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
             const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
 
-            // Neural Orientation Filter (Z-Y-X rotation for stable world locking)
             const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
-            worldGroup.quaternion.setFromEuler(euler);
+            worldAnchor.quaternion.setFromEuler(euler);
         });
 
         /**
-         * 5. AUDIO & HUD LOGIC
+         * 5. SPATIAL AUDIO SYSTEM
          */
-        function handleSongPlay(song) {
+        function startSpatialAudio(song) {
             if(!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            if(activeOscillator) activeOscillator.stop();
+            if(activeOsc) activeOsc.stop();
 
-            // HUD Update
-            document.getElementById('playback-hud').style.display = 'block';
-            document.getElementById('current-track-name').innerText = song.title;
-            document.getElementById('current-artist-name').innerText = song.artist;
+            const hud = document.getElementById('hud-now-playing');
+            hud.style.display = 'block';
+            document.getElementById('ui-track-name').innerText = song.title;
+            document.getElementById('ui-artist-name').innerText = song.artist;
             
-            // Synthetic Playback
             const osc = audioContext.createOscillator();
             const gain = audioContext.createGain();
-            osc.type = 'triangle';
-            // Scale frequency by track ID for unique soundscapes
-            osc.frequency.setValueAtTime(110 + (song.id % 20) * 5, audioContext.currentTime);
-            gain.gain.setValueAtTime(0.08, audioContext.currentTime);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(140 + (song.id % 25) * 6, audioContext.currentTime);
+            gain.gain.setValueAtTime(0.1, audioContext.currentTime);
             osc.connect(gain);
             gain.connect(audioContext.destination);
             osc.start();
-            activeOscillator = osc;
+            activeOsc = osc;
 
-            // Progress bar simulation
             let p = 0;
-            if(playbackInterval) clearInterval(playbackInterval);
-            playbackInterval = setInterval(() => {
-                p += 0.25;
-                document.getElementById('progress-bar').style.width = p + "%";
-                if(p >= 100) {
-                    clearInterval(playbackInterval);
-                    osc.stop();
-                }
+            if(trackInterval) clearInterval(trackInterval);
+            trackInterval = setInterval(() => {
+                p += 0.3;
+                document.getElementById('progress-fill').style.width = p + "%";
+                if(p >= 100) { clearInterval(trackInterval); osc.stop(); }
             }, 100);
         }
 
         /**
-         * 6. SYSTEM LIFECYCLE
+         * 6. SYSTEM LIFECYCLE (THE FIX)
          */
-        async function unlockSpatialSystem() {
+        async function requestSystemEntry() {
+            const statusUI = document.getElementById('system-status-msg');
+            const statusBody = document.getElementById('status-body');
+
             try {
-                // Request Camera Hardware
+                // Step 1: Camera Access
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment', width: 1280, height: 720 } 
-                });
-                videoElement.srcObject = stream;
-                await videoElement.play();
+                }).catch(() => { throw new Error("CAM_DENIED"); });
+                
+                videoEl.srcObject = stream;
+                await videoEl.play();
 
-                // Request Motion Sensors (iOS Security Protocol)
-                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    const permission = await DeviceOrientationEvent.requestPermission();
-                    if(permission !== 'granted') throw new Error("Motion denied");
+                // Step 2: Motion Access (iOS Specific)
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    const result = await DeviceOrientationEvent.requestPermission();
+                    if(result !== 'granted') throw new Error("MOTION_DENIED");
                 }
 
-                // Hide Boot UI
-                document.getElementById('boot-interface').style.display = 'none';
+                // SUCCESS: Launch Engine
+                document.getElementById('vision-boot-screen').style.opacity = '0';
+                setTimeout(() => { document.getElementById('vision-boot-screen').style.display = 'none'; }, 800);
+                statusUI.style.display = 'none';
+
+                initialize3DWorld();
+                generateMeTubeWindow();
                 
-                // Initialize Graphics & AI
-                initSpatialEngine();
-                createMeTubeWindow();
-                
-                const cameraTracker = new Camera(videoElement, {
-                    onFrame: async () => { await handsEngine.send({image: videoElement}); },
+                const aiCam = new Camera(videoEl, {
+                    onFrame: async () => { await handAI.send({image: videoEl}); },
                     width: 1280, height: 720
                 });
-                cameraTracker.start();
+                aiCam.start();
                 
-                isSystemInitialized = true;
-                requestAnimationFrame(spatialUpdateLoop);
+                isEngineInitialized = true;
+                requestAnimationFrame(updateLoop);
             } catch (err) {
-                alert("VisionOS requires Camera and Motion permissions to function. Error: " + err.message);
+                statusUI.style.display = 'block';
+                if(err.message === "CAM_DENIED") statusBody.innerText = "Camera permission was denied. Please go to your browser settings and enable it.";
+                else if(err.message === "MOTION_DENIED") statusBody.innerText = "Motion sensor access is required for the World-Locked VR effect.";
+                else statusBody.innerText = "System initialization failed. Ensure you are using HTTPS and have allowed all sensors.";
             }
         }
 
-        function spatialUpdateLoop() {
-            // Render 3D Scene
+        function updateLoop() {
             renderer.render(scene, camera);
 
-            // Handle Physics & Scrolling
-            if (isMeTubeOpen && !isDraggingWindow) {
-                scrollOffset += scrollVelocity;
-                scrollVelocity *= 0.94; // Inertia
+            if (isMeTubeOpen && !draggingState) {
+                scrollY += scrollVel;
+                scrollVel *= 0.94; // Friction
                 
-                // Boundaries
-                if (scrollOffset < 0) { scrollOffset = 0; scrollVelocity = 0; }
-                const maxScroll = METUBE_LIBRARY.length * 130 - 800;
-                if (scrollOffset > maxScroll) { scrollOffset = maxScroll; scrollVelocity = 0; }
+                if (scrollY < 0) { scrollY = 0; scrollVel = 0; }
+                const limit = MASTER_LIBRARY.length * 140 - 900;
+                if (scrollY > limit) { scrollY = limit; scrollVel = 0; }
             }
 
-            requestAnimationFrame(spatialUpdateLoop);
+            requestAnimationFrame(updateLoop);
         }
 
-        function openMeTube() {
+        function triggerDeployment() {
             if(isMeTubeOpen) return;
             isMeTubeOpen = true;
-            uiWindow.visible = true;
-            launchOrb.visible = false;
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Interface Loaded. MeTube Online."));
+            floatingWindow.visible = true;
+            launchBubble.visible = false;
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Neural interface sync complete. MeTube is now locked in your space."));
         }
 
         window.addEventListener('resize', () => {
