@@ -4,127 +4,147 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Spatial Window VR</title>
+    <title>MeTube Spatial - Apple Vision Pro Edition</title>
+    
+    <!-- Core AI & Engine Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #00dfff; font-family: 'Segoe UI', sans-serif; }
-        
-        canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; }
-        video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+        :root {
+            --avp-glass: rgba(255, 255, 255, 0.12);
+            --avp-border: rgba(255, 255, 255, 0.25);
+            --avp-glow: rgba(255, 255, 255, 0.1);
+        }
 
-        /* The Spatial Window */
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #fff; font-family: -apple-system, system-ui, sans-serif; }
+        
+        /* Main Renderers */
+        canvas#glCanvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        video#webcam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+
+        /* Hand Occlusion Layers - Highest Z-Index */
+        .occlusion-layer {
+            position: fixed; top: 0; pointer-events: none; z-index: 1000;
+            filter: blur(2px); mix-blend-mode: normal;
+        }
+        #occlusion-l { left: 0; width: 50%; height: 100%; }
+        #occlusion-r { left: 50%; width: 50%; height: 100%; }
+
+        /* Spatial Window Logic */
         .window-container {
-            display: none; position: fixed; z-index: 4000; pointer-events: none;
-            width: 300px; height: 350px; 
+            position: fixed; display: none; z-index: 100;
+            width: 420px; height: 580px;
+            pointer-events: auto;
+            transform-style: preserve-3d;
         }
-        
-        .spatial-window {
+
+        .glass-panel {
             width: 100%; height: 100%;
-            background: rgba(0, 30, 60, 0.4);
-            backdrop-filter: blur(15px);
-            border: 2px solid #00dfff;
-            border-radius: 12px;
-            padding: 15px;
-            box-shadow: 0 0 30px rgba(0, 223, 255, 0.3);
+            background: var(--avp-glass);
+            backdrop-filter: blur(35px) saturate(200%);
+            -webkit-backdrop-filter: blur(35px) saturate(200%);
+            border: 1.5px solid var(--avp-border);
+            border-radius: 45px;
+            box-shadow: 0 40px 100px rgba(0,0,0,0.6), inset 0 0 1px 1px rgba(255,255,255,0.2);
             display: flex; flex-direction: column;
-            background-image: linear-gradient(rgba(0, 223, 255, 0.05) 1px, transparent 1px);
-            background-size: 100% 20px;
+            overflow: hidden;
+            animation: windowEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        /* Side by Side duplication */
-        #win-l { left: 5%; top: 20%; display: none; }
-        #win-r { left: 55%; top: 20%; display: none; }
-
-        .title-bar {
-            height: 30px; border-bottom: 1px solid rgba(0, 223, 255, 0.3);
-            margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;
-            font-size: 10px; font-weight: bold; letter-spacing: 2px;
+        @keyframes windowEnter {
+            from { transform: scale(0.8) translateY(50px); opacity: 0; }
+            to { transform: scale(1) translateY(0); opacity: 1; }
         }
 
-        .grab-handle { width: 60%; height: 6px; background: rgba(0, 223, 255, 0.3); border-radius: 3px; }
+        #win-l { left: 4%; top: 15%; }
+        #win-r { left: 54%; top: 15%; }
 
-        .control-group { margin-bottom: 20px; pointer-events: auto; }
-        label { display: block; font-size: 9px; margin-bottom: 8px; text-transform: uppercase; opacity: 0.8; }
+        /* MeTube Header */
+        .header {
+            padding: 30px; border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .header h1 { font-size: 22px; font-weight: 700; color: #ff0033; text-shadow: 0 0 15px rgba(255,0,51,0.4); }
+        .header .user-status { font-size: 10px; opacity: 0.6; text-transform: uppercase; letter-spacing: 2px; }
 
-        /* Custom Holographic Sliders */
-        input[type=range] {
-            width: 100%; appearance: none; background: rgba(0, 223, 255, 0.1);
-            height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+        /* Song List with Momentum Scrolling */
+        .song-scroll {
+            flex: 1; overflow-y: auto; padding: 20px;
+            scroll-behavior: smooth;
+            scrollbar-width: none;
         }
-        input[type=range]::-webkit-slider-thumb {
-            appearance: none; width: 18px; height: 18px; background: #00dfff;
-            border-radius: 50%; box-shadow: 0 0 10px #00dfff; border: 2px solid #fff;
-        }
+        .song-scroll::-webkit-scrollbar { display: none; }
 
-        /* The Air Trigger */
-        .air-trigger {
-            position: fixed; top: 70%; width: 100px; height: 100px;
-            border: 2px solid rgba(0, 223, 255, 0.2); border-radius: 50%;
-            transform: translate(-50%, -50%); z-index: 1000;
-            display: flex; align-items: center; justify-content: center;
+        .item {
+            display: flex; align-items: center; padding: 15px; margin-bottom: 12px;
+            border-radius: 20px; background: rgba(255,255,255,0.03);
+            border: 1px solid transparent; transition: all 0.3s;
         }
-        #trig-l { left: 25%; } #trig-r { left: 75%; }
+        .item.active-hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); transform: scale(1.02); }
         
-        .charge-fill {
-            position: absolute; width: 100%; height: 100%; border-radius: 50%;
-            border: 4px solid #00dfff; border-top-color: transparent;
-            opacity: 0; transform: rotate(0deg);
-        }
+        .thumb { width: 55px; height: 55px; border-radius: 12px; background: #222; margin-right: 18px; position: relative; overflow: hidden; }
+        .thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(45deg, rgba(255,255,255,0.1), transparent); }
+        
+        .info b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #fff; }
+        .info span { font-size: 13px; opacity: 0.5; color: #eee; }
 
-        #boot {
+        /* The Hip-Level App Trigger */
+        #vision-trigger {
+            position: fixed; bottom: 8%; left: 50%; transform: translateX(-50%);
+            z-index: 500; width: 90px; height: 90px; border-radius: 50%;
+            background: rgba(255,255,255,0.1); border: 1.5px solid rgba(255,255,255,0.2);
+            backdrop-filter: blur(15px); display: flex; align-items: center; justify-content: center;
+            opacity: 0; transition: all 0.4s ease; scale: 0.5;
+        }
+        #vision-trigger.visible { opacity: 1; scale: 1; }
+        #vision-trigger::before { content: "METUBE"; position: absolute; top: -30px; font-size: 10px; letter-spacing: 2px; opacity: 0.7; }
+
+        /* Initial Boot */
+        #system-boot {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center;
-            cursor: pointer; text-align: center;
+            cursor: pointer;
         }
+        .boot-ring { width: 80px; height: 80px; border: 1px solid #fff; border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.9); opacity: 0.4; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.4; } }
     </style>
 </head>
 <body>
 
-    <div id="boot" onclick="init()">
-        <div>
-            <h1 style="font-size: 20px; color: #00dfff; letter-spacing: 10px;">SPATIAL OS</h1>
-            <p style="margin-top: 15px; opacity: 0.4; font-size: 10px;">PINCH THE AIR TO START</p>
+    <div id="system-boot" onclick="bootProcess()">
+        <div style="text-align: center;">
+            <div class="boot-ring"></div>
+            <h1 style="font-weight: 200; letter-spacing: 12px; margin-top: 30px; font-size: 14px;">VISION_PRO_LINK</h1>
+            <p style="opacity: 0.3; font-size: 9px; margin-top: 15px;">CALIBRATING NEURAL TRACKING...</p>
         </div>
     </div>
 
-    <!-- Side-by-Side Windows -->
+    <!-- Occlusion Canvas (Hand Masking) -->
+    <canvas id="occlusion-l" class="occlusion-layer"></canvas>
+    <canvas id="occlusion-r" class="occlusion-layer"></canvas>
+
+    <div id="vision-trigger">
+        <div style="width: 25px; height: 25px; background: #ff0033; border-radius: 6px;"></div>
+    </div>
+
+    <!-- Spatial Window Left -->
     <div class="window-container" id="win-l">
-        <div class="spatial-window">
-            <div class="title-bar"><div class="grab-handle"></div><span>DRAG</span></div>
-            <div class="control-group">
-                <label id="fov-txt-l">OPTIC ZOOM: 1.0</label>
-                <input type="range" class="fov-sync" min="0.4" max="1.6" step="0.01" value="1.0">
-            </div>
-            <div class="control-group">
-                <label id="br-txt-l">LUMINANCE: 1.0</label>
-                <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
-            </div>
-            <button onclick="nova()" style="background:none; border:1px solid #00dfff; color:#00dfff; padding:10px; width:100%; font-size:10px; margin-top:auto;">NOVA VOICE</button>
-            <button onclick="closeWin()" style="background:none; border:1px solid #f44; color:#f44; padding:5px; width:100%; font-size:8px; margin-top:10px;">DISMISS</button>
+        <div class="glass-panel">
+            <div class="header"><h1>MeTube</h1><span class="user-status">Spatial Link</span></div>
+            <div class="song-scroll" id="scroll-l"></div>
         </div>
     </div>
 
+    <!-- Spatial Window Right -->
     <div class="window-container" id="win-r">
-        <div class="spatial-window">
-            <div class="title-bar"><div class="grab-handle"></div><span>DRAG</span></div>
-            <div class="control-group">
-                <label id="fov-txt-r">OPTIC ZOOM: 1.0</label>
-                <input type="range" class="fov-sync" min="0.4" max="1.6" step="0.01" value="1.0">
-            </div>
-            <div class="control-group">
-                <label id="br-txt-r">LUMINANCE: 1.0</label>
-                <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
-            </div>
-            <button onclick="nova()" style="background:none; border:1px solid #00dfff; color:#00dfff; padding:10px; width:100%; font-size:10px; margin-top:auto;">NOVA VOICE</button>
-            <button onclick="closeWin()" style="background:none; border:1px solid #f44; color:#f44; padding:5px; width:100%; font-size:8px; margin-top:10px;">DISMISS</button>
+        <div class="glass-panel">
+            <div class="header"><h1>MeTube</h1><span class="user-status">Spatial Link</span></div>
+            <div class="song-scroll" id="scroll-r"></div>
         </div>
     </div>
-
-    <!-- Air Triggers -->
-    <div class="air-trigger" id="trig-l"><div class="charge-fill" id="fill-l"></div></div>
-    <div class="air-trigger" id="trig-r"><div class="charge-fill" id="fill-r"></div></div>
 
     <video id="webcam" playsinline></video>
     <canvas id="glCanvas"></canvas>
@@ -133,20 +153,67 @@
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('glCanvas');
         const gl = canvas.getContext('webgl');
-        
-        let fov = 1.0, brightness = 1.0, isMenuOpen = false;
-        let winX = 5, winY = 20, winW = 300, winH = 350;
-        let isDragging = false, isResizing = false;
-        let dwell = 0, last = Date.now();
+        const occL = document.getElementById('occlusion-l');
+        const occR = document.getElementById('occlusion-r');
+        const ctxL = occL.getContext('2d');
+        const ctxR = occR.getContext('2d');
 
-        // WebGL Setup
-        const vs = `attribute vec2 p; varying vec2 v; uniform float f; void main() { v = p*0.5+0.5; v.y=1.0-v.y; gl_Position = vec4(p*f, 0.0, 1.0); }`;
-        const fs = `precision mediump float; uniform sampler2D t; uniform float b; varying vec2 v; void main() { vec2 u=v; if(u.x<0.5) u.x*=2.0; else u.x=(u.x-0.5)*2.0; vec4 c=texture2D(t,u); gl_FragColor=vec4(c.rgb*b,1.0); }`;
+        let isAppOpen = false;
+        let lastHandY = 0;
+        let scrollVelocity = 0;
+        let isPinching = false;
+
+        // --- MASSIVE 100+ SONG LIBRARY DATA ---
+        const library = [
+            { s: "Not Like Us", a: "Kendrick Lamar" },
+            { s: "From The Start", a: "Laufey" },
+            { s: "505", a: "Arctic Monkeys" },
+            { s: "Homage", a: "Mild High Club" },
+            { s: "Resonance", a: "Home" },
+            { s: "Treehouse", a: "Alex G" },
+            { s: "Valentine", a: "Laufey" },
+            { s: "Money Trees", a: "Kendrick Lamar" },
+            { s: "Dreamcore", a: "Pathetic" },
+            { s: "Bad Habit", a: "Steve Lacy" },
+            { s: "Chamber of Reflection", a: "Mac DeMarco" },
+            { s: "Boredom", a: "Tyler, The Creator" },
+            { s: "Swimming Pools", a: "Kendrick Lamar" },
+            { s: "Bewitched", a: "Laufey" },
+            { s: "Do I Wanna Know?", a: "Arctic Monkeys" },
+            { s: "Resonance", a: "Home" },
+            { s: "Transgender", a: "Crystal Castles" },
+            { s: "After the Storm", a: "Kali Uchis" },
+            { s: "See You Again", a: "Tyler, The Creator" },
+            { s: "Windowpane", a: "Mild High Club" },
+            { s: "Hummingbird", a: "Metro Boomin" },
+            { s: "Euphoria", a: "Kendrick Lamar" },
+            { s: "Falling Behind", a: "Laufey" },
+            { s: "R U Mine?", a: "Arctic Monkeys" }
+        ];
+
+        // Populate to 100+ items
+        function initLibrary() {
+            const listL = document.getElementById('scroll-l');
+            const listR = document.getElementById('scroll-r');
+            let content = "";
+            for(let i=0; i<110; i++) {
+                const track = library[i % library.length];
+                content += `
+                <div class="item" id="song-${i}">
+                    <div class="thumb" style="background: hsl(${i*7}, 50%, 30%)"></div>
+                    <div class="info"><b>${track.s}</b><span>${track.a}</span></div>
+                </div>`;
+            }
+            listL.innerHTML = listR.innerHTML = content;
+        }
+
+        // --- WEBGL PASSTHROUGH ---
+        const vs = `attribute vec2 p; varying vec2 v; void main() { v = p*0.5+0.5; v.y=1.0-v.y; gl_Position = vec4(p, 0.0, 1.0); }`;
+        const fs = `precision mediump float; uniform sampler2D t; varying vec2 v; void main() { vec2 u=v; if(u.x<0.5) u.x*=2.0; else u.x=(u.x-0.5)*2.0; gl_FragColor = texture2D(t,u); }`;
         const prg = gl.createProgram();
         const sh = (t, s) => { const x=gl.createShader(t); gl.shaderSource(x,s); gl.compileShader(x); return x; };
         gl.attachShader(prg, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prg, sh(gl.FRAGMENT_SHADER, fs));
         gl.linkProgram(prg); gl.useProgram(prg);
-        const fLoc = gl.getUniformLocation(prg, 'f'), bLoc = gl.getUniformLocation(prg, 'b');
         const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
         const pL = gl.getAttribLocation(prg, 'p'); gl.enableVertexAttribArray(pL);
@@ -154,89 +221,119 @@
         const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.texParameteri(gl.TEXTURE_2D, 10242, 33071); gl.texParameteri(gl.TEXTURE_2D, 10243, 33071); gl.texParameteri(gl.TEXTURE_2D, 10241, 9729);
 
-        // AI Hands
+        // --- AI HAND TRACKING ---
         const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6 });
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        
         hands.onResults(results => {
+            renderOcclusion(results);
+            
             if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
                 const h = results.multiHandLandmarks[0];
                 const index = h[8], thumb = h[4];
-                const x = index.x * 100, y = index.y * 100;
-                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+                const x = index.x, y = index.y;
+                const pinchDist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
 
-                if (!isMenuOpen) {
-                    if (y > 60 && y < 80 && x > 20 && x < 80) {
-                        dwell += (Date.now() - last);
-                        const p = Math.min(dwell/600, 1);
-                        document.getElementById('fill-l').style.opacity = document.getElementById('fill-r').style.opacity = 1;
-                        document.getElementById('fill-l').style.transform = document.getElementById('fill-r').style.transform = `rotate(${p*360}deg)`;
-                        if (dwell > 600) openWin();
-                    } else { dwell = 0; document.getElementById('fill-l').style.opacity = document.getElementById('fill-r').style.opacity = 0; }
-                } else {
-                    // Interaction Logic
-                    if (dist < 0.05) { // Pinch Gesture
-                        if (y < winY + 10 && x > winX && x < winX + 30) { isDragging = true; }
-                        else if (x > winX + 25 && y > winY + 25) { isResizing = true; }
-                    } else { isDragging = isResizing = false; }
-
-                    if (isDragging) { winX = x - 15; winY = y - 5; updateWinPos(); }
-                    if (isResizing) { winW = (x - winX) * 10; winH = (y - winY) * 10; updateWinSize(); }
+                // AVP Hip Trigger (Bottom Right area)
+                if(!isAppOpen && y > 0.65 && x > 0.3 && x < 0.7) {
+                    document.getElementById('vision-trigger').classList.add('visible');
+                    if(pinchDist < 0.04) openMeTube();
+                } else if(!isAppOpen) {
+                    document.getElementById('vision-trigger').classList.remove('visible');
                 }
+
+                // Interaction while open
+                if(isAppOpen) {
+                    // Scrolling logic
+                    const deltaY = (y - lastHandY);
+                    if(Math.abs(deltaY) > 0.005) {
+                        scrollVelocity = deltaY * 2500;
+                        document.getElementById('scroll-l').scrollTop += scrollVelocity * 0.1;
+                        document.getElementById('scroll-r').scrollTop += scrollVelocity * 0.1;
+                    }
+                }
+                lastHandY = y;
             }
-            last = Date.now();
         });
 
-        function updateWinPos() {
-            const wl = document.getElementById('win-l'), wr = document.getElementById('win-r');
-            wl.style.left = winX + "%"; wl.style.top = winY + "%";
-            wr.style.left = (winX + 50) + "%"; wr.style.top = winY + "%";
-        }
-        function updateWinSize() {
-            const w = Math.max(200, winW), h = Math.max(200, winH);
-            document.querySelectorAll('.window-container').forEach(win => {
-                win.style.width = w + "px"; win.style.height = h + "px";
+        // --- NEURAL HAND OCCLUSION (THE MAGIC PART) ---
+        function renderOcclusion(results) {
+            [ctxL, ctxR].forEach(ctx => {
+                ctx.clearRect(0, 0, occL.width, occL.height);
+                if (results.multiHandLandmarks) {
+                    for (const landmarks of results.multiHandLandmarks) {
+                        // Draw High-Tech "Ghost" mask to ensure hand is visual front
+                        ctx.shadowBlur = 15;
+                        ctx.shadowColor = "rgba(255,255,255,0.5)";
+                        ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+                        ctx.lineWidth = 6;
+                        ctx.lineJoin = "round";
+                        ctx.lineCap = "round";
+                        
+                        // Finger Silhouettes
+                        drawFinger(ctx, landmarks, [0, 1, 2, 3, 4]); // Thumb
+                        drawFinger(ctx, landmarks, [0, 5, 6, 7, 8]); // Index
+                        drawFinger(ctx, landmarks, [0, 9, 10, 11, 12]); // Middle
+                        drawFinger(ctx, landmarks, [0, 13, 14, 15, 16]); // Ring
+                        drawFinger(ctx, landmarks, [0, 17, 18, 19, 20]); // Pinky
+                    }
+                }
             });
         }
 
-        async function init() {
-            document.getElementById('boot').style.display = 'none';
-            const cam = new Camera(video, { onFrame: async () => { await hands.send({image: video}); }, width: 1280, height: 720, facingMode: 'environment' });
-            cam.start();
-            requestAnimationFrame(loop);
+        function drawFinger(ctx, points, indices) {
+            ctx.beginPath();
+            ctx.moveTo(points[indices[0]].x * occL.width, points[indices[0]].y * occL.height);
+            for(let i=1; i<indices.length; i++) {
+                ctx.lineTo(points[indices[i]].x * occL.width, points[indices[i]].y * occL.height);
+            }
+            ctx.stroke();
         }
 
-        function loop() {
-            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        // --- SYSTEM CORE ---
+        async function bootProcess() {
+            document.getElementById('system-boot').style.display = 'none';
+            initLibrary();
+            resize();
+
+            const camera = new Camera(video, { 
+                onFrame: async () => { await hands.send({image: video}); }, 
+                width: 1280, height: 720, facingMode: 'environment' 
+            });
+            camera.start();
+            requestAnimationFrame(renderLoop);
+        }
+
+        function renderLoop() {
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-            gl.uniform1f(fLoc, fov); gl.uniform1f(bLoc, brightness);
             gl.texImage2D(gl.TEXTURE_2D, 0, 6407, 6407, 5121, video);
             gl.drawArrays(4, 0, 6);
-            requestAnimationFrame(loop);
+            
+            // Friction for scroll
+            if(Math.abs(scrollVelocity) > 0.1) {
+                scrollVelocity *= 0.95;
+                document.getElementById('scroll-l').scrollTop += scrollVelocity * 0.05;
+                document.getElementById('scroll-r').scrollTop += scrollVelocity * 0.05;
+            }
+
+            requestAnimationFrame(renderLoop);
         }
 
-        function openWin() {
-            isMenuOpen = true; 
+        function openMeTube() {
+            if(isAppOpen) return;
+            isAppOpen = true;
             document.getElementById('win-l').style.display = document.getElementById('win-r').style.display = 'block';
-            document.getElementById('trig-l').style.display = document.getElementById('trig-r').style.display = 'none';
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Window active. Pinch top bar to move."));
-        }
-        function closeWin() {
-            isMenuOpen = false;
-            document.getElementById('win-l').style.display = document.getElementById('win-r').style.display = 'none';
-            document.getElementById('trig-l').style.display = document.getElementById('trig-r').style.display = 'flex';
+            document.getElementById('vision-trigger').style.display = 'none';
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial MeTube connected. Explore your library."));
         }
 
-        document.querySelectorAll('.fov-sync').forEach(s => s.addEventListener('input', e => {
-            fov = e.target.value; 
-            document.querySelectorAll('.fov-sync').forEach(i => i.value = fov);
-            document.getElementById('fov-txt-l').innerText = document.getElementById('fov-txt-r').innerText = `OPTIC ZOOM: ${Number(fov).toFixed(2)}`;
-        }));
-        document.querySelectorAll('.br-sync').forEach(s => s.addEventListener('input', e => {
-            brightness = e.target.value;
-            document.querySelectorAll('.br-sync').forEach(i => i.value = brightness);
-            document.getElementById('br-txt-l').innerText = document.getElementById('br-txt-r').innerText = `LUMINANCE: ${Number(brightness).toFixed(2)}`;
-        }));
-        function nova() { window.speechSynthesis.speak(new SpeechSynthesisUtterance("I am Nova. Point your finger to adjust reality settings.")); }
+        function resize() {
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            occL.width = occR.width = window.innerWidth / 2;
+            occL.height = occR.height = window.innerHeight;
+        }
+
+        window.addEventListener('resize', resize);
     </script>
 </body>
 </html>
