@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AR Gesture Song Selector</title>
     
+    <!-- MediaPipe Dependencies -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
 
@@ -13,8 +15,9 @@
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background: #000;
-            font-family: 'Inter', -apple-system, sans-serif;
+            background: #050505; 
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: white;
         }
 
         /* The Camera Feed - Mirrored and on top */
@@ -25,107 +28,168 @@
             width: 100vw;
             height: 100vh;
             z-index: 10; 
-            pointer-events: none; /* Allows you to scroll the list underneath */
-            transform: scaleX(-1); /* Mirror fix */
+            pointer-events: none; /* Allows mouse interactions to pass through to the bubble underneath */
+            transform: scaleX(-1); /* Mirror the front camera feed so movement feels natural */
+            object-fit: cover;
+        }
+
+        /* Loading state */
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.2rem;
+            z-index: 1;
+            color: #888;
+            text-align: center;
         }
 
         /* The Glassmorphism Bubble */
         .bubble-window {
             position: absolute;
             width: 320px;
-            height: 450px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 40px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            height: 480px;
+            left: calc(50vw - 160px); 
+            top: calc(50vh - 240px);
+            
+            background: rgba(20, 20, 25, 0.4);
+            backdrop-filter: blur(25px) saturate(200%);
+            -webkit-backdrop-filter: blur(25px) saturate(200%);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 32px;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.2);
             z-index: 5; 
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            transition: border-color 0.2s, transform 0.05s linear;
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        /* Visual cue when grabbed */
+        .bubble-window.grabbed {
+            border-color: #00f2ff;
+            box-shadow: 0 0 40px rgba(0, 242, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.5);
+            transform: scale(1.02); 
+            transition: transform 0.1s, border-color 0.1s, box-shadow 0.1s;
         }
 
         .header {
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.1);
+            padding: 24px 20px 16px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%);
             text-align: center;
-            color: #fff;
-            font-weight: 800;
-            letter-spacing: 1px;
+            font-weight: 700;
+            letter-spacing: 1.5px;
             text-transform: uppercase;
-            font-size: 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            user-select: none;
+        }
+
+        .header span {
+            display: block;
+            font-size: 16px;
+            color: #fff;
+            text-transform: none;
+            letter-spacing: 0;
+            margin-bottom: 4px;
         }
 
         .song-list {
             flex: 1;
             overflow-y: auto;
-            padding: 15px;
+            padding: 12px;
             scrollbar-width: thin;
             scrollbar-color: rgba(255,255,255,0.2) transparent;
         }
 
         .song-item {
-            padding: 15px;
+            padding: 16px;
             margin-bottom: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            color: #ddd;
-            font-size: 14px;
-            transition: background 0.2s;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 16px;
+            color: #eee;
+            font-size: 15px;
+            transition: background 0.2s, transform 0.1s;
             cursor: pointer;
+            border: 1px solid transparent;
         }
 
         .song-item:hover {
-            background: rgba(255, 255, 255, 0.15);
-            color: #fff;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transform: translateY(-1px);
         }
 
-        /* Scrollbar styling */
+        .song-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .song-artist {
+            font-size: 12px;
+            color: #aaa;
+            font-weight: 400;
+        }
+
         .song-list::-webkit-scrollbar { width: 6px; }
         .song-list::-webkit-scrollbar-thumb {
             background: rgba(255, 255, 255, 0.2);
             border-radius: 10px;
         }
+        .song-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
     </style>
 </head>
 <body>
 
-    <video class="input_video" style="display:none;"></video>
+    <div id="loading">Requesting front camera access & loading AI model...</div>
+
+    <video class="input_video" style="display:none;" playsinline></video>
     <canvas class="output_canvas"></canvas>
 
     <div id="bubble" class="bubble-window">
-        <div class="header">Grab to Move • Scroll to Select</div>
+        <div class="header">
+            <span>Library</span>
+            Grab with index & thumb to move
+        </div>
         <div class="song-list" id="songList"></div>
     </div>
 
     <script>
-        const videoElement = document.getElementsByClassName('input_video')[0];
-        const canvasElement = document.getElementsByClassName('output_canvas')[0];
+        const videoElement = document.querySelector('.input_video');
+        const canvasElement = document.querySelector('.output_canvas');
         const canvasCtx = canvasElement.getContext('2d');
         const bubble = document.getElementById('bubble');
         const songList = document.getElementById('songList');
+        const loadingText = document.getElementById('loading');
 
-        // 1. Generate the 500 Songs
-        const artists = ["Kendrick Lamar", "Malcolm Todd", "Laufey", "Steve Lacy", "Treehouse", "Steve Lacy", "Bad Habit"];
-        const tracks = ["Money Trees", "Room Service", "Valentine", "Dark Red", "Evergreen", "Bad Habit", "The Hillbillies"];
+        // 1. Generate the 500 Songs dynamically
+        const artists = ["Kendrick Lamar", "Malcolm Todd", "Laufey", "Steve Lacy", "Treehouse", "Frank Ocean", "Tyler, The Creator", "SZA"];
+        const tracks = ["Money Trees", "Room Service", "Valentine", "Dark Red", "Evergreen", "Nights", "EARFQUAKE", "Good Days"];
         
         for (let i = 1; i <= 500; i++) {
             const div = document.createElement('div');
             div.className = 'song-item';
             const artist = artists[i % artists.length];
             const track = tracks[i % tracks.length];
-            div.innerHTML = `<strong>${track}</strong><br><span style="font-size:11px; opacity:0.6">${artist}</span>`;
+            
+            div.innerHTML = `
+                <span class="song-title">${track} (Pt. ${i})</span>
+                <span class="song-artist">${artist}</span>
+            `;
             songList.appendChild(div);
         }
 
         // 2. Gesture Logic
         function onResults(results) {
+            if (loadingText.style.display !== 'none') {
+                loadingText.style.display = 'none';
+            }
+
             canvasCtx.save();
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
@@ -133,53 +197,67 @@
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const landmarks = results.multiHandLandmarks[0];
                 
-                // Index Tip (8) and Thumb Tip (4)
                 const index = landmarks[8];
                 const thumb = landmarks[4];
 
-                // Check for "Claw" (Pinch) distance
                 const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
                 
-                // Map coordinates (Inverted X because of mirror)
+                // Map to screen coordinates (Inverted X for mirror effect)
                 const x = (1 - index.x) * window.innerWidth;
                 const y = index.y * window.innerHeight;
 
-                if (dist < 0.04) { // Tight claw/pinch
-                    bubble.style.left = (x - 160) + 'px';
-                    bubble.style.top = (y - 50) + 'px';
-                    bubble.style.borderColor = "#00f2ff";
-                    bubble.style.boxShadow = "0 0 30px rgba(0, 242, 255, 0.4)";
+                if (dist < 0.05) { 
+                    bubble.classList.add('grabbed');
+                    
+                    bubble.style.left = (x - 160) + 'px'; 
+                    bubble.style.top = (y - 40) + 'px';   
                 } else {
-                    bubble.style.borderColor = "rgba(255, 255, 255, 0.3)";
-                    bubble.style.boxShadow = "0 20px 50px rgba(0,0,0,0.5)";
+                    bubble.classList.remove('grabbed');
                 }
+            } else {
+                bubble.classList.remove('grabbed');
             }
             canvasCtx.restore();
         }
 
-        // 3. Initialize MediaPipe
+        function resizeCanvas() {
+            canvasElement.width = window.innerWidth;
+            canvasElement.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 3. Initialize MediaPipe Hands
         const hands = new Hands({locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
         }});
 
         hands.setOptions({
-            maxNumHands: 1,
+            maxNumHands: 1, 
             modelComplexity: 1,
-            minDetectionConfidence: 0.7,
-            minTrackingConfidence: 0.7
+            minDetectionConfidence: 0.65,
+            minTrackingConfidence: 0.65
         });
+        
         hands.onResults(onResults);
 
+        // 4. Start Camera with Front-Facing constraint
         const camera = new Camera(videoElement, {
             onFrame: async () => {
-                canvasElement.width = window.innerWidth;
-                canvasElement.height = window.innerHeight;
                 await hands.send({image: videoElement});
             },
             width: 1280,
-            height: 720
+            height: 720,
+            facingMode: 'user' // <--- THIS FORCES THE FRONT CAMERA
         });
-        camera.start();
+        
+        camera.start().catch(err => {
+            console.error("Camera error:", err);
+            loadingText.innerText = "Camera access denied. Please ensure you have allowed camera permissions.";
+        });
     </script>
 </body>
 </html>
+
+
+```
