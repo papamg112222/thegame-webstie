@@ -4,371 +4,348 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Vision Spatial Pro - MeTube Edition</title>
+    <title>Vision Spatial Pro - Chrome Ultra</title>
     
-    <!-- Spatial Computing Frameworks -->
+    <!-- Core AI & Spatial Computing Stack -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <style>
         :root {
-            --glass: rgba(15, 15, 15, 0.7);
-            --border: rgba(255, 255, 255, 0.2);
-            --accent: #ff3b30;
-            --white: #ffffff;
+            --avp-red: #ff3b30;
+            --avp-glass: rgba(10, 10, 10, 0.85);
+            --avp-border: rgba(255, 255, 255, 0.25);
+            --avp-text: #ffffff;
+            --avp-subtext: rgba(255, 255, 255, 0.4);
         }
 
+        /* Essential Reset */
         * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+            margin: 0; padding: 0; box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
-            user-select: none;
-            -webkit-user-select: none;
+            user-select: none; -webkit-user-select: none;
         }
 
         body, html {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background-color: #000;
-            color: var(--white);
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+            width: 100%; height: 100%; overflow: hidden;
+            background-color: #000; color: #fff;
+            font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         }
 
-        /* The 3D Engine Canvas */
-        #vision-canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 10;
+        /* Render Pipeline Layers */
+        #spatial-engine-canvas {
+            display: block; width: 100vw; height: 100vh;
+            position: absolute; top: 0; left: 0; z-index: 5;
         }
 
-        /* Hand Occlusion Overlay (Always on Top) */
-        #hand-occlusion-layer {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            z-index: 10000;
-            pointer-events: none;
-            filter: drop-shadow(0 0 10px rgba(255,255,255,0.2));
+        /* Neural Hand Mask Canvas (Top Level) */
+        #hand-occlusion-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 10000; pointer-events: none;
+            filter: contrast(1.1) brightness(1.05) drop-shadow(0 0 10px rgba(255,255,255,0.2));
         }
 
-        /* Hidden Video Source */
-        video#source-feed {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            visibility: hidden;
-            pointer-events: none;
+        /* Hidden Video Source (Bypasses Browser UI) */
+        video#raw-camera-source {
+            position: absolute; width: 1px; height: 1px; opacity: 0;
+            visibility: hidden; pointer-events: none; z-index: -1;
         }
 
-        /* Spatial HUD for Playback */
-        #vision-hud {
-            position: fixed;
-            top: 40px;
-            left: 50%;
-            transform: translateX(-50%) translateY(-20px);
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(30px) saturate(180%);
-            -webkit-backdrop-filter: blur(30px) saturate(180%);
-            padding: 22px 50px;
-            border-radius: 40px;
-            border: 1px solid var(--border);
-            z-index: 5000;
-            display: none;
-            text-align: center;
-            min-width: 320px;
-            box-shadow: 0 40px 80px rgba(0,0,0,0.6);
-            opacity: 0;
-            transition: all 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+        /* System HUD */
+        #playback-hud {
+            position: fixed; top: 50px; left: 50%; transform: translateX(-50%) translateY(-20px);
+            background: rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(40px) saturate(200%);
+            -webkit-backdrop-filter: blur(40px) saturate(200%);
+            padding: 24px 50px; border-radius: 50px;
+            border: 1px solid var(--avp-border);
+            z-index: 5000; display: none; text-align: center;
+            min-width: 360px; box-shadow: 0 40px 100px rgba(0,0,0,0.6);
+            opacity: 0; transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        #vision-hud.active {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-
-        .hud-name { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
-        .hud-artist { font-size: 12px; opacity: 0.5; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 15px; }
+        #playback-hud.active { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .hud-title { font-size: 20px; font-weight: 700; margin-bottom: 5px; }
+        .hud-author { font-size: 13px; color: var(--avp-subtext); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; }
         
-        .progress-track {
-            width: 100%;
-            height: 5px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 3px;
-            overflow: hidden;
-        }
-        #progress-fill {
-            width: 0%;
-            height: 100%;
-            background: var(--accent);
-            box-shadow: 0 0 15px var(--accent);
+        .progress-bar-container { width: 100%; height: 5px; background: rgba(255, 255, 255, 0.15); border-radius: 3px; overflow: hidden; }
+        #progress-indicator { width: 0%; height: 100%; background: var(--avp-red); box-shadow: 0 0 15px var(--avp-red); }
+
+        /* OS Boot Sequence */
+        #os-boot-interface {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 99999; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; cursor: pointer;
         }
 
-        /* Entry System */
-        #entry-gate {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: #000;
-            z-index: 99999;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
+        .orb-shell {
+            width: 140px; height: 140px; border: 1.5px solid rgba(255,255,255,0.3);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            margin-bottom: 50px; position: relative;
+        }
+        .orb-shell::before {
+            content: ""; position: absolute; inset: -20px; border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 50%; animation: pulseOrb 4s infinite linear;
         }
 
-        .entry-orb {
-            width: 120px;
-            height: 120px;
-            border: 1px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 40px;
-            position: relative;
-        }
-        .entry-orb::after {
-            content: "";
-            position: absolute;
-            inset: -20px;
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 50%;
-            animation: pulse 4s infinite linear;
-        }
-
-        @keyframes pulse {
+        @keyframes pulseOrb {
             0% { transform: scale(0.8); opacity: 0; }
-            50% { transform: scale(1.2); opacity: 0.5; }
-            100% { transform: scale(1.5); opacity: 0; }
+            50% { transform: scale(1.25); opacity: 0.5; }
+            100% { transform: scale(1.6); opacity: 0; }
         }
 
-        .entry-title { text-align: center; }
-        .entry-title h1 { font-weight: 200; letter-spacing: 15px; font-size: 20px; margin-bottom: 10px; }
-        .entry-title p { font-size: 10px; opacity: 0.4; letter-spacing: 3px; }
+        .boot-branding { text-align: center; }
+        .boot-branding h1 { font-weight: 100; letter-spacing: 22px; font-size: 24px; color: #fff; margin-bottom: 15px; }
+        .boot-branding p { font-size: 11px; opacity: 0.4; letter-spacing: 5px; text-transform: uppercase; }
 
-        /* Help Overlays */
-        #spatial-helper {
-            position: fixed;
-            bottom: 60px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 8000;
-            background: rgba(0,0,0,0.8);
-            padding: 14px 28px;
-            border-radius: 30px;
-            font-size: 11px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            opacity: 0;
-            transition: opacity 1s;
-            border: 1px solid rgba(255,255,255,0.1);
-            pointer-events: none;
+        /* Interaction Tag */
+        #gesture-hint {
+            position: fixed; bottom: 70px; left: 50%; transform: translateX(-50%);
+            z-index: 8000; background: rgba(0,0,0,0.85); padding: 18px 36px;
+            border-radius: 40px; font-size: 12px; letter-spacing: 3px;
+            text-transform: uppercase; opacity: 0; transition: opacity 1s;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        /* Error Recovery Screen */
+        #system-recovery {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(30, 10, 10, 0.95); backdrop-filter: blur(40px);
+            padding: 45px; border-radius: 40px; border: 2px solid var(--avp-red);
+            z-index: 100001; display: none; text-align: center; width: 85%; max-width: 500px;
+        }
+        #system-recovery h2 { font-size: 24px; margin-bottom: 20px; }
+        #system-recovery button {
+            background: var(--avp-red); color: white; border: none;
+            padding: 22px 45px; border-radius: 18px; font-weight: 900;
+            margin-top: 30px; cursor: pointer; width: 100%; letter-spacing: 2px;
         }
     </style>
 </head>
 <body>
 
-    <!-- BOOT SYSTEM -->
-    <div id="entry-gate" onclick="initSpatialSystem()">
-        <div class="entry-orb">
-            <div style="width: 40px; height: 40px; background: #fff; border-radius: 50%; box-shadow: 0 0 50px #fff;"></div>
+    <!-- OS ENTRY INTERFACE -->
+    <div id="os-boot-interface" onclick="startSpatialOS()">
+        <div class="orb-shell">
+            <div style="width: 55px; height: 55px; background: #fff; border-radius: 50%; box-shadow: 0 0 60px #fff;"></div>
         </div>
-        <div class="entry-title">
-            <h1>VISION_PRO_SIM</h1>
+        <div class="boot-branding">
+            <h1>CHROME_OS_PRO</h1>
             <p>TOUCH TO INITIALIZE SPATIAL LINK</p>
         </div>
     </div>
 
+    <!-- RECOVERY OVERLAY -->
+    <div id="system-recovery">
+        <h2>Handshake Failed</h2>
+        <p style="opacity: 0.7; line-height: 1.6;">The system could not access the hardware sensors. Please verify Camera access in Chrome's site settings.</p>
+        <button onclick="startSpatialOS()">RETRY LINK</button>
+    </div>
+
     <!-- SPATIAL HUD -->
-    <div id="vision-hud">
-        <h3 id="track-name">System Standby</h3>
-        <p id="artist-name">Select track from MeTube Window</p>
-        <div class="progress-track">
-            <div id="progress-fill"></div>
+    <div id="playback-hud">
+        <h3 id="ui-track-name" class="hud-title">System Standby</h3>
+        <p id="ui-artist-name" class="hud-author">Neural Selection Active</p>
+        <div class="progress-bar-container">
+            <div id="progress-indicator"></div>
         </div>
     </div>
 
-    <div id="spatial-helper">INDEX PINCH: SELECT • OPEN PALM: MOVE WINDOW</div>
+    <div id="gesture-hint">PINCH: PLAY • PALM OPEN: GRAB & MOVE WINDOW</div>
 
-    <!-- MAIN ENGINE RENDERING -->
-    <canvas id="vision-canvas"></canvas>
-    <canvas id="hand-occlusion-layer"></canvas>
-    <video id="source-feed" playsinline muted autoplay></video>
+    <!-- MAIN SYSTEM CORE -->
+    <canvas id="spatial-engine-canvas"></canvas>
+    <canvas id="hand-occlusion-overlay"></canvas>
+    <!-- Hidden to prevent Chrome UI elements -->
+    <video id="raw-camera-source" playsinline muted autoplay disablePictureInPicture disableremoteplayback></video>
 
     <script>
         /**
-         * SPATIAL DATA ARCHIVE: METUBE PRO (125+ Songs)
+         * MODULE 1: DATA ARCHIVE - THE METUBE PRO LIBRARY (150+ Songs)
+         * We hard-code a massive database to provide real content density.
          */
-        const ARTIST_DATA = ["Kendrick Lamar", "Laufey", "Arctic Monkeys", "Mild High Club", "Home", "Tame Impala", "Steve Lacy", "Tyler, The Creator", "Mac DeMarco", "TV Girl", "Joji", "Clairo", "Beach House", "Mitski", "Frank Ocean", "Slowdive", "Aphex Twin", "Thundercat", "PinkPantheress", "Drake", "Crystal Castles", "Alex G"];
-        const TRACK_DATA = ["Not Like Us", "From The Start", "505", "Homage", "Resonance", "Treehouse", "Valentine", "Dreamcore", "Money Trees", "Swimming Pools", "Bad Habit", "After the Storm", "See You Again", "Chamber of Reflection", "Blue Hair", "Glimpse of Us", "Bags", "Borderline", "Myth", "First Love / Late Spring", "White Ferrari", "Pyramids", "Alison", "Xtal", "Them Changes", "Pain", "God's Plan", "Transgender", "Mary"];
+        const POOL_ARTISTS = [
+            "Kendrick Lamar", "Laufey", "Arctic Monkeys", "Mild High Club", "Home", 
+            "Tame Impala", "Steve Lacy", "Tyler, The Creator", "Mac DeMarco", "TV Girl", 
+            "Joji", "Clairo", "Beach House", "Mitski", "Frank Ocean", "Slowdive", 
+            "Aphex Twin", "Thundercat", "PinkPantheress", "Drake", "Crystal Castles", 
+            "Alex G", "SZA", "The Weeknd", "Lana Del Rey", "Radiohead", "Daft Punk", 
+            "Men I Trust", "The Marías", "Faye Webster", "Lamp", "Jack Stauber"
+        ];
+        const POOL_TRACKS = [
+            "Not Like Us", "From The Start", "505", "Homage", "Resonance", "Treehouse", 
+            "Valentine", "Dreamcore", "Money Trees", "Swimming Pools", "Bad Habit", 
+            "After the Storm", "See You Again", "Chamber of Reflection", "Blue Hair", 
+            "Glimpse of Us", "Bags", "Borderline", "Myth", "First Love / Late Spring", 
+            "White Ferrari", "Pyramids", "Alison", "Xtal", "Them Changes", "Pain", 
+            "God's Plan", "Transgender", "Mary", "Starboy", "Diet Mountain Dew",
+            "Everything In Its Right Place", "One More Time", "Show Me How", "Hush",
+            "King Kunta", "Alright", "DNA", "Element", "Pride", "Humble", "Lust"
+        ];
         
-        const MASTER_SONG_LIST = [];
-        for(let i=0; i<130; i++) {
-            MASTER_SONG_LIST.push({
-                title: TRACK_DATA[i % TRACK_DATA.length],
-                artist: ARTIST_DATA[i % ARTIST_DATA.length],
-                color: `hsl(${i * 11.1}, 60%, 45%)`,
+        const MASTER_LIBRARY_DB = [];
+        for(let i=0; i<160; i++) {
+            MASTER_LIBRARY_DB.push({
+                title: POOL_TRACKS[i % POOL_TRACKS.length],
+                artist: POOL_ARTISTS[i % POOL_ARTISTS.length],
+                color: `hsl(${i * 12.3}, 65%, 50%)`,
                 id: i
             });
         }
 
         /**
-         * GLOBAL ENGINE STATE
+         * MODULE 2: GLOBAL SPATIAL ENGINE STATE
          */
-        let renderer, scene, camera, cameraTex;
-        let worldAnchor, uiWindow, startupOrb;
-        let isEngineRunning = false;
-        let meTubeVisible = false;
-        let audioContext, activeSynth;
-        let progressInterval;
+        let renderer_kernel, scene_kernel, camera_kernel, video_tex;
+        let spatial_anchor, metube_mesh, launch_orb;
+        let is_system_live = false;
+        let is_app_deployed = false;
+        let audio_engine_ctx, synth_osc_source;
+        let playback_loop_timer;
 
-        // Interaction State
-        let lastHandCoords = { x: 0, y: 0 };
-        let winTransform = { x: 0, y: 0, z: -6.5 };
-        let isDraggingWin = false;
-        let listScrollY = 0;
-        let scrollMomentum = 0;
+        // Interaction Dynamics State
+        let last_f_coords = { x: 0, y: 0 };
+        let current_win_pos = { x: 0, y: 0, z: -7.5 }; 
+        let is_manipulating_win = false;
+        let scroll_y_accumulator = 0;
+        let scroll_velocity_val = 0;
 
-        const videoEl = document.getElementById('source-feed');
-        const occCanvas = document.getElementById('hand-occlusion-layer');
-        const oCtx = occCanvas.getContext('2d');
+        const video_hardware_el = document.getElementById('raw-camera-source');
+        const occlusion_canvas_el = document.getElementById('hand-occlusion-overlay');
+        const occ_context_api = occlusion_canvas_el.getContext('2d');
 
         /**
-         * 1. MODULE: 3D SPATIAL ENGINE (Three.js Kernel)
+         * MODULE 3: SPATIAL RENDERING ENGINE (Three.js Pro)
          */
-        function initialize3D() {
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        function initializeSpatialGraphics() {
+            // Kernel 3D Sequence
+            scene_kernel = new THREE.Scene();
+            camera_kernel = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            renderer = new THREE.WebGLRenderer({ 
-                canvas: document.getElementById('vision-canvas'), 
+            renderer_kernel = new THREE.WebGLRenderer({ 
+                canvas: document.getElementById('spatial-engine-canvas'), 
                 antialias: true,
                 alpha: true 
             });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer_kernel.setSize(window.innerWidth, window.innerHeight);
+            renderer_kernel.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
 
-            // True-Passthrough Architecture
-            cameraTex = new THREE.VideoTexture(videoEl);
-            const skyGeo = new THREE.SphereGeometry(300, 64, 64);
-            skyGeo.scale(-1, 1, 1);
-            const skyMat = new THREE.MeshBasicMaterial({ map: cameraTex });
-            const skySphere = new THREE.Mesh(skyGeo, skyMat);
-            scene.add(skySphere);
+            // Neural Passthrough Implementation: Mapping Camera Feed to 3D Sphere
+            video_tex = new THREE.VideoTexture(video_hardware_el);
+            const environment_geo = new THREE.SphereGeometry(480, 64, 64);
+            environment_geo.scale(-1, 1, 1); // View from interior
+            const environment_mat = new THREE.MeshBasicMaterial({ map: video_tex });
+            const environment_sphere = new THREE.Mesh(environment_geo, environment_mat);
+            scene_kernel.add(environment_sphere);
 
-            // World Anchor - This anchors everything to room space
-            worldAnchor = new THREE.Group();
-            scene.add(worldAnchor);
+            // World Anchor Group - This provides the coordinate system for room-locking
+            spatial_anchor = new THREE.Group();
+            scene_kernel.add(spatial_anchor);
 
-            // Peripheral Launcher
-            spawnLauncher();
+            // Deploy Initial Entry Interface
+            deployLauncherOrb();
 
-            camera.position.set(0, 0, 0.05);
+            camera_kernel.position.set(0, 0, 0.1);
         }
 
-        function spawnLauncher() {
-            const geo = new THREE.SphereGeometry(0.4, 32, 32);
-            const mat = new THREE.MeshBasicMaterial({ color: 0xff0033, transparent: true, opacity: 0.95 });
-            startupOrb = new THREE.Mesh(geo, mat);
-            // Placement: Waist-level, right side
-            startupOrb.position.set(2.4, -3.0, -5);
-            worldAnchor.add(startupOrb);
+        function deployLauncherOrb() {
+            // Orb placed in Peripheral Space
+            const orb_geometry = new THREE.SphereGeometry(0.55, 32, 32);
+            const orb_material = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.95 });
+            launch_orb = new THREE.Mesh(orb_geometry, orb_material);
+            launch_orb.position.set(3.2, -3.8, -6.5);
+            spatial_anchor.add(launch_orb);
 
-            // UI Label
-            const lblCanv = document.createElement('canvas');
-            lblCanv.width = 400; lblCanv.height = 120;
-            const lctx = lblCanv.getContext('2d');
-            lctx.fillStyle = "#fff"; lctx.font = "bold 65px sans-serif";
-            lctx.textAlign = "center"; lctx.fillText("MeTube", 200, 90);
-            const lblTex = new THREE.CanvasTexture(lblCanv);
-            const lblMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.4), new THREE.MeshBasicMaterial({ map: lblTex, transparent: true }));
-            lblMesh.position.set(2.4, -2.2, -5);
-            worldAnchor.add(lblMesh);
+            // Spatial Metadata Label
+            const c_buffer = document.createElement('canvas');
+            c_buffer.width = 500; c_buffer.height = 180;
+            const ctx_buffer = c_buffer.getContext('2d');
+            ctx_buffer.fillStyle = "#fff"; ctx_buffer.font = "900 85px sans-serif";
+            ctx_buffer.textAlign = "center"; ctx_buffer.fillText("MeTube", 250, 115);
+            const tex_buffer = new THREE.CanvasTexture(c_buffer);
+            const lbl_mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.72), new THREE.MeshBasicMaterial({ map: tex_buffer, transparent: true }));
+            lbl_mesh.position.set(3.2, -2.8, -6.5);
+            spatial_anchor.add(lbl_mesh);
         }
 
         /**
-         * 2. MODULE: SPATIAL WINDOW GENERATION (HD Canvas)
+         * MODULE 4: SPATIAL METUBE INTERFACE (High Fidelity Canvas Pipeline)
          */
-        function buildMeTubeSpatial() {
-            const ui_canvas = document.createElement('canvas');
-            ui_canvas.width = 1024;
-            ui_canvas.height = 1550;
-            const ctx = ui_canvas.getContext('2d');
+        function initMeTubeSpatialWindow() {
+            const ui_buffer = document.createElement('canvas');
+            ui_buffer.width = 1024;
+            ui_buffer.height = 1800;
+            const ctx_ui = ui_buffer.getContext('2d');
 
-            function refreshUI() {
-                ctx.clearRect(0, 0, 1024, 1550);
+            function performSpatialRefresh() {
+                ctx_ui.clearRect(0, 0, 1024, 1800);
                 
-                // Vision Pro Glass Container
-                ctx.fillStyle = "rgba(10, 10, 10, 0.9)";
-                drawAVPRect(ctx, 40, 40, 944, 1470, 100, true);
-                ctx.strokeStyle = "rgba(255,255,255,0.25)";
-                ctx.lineWidth = 6;
-                drawAVPRect(ctx, 40, 40, 944, 1470, 100, false);
+                // Professional Glassmorphism (Vision Pro Standards)
+                ctx_ui.shadowBlur = 70; ctx_ui.shadowColor = "rgba(0,0,0,0.8)";
+                ctx_ui.fillStyle = "rgba(12, 12, 12, 0.95)";
+                drawAVPRoundedPanel(ctx_ui, 45, 45, 934, 1710, 120, true);
+                
+                ctx_ui.shadowBlur = 0;
+                ctx_ui.strokeStyle = "rgba(255,255,255,0.32)";
+                ctx_ui.lineWidth = 12;
+                drawAVPRoundedPanel(ctx_ui, 45, 45, 934, 1710, 120, false);
 
-                // OS Headers
-                ctx.fillStyle = "#ff3b30";
-                ctx.font = "900 95px sans-serif";
-                ctx.fillText("MeTube", 140, 220);
-                ctx.fillStyle = "rgba(255,255,255,0.4)";
-                ctx.font = "38px sans-serif";
-                ctx.fillText("Spatial OS Pro", 650, 215);
+                // Branding Core
+                ctx_ui.fillStyle = "#ff3b30";
+                ctx_ui.font = "900 120px sans-serif";
+                ctx_ui.fillText("MeTube", 140, 260);
+                ctx_ui.fillStyle = "rgba(255,255,255,0.42)";
+                ctx_ui.font = "40px sans-serif";
+                ctx_ui.fillText("Spatial OS Chrome Pro v7.0", 570, 255);
 
-                // Song List Rendering
-                const h = 150;
-                MASTER_SONG_LIST.forEach((song, i) => {
-                    const y = 340 + (i * h) - listScrollY;
-                    if(y < 240 || y > 1400) return;
+                // Dynamic Song List Rendering (Inertia Scroller)
+                const row_unit_h = 175;
+                MASTER_LIBRARY_DB.forEach((item, idx) => {
+                    const y_pos = 380 + (idx * row_unit_h) - scroll_y_accumulator;
+                    if(y_pos < 240 || y_pos > 1650) return; // Spatial Buffer Culling
 
-                    ctx.fillStyle = "rgba(255,255,255,0.07)";
-                    drawAVPRect(ctx, 110, y, 804, 130, 35, true);
+                    // Item Material Layer
+                    ctx_ui.fillStyle = "rgba(255,255,255,0.09)";
+                    drawAVPRoundedPanel(ctx_ui, 120, y_pos, 784, 155, 45, true);
 
-                    ctx.fillStyle = song.color;
-                    drawAVPRect(ctx, 145, y + 15, 100, 100, 22, true);
+                    // Track Thumbnail Block
+                    ctx_ui.fillStyle = item.color;
+                    drawAVPRoundedPanel(ctx_ui, 155, y_pos + 25, 105, 105, 28, true);
                     
-                    ctx.fillStyle = "#fff";
-                    ctx.font = "bold 44px sans-serif";
-                    ctx.fillText(song.title, 280, y + 65);
+                    // Metadata String Generation
+                    ctx_ui.fillStyle = "#fff";
+                    ctx_ui.font = "bold 52px sans-serif";
+                    ctx_ui.fillText(item.title, 305, y_pos + 82);
                     
-                    ctx.fillStyle = "rgba(255,255,255,0.5)";
-                    ctx.font = "32px sans-serif";
-                    ctx.fillText(song.artist, 280, y + 110);
+                    ctx_ui.fillStyle = "rgba(255,255,255,0.65)";
+                    ctx_ui.font = "36px sans-serif";
+                    ctx_ui.fillText(item.artist, 305, y_pos + 130);
                 });
 
-                // Grab Handle
-                ctx.fillStyle = "rgba(255,255,255,0.25)";
-                drawAVPRect(ctx, 362, 1440, 300, 16, 8, true);
+                // Hardware Mimic Interaction Handle
+                ctx_ui.fillStyle = "rgba(255,255,255,0.35)";
+                drawAVPRoundedPanel(ctx_ui, 362, 1655, 300, 24, 12, true);
 
-                if(window.sharedTexture) window.sharedTexture.needsUpdate = true;
+                if(window.masterSpatialTexture) window.masterSpatialTexture.needsUpdate = true;
             }
 
-            const texture = new THREE.CanvasTexture(ui_canvas);
-            window.sharedTexture = texture;
-            uiWindow = new THREE.Mesh(
-                new THREE.PlaneGeometry(5, 7.6), 
-                new THREE.MeshBasicMaterial({ map: texture, transparent: true })
+            const win_texture = new THREE.CanvasTexture(ui_buffer);
+            window.masterSpatialTexture = win_texture;
+            metube_mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(5.8, 10.2), 
+                new THREE.MeshBasicMaterial({ map: win_texture, transparent: true })
             );
             
-            uiWindow.position.set(0, 0, -6.5);
-            uiWindow.visible = false;
-            worldAnchor.add(uiWindow);
+            metube_mesh.position.set(0, 0, current_win_pos.z);
+            metube_mesh.visible = false;
+            spatial_anchor.add(metube_mesh);
 
-            setInterval(refreshUI, 30);
+            // Spatial Refresh Interval
+            setInterval(performSpatialRefresh, 16);
         }
 
-        function drawAVPRect(ctx, x, y, w, h, r, f) {
+        function drawAVPRoundedPanel(ctx, x, y, w, h, r, f) {
             ctx.beginPath();
             ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
             ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
@@ -379,195 +356,208 @@
         }
 
         /**
-         * 3. MODULE: NEURAL HAND OCCLUSION (AI Masking)
+         * MODULE 5: NEURAL OCCLUSION ENGINE (MediaPipe AI Kernel)
+         * Ensures physical hands remain in the visual foreground.
          */
-        const hand_ai = new Hands({
+        const hand_neural_engine = new Hands({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
         });
 
-        hand_ai.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.8, minTrackingConfidence: 0.8 });
+        hand_neural_engine.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.85, minTrackingConfidence: 0.85 });
 
-        hand_ai.onResults(results => {
-            // A. UPDATE OCCLUSION LAYER
-            occCanvas.width = window.innerWidth;
-            occCanvas.height = window.innerHeight;
-            oCtx.clearRect(0, 0, occCanvas.width, occCanvas.height);
+        hand_neural_engine.onResults(results => {
+            // A. UPDATE OCCLUSION STENCIL (Hand-in-Front Mask)
+            occlusion_canvas_el.width = window.innerWidth;
+            occlusion_canvas_el.height = window.innerHeight;
+            occ_context_api.clearRect(0, 0, occlusion_canvas_el.width, occlusion_canvas_el.height);
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                document.getElementById('spatial-helper').style.opacity = 1;
+                document.getElementById('gesture-hint').style.opacity = 1;
                 
-                results.multiHandLandmarks.forEach((marks) => {
-                    // Neural Stencil Rendering
-                    oCtx.save();
-                    oCtx.beginPath();
-                    const path = [0, 1, 2, 3, 4, 3, 2, 1, 0, 5, 6, 7, 8, 7, 6, 5, 0, 9, 10, 11, 12, 11, 10, 9, 0, 13, 14, 15, 16, 15, 14, 13, 0, 17, 18, 19, 20];
-                    path.forEach((p_idx, i) => {
-                        const p = marks[p_idx];
-                        if(i === 0) oCtx.moveTo(p.x * occCanvas.width, p.y * occCanvas.height);
-                        else oCtx.lineTo(p.x * occCanvas.width, p.y * occCanvas.height);
+                results.multiHandLandmarks.forEach((landmarks) => {
+                    // Neural Stencil Rendering Architecture
+                    occ_context_api.save();
+                    occ_context_api.beginPath();
+                    // Connect skeletal joint nodes
+                    const node_map = [0, 1, 2, 3, 4, 3, 2, 1, 0, 5, 6, 7, 8, 7, 6, 5, 0, 9, 10, 11, 12, 11, 10, 9, 0, 13, 14, 15, 16, 15, 14, 13, 0, 17, 18, 19, 20];
+                    node_map.forEach((node_idx, i) => {
+                        const pt = landmarks[node_idx];
+                        if(i === 0) occ_context_api.moveTo(pt.x * occlusion_canvas_el.width, pt.y * occlusion_canvas_el.height);
+                        else occ_context_api.lineTo(pt.x * occlusion_canvas_el.width, pt.y * occlusion_canvas_el.height);
                     });
-                    oCtx.closePath();
-                    oCtx.clip();
+                    occ_context_api.closePath();
+                    occ_context_api.clip();
 
-                    // DIRECT FRAME INJECTION: Re-render camera inside the hand shape
-                    oCtx.drawImage(videoEl, 0, 0, occCanvas.width, occCanvas.height);
-                    oCtx.restore();
+                    // DIRECT FRAME INJECTION: Re-render raw hardware feed through the neural hand silhouette
+                    occ_context_api.drawImage(video_hardware_el, 0, 0, occlusion_canvas_el.width, occlusion_canvas_el.height);
+                    occ_context_api.restore();
 
-                    // B. GESTURE ENGINE
-                    const tip = marks[8];
-                    const thumb = marks[4];
-                    const sx = tip.x * 100, sy = tip.y * 100;
-                    const isPinching = Math.hypot(tip.x - thumb.x, tip.y - thumb.y) < 0.045;
+                    // B. SPATIAL GESTURE ENGINE
+                    const finger_node = landmarks[8];
+                    const thumb_node = landmarks[4];
+                    const viewport_x = finger_node.x * 100, viewport_y = finger_node.y * 100;
+                    const pinch_magnitude = Math.hypot(finger_node.x - thumb_node.x, finger_node.y - thumb_node.y);
+                    const system_pinching = pinch_magnitude < 0.052;
 
-                    // I. Deployment
-                    if (!meTubeVisible && sx > 70 && sy > 70) {
-                        if (isPinching) deployMeTube();
-                    }
+                    // I. Deployment Calibration
+                    if (!is_app_deployed && viewport_x > 70 && viewport_y > 70 && system_pinching) executeDeployment();
 
-                    if (meTubeVisible) {
-                        // II. Spatial Drag (Open Palm)
-                        const palmOpen = Math.hypot(marks[8].x - marks[0].x, marks[8].y - marks[0].y) > 0.35;
-                        if (palmOpen && sy > 85 && sx > 35 && sx < 65) {
-                            isDraggingWin = true;
-                        } else if (!palmOpen) {
-                            isDraggingWin = false;
+                    if (is_app_deployed) {
+                        // II. Window Manipulation Logic (Palm Expansion Check)
+                        const palm_span = Math.hypot(landmarks[8].x - landmarks[0].x, landmarks[8].y - landmarks[0].y);
+                        const open_palm_active = palm_span > 0.38;
+                        
+                        if (open_palm_active && viewport_y > 85 && viewport_x > 30 && viewport_x < 70) {
+                            is_manipulating_win = true;
+                        } else if (!open_palm_active) {
+                            is_manipulating_win = false;
                         }
 
-                        if (isDraggingWin) {
-                            uiWindow.position.x = (tip.x - 0.5) * 15;
-                            uiWindow.position.y = (0.5 - tip.y) * 12;
+                        if (is_manipulating_win) {
+                            // Map Hand Coordinate Delta to 3D Plane
+                            metube_mesh.position.x = (finger_node.x - 0.5) * 20;
+                            metube_mesh.position.y = (0.5 - finger_node.y) * 16;
                         }
 
-                        // III. Air-Scroll
-                        if (!isDraggingWin) {
-                            const dy = (tip.y * 100 - lastHandCoords.y);
-                            if (Math.abs(dy) > 0.6) {
-                                scrollMomentum = dy * 18;
+                        // III. Spatial Navigation Architecture (Air-Scroll Momentum)
+                        if (!is_manipulating_win) {
+                            const y_delta = (finger_node.y * 100 - last_f_coords.y);
+                            if (Math.abs(y_delta) > 0.6) {
+                                scroll_velocity_val = y_delta * 26;
                             }
                             
-                            // IV. Selection
-                            if (isPinching && sx > 20 && sx < 80 && sy > 25 && sy < 80) {
-                                const songIdx = Math.floor((listScrollY + (sy - 25) * 19) / 150);
-                                if (songIdx >= 0 && songIdx < MASTER_SONG_LIST.length) {
-                                    triggerPlayback(MASTER_SONG_LIST[songIdx]);
+                            // IV. Action Command (Pinch-to-Execute Playback)
+                            if (system_pinching && viewport_x > 15 && viewport_x < 85 && viewport_y > 25 && viewport_y < 85) {
+                                const calc_db_idx = Math.floor((scroll_y_accumulator + (viewport_y - 25) * 22) / 175);
+                                if (calc_db_idx >= 0 && calc_db_idx < MASTER_LIBRARY_DB.length) {
+                                    triggerSpatialAudioLink(MASTER_LIBRARY_DB[calc_db_idx]);
                                 }
                             }
                         }
                     }
-                    lastHandCoords = { x: sx, y: sy };
+                    last_f_coords = { x: viewport_x, y: viewport_y };
                 });
             } else {
-                document.getElementById('spatial-helper').style.opacity = 0;
+                document.getElementById('gesture-hint').style.opacity = 0;
             }
         });
 
         /**
-         * 4. MODULE: WORLD LOCKING (Orientation Engine)
+         * MODULE 6: WORLD LOCKING ENGINE (Visual Orientation Fusion)
          */
         window.addEventListener('deviceorientation', (e) => {
-            if(!isEngineRunning) return;
-            const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
-            const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
-            const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
-            const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
-            worldAnchor.quaternion.setFromEuler(euler);
+            if(!is_system_live) return;
+            
+            // Apply Orientation Quaternions to counteract phone movement
+            const alph = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+            const bet = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+            const gam = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+
+            const spatial_euler_state = new THREE.Euler(bet, alph, -gam, 'YXZ');
+            spatial_anchor.quaternion.setFromEuler(spatial_euler_state);
         });
 
         /**
-         * 5. MODULE: SPATIAL AUDIO ENGINE
+         * MODULE 7: SPATIAL AUDIO SYSTEM (Neural Stream)
          */
-        function triggerPlayback(track) {
-            if(!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            if(activeSynth) activeSynth.stop();
+        function triggerSpatialAudioLink(track_object) {
+            if(!audio_engine_ctx) audio_engine_ctx = new (window.AudioContext || window.webkitAudioContext)();
+            if(synth_osc_source) synth_osc_source.stop();
 
-            const hud = document.getElementById('vision-hud');
-            hud.classList.add('active');
-            hud.style.display = 'block';
-            document.getElementById('track-name').innerText = track.title;
-            document.getElementById('artist-name').innerText = track.artist;
+            const hud_panel = document.getElementById('playback-hud');
+            hud_panel.classList.add('active');
+            hud_panel.style.display = 'block';
+            document.getElementById('ui-track-name').innerText = track_object.title;
+            document.getElementById('ui-artist-name').innerText = track_object.artist;
             
-            const osc = audioContext.createOscillator();
-            const gain = audioContext.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(160 + (track.id % 25) * 6, audioContext.currentTime);
-            gain.gain.setValueAtTime(0.12, audioContext.currentTime);
-            osc.connect(gain);
-            gain.connect(audioContext.destination);
-            osc.start();
-            activeSynth = osc;
+            const synth_osc = audio_engine_ctx.createOscillator();
+            const gain_module = audio_engine_ctx.createGain();
+            synth_osc.type = 'sine';
+            synth_osc.frequency.setValueAtTime(140 + (track_object.id % 32) * 6, audio_engine_ctx.currentTime);
+            gain_module.gain.setValueAtTime(0.14, audio_engine_ctx.currentTime);
+            synth_osc.connect(gain_module);
+            gain_module.connect(audio_engine_ctx.destination);
+            synth_osc.start();
+            synth_osc_source = synth_osc;
 
-            let p = 0;
-            if(progressInterval) clearInterval(progressInterval);
-            progressInterval = setInterval(() => {
-                p += 0.35;
-                document.getElementById('progress-fill').style.width = p + "%";
-                if(p >= 100) { clearInterval(progressInterval); osc.stop(); }
+            let tick_count = 0;
+            if(playback_loop_timer) clearInterval(playback_loop_timer);
+            playback_loop_timer = setInterval(() => {
+                tick_count += 0.42;
+                document.getElementById('progress-indicator').style.width = tick_count + "%";
+                if(tick_count >= 100) { clearInterval(playback_loop_timer); synth_osc.stop(); }
             }, 100);
         }
 
         /**
-         * 6. MODULE: CORE LIFECYCLE
+         * MODULE 8: SYSTEM CORE BOOTSTRAP (Hard-Sync Initializer)
          */
-        async function initSpatialSystem() {
+        async function startSpatialOS() {
             try {
-                // FORCE Video Capture
-                const stream = await navigator.mediaDevices.getUserMedia({ 
+                // STAGE 1: Direct Pixel Hardware Link
+                const cam_stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { facingMode: 'environment', width: 1280, height: 720 } 
-                });
-                videoEl.srcObject = stream;
-                await videoEl.play();
+                }).catch(() => { throw new Error("CAMERA_LOCK_FAILED"); });
+                
+                video_hardware_el.srcObject = cam_stream;
+                await video_hardware_el.play();
 
-                // FORCE Motion Sync
+                // STAGE 2: Neural Sensor Handshake (Chrome Compliance)
                 if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    await DeviceOrientationEvent.requestPermission();
+                    const sensor_status = await DeviceOrientationEvent.requestPermission();
+                    if(sensor_status !== 'granted') throw new Error("SENSORS_LOCK_FAILED");
                 }
 
-                // Finalize Boot
-                document.getElementById('entry-gate').style.display = 'none';
-                initialize3D();
-                buildMeTubeSpatial();
+                // SUCCESS: Final OS Activation
+                document.getElementById('os-boot-interface').style.opacity = '0';
+                setTimeout(() => { document.getElementById('os-boot-interface').style.display = 'none'; }, 600);
+                document.getElementById('system-recovery').style.display = 'none';
+
+                initializeSpatialGraphics();
+                initMeTubeSpatialWindow();
                 
-                const aiCam = new Camera(videoEl, {
-                    onFrame: async () => { await hand_ai.send({image: videoEl}); },
+                const vision_loop = new Camera(video_hardware_el, {
+                    onFrame: async () => { await hand_neural_engine.send({image: video_hardware_el}); },
                     width: 1280, height: 720
                 });
-                aiCam.start();
+                vision_loop.start();
                 
-                isEngineRunning = true;
-                requestAnimationFrame(spatialMainLoop);
+                is_system_live = true;
+                requestAnimationFrame(spatialMainLoopUpdate);
             } catch (err) {
-                console.error(err);
-                alert("Critical System Failure: Ensure Camera and Motion sensors are enabled.");
+                document.getElementById('system-recovery').style.display = 'block';
             }
         }
 
-        function spatialMainLoop() {
-            renderer.render(scene, camera);
+        function spatialMainLoopUpdate() {
+            // Render High Priority Spatial Engine Frame
+            renderer_kernel.render(scene_kernel, camera_kernel);
 
-            if (meTubeVisible && !isDraggingWin) {
-                listScrollY += scrollMomentum;
-                scrollMomentum *= 0.93; // Friction
+            // Interaction Physics Management (Inertial Fluidity)
+            if (is_app_deployed && !is_manipulating_win) {
+                scroll_y_accumulator += scroll_velocity_val;
+                scroll_velocity_val *= 0.94; // Air Fluid Resistance
                 
-                if (listScrollY < 0) { listScrollY = 0; scrollMomentum = 0; }
-                const max = MASTER_SONG_LIST.length * 150 - 1000;
-                if (listScrollY > max) { listScrollY = max; scrollMomentum = 0; }
+                if (scroll_y_accumulator < 0) { scroll_y_accumulator = 0; scroll_velocity_val = 0; }
+                const scroll_boundary = MASTER_LIBRARY_DB.length * 175 - 1200;
+                if (scroll_y_accumulator > scroll_boundary) { scroll_y_accumulator = scroll_boundary; scroll_velocity_val = 0; }
             }
 
-            requestAnimationFrame(spatialMainLoop);
+            requestAnimationFrame(spatialMainLoopUpdate);
         }
 
-        function deployMeTube() {
-            if(meTubeVisible) return;
-            meTubeVisible = true;
-            uiWindow.visible = true;
-            startupOrb.visible = false;
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Interface Synced. User Library Loaded."));
+        function executeDeployment() {
+            if(is_app_deployed) return;
+            is_app_deployed = true;
+            metube_mesh.visible = true;
+            launch_orb.visible = false;
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Neural Interface Sync Complete."));
         }
 
         window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera_kernel.aspect = window.innerWidth / window.innerHeight;
+            camera_kernel.updateProjectionMatrix();
+            renderer_kernel.setSize(window.innerWidth, window.innerHeight);
         });
 
     </script>
