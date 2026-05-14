@@ -4,134 +4,127 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AI Hand VR Passthrough</title>
-    <!-- Load MediaPipe Hand Tracking Libraries -->
+    <title>Spatial Window VR</title>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #00dfff; font-family: 'Courier New', monospace; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #00dfff; font-family: 'Segoe UI', sans-serif; }
         
         canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; }
         video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 
-        /* AI Status Indicators */
-        #status-bar {
-            position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-            z-index: 5000; font-size: 10px; background: rgba(0,0,0,0.5); padding: 5px 15px;
-            border-radius: 20px; border: 1px solid #00dfff; pointer-events: none;
-            display: flex; gap: 10px;
+        /* The Spatial Window */
+        .window-container {
+            display: none; position: fixed; z-index: 4000; pointer-events: none;
+            width: 300px; height: 350px; 
         }
-
-        /* Interactive Air Buttons */
-        .air-button {
-            position: fixed; top: 65%; width: 120px; height: 120px;
-            border: 2px dashed rgba(0, 223, 255, 0.3); border-radius: 50%;
-            transform: translate(-50%, -50%); z-index: 1000;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            transition: all 0.3s ease; pointer-events: none;
-        }
-        #btn-l { left: 25%; }
-        #btn-r { left: 75%; }
-
-        .btn-label { font-size: 9px; margin-top: 5px; letter-spacing: 2px; }
         
-        /* The Dwell/Charge Ring */
-        .charge-ring {
-            position: absolute; width: 100%; height: 100%;
-            border-radius: 50%; border: 4px solid #00dfff;
-            border-top-color: transparent; opacity: 0;
-            transform: rotate(0deg); transition: opacity 0.2s;
+        .spatial-window {
+            width: 100%; height: 100%;
+            background: rgba(0, 30, 60, 0.4);
+            backdrop-filter: blur(15px);
+            border: 2px solid #00dfff;
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 0 30px rgba(0, 223, 255, 0.3);
+            display: flex; flex-direction: column;
+            background-image: linear-gradient(rgba(0, 223, 255, 0.05) 1px, transparent 1px);
+            background-size: 100% 20px;
         }
 
-        /* Hologram Menu */
-        #hologram {
-            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 4000; pointer-events: auto;
-        }
-        .panel {
-            position: absolute; top: 50%; width: 42%; height: 65%;
-            transform: translate(-50%, -50%); background: rgba(0, 30, 60, 0.6);
-            backdrop-filter: blur(10px); border: 2px solid #00dfff; padding: 20px;
-            box-shadow: 0 0 40px rgba(0, 223, 255, 0.4);
-            background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 223, 255, 0.05) 3px);
-        }
-        #panel-l { left: 25%; }
-        #panel-r { left: 75%; }
+        /* Side by Side duplication */
+        #win-l { left: 5%; top: 20%; display: none; }
+        #win-r { left: 55%; top: 20%; display: none; }
 
-        .control-row { margin-bottom: 25px; }
-        label { display: block; font-size: 11px; margin-bottom: 10px; text-transform: uppercase; }
-        input[type=range] { width: 100%; appearance: none; background: rgba(0, 223, 255, 0.2); height: 4px; border-radius: 2px; }
-        input[type=range]::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; background: #00dfff; border-radius: 50%; box-shadow: 0 0 15px #00dfff; }
-
-        .action-btn {
-            width: 100%; padding: 12px; margin-top: 10px; font-weight: bold; font-family: inherit;
-            background: rgba(0, 223, 255, 0.1); border: 1px solid #00dfff; color: #00dfff; cursor: pointer;
+        .title-bar {
+            height: 30px; border-bottom: 1px solid rgba(0, 223, 255, 0.3);
+            margin-bottom: 15px; display: flex; align-items: center; justify-content: space-between;
+            font-size: 10px; font-weight: bold; letter-spacing: 2px;
         }
-        .action-btn:active { background: #00dfff; color: #000; }
 
-        #boot-screen {
+        .grab-handle { width: 60%; height: 6px; background: rgba(0, 223, 255, 0.3); border-radius: 3px; }
+
+        .control-group { margin-bottom: 20px; pointer-events: auto; }
+        label { display: block; font-size: 9px; margin-bottom: 8px; text-transform: uppercase; opacity: 0.8; }
+
+        /* Custom Holographic Sliders */
+        input[type=range] {
+            width: 100%; appearance: none; background: rgba(0, 223, 255, 0.1);
+            height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            appearance: none; width: 18px; height: 18px; background: #00dfff;
+            border-radius: 50%; box-shadow: 0 0 10px #00dfff; border: 2px solid #fff;
+        }
+
+        /* The Air Trigger */
+        .air-trigger {
+            position: fixed; top: 70%; width: 100px; height: 100px;
+            border: 2px solid rgba(0, 223, 255, 0.2); border-radius: 50%;
+            transform: translate(-50%, -50%); z-index: 1000;
+            display: flex; align-items: center; justify-content: center;
+        }
+        #trig-l { left: 25%; } #trig-r { left: 75%; }
+        
+        .charge-fill {
+            position: absolute; width: 100%; height: 100%; border-radius: 50%;
+            border: 4px solid #00dfff; border-top-color: transparent;
+            opacity: 0; transform: rotate(0deg);
+        }
+
+        #boot {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center;
+            cursor: pointer; text-align: center;
         }
     </style>
 </head>
 <body>
 
-    <div id="boot-screen" onclick="initApp()">
-        <div style="text-align: center;">
-            <h1 style="font-size: 18px; letter-spacing: 5px;">AI_PASSTHROUGH_OS</h1>
-            <p style="margin-top: 20px; color: #aaa; font-size: 10px;">[ TAP TO CONNECT NEURAL INTERFACE ]</p>
+    <div id="boot" onclick="init()">
+        <div>
+            <h1 style="font-size: 20px; color: #00dfff; letter-spacing: 10px;">SPATIAL OS</h1>
+            <p style="margin-top: 15px; opacity: 0.4; font-size: 10px;">PINCH THE AIR TO START</p>
         </div>
     </div>
 
-    <div id="status-bar">
-        <span>CAM: <span id="cam-status" style="color: #0f0;">OFF</span></span>
-        <span>AI_HANDS: <span id="ai-status" style="color: #f00;">INIT</span></span>
-    </div>
-
-    <!-- Dual Eye Buttons -->
-    <div class="air-button" id="btn-l">
-        <div class="charge-ring" id="ring-l"></div>
-        <div style="width: 10px; height: 10px; border: 1px solid #00dfff; border-radius: 50%;"></div>
-        <span class="btn-label">AIR MENU</span>
-    </div>
-    <div class="air-button" id="btn-r">
-        <div class="charge-ring" id="ring-r"></div>
-        <div style="width: 10px; height: 10px; border: 1px solid #00dfff; border-radius: 50%;"></div>
-        <span class="btn-label">AIR MENU</span>
-    </div>
-
-    <!-- Side-by-Side Hologram -->
-    <div id="hologram">
-        <div class="panel" id="panel-l">
-            <h2 style="font-size: 14px; margin-bottom: 20px;">SYSTEM CONFIG</h2>
-            <div class="control-row">
-                <label id="fov-lbl-l">FOV SENSOR: 1.0x</label>
-                <input type="range" class="fov-sync" min="0.5" max="1.5" step="0.01" value="1.0">
+    <!-- Side-by-Side Windows -->
+    <div class="window-container" id="win-l">
+        <div class="spatial-window">
+            <div class="title-bar"><div class="grab-handle"></div><span>DRAG</span></div>
+            <div class="control-group">
+                <label id="fov-txt-l">OPTIC ZOOM: 1.0</label>
+                <input type="range" class="fov-sync" min="0.4" max="1.6" step="0.01" value="1.0">
             </div>
-            <div class="control-row">
-                <label id="br-lbl-l">EXPOSURE: 1.0x</label>
+            <div class="control-group">
+                <label id="br-txt-l">LUMINANCE: 1.0</label>
                 <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
             </div>
-            <button class="action-btn talk-btn">SUMMON NOVA</button>
-            <button class="action-btn" id="close-l" style="border-color: #ff3232; color: #ff3232;">SHUTDOWN MENU</button>
-        </div>
-        <div class="panel" id="panel-r">
-            <h2 style="font-size: 14px; margin-bottom: 20px;">SYSTEM CONFIG</h2>
-            <div class="control-row">
-                <label id="fov-lbl-r">FOV SENSOR: 1.0x</label>
-                <input type="range" class="fov-sync" min="0.5" max="1.5" step="0.01" value="1.0">
-            </div>
-            <div class="control-row">
-                <label id="br-lbl-r">EXPOSURE: 1.0x</label>
-                <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
-            </div>
-            <button class="action-btn talk-btn">SUMMON NOVA</button>
-            <button class="action-btn" id="close-r" style="border-color: #ff3232; color: #ff3232;">SHUTDOWN MENU</button>
+            <button onclick="nova()" style="background:none; border:1px solid #00dfff; color:#00dfff; padding:10px; width:100%; font-size:10px; margin-top:auto;">NOVA VOICE</button>
+            <button onclick="closeWin()" style="background:none; border:1px solid #f44; color:#f44; padding:5px; width:100%; font-size:8px; margin-top:10px;">DISMISS</button>
         </div>
     </div>
+
+    <div class="window-container" id="win-r">
+        <div class="spatial-window">
+            <div class="title-bar"><div class="grab-handle"></div><span>DRAG</span></div>
+            <div class="control-group">
+                <label id="fov-txt-r">OPTIC ZOOM: 1.0</label>
+                <input type="range" class="fov-sync" min="0.4" max="1.6" step="0.01" value="1.0">
+            </div>
+            <div class="control-group">
+                <label id="br-txt-r">LUMINANCE: 1.0</label>
+                <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
+            </div>
+            <button onclick="nova()" style="background:none; border:1px solid #00dfff; color:#00dfff; padding:10px; width:100%; font-size:10px; margin-top:auto;">NOVA VOICE</button>
+            <button onclick="closeWin()" style="background:none; border:1px solid #f44; color:#f44; padding:5px; width:100%; font-size:8px; margin-top:10px;">DISMISS</button>
+        </div>
+    </div>
+
+    <!-- Air Triggers -->
+    <div class="air-trigger" id="trig-l"><div class="charge-fill" id="fill-l"></div></div>
+    <div class="air-trigger" id="trig-r"><div class="charge-fill" id="fill-r"></div></div>
 
     <video id="webcam" playsinline></video>
     <canvas id="glCanvas"></canvas>
@@ -142,159 +135,108 @@
         const gl = canvas.getContext('webgl');
         
         let fov = 1.0, brightness = 1.0, isMenuOpen = false;
-        let dwellTime = 0, lastTime = Date.now();
+        let winX = 5, winY = 20, winW = 300, winH = 350;
+        let isDragging = false, isResizing = false;
+        let dwell = 0, last = Date.now();
 
         // WebGL Setup
-        const vs = `attribute vec2 pos; varying vec2 vTex; uniform float fov; void main() { vTex = pos * 0.5 + 0.5; vTex.y = 1.0 - vTex.y; gl_Position = vec4(pos * fov, 0.0, 1.0); }`;
-        const fs = `precision mediump float; uniform sampler2D t; uniform float b; varying vec2 vTex; void main() { vec2 uv = vTex; if(uv.x < 0.5) uv.x *= 2.0; else uv.x = (uv.x - 0.5) * 2.0; vec4 c = texture2D(t, uv); gl_FragColor = vec4(c.rgb * b, 1.0); }`;
-
-        const program = gl.createProgram();
-        const createS = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
-        gl.attachShader(program, createS(gl.VERTEX_SHADER, vs));
-        gl.attachShader(program, createS(gl.FRAGMENT_SHADER, fs));
-        gl.linkProgram(program); gl.useProgram(program);
-
-        const fovLoc = gl.getUniformLocation(program, 'fov');
-        const brLoc = gl.getUniformLocation(program, 'b');
-        const buf = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        const vs = `attribute vec2 p; varying vec2 v; uniform float f; void main() { v = p*0.5+0.5; v.y=1.0-v.y; gl_Position = vec4(p*f, 0.0, 1.0); }`;
+        const fs = `precision mediump float; uniform sampler2D t; uniform float b; varying vec2 v; void main() { vec2 u=v; if(u.x<0.5) u.x*=2.0; else u.x=(u.x-0.5)*2.0; vec4 c=texture2D(t,u); gl_FragColor=vec4(c.rgb*b,1.0); }`;
+        const prg = gl.createProgram();
+        const sh = (t, s) => { const x=gl.createShader(t); gl.shaderSource(x,s); gl.compileShader(x); return x; };
+        gl.attachShader(prg, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prg, sh(gl.FRAGMENT_SHADER, fs));
+        gl.linkProgram(prg); gl.useProgram(prg);
+        const fLoc = gl.getUniformLocation(prg, 'f'), bLoc = gl.getUniformLocation(prg, 'b');
+        const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
-        const pLoc = gl.getAttribLocation(program, 'pos');
-        gl.enableVertexAttribArray(pLoc);
-        gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
+        const pL = gl.getAttribLocation(prg, 'p'); gl.enableVertexAttribArray(pL);
+        gl.vertexAttribPointer(pL, 2, gl.FLOAT, false, 0, 0);
+        const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, 10242, 33071); gl.texParameteri(gl.TEXTURE_2D, 10243, 33071); gl.texParameteri(gl.TEXTURE_2D, 10241, 9729);
 
-        const tex = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, tex);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        // AI Hands
+        const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6 });
+        hands.onResults(results => {
+            if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+                const h = results.multiHandLandmarks[0];
+                const index = h[8], thumb = h[4];
+                const x = index.x * 100, y = index.y * 100;
+                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
 
-        // MediaPipe Integration
-        const hands = new Hands({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-        });
-
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
-
-        hands.onResults(onResults);
-
-        function onResults(results) {
-            document.getElementById('ai-status').innerText = "TRACKING";
-            document.getElementById('ai-status').style.color = "#0f0";
-
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0 && !isMenuOpen) {
-                const hand = results.multiHandLandmarks[0];
-                const indexFinger = hand[8]; // Landmark 8 is Index Finger Tip
-
-                // Check if finger is hovering over the center-ish area (normalized coordinates)
-                // Since it's split screen, we check both halves or just the center
-                const fingerX = indexFinger.x;
-                const fingerY = indexFinger.y;
-
-                // Hitbox for the AIR PRESS buttons (roughly center-bottom)
-                if (fingerY > 0.55 && fingerY < 0.75 && fingerX > 0.2 && fingerX < 0.8) {
-                    dwellTime += (Date.now() - lastTime);
-                    updateDwellUI(true);
-                    if (dwellTime > 1000) {
-                        openMenu();
-                    }
+                if (!isMenuOpen) {
+                    if (y > 60 && y < 80 && x > 20 && x < 80) {
+                        dwell += (Date.now() - last);
+                        const p = Math.min(dwell/600, 1);
+                        document.getElementById('fill-l').style.opacity = document.getElementById('fill-r').style.opacity = 1;
+                        document.getElementById('fill-l').style.transform = document.getElementById('fill-r').style.transform = `rotate(${p*360}deg)`;
+                        if (dwell > 600) openWin();
+                    } else { dwell = 0; document.getElementById('fill-l').style.opacity = document.getElementById('fill-r').style.opacity = 0; }
                 } else {
-                    dwellTime = 0;
-                    updateDwellUI(false);
+                    // Interaction Logic
+                    if (dist < 0.05) { // Pinch Gesture
+                        if (y < winY + 10 && x > winX && x < winX + 30) { isDragging = true; }
+                        else if (x > winX + 25 && y > winY + 25) { isResizing = true; }
+                    } else { isDragging = isResizing = false; }
+
+                    if (isDragging) { winX = x - 15; winY = y - 5; updateWinPos(); }
+                    if (isResizing) { winW = (x - winX) * 10; winH = (y - winY) * 10; updateWinSize(); }
                 }
-            } else {
-                dwellTime = 0;
-                updateDwellUI(false);
             }
-            lastTime = Date.now();
+            last = Date.now();
+        });
+
+        function updateWinPos() {
+            const wl = document.getElementById('win-l'), wr = document.getElementById('win-r');
+            wl.style.left = winX + "%"; wl.style.top = winY + "%";
+            wr.style.left = (winX + 50) + "%"; wr.style.top = winY + "%";
+        }
+        function updateWinSize() {
+            const w = Math.max(200, winW), h = Math.max(200, winH);
+            document.querySelectorAll('.window-container').forEach(win => {
+                win.style.width = w + "px"; win.style.height = h + "px";
+            });
         }
 
-        function updateDwellUI(active) {
-            const rings = [document.getElementById('ring-l'), document.getElementById('ring-r')];
-            if (active) {
-                const percent = Math.min(dwellTime / 1000, 1);
-                rings.forEach(r => {
-                    r.style.opacity = 1;
-                    r.style.transform = `rotate(${percent * 360}deg)`;
-                    r.parentElement.style.borderColor = "rgba(0, 223, 255, 0.8)";
-                    r.parentElement.style.background = "rgba(0, 223, 255, 0.2)";
-                });
-            } else {
-                rings.forEach(r => {
-                    r.style.opacity = 0;
-                    r.parentElement.style.borderColor = "rgba(0, 223, 255, 0.3)";
-                    r.parentElement.style.background = "transparent";
-                });
-            }
+        async function init() {
+            document.getElementById('boot').style.display = 'none';
+            const cam = new Camera(video, { onFrame: async () => { await hands.send({image: video}); }, width: 1280, height: 720, facingMode: 'environment' });
+            cam.start();
+            requestAnimationFrame(loop);
         }
 
-        async function initApp() {
-            document.getElementById('boot-screen').style.display = 'none';
-            try {
-                const camera = new Camera(video, {
-                    onFrame: async () => { await hands.send({image: video}); },
-                    width: 1280, height: 720, facingMode: 'environment'
-                });
-                camera.start();
-                document.getElementById('cam-status').innerText = "READY";
-                requestAnimationFrame(renderLoop);
-            } catch (e) { alert("Permission Denied."); }
-        }
-
-        function renderLoop() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
+        function loop() {
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-            gl.uniform1f(fovLoc, fov);
-            gl.uniform1f(brLoc, brightness);
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
-            gl.drawArrays(gl.TRIANGLES, 0, 6);
-            requestAnimationFrame(renderLoop);
+            gl.uniform1f(fLoc, fov); gl.uniform1f(bLoc, brightness);
+            gl.texImage2D(gl.TEXTURE_2D, 0, 6407, 6407, 5121, video);
+            gl.drawArrays(4, 0, 6);
+            requestAnimationFrame(loop);
         }
 
-        function openMenu() {
-            isMenuOpen = true;
-            document.getElementById('hologram').style.display = 'block';
-            document.getElementById('btn-l').style.display = 'none';
-            document.getElementById('btn-r').style.display = 'none';
-            const msg = new SpeechSynthesisUtterance("System settings unlocked. User interface deployed.");
-            window.speechSynthesis.speak(msg);
+        function openWin() {
+            isMenuOpen = true; 
+            document.getElementById('win-l').style.display = document.getElementById('win-r').style.display = 'block';
+            document.getElementById('trig-l').style.display = document.getElementById('trig-r').style.display = 'none';
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Window active. Pinch top bar to move."));
         }
-
-        function closeMenu() {
+        function closeWin() {
             isMenuOpen = false;
-            document.getElementById('hologram').style.display = 'none';
-            document.getElementById('btn-l').style.display = 'flex';
-            document.getElementById('btn-r').style.display = 'flex';
-            dwellTime = 0;
+            document.getElementById('win-l').style.display = document.getElementById('win-r').style.display = 'none';
+            document.getElementById('trig-l').style.display = document.getElementById('trig-r').style.display = 'flex';
         }
 
-        // Settings Logic
-        document.querySelectorAll('.fov-sync').forEach(s => s.addEventListener('input', (e) => {
-            fov = e.target.value;
+        document.querySelectorAll('.fov-sync').forEach(s => s.addEventListener('input', e => {
+            fov = e.target.value; 
             document.querySelectorAll('.fov-sync').forEach(i => i.value = fov);
-            document.getElementById('fov-lbl-l').innerText = `FOV SENSOR: ${Number(fov).toFixed(2)}x`;
-            document.getElementById('fov-lbl-r').innerText = `FOV SENSOR: ${Number(fov).toFixed(2)}x`;
+            document.getElementById('fov-txt-l').innerText = document.getElementById('fov-txt-r').innerText = `OPTIC ZOOM: ${Number(fov).toFixed(2)}`;
         }));
-
-        document.querySelectorAll('.br-sync').forEach(s => s.addEventListener('input', (e) => {
+        document.querySelectorAll('.br-sync').forEach(s => s.addEventListener('input', e => {
             brightness = e.target.value;
             document.querySelectorAll('.br-sync').forEach(i => i.value = brightness);
-            document.getElementById('br-lbl-l').innerText = `EXPOSURE: ${Number(brightness).toFixed(2)}x`;
-            document.getElementById('br-lbl-r').innerText = `EXPOSURE: ${Number(brightness).toFixed(2)}x`;
+            document.getElementById('br-txt-l').innerText = document.getElementById('br-txt-r').innerText = `LUMINANCE: ${Number(brightness).toFixed(2)}`;
         }));
-
-        document.querySelectorAll('.talk-btn').forEach(b => b.addEventListener('click', () => {
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Nova active. Systems optimal. Point your finger to interact."));
-        }));
-
-        document.getElementById('close-l').onclick = closeMenu;
-        document.getElementById('close-r').onclick = closeMenu;
+        function nova() { window.speechSynthesis.speak(new SpeechSynthesisUtterance("I am Nova. Point your finger to adjust reality settings.")); }
     </script>
 </body>
 </html>
