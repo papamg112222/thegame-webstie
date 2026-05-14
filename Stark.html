@@ -1,211 +1,185 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>MeTube Vision Pro VR</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Gesture Song Selector</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+
     <style>
-        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; font-family: sans-serif; }
-        canvas { display: block; }
-        .center-line { position: fixed; left: 50%; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,0.1); z-index: 10; pointer-events: none; }
-        #setup-ui { position: fixed; inset: 0; z-index: 100; background: #000; display: flex; align-items: center; justify-content: center; }
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Inter', -apple-system, sans-serif;
+        }
+
+        /* The Camera Feed - Mirrored and on top */
+        .output_canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10; 
+            pointer-events: none; /* Allows you to scroll the list underneath */
+            transform: scaleX(-1); /* Mirror fix */
+        }
+
+        /* The Glassmorphism Bubble */
+        .bubble-window {
+            position: absolute;
+            width: 320px;
+            height: 450px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 40px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            z-index: 5; 
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: border-color 0.2s, transform 0.05s linear;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .header {
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            text-align: center;
+            color: #fff;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .song-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.2) transparent;
+        }
+
+        .song-item {
+            padding: 15px;
+            margin-bottom: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            color: #ddd;
+            font-size: 14px;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+
+        .song-item:hover {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+        }
+
+        /* Scrollbar styling */
+        .song-list::-webkit-scrollbar { width: 6px; }
+        .song-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body>
 
-    <div id="setup-ui">
-        <div class="bg-zinc-900/90 p-8 rounded-[40px] border border-white/10 text-center max-w-sm w-full">
-            <div class="w-16 h-16 bg-red-600 rounded-2xl mx-auto mb-6 flex items-center justify-center shadow-lg shadow-red-600/30">
-                <svg viewBox="0 0 24 24" fill="white" class="w-8 h-8"><path d="M8 5v14l11-7z"/></svg>
-            </div>
-            <h1 class="text-2xl font-bold text-white mb-2">MeTube Spatial</h1>
-            <p id="status" class="text-zinc-400 text-sm mb-8">Aligning spatial passthrough...</p>
-            <button id="start-btn" class="w-full bg-white text-black font-bold py-4 rounded-2xl active:scale-95 transition-all">
-                Enter VR Mode
-            </button>
-        </div>
+    <video class="input_video" style="display:none;"></video>
+    <canvas class="output_canvas"></canvas>
+
+    <div id="bubble" class="bubble-window">
+        <div class="header">Grab to Move • Scroll to Select</div>
+        <div class="song-list" id="songList"></div>
     </div>
 
-    <div class="center-line"></div>
-    <audio id="audio-player" crossorigin="anonymous"></audio>
-
     <script>
-        const songs = [
-            "Not Like Us - Kendrick Lamar", "Humble - Kendrick Lamar", "DNA - Kendrick Lamar",
-            "From The Start - Laufey", "Valentine - Laufey", "Treehouse - Alex G", 
-            "Homage - Mild High Club", "Bad Habit - Steve Lacy", "Dark Red - Steve Lacy", 
-            "Pink + White - Frank Ocean", "Moonlight - Kali Uchis", "Telepatía - Kali Uchis",
-            "Starboy - The Weeknd", "Blinding Lights - The Weeknd", "Snooze - SZA", 
-            "Kill Bill - SZA", "Watermelon Sugar - Harry Styles", "Bad Guy - Billie Eilish",
-            "Espresso - Sabrina Carpenter", "Vampire - Olivia Rodrigo"
-        ];
-        const fullSongs = Array(5).fill(songs).flat().slice(0, 100);
+        const videoElement = document.getElementsByClassName('input_video')[0];
+        const canvasElement = document.getElementsByClassName('output_canvas')[0];
+        const canvasCtx = canvasElement.getContext('2d');
+        const bubble = document.getElementById('bubble');
+        const songList = document.getElementById('songList');
 
-        let scene, camera, renderer, menuGroup, videoTex, reticle, progressRing;
-        let items = [], hovered = null, hoverStart = 0, scrollY = 0;
-        const audioPlayer = document.getElementById('audio-player');
-
-        document.getElementById('start-btn').onclick = async () => {
-            document.getElementById('status').innerText = "Requesting Camera...";
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment", width: 1280, height: 720 }
-                });
-                const video = document.createElement('video');
-                video.srcObject = stream;
-                video.setAttribute('playsinline', '');
-                video.onloadedmetadata = () => {
-                    video.play();
-                    document.getElementById('setup-ui').style.display = 'none';
-                    init(video);
-                };
-            } catch (e) {
-                document.getElementById('status').innerText = "Error: Camera required.";
-            }
-        };
-
-        function init(video) {
-            scene = new THREE.Scene();
-            const w = window.innerWidth, h = window.innerHeight;
-            camera = new THREE.PerspectiveCamera(70, (w / 2) / h, 0.1, 1000);
-            
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setSize(w, h);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            document.body.appendChild(renderer.domElement);
-
-            // Background Video
-            videoTex = new THREE.VideoTexture(video);
-            scene.background = videoTex;
-
-            // Spatial Menu (Holographic style)
-            menuGroup = new THREE.Group();
-            menuGroup.position.set(1.5, -0.5, -4); // Side of waist, 4m away
-            scene.add(menuGroup);
-
-            // Header
-            const header = createLabel("METUBE", 2.2, 0.6, '#ff0000', 'white', 80, true);
-            header.position.y = 2;
-            menuGroup.add(header);
-
-            // Now Playing Display
-            const np = createLabel("LOOK AT SONG TO PLAY", 3, 0.4, 'rgba(0,0,0,0.5)', '#00ffcc', 30);
-            np.position.y = 2.6;
-            np.name = "now-playing";
-            menuGroup.add(np);
-
-            // Scrollable List Container
-            const listGroup = new THREE.Group();
-            menuGroup.add(listGroup);
-
-            fullSongs.forEach((s, i) => {
-                const item = createLabel(s, 3.5, 0.45, 'rgba(255,255,255,0.05)', 'white', 28);
-                item.position.y = 1.3 - (i * 0.55);
-                item.userData = { id: i, name: s };
-                listGroup.add(item);
-                items.push(item);
-            });
-
-            // Gaze Reticle & Air Tap Ring
-            reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.02, 0.03, 32),
-                new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.8 })
-            );
-            progressRing = new THREE.Mesh(
-                new THREE.RingGeometry(0.032, 0.045, 32, 1, 0, 0),
-                new THREE.MeshBasicMaterial({ color: 0x00ffcc, depthTest: false, transparent: true, opacity: 0.9 })
-            );
-            
-            const reticleGroup = new THREE.Group();
-            reticleGroup.add(reticle);
-            reticleGroup.add(progressRing);
-            reticleGroup.position.z = -2;
-            camera.add(reticleGroup);
-            scene.add(camera);
-
-            animate();
+        // 1. Generate the 500 Songs
+        const artists = ["Kendrick Lamar", "Malcolm Todd", "Laufey", "Steve Lacy", "Treehouse", "Steve Lacy", "Bad Habit"];
+        const tracks = ["Money Trees", "Room Service", "Valentine", "Dark Red", "Evergreen", "Bad Habit", "The Hillbillies"];
+        
+        for (let i = 1; i <= 500; i++) {
+            const div = document.createElement('div');
+            div.className = 'song-item';
+            const artist = artists[i % artists.length];
+            const track = tracks[i % tracks.length];
+            div.innerHTML = `<strong>${track}</strong><br><span style="font-size:11px; opacity:0.6">${artist}</span>`;
+            songList.appendChild(div);
         }
 
-        function createLabel(text, w, h, bg, color, size, bold) {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512; canvas.height = 128;
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = bg;
-            ctx.fillRect(0, 0, 512, 128);
-            ctx.fillStyle = color;
-            ctx.font = `${bold ? 'bold' : ''} ${size}px sans-serif`;
-            ctx.fillText(text.slice(0, 30), 20, 80);
-            
-            const tex = new THREE.CanvasTexture(canvas);
-            const mesh = new THREE.Mesh(
-                new THREE.PlaneGeometry(w, h),
-                new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.6 }) // TRANSPARENT FOR HANDS
-            );
-            return mesh;
-        }
+        // 2. Gesture Logic
+        function onResults(results) {
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
 
-        function play(song) {
-            const np = menuGroup.getObjectByName("now-playing");
-            const ctx = np.material.map.image.getContext('2d');
-            ctx.fillStyle = 'rgba(0,0,0,0.8)'; ctx.fillRect(0,0,512,128);
-            ctx.fillStyle = '#00ffcc'; ctx.font = '30px sans-serif';
-            ctx.fillText("PLAYING: " + song.slice(0, 20), 20, 80);
-            np.material.map.needsUpdate = true;
-            
-            audioPlayer.src = "https://cdn.pixabay.com/audio/2022/01/18/audio_d0a13f69d2.mp3";
-            audioPlayer.play();
-        }
-
-        function animate() {
-            requestAnimationFrame(animate);
-            const ray = new THREE.Raycaster();
-            ray.setFromCamera(new THREE.Vector2(0, 0), camera);
-            
-            const hits = ray.intersectObjects(items);
-            if (hits.length > 0) {
-                const obj = hits[0].object;
-                if (hovered !== obj) {
-                    hovered = obj;
-                    hoverStart = Date.now();
-                }
-                const progress = Math.min((Date.now() - hoverStart) / 1000, 1.0);
-                progressRing.geometry = new THREE.RingGeometry(0.032, 0.045, 32, 1, 0, progress * Math.PI * 2);
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
                 
-                if (progress >= 1.0) {
-                    play(obj.userData.name);
-                    hoverStart = Date.now() + 5000; // Delay next tap
+                // Index Tip (8) and Thumb Tip (4)
+                const index = landmarks[8];
+                const thumb = landmarks[4];
+
+                // Check for "Claw" (Pinch) distance
+                const dist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
+                
+                // Map coordinates (Inverted X because of mirror)
+                const x = (1 - index.x) * window.innerWidth;
+                const y = index.y * window.innerHeight;
+
+                if (dist < 0.04) { // Tight claw/pinch
+                    bubble.style.left = (x - 160) + 'px';
+                    bubble.style.top = (y - 50) + 'px';
+                    bubble.style.borderColor = "#00f2ff";
+                    bubble.style.boxShadow = "0 0 30px rgba(0, 242, 255, 0.4)";
+                } else {
+                    bubble.style.borderColor = "rgba(255, 255, 255, 0.3)";
+                    bubble.style.boxShadow = "0 20px 50px rgba(0,0,0,0.5)";
                 }
-            } else {
-                hovered = null;
-                progressRing.geometry = new THREE.RingGeometry(0, 0, 0);
             }
-
-            // Simple Auto-Scroll if looking at edges
-            const v = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-            if (v.y > 0.3) menuGroup.children[2].position.y -= 0.05; // Scroll Down
-            if (v.y < -0.3) menuGroup.children[2].position.y += 0.05; // Scroll Up
-
-            // Stereo Render
-            const w = window.innerWidth, h = window.innerHeight;
-            renderer.setScissorTest(true);
-            
-            renderer.setScissor(0, 0, w / 2, h);
-            renderer.setViewport(0, 0, w / 2, h);
-            camera.position.x = -0.06;
-            renderer.render(scene, camera);
-
-            renderer.setScissor(w / 2, 0, w / 2, h);
-            renderer.setViewport(w / 2, 0, w / 2, h);
-            camera.position.x = 0.06;
-            renderer.render(scene, camera);
-            
-            renderer.setScissorTest(false);
+            canvasCtx.restore();
         }
+
+        // 3. Initialize MediaPipe
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7,
+            minTrackingConfidence: 0.7
+        });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                canvasElement.width = window.innerWidth;
+                canvasElement.height = window.innerHeight;
+                await hands.send({image: videoElement});
+            },
+            width: 1280,
+            height: 720
+        });
+        camera.start();
     </script>
 </body>
 </html>
-
-```
