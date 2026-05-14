@@ -4,330 +4,349 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MeTube Spatial - Vision OS 2.0</title>
+    <title>MeTube Spatial - World Locked</title>
     
-    <!-- Spatial AI Stack -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <style>
-        :root {
-            --glass: rgba(255, 255, 255, 0.08);
-            --border: rgba(255, 255, 255, 0.2);
-            --accent: #ff0033;
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html { 
+            width: 100%; height: 100%; overflow: hidden; 
+            background-color: #000; color: #fff; 
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; 
         }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
-        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
         
-        /* Video & Render Canvas */
-        canvas#glCanvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
-        video#webcam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-
-        /* Neural Hand Occlusion Layer */
-        .hand-mask {
-            position: fixed; top: 0; pointer-events: none; z-index: 1000;
-            filter: drop-shadow(0 0 10px rgba(255,255,255,0.2));
-        }
-        #mask-l { left: 0; width: 50%; height: 100%; }
-        #mask-r { left: 50%; width: 50%; height: 100%; }
-
-        /* Vision Pro Style Spatial Window */
-        .spatial-window {
-            position: fixed; display: none; z-index: 100;
-            width: 440px; height: 620px;
-            pointer-events: auto;
-            transform-style: preserve-3d;
-            perspective: 1000px;
+        /* The main WebGL view */
+        #view-canvas { 
+            display: block; width: 100vw; height: 100vh; 
+            position: absolute; top: 0; left: 0; z-index: 1; 
         }
 
-        .glass-shell {
-            width: 100%; height: 100%;
-            background: var(--glass);
-            backdrop-filter: blur(40px) saturate(200%);
-            -webkit-backdrop-filter: blur(40px) saturate(200%);
-            border: 1.5px solid var(--border);
-            border-radius: 50px;
-            box-shadow: 0 50px 100px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(255,255,255,0.1);
-            display: flex; flex-direction: column;
-            overflow: hidden;
-            transition: transform 0.1s ease-out;
+        /* Top-level Occlusion Canvas (Renders your real hand OVER the UI) */
+        #occlusion-canvas {
+            position: fixed; top: 0; left: 0; 
+            width: 100vw; height: 100vh; 
+            z-index: 2000; pointer-events: none;
+            /* Using blur to make the hand edges feel integrated */
+            filter: drop-shadow(0 0 5px rgba(255,255,255,0.2));
         }
 
-        /* Drag Handle Bar (Bottom) */
-        .drag-bar {
-            height: 60px; width: 100%;
-            display: flex; align-items: center; justify-content: center;
-            background: rgba(255,255,255,0.05);
-            border-top: 1px solid rgba(255,255,255,0.1);
-        }
-        .handle-pill {
-            width: 120px; height: 6px; background: rgba(255,255,255,0.3);
-            border-radius: 3px; transition: all 0.3s;
-        }
-        .dragging .handle-pill { width: 180px; background: #fff; box-shadow: 0 0 20px #fff; }
-
-        #win-l { left: 3%; top: 10%; }
-        #win-r { left: 53%; top: 10%; }
-
-        /* MeTube Layout */
-        .app-header { padding: 35px; display: flex; align-items: center; justify-content: space-between; }
-        .app-header h1 { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: -1px; }
-
-        .content-scroll {
-            flex: 1; overflow-y: scroll; padding: 0 20px 20px;
-            scroll-behavior: smooth; scrollbar-width: none;
-        }
-        .content-scroll::-webkit-scrollbar { display: none; }
-
-        .track {
-            display: flex; align-items: center; padding: 18px; margin-bottom: 12px;
-            border-radius: 25px; background: rgba(255,255,255,0.03);
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .track:active { transform: scale(0.96); background: rgba(255,255,255,0.1); }
-        
-        .art { width: 60px; height: 60px; border-radius: 14px; margin-right: 20px; position: relative; }
-        .art::after { content: "▶"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: 0.3; }
-
-        .meta b { display: block; font-size: 17px; font-weight: 600; margin-bottom: 2px; }
-        .meta span { font-size: 13px; opacity: 0.5; color: #ccc; }
-
-        /* Waist Level Trigger */
-        #waist-trigger {
-            position: fixed; bottom: 8%; right: 10%;
-            z-index: 500; width: 100px; height: 100px; border-radius: 50%;
-            background: rgba(255,0,51,0.1); border: 2px solid var(--accent);
-            backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center;
-            opacity: 0; scale: 0.8; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        #waist-trigger.active { opacity: 1; scale: 1; }
-        #waist-trigger::after { content: "MeTube"; position: absolute; bottom: -30px; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; }
-
-        /* Startup */
-        #boot-screen {
+        #ui-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center;
-            cursor: pointer;
+            z-index: 100; pointer-events: none;
+            display: flex; align-items: center; justify-content: center;
         }
-        .loader { width: 100px; height: 100px; border: 2px solid #fff; border-radius: 50%; border-top-color: transparent; animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Hidden elements for processing */
+        video#webcam { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+        #boot-loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 9999; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; cursor: pointer;
+        }
+
+        .avp-logo {
+            width: 80px; height: 80px; border: 2px solid #fff; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            animation: breathe 3s infinite ease-in-out;
+        }
+        @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 0.5; } 50% { transform: scale(1.1); opacity: 1; } }
+
+        #now-playing-hud {
+            position: fixed; top: 30px; left: 50%; transform: translateX(-50%);
+            background: rgba(255,255,255,0.1); backdrop-filter: blur(20px);
+            padding: 15px 30px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2);
+            z-index: 500; display: none; text-align: center;
+            min-width: 250px;
+        }
     </style>
 </head>
 <body>
 
-    <div id="boot-screen" onclick="startSystem()">
-        <div style="text-align: center;">
-            <div class="loader"></div>
-            <h2 style="margin-top: 30px; letter-spacing: 8px; font-weight: 200;">SPATIAL_OS</h2>
-            <p style="opacity: 0.3; font-size: 9px; margin-top: 10px;">SCANNING ENVIRONMENT...</p>
+    <div id="boot-loader" onclick="requestPermissions()">
+        <div class="avp-logo"><div style="width: 20px; height: 20px; background: #fff; border-radius: 4px;"></div></div>
+        <h1 style="margin-top: 30px; letter-spacing: 10px; font-weight: 200; font-size: 14px;">VISION_OS</h1>
+        <p style="margin-top: 15px; opacity: 0.4; font-size: 10px;">TAP TO SYNC WORLD & HANDS</p>
+    </div>
+
+    <div id="now-playing-hud">
+        <div id="song-title" style="font-weight: bold; font-size: 14px;">Not Playing</div>
+        <div id="song-artist" style="font-size: 11px; opacity: 0.6; margin-bottom: 8px;">Select a track</div>
+        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+            <div id="song-progress" style="width: 0%; height: 100%; background: #ff0033;"></div>
         </div>
     </div>
 
-    <!-- Hand Occlusion Layers -->
-    <canvas id="mask-l" class="hand-mask"></canvas>
-    <canvas id="mask-r" class="hand-mask"></canvas>
-
-    <div id="waist-trigger">
-        <div style="width: 30px; height: 30px; border: 3px solid #fff; border-radius: 8px;"></div>
-    </div>
-
-    <!-- Spatial Window Pair -->
-    <div class="spatial-window" id="win-l">
-        <div class="glass-shell">
-            <div class="app-header"><h1>MeTube</h1><span>Spatial Beta</span></div>
-            <div class="content-scroll" id="scroll-l"></div>
-            <div class="drag-bar"><div class="handle-pill"></div></div>
-        </div>
-    </div>
-
-    <div class="spatial-window" id="win-r">
-        <div class="glass-shell">
-            <div class="app-header"><h1>MeTube</h1><span>Spatial Beta</span></div>
-            <div class="content-scroll" id="scroll-r"></div>
-            <div class="drag-bar"><div class="handle-pill"></div></div>
-        </div>
-    </div>
-
+    <canvas id="view-canvas"></canvas>
+    <canvas id="occlusion-canvas"></canvas>
     <video id="webcam" playsinline></video>
-    <canvas id="glCanvas"></canvas>
 
     <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('glCanvas');
-        const gl = canvas.getContext('webgl');
-        const maskL = document.getElementById('mask-l');
-        const maskR = document.getElementById('mask-r');
-        const mctxL = maskL.getContext('2d');
-        const mctxR = maskR.getContext('2d');
-
-        let isAppActive = false;
-        let lastHandPos = { x: 0, y: 0 };
-        let winPos = { x: 5, y: 15 };
-        let isMovingWindow = false;
-        let scrollMomentum = 0;
-
-        // Expanded Song List (110+ items)
-        const library = [
-            { t: "Not Like Us", a: "Kendrick Lamar" }, { t: "From The Start", a: "Laufey" },
-            { t: "505", a: "Arctic Monkeys" }, { t: "Homage", a: "Mild High Club" },
-            { t: "Resonance", a: "Home" }, { t: "Treehouse", a: "Alex G" },
-            { t: "Valentine", a: "Laufey" }, { t: "Dreamcore", a: "Pathetic" },
-            { t: "Money Trees", a: "Kendrick Lamar" }, { t: "Valentine", a: "Laufey" },
-            { t: "Bad Habit", a: "Steve Lacy" }, { t: "Chamber of Reflection", a: "Mac DeMarco" },
-            { t: "Europia", a: "Kendrick Lamar" }, { t: "Lovesick", a: "Laufey" },
-            { t: "Resonance", a: "Home" }, { t: "Do I Wanna Know?", a: "Arctic Monkeys" }
-        ];
-
-        function fillMeTube() {
-            const l = document.getElementById('scroll-l');
-            const r = document.getElementById('scroll-r');
-            let h = "";
-            for(let i=0; i<115; i++) {
-                const item = library[i % library.length];
-                h += `
-                <div class="track" id="tr-${i}">
-                    <div class="art" style="background: hsl(${i*12}, 60%, 40%)"></div>
-                    <div class="meta"><b>${item.t}</b><span>${item.a}</span></div>
-                </div>`;
-            }
-            l.innerHTML = r.innerHTML = h;
+        // --- DATA: 100+ SONGS ---
+        const artists = ["Kendrick Lamar", "Laufey", "Arctic Monkeys", "Mild High Club", "Home", "Tame Impala", "Steve Lacy", "Tyler, The Creator", "Mac DeMarco", "TV Girl", "Joji", "Clairo"];
+        const songs = ["Not Like Us", "From The Start", "505", "Homage", "Resonance", "Treehouse", "Valentine", "Dreamcore", "Money Trees", "Swimming Pools", "Bad Habit", "After the Storm", "See You Again", "Chamber of Reflection", "Blue Hair", "Glimpse of Us", "Bags", "Borderline"];
+        
+        let library = [];
+        for(let i=0; i<110; i++) {
+            library.push({
+                title: songs[i % songs.length],
+                artist: artists[i % artists.length],
+                color: `hsl(${i * 13.7}, 60%, 40%)`
+            });
         }
 
-        // WebGL Passthrough Engine
-        const vsSource = `attribute vec2 p; varying vec2 v; void main() { v = p*0.5+0.5; v.y=1.0-v.y; gl_Position = vec4(p, 0.0, 1.0); }`;
-        const fsSource = `precision mediump float; uniform sampler2D t; varying vec2 v; void main() { vec2 u=v; if(u.x<0.5) u.x*=2.0; else u.x=(u.x-0.5)*2.0; gl_FragColor = texture2D(t,u); }`;
-        const program = gl.createProgram();
-        const buildShader = (t, s) => { const x=gl.createShader(t); gl.shaderSource(x,s); gl.compileShader(x); return x; };
-        gl.attachShader(program, buildShader(gl.VERTEX_SHADER, vsSource));
-        gl.attachShader(program, buildShader(gl.FRAGMENT_SHADER, fsSource));
-        gl.linkProgram(program); gl.useProgram(program);
-        const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
-        const pLoc = gl.getAttribLocation(program, 'p'); gl.enableVertexAttribArray(pLoc);
-        gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
-        const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
-        gl.texParameteri(gl.TEXTURE_2D, 10242, 33071); gl.texParameteri(gl.TEXTURE_2D, 10243, 33071); gl.texParameteri(gl.TEXTURE_2D, 10241, 9729);
+        // --- CORE VARIABLES ---
+        let scene, camera, renderer, videoTexture;
+        let worldGroup; // Group that holds the UI and stays world-locked
+        let handMaskCanvas, handMaskCtx;
+        let isSystemReady = false;
+        let audioCtx, currentOsc;
 
-        // AI Interaction Logic
+        const video = document.getElementById('webcam');
+        const occlusionCanvas = document.getElementById('occlusion-canvas');
+        const oCtx = occlusionCanvas.getContext('2d');
+
+        // --- 3D SETUP ---
+        function init3D() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ 
+                canvas: document.getElementById('view-canvas'), 
+                antialias: true,
+                alpha: true 
+            });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            // 1. Background Camera Sphere
+            videoTexture = new THREE.VideoTexture(video);
+            const bgGeo = new THREE.SphereGeometry(100, 32, 32);
+            bgGeo.scale(-1, 1, 1);
+            const bgMat = new THREE.MeshBasicMaterial({ map: videoTexture });
+            const bgSphere = new THREE.Mesh(bgGeo, bgMat);
+            scene.add(bgSphere);
+
+            // 2. World Group (This moves opposite to phone rotation to stay locked)
+            worldGroup = new THREE.Group();
+            scene.add(worldGroup);
+
+            // 3. Create the Floating MeTube Window
+            createMeTubeWindow();
+
+            camera.position.set(0, 0, 0.1);
+        }
+
+        function createMeTubeWindow() {
+            // We draw the UI to a canvas first, then use it as a texture
+            const uiCanvas = document.createElement('canvas');
+            uiCanvas.width = 1024;
+            uiCanvas.height = 1400;
+            const uctx = uiCanvas.getContext('2d');
+
+            function updateUITexture() {
+                // Glassmorphism background
+                uctx.clearRect(0,0,1024,1400);
+                uctx.fillStyle = "rgba(20, 20, 20, 0.8)";
+                roundRect(uctx, 50, 50, 924, 1300, 80, true);
+                uctx.strokeStyle = "rgba(255,255,255,0.2)";
+                uctx.lineWidth = 4;
+                roundRect(uctx, 50, 50, 924, 1300, 80, false);
+
+                // Header
+                uctx.fillStyle = "#ff0033";
+                uctx.font = "bold 80px sans-serif";
+                uctx.fillText("MeTube", 120, 200);
+                uctx.fillStyle = "rgba(255,255,255,0.4)";
+                uctx.font = "30px sans-serif";
+                uctx.fillText("Spatial Reality v2.5", 700, 190);
+
+                // Songs
+                library.slice(0, 10).forEach((song, i) => {
+                    const y = 300 + (i * 105);
+                    uctx.fillStyle = "rgba(255,255,255,0.05)";
+                    roundRect(uctx, 100, y, 824, 90, 20, true);
+                    
+                    uctx.fillStyle = song.color;
+                    roundRect(uctx, 120, y + 15, 60, 60, 10, true);
+                    
+                    uctx.fillStyle = "#fff";
+                    uctx.font = "bold 35px sans-serif";
+                    uctx.fillText(song.title, 210, y + 45);
+                    uctx.fillStyle = "rgba(255,255,255,0.5)";
+                    uctx.font = "25px sans-serif";
+                    uctx.fillText(song.artist, 210, y + 75);
+                });
+
+                if(window.uiTexture) window.uiTexture.needsUpdate = true;
+            }
+
+            const texture = new THREE.CanvasTexture(uiCanvas);
+            window.uiTexture = texture;
+            const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+            const geometry = new THREE.PlaneGeometry(3, 4.2);
+            const mesh = new THREE.Mesh(geometry, material);
+            
+            // Position the window 5 units in front of the world center
+            mesh.position.set(0, 0, -5); 
+            worldGroup.add(mesh);
+            
+            updateUITexture();
+        }
+
+        function roundRect(ctx, x, y, width, height, radius, fill) {
+            ctx.beginPath();
+            ctx.moveTo(x + radius, y);
+            ctx.lineTo(x + width - radius, y); ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+            ctx.lineTo(x + width, y + height - radius); ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+            ctx.lineTo(x + radius, y + height); ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+            ctx.lineTo(x, y + radius); ctx.quadraticCurveTo(x, y, x + radius, y);
+            ctx.closePath();
+            if (fill) ctx.fill(); else ctx.stroke();
+        }
+
+        // --- WORLD LOCKING (ORIENTATION) ---
+        let baseRotation = new THREE.Quaternion();
+        window.addEventListener('deviceorientation', (e) => {
+            if(!isSystemReady) return;
+            // Simple world-locking: Rotate the worldGroup opposite to the phone's tilt
+            const alpha = e.alpha ? THREE.MathUtils.degToRad(e.alpha) : 0;
+            const beta = e.beta ? THREE.MathUtils.degToRad(e.beta) : 0;
+            const gamma = e.gamma ? THREE.MathUtils.degToRad(e.gamma) : 0;
+
+            const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+            worldGroup.quaternion.setFromEuler(euler);
+        });
+
+        // --- HAND TRACKING & OCCLUSION ---
         const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
         
         hands.onResults(results => {
-            renderOcclusion(results);
-            if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
-                const hand = results.multiHandLandmarks[0];
-                const index = hand[8], thumb = hand[4], middle = hand[12];
-                const x = index.x * 100, y = index.y * 100;
+            // Render the "Hand Occlusion" mask
+            occlusionCanvas.width = window.innerWidth;
+            occlusionCanvas.height = window.innerHeight;
+            oCtx.clearRect(0,0,occlusionCanvas.width, occlusionCanvas.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const h = results.multiHandLandmarks[0];
                 
-                // Trigger Check: Bottom corner (Waist level)
-                if(!isAppActive) {
-                    if (y > 70 && x > 70) {
-                        document.getElementById('waist-trigger').classList.add('active');
-                        if(Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05) deployApp();
-                    } else { document.getElementById('waist-trigger').classList.remove('active'); }
+                // 1. Create Hand Mask Path
+                oCtx.save();
+                oCtx.beginPath();
+                // Draw palm and fingers
+                const points = [0, 1, 2, 3, 4, 3, 2, 1, 0, 5, 6, 7, 8, 7, 6, 5, 0, 9, 10, 11, 12, 11, 10, 9, 0, 13, 14, 15, 16, 15, 14, 13, 0, 17, 18, 19, 20];
+                points.forEach((idx, i) => {
+                    const p = h[idx];
+                    if(i === 0) oCtx.moveTo(p.x * occlusionCanvas.width, p.y * occlusionCanvas.height);
+                    else oCtx.lineTo(p.x * occlusionCanvas.width, p.y * occlusionCanvas.height);
+                });
+                oCtx.closePath();
+                oCtx.clip();
+
+                // 2. Draw Real Camera Image into the hand-shaped clip (Occlusion!)
+                oCtx.drawImage(video, 0, 0, occlusionCanvas.width, occlusionCanvas.height);
+                oCtx.restore();
+
+                // 3. Interaction Logic (Tap)
+                const indexTip = h[8];
+                const thumbTip = h[4];
+                const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                
+                if(dist < 0.05) {
+                    handleSpatialTap(indexTip.x, indexTip.y);
                 }
-
-                if(isAppActive) {
-                    // Grab & Move Logic: Palm Expanded near bottom of window
-                    const handExpansion = Math.hypot(index.x - hand[0].x, index.y - hand[0].y);
-                    const isHandOpen = handExpansion > 0.3;
-                    
-                    const winBottom = winPos.y + 50; 
-                    if (isHandOpen && y > winBottom && y < winBottom + 20 && x > winPos.x && x < winPos.x + 40) {
-                        isMovingWindow = true;
-                        document.querySelectorAll('.glass-shell').forEach(s => s.classList.add('dragging'));
-                    } else if (!isHandOpen) {
-                        isMovingWindow = false;
-                        document.querySelectorAll('.glass-shell').forEach(s => s.classList.remove('dragging'));
-                    }
-
-                    if (isMovingWindow) {
-                        winPos.x = x - 20; winPos.y = y - 55;
-                        updateWindowPos();
-                    }
-
-                    // Natural Scrolling: Vertical swipe
-                    const dy = (y - lastHandPos.y);
-                    if (Math.abs(dy) > 0.5 && !isMovingWindow) {
-                        scrollMomentum = dy * 20;
-                        document.getElementById('scroll-l').scrollTop += scrollMomentum;
-                        document.getElementById('scroll-r').scrollTop += scrollMomentum;
-                    }
-                }
-                lastHandPos = {x, y};
             }
         });
 
-        function updateWindowPos() {
-            const l = document.getElementById('win-l'), r = document.getElementById('win-r');
-            l.style.left = winPos.x + "%"; l.style.top = winPos.y + "%";
-            r.style.left = (winPos.x + 50) + "%"; r.style.top = winPos.y + "%";
-        }
-
-        function renderOcclusion(results) {
-            [mctxL, mctxR].forEach(ctx => {
-                ctx.clearRect(0, 0, maskL.width, maskL.height);
-                if (results.multiHandLandmarks) {
-                    for (const landmarks of results.multiHandLandmarks) {
-                        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
-                        ctx.shadowBlur = 20; ctx.shadowColor = "#fff";
-                        // Draw silhouette
-                        landmarks.forEach(p => {
-                            ctx.beginPath(); ctx.arc(p.x * maskL.width, p.y * maskL.height, 10, 0, 7); ctx.fill();
-                        });
-                        // Connect bones
-                        ctx.strokeStyle = "#fff"; ctx.lineWidth = 12; ctx.beginPath();
-                        ctx.moveTo(landmarks[0].x * maskL.width, landmarks[0].y * maskL.height);
-                        [1,5,9,13,17].forEach(i => {
-                            ctx.lineTo(landmarks[i].x * maskL.width, landmarks[i].y * maskL.height);
-                            ctx.moveTo(landmarks[0].x * maskL.width, landmarks[0].y * maskL.height);
-                        });
-                        ctx.stroke();
-                    }
+        function handleSpatialTap(x, y) {
+            // Map 0-1 screen coordinates to song list
+            if(x > 0.3 && x < 0.7 && y > 0.2 && y < 0.8) {
+                const songIndex = Math.floor((y - 0.2) / 0.06);
+                if(songIndex >= 0 && songIndex < 10) {
+                    playSong(library[songIndex]);
                 }
-            });
-        }
-
-        async function startSystem() {
-            document.getElementById('boot-screen').style.display = 'none';
-            fillMeTube();
-            resize();
-            const cam = new Camera(video, { 
-                onFrame: async () => { await hands.send({image: video}); }, 
-                width: 1280, height: 720, facingMode: 'environment' 
-            });
-            cam.start();
-            requestAnimationFrame(renderLoop);
-        }
-
-        function renderLoop() {
-            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-            gl.texImage2D(gl.TEXTURE_2D, 0, 6407, 6407, 5121, video);
-            gl.drawArrays(4, 0, 6);
-            if(Math.abs(scrollMomentum) > 0.1) {
-                scrollMomentum *= 0.92;
-                document.getElementById('scroll-l').scrollTop += scrollMomentum;
-                document.getElementById('scroll-r').scrollTop += scrollMomentum;
             }
-            requestAnimationFrame(renderLoop);
         }
 
-        function deployApp() {
-            isAppActive = true;
-            document.getElementById('win-l').style.display = document.getElementById('win-r').style.display = 'block';
-            document.getElementById('waist-trigger').style.display = 'none';
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Interface Loaded. Grab the bottom bar to move."));
+        // --- AUDIO SYSTEM ---
+        function playSong(song) {
+            if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if(currentOsc) currentOsc.stop();
+
+            document.getElementById('now-playing-hud').style.display = 'block';
+            document.getElementById('song-title').innerText = song.title;
+            document.getElementById('song-artist').innerText = song.artist;
+            
+            // Create a "Synth Chill" sound
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(220 + (Math.random() * 100), audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            currentOsc = osc;
+
+            // Animate progress bar
+            let p = 0;
+            const interval = setInterval(() => {
+                p += 0.5;
+                document.getElementById('song-progress').style.width = p + "%";
+                if(p >= 100) {
+                    clearInterval(interval);
+                    osc.stop();
+                }
+            }, 100);
         }
 
-        function resize() {
-            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-            maskL.width = maskR.width = window.innerWidth / 2;
-            maskL.height = maskR.height = window.innerHeight;
+        async function requestPermissions() {
+            try {
+                // Request Camera
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment', width: 1280, height: 720 } 
+                });
+                video.srcObject = stream;
+                await video.play();
+
+                // Request Orientation (iOS requires explicit button tap)
+                if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    await DeviceOrientationEvent.requestPermission();
+                }
+
+                document.getElementById('boot-loader').style.display = 'none';
+                init3D();
+                
+                const cam = new Camera(video, {
+                    onFrame: async () => { await hands.send({image: video}); },
+                    width: 1280, height: 720
+                });
+                cam.start();
+                
+                isSystemReady = true;
+                requestAnimationFrame(animate);
+            } catch (e) {
+                alert("Please allow Camera and Motion permissions.");
+            }
         }
 
-        window.addEventListener('resize', resize);
+        function animate() {
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', () => {
+            if(camera) {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+        });
+
     </script>
 </body>
 </html>
