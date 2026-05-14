@@ -4,145 +4,149 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>MeTube Spatial - Apple Vision Pro Edition</title>
+    <title>MeTube Spatial - Vision OS 2.0</title>
     
-    <!-- Core AI & Engine Dependencies -->
+    <!-- Spatial AI Stack -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <style>
         :root {
-            --avp-glass: rgba(255, 255, 255, 0.12);
-            --avp-border: rgba(255, 255, 255, 0.25);
-            --avp-glow: rgba(255, 255, 255, 0.1);
+            --glass: rgba(255, 255, 255, 0.08);
+            --border: rgba(255, 255, 255, 0.2);
+            --accent: #ff0033;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
-        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #fff; font-family: -apple-system, system-ui, sans-serif; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; }
         
-        /* Main Renderers */
+        /* Video & Render Canvas */
         canvas#glCanvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         video#webcam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 
-        /* Hand Occlusion Layers - Highest Z-Index */
-        .occlusion-layer {
+        /* Neural Hand Occlusion Layer */
+        .hand-mask {
             position: fixed; top: 0; pointer-events: none; z-index: 1000;
-            filter: blur(2px); mix-blend-mode: normal;
+            filter: drop-shadow(0 0 10px rgba(255,255,255,0.2));
         }
-        #occlusion-l { left: 0; width: 50%; height: 100%; }
-        #occlusion-r { left: 50%; width: 50%; height: 100%; }
+        #mask-l { left: 0; width: 50%; height: 100%; }
+        #mask-r { left: 50%; width: 50%; height: 100%; }
 
-        /* Spatial Window Logic */
-        .window-container {
+        /* Vision Pro Style Spatial Window */
+        .spatial-window {
             position: fixed; display: none; z-index: 100;
-            width: 420px; height: 580px;
+            width: 440px; height: 620px;
             pointer-events: auto;
             transform-style: preserve-3d;
+            perspective: 1000px;
         }
 
-        .glass-panel {
+        .glass-shell {
             width: 100%; height: 100%;
-            background: var(--avp-glass);
-            backdrop-filter: blur(35px) saturate(200%);
-            -webkit-backdrop-filter: blur(35px) saturate(200%);
-            border: 1.5px solid var(--avp-border);
-            border-radius: 45px;
-            box-shadow: 0 40px 100px rgba(0,0,0,0.6), inset 0 0 1px 1px rgba(255,255,255,0.2);
+            background: var(--glass);
+            backdrop-filter: blur(40px) saturate(200%);
+            -webkit-backdrop-filter: blur(40px) saturate(200%);
+            border: 1.5px solid var(--border);
+            border-radius: 50px;
+            box-shadow: 0 50px 100px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(255,255,255,0.1);
             display: flex; flex-direction: column;
             overflow: hidden;
-            animation: windowEnter 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: transform 0.1s ease-out;
         }
 
-        @keyframes windowEnter {
-            from { transform: scale(0.8) translateY(50px); opacity: 0; }
-            to { transform: scale(1) translateY(0); opacity: 1; }
+        /* Drag Handle Bar (Bottom) */
+        .drag-bar {
+            height: 60px; width: 100%;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.05);
+            border-top: 1px solid rgba(255,255,255,0.1);
         }
-
-        #win-l { left: 4%; top: 15%; }
-        #win-r { left: 54%; top: 15%; }
-
-        /* MeTube Header */
-        .header {
-            padding: 30px; border-bottom: 1px solid rgba(255,255,255,0.1);
-            display: flex; align-items: center; justify-content: space-between;
+        .handle-pill {
+            width: 120px; height: 6px; background: rgba(255,255,255,0.3);
+            border-radius: 3px; transition: all 0.3s;
         }
-        .header h1 { font-size: 22px; font-weight: 700; color: #ff0033; text-shadow: 0 0 15px rgba(255,0,51,0.4); }
-        .header .user-status { font-size: 10px; opacity: 0.6; text-transform: uppercase; letter-spacing: 2px; }
+        .dragging .handle-pill { width: 180px; background: #fff; box-shadow: 0 0 20px #fff; }
 
-        /* Song List with Momentum Scrolling */
-        .song-scroll {
-            flex: 1; overflow-y: auto; padding: 20px;
-            scroll-behavior: smooth;
-            scrollbar-width: none;
-        }
-        .song-scroll::-webkit-scrollbar { display: none; }
+        #win-l { left: 3%; top: 10%; }
+        #win-r { left: 53%; top: 10%; }
 
-        .item {
-            display: flex; align-items: center; padding: 15px; margin-bottom: 12px;
-            border-radius: 20px; background: rgba(255,255,255,0.03);
-            border: 1px solid transparent; transition: all 0.3s;
+        /* MeTube Layout */
+        .app-header { padding: 35px; display: flex; align-items: center; justify-content: space-between; }
+        .app-header h1 { font-size: 26px; font-weight: 800; color: var(--accent); letter-spacing: -1px; }
+
+        .content-scroll {
+            flex: 1; overflow-y: scroll; padding: 0 20px 20px;
+            scroll-behavior: smooth; scrollbar-width: none;
         }
-        .item.active-hover { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.3); transform: scale(1.02); }
+        .content-scroll::-webkit-scrollbar { display: none; }
+
+        .track {
+            display: flex; align-items: center; padding: 18px; margin-bottom: 12px;
+            border-radius: 25px; background: rgba(255,255,255,0.03);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .track:active { transform: scale(0.96); background: rgba(255,255,255,0.1); }
         
-        .thumb { width: 55px; height: 55px; border-radius: 12px; background: #222; margin-right: 18px; position: relative; overflow: hidden; }
-        .thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(45deg, rgba(255,255,255,0.1), transparent); }
-        
-        .info b { display: block; font-size: 16px; font-weight: 600; margin-bottom: 4px; color: #fff; }
-        .info span { font-size: 13px; opacity: 0.5; color: #eee; }
+        .art { width: 60px; height: 60px; border-radius: 14px; margin-right: 20px; position: relative; }
+        .art::after { content: "▶"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; opacity: 0.3; }
 
-        /* The Hip-Level App Trigger */
-        #vision-trigger {
-            position: fixed; bottom: 8%; left: 50%; transform: translateX(-50%);
-            z-index: 500; width: 90px; height: 90px; border-radius: 50%;
-            background: rgba(255,255,255,0.1); border: 1.5px solid rgba(255,255,255,0.2);
-            backdrop-filter: blur(15px); display: flex; align-items: center; justify-content: center;
-            opacity: 0; transition: all 0.4s ease; scale: 0.5;
+        .meta b { display: block; font-size: 17px; font-weight: 600; margin-bottom: 2px; }
+        .meta span { font-size: 13px; opacity: 0.5; color: #ccc; }
+
+        /* Waist Level Trigger */
+        #waist-trigger {
+            position: fixed; bottom: 8%; right: 10%;
+            z-index: 500; width: 100px; height: 100px; border-radius: 50%;
+            background: rgba(255,0,51,0.1); border: 2px solid var(--accent);
+            backdrop-filter: blur(20px); display: flex; align-items: center; justify-content: center;
+            opacity: 0; scale: 0.8; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
-        #vision-trigger.visible { opacity: 1; scale: 1; }
-        #vision-trigger::before { content: "METUBE"; position: absolute; top: -30px; font-size: 10px; letter-spacing: 2px; opacity: 0.7; }
+        #waist-trigger.active { opacity: 1; scale: 1; }
+        #waist-trigger::after { content: "MeTube"; position: absolute; bottom: -30px; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 2px; }
 
-        /* Initial Boot */
-        #system-boot {
+        /* Startup */
+        #boot-screen {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center;
             cursor: pointer;
         }
-        .boot-ring { width: 80px; height: 80px; border: 1px solid #fff; border-radius: 50%; animation: pulse 2s infinite; }
-        @keyframes pulse { 0% { transform: scale(0.9); opacity: 0.4; } 50% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.4; } }
+        .loader { width: 100px; height: 100px; border: 2px solid #fff; border-radius: 50%; border-top-color: transparent; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <div id="system-boot" onclick="bootProcess()">
+    <div id="boot-screen" onclick="startSystem()">
         <div style="text-align: center;">
-            <div class="boot-ring"></div>
-            <h1 style="font-weight: 200; letter-spacing: 12px; margin-top: 30px; font-size: 14px;">VISION_PRO_LINK</h1>
-            <p style="opacity: 0.3; font-size: 9px; margin-top: 15px;">CALIBRATING NEURAL TRACKING...</p>
+            <div class="loader"></div>
+            <h2 style="margin-top: 30px; letter-spacing: 8px; font-weight: 200;">SPATIAL_OS</h2>
+            <p style="opacity: 0.3; font-size: 9px; margin-top: 10px;">SCANNING ENVIRONMENT...</p>
         </div>
     </div>
 
-    <!-- Occlusion Canvas (Hand Masking) -->
-    <canvas id="occlusion-l" class="occlusion-layer"></canvas>
-    <canvas id="occlusion-r" class="occlusion-layer"></canvas>
+    <!-- Hand Occlusion Layers -->
+    <canvas id="mask-l" class="hand-mask"></canvas>
+    <canvas id="mask-r" class="hand-mask"></canvas>
 
-    <div id="vision-trigger">
-        <div style="width: 25px; height: 25px; background: #ff0033; border-radius: 6px;"></div>
+    <div id="waist-trigger">
+        <div style="width: 30px; height: 30px; border: 3px solid #fff; border-radius: 8px;"></div>
     </div>
 
-    <!-- Spatial Window Left -->
-    <div class="window-container" id="win-l">
-        <div class="glass-panel">
-            <div class="header"><h1>MeTube</h1><span class="user-status">Spatial Link</span></div>
-            <div class="song-scroll" id="scroll-l"></div>
+    <!-- Spatial Window Pair -->
+    <div class="spatial-window" id="win-l">
+        <div class="glass-shell">
+            <div class="app-header"><h1>MeTube</h1><span>Spatial Beta</span></div>
+            <div class="content-scroll" id="scroll-l"></div>
+            <div class="drag-bar"><div class="handle-pill"></div></div>
         </div>
     </div>
 
-    <!-- Spatial Window Right -->
-    <div class="window-container" id="win-r">
-        <div class="glass-panel">
-            <div class="header"><h1>MeTube</h1><span class="user-status">Spatial Link</span></div>
-            <div class="song-scroll" id="scroll-r"></div>
+    <div class="spatial-window" id="win-r">
+        <div class="glass-shell">
+            <div class="app-header"><h1>MeTube</h1><span>Spatial Beta</span></div>
+            <div class="content-scroll" id="scroll-r"></div>
+            <div class="drag-bar"><div class="handle-pill"></div></div>
         </div>
     </div>
 
@@ -153,154 +157,148 @@
         const video = document.getElementById('webcam');
         const canvas = document.getElementById('glCanvas');
         const gl = canvas.getContext('webgl');
-        const occL = document.getElementById('occlusion-l');
-        const occR = document.getElementById('occlusion-r');
-        const ctxL = occL.getContext('2d');
-        const ctxR = occR.getContext('2d');
+        const maskL = document.getElementById('mask-l');
+        const maskR = document.getElementById('mask-r');
+        const mctxL = maskL.getContext('2d');
+        const mctxR = maskR.getContext('2d');
 
-        let isAppOpen = false;
-        let lastHandY = 0;
-        let scrollVelocity = 0;
-        let isPinching = false;
+        let isAppActive = false;
+        let lastHandPos = { x: 0, y: 0 };
+        let winPos = { x: 5, y: 15 };
+        let isMovingWindow = false;
+        let scrollMomentum = 0;
 
-        // --- MASSIVE 100+ SONG LIBRARY DATA ---
+        // Expanded Song List (110+ items)
         const library = [
-            { s: "Not Like Us", a: "Kendrick Lamar" },
-            { s: "From The Start", a: "Laufey" },
-            { s: "505", a: "Arctic Monkeys" },
-            { s: "Homage", a: "Mild High Club" },
-            { s: "Resonance", a: "Home" },
-            { s: "Treehouse", a: "Alex G" },
-            { s: "Valentine", a: "Laufey" },
-            { s: "Money Trees", a: "Kendrick Lamar" },
-            { s: "Dreamcore", a: "Pathetic" },
-            { s: "Bad Habit", a: "Steve Lacy" },
-            { s: "Chamber of Reflection", a: "Mac DeMarco" },
-            { s: "Boredom", a: "Tyler, The Creator" },
-            { s: "Swimming Pools", a: "Kendrick Lamar" },
-            { s: "Bewitched", a: "Laufey" },
-            { s: "Do I Wanna Know?", a: "Arctic Monkeys" },
-            { s: "Resonance", a: "Home" },
-            { s: "Transgender", a: "Crystal Castles" },
-            { s: "After the Storm", a: "Kali Uchis" },
-            { s: "See You Again", a: "Tyler, The Creator" },
-            { s: "Windowpane", a: "Mild High Club" },
-            { s: "Hummingbird", a: "Metro Boomin" },
-            { s: "Euphoria", a: "Kendrick Lamar" },
-            { s: "Falling Behind", a: "Laufey" },
-            { s: "R U Mine?", a: "Arctic Monkeys" }
+            { t: "Not Like Us", a: "Kendrick Lamar" }, { t: "From The Start", a: "Laufey" },
+            { t: "505", a: "Arctic Monkeys" }, { t: "Homage", a: "Mild High Club" },
+            { t: "Resonance", a: "Home" }, { t: "Treehouse", a: "Alex G" },
+            { t: "Valentine", a: "Laufey" }, { t: "Dreamcore", a: "Pathetic" },
+            { t: "Money Trees", a: "Kendrick Lamar" }, { t: "Valentine", a: "Laufey" },
+            { t: "Bad Habit", a: "Steve Lacy" }, { t: "Chamber of Reflection", a: "Mac DeMarco" },
+            { t: "Europia", a: "Kendrick Lamar" }, { t: "Lovesick", a: "Laufey" },
+            { t: "Resonance", a: "Home" }, { t: "Do I Wanna Know?", a: "Arctic Monkeys" }
         ];
 
-        // Populate to 100+ items
-        function initLibrary() {
-            const listL = document.getElementById('scroll-l');
-            const listR = document.getElementById('scroll-r');
-            let content = "";
-            for(let i=0; i<110; i++) {
-                const track = library[i % library.length];
-                content += `
-                <div class="item" id="song-${i}">
-                    <div class="thumb" style="background: hsl(${i*7}, 50%, 30%)"></div>
-                    <div class="info"><b>${track.s}</b><span>${track.a}</span></div>
+        function fillMeTube() {
+            const l = document.getElementById('scroll-l');
+            const r = document.getElementById('scroll-r');
+            let h = "";
+            for(let i=0; i<115; i++) {
+                const item = library[i % library.length];
+                h += `
+                <div class="track" id="tr-${i}">
+                    <div class="art" style="background: hsl(${i*12}, 60%, 40%)"></div>
+                    <div class="meta"><b>${item.t}</b><span>${item.a}</span></div>
                 </div>`;
             }
-            listL.innerHTML = listR.innerHTML = content;
+            l.innerHTML = r.innerHTML = h;
         }
 
-        // --- WEBGL PASSTHROUGH ---
-        const vs = `attribute vec2 p; varying vec2 v; void main() { v = p*0.5+0.5; v.y=1.0-v.y; gl_Position = vec4(p, 0.0, 1.0); }`;
-        const fs = `precision mediump float; uniform sampler2D t; varying vec2 v; void main() { vec2 u=v; if(u.x<0.5) u.x*=2.0; else u.x=(u.x-0.5)*2.0; gl_FragColor = texture2D(t,u); }`;
-        const prg = gl.createProgram();
-        const sh = (t, s) => { const x=gl.createShader(t); gl.shaderSource(x,s); gl.compileShader(x); return x; };
-        gl.attachShader(prg, sh(gl.VERTEX_SHADER, vs)); gl.attachShader(prg, sh(gl.FRAGMENT_SHADER, fs));
-        gl.linkProgram(prg); gl.useProgram(prg);
-        const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        // WebGL Passthrough Engine
+        const vsSource = `attribute vec2 p; varying vec2 v; void main() { v = p*0.5+0.5; v.y=1.0-v.y; gl_Position = vec4(p, 0.0, 1.0); }`;
+        const fsSource = `precision mediump float; uniform sampler2D t; varying vec2 v; void main() { vec2 u=v; if(u.x<0.5) u.x*=2.0; else u.x=(u.x-0.5)*2.0; gl_FragColor = texture2D(t,u); }`;
+        const program = gl.createProgram();
+        const buildShader = (t, s) => { const x=gl.createShader(t); gl.shaderSource(x,s); gl.compileShader(x); return x; };
+        gl.attachShader(program, buildShader(gl.VERTEX_SHADER, vsSource));
+        gl.attachShader(program, buildShader(gl.FRAGMENT_SHADER, fsSource));
+        gl.linkProgram(program); gl.useProgram(program);
+        const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
-        const pL = gl.getAttribLocation(prg, 'p'); gl.enableVertexAttribArray(pL);
-        gl.vertexAttribPointer(pL, 2, gl.FLOAT, false, 0, 0);
-        const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+        const pLoc = gl.getAttribLocation(program, 'p'); gl.enableVertexAttribArray(pLoc);
+        gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
+        const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
         gl.texParameteri(gl.TEXTURE_2D, 10242, 33071); gl.texParameteri(gl.TEXTURE_2D, 10243, 33071); gl.texParameteri(gl.TEXTURE_2D, 10241, 9729);
 
-        // --- AI HAND TRACKING ---
+        // AI Interaction Logic
         const hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
         hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
         
         hands.onResults(results => {
             renderOcclusion(results);
-            
             if (results.multiHandLandmarks && results.multiHandLandmarks[0]) {
-                const h = results.multiHandLandmarks[0];
-                const index = h[8], thumb = h[4];
-                const x = index.x, y = index.y;
-                const pinchDist = Math.hypot(index.x - thumb.x, index.y - thumb.y);
-
-                // AVP Hip Trigger (Bottom Right area)
-                if(!isAppOpen && y > 0.65 && x > 0.3 && x < 0.7) {
-                    document.getElementById('vision-trigger').classList.add('visible');
-                    if(pinchDist < 0.04) openMeTube();
-                } else if(!isAppOpen) {
-                    document.getElementById('vision-trigger').classList.remove('visible');
+                const hand = results.multiHandLandmarks[0];
+                const index = hand[8], thumb = hand[4], middle = hand[12];
+                const x = index.x * 100, y = index.y * 100;
+                
+                // Trigger Check: Bottom corner (Waist level)
+                if(!isAppActive) {
+                    if (y > 70 && x > 70) {
+                        document.getElementById('waist-trigger').classList.add('active');
+                        if(Math.hypot(index.x - thumb.x, index.y - thumb.y) < 0.05) deployApp();
+                    } else { document.getElementById('waist-trigger').classList.remove('active'); }
                 }
 
-                // Interaction while open
-                if(isAppOpen) {
-                    // Scrolling logic
-                    const deltaY = (y - lastHandY);
-                    if(Math.abs(deltaY) > 0.005) {
-                        scrollVelocity = deltaY * 2500;
-                        document.getElementById('scroll-l').scrollTop += scrollVelocity * 0.1;
-                        document.getElementById('scroll-r').scrollTop += scrollVelocity * 0.1;
+                if(isAppActive) {
+                    // Grab & Move Logic: Palm Expanded near bottom of window
+                    const handExpansion = Math.hypot(index.x - hand[0].x, index.y - hand[0].y);
+                    const isHandOpen = handExpansion > 0.3;
+                    
+                    const winBottom = winPos.y + 50; 
+                    if (isHandOpen && y > winBottom && y < winBottom + 20 && x > winPos.x && x < winPos.x + 40) {
+                        isMovingWindow = true;
+                        document.querySelectorAll('.glass-shell').forEach(s => s.classList.add('dragging'));
+                    } else if (!isHandOpen) {
+                        isMovingWindow = false;
+                        document.querySelectorAll('.glass-shell').forEach(s => s.classList.remove('dragging'));
+                    }
+
+                    if (isMovingWindow) {
+                        winPos.x = x - 20; winPos.y = y - 55;
+                        updateWindowPos();
+                    }
+
+                    // Natural Scrolling: Vertical swipe
+                    const dy = (y - lastHandPos.y);
+                    if (Math.abs(dy) > 0.5 && !isMovingWindow) {
+                        scrollMomentum = dy * 20;
+                        document.getElementById('scroll-l').scrollTop += scrollMomentum;
+                        document.getElementById('scroll-r').scrollTop += scrollMomentum;
                     }
                 }
-                lastHandY = y;
+                lastHandPos = {x, y};
             }
         });
 
-        // --- NEURAL HAND OCCLUSION (THE MAGIC PART) ---
+        function updateWindowPos() {
+            const l = document.getElementById('win-l'), r = document.getElementById('win-r');
+            l.style.left = winPos.x + "%"; l.style.top = winPos.y + "%";
+            r.style.left = (winPos.x + 50) + "%"; r.style.top = winPos.y + "%";
+        }
+
         function renderOcclusion(results) {
-            [ctxL, ctxR].forEach(ctx => {
-                ctx.clearRect(0, 0, occL.width, occL.height);
+            [mctxL, mctxR].forEach(ctx => {
+                ctx.clearRect(0, 0, maskL.width, maskL.height);
                 if (results.multiHandLandmarks) {
                     for (const landmarks of results.multiHandLandmarks) {
-                        // Draw High-Tech "Ghost" mask to ensure hand is visual front
-                        ctx.shadowBlur = 15;
-                        ctx.shadowColor = "rgba(255,255,255,0.5)";
-                        ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-                        ctx.lineWidth = 6;
-                        ctx.lineJoin = "round";
-                        ctx.lineCap = "round";
-                        
-                        // Finger Silhouettes
-                        drawFinger(ctx, landmarks, [0, 1, 2, 3, 4]); // Thumb
-                        drawFinger(ctx, landmarks, [0, 5, 6, 7, 8]); // Index
-                        drawFinger(ctx, landmarks, [0, 9, 10, 11, 12]); // Middle
-                        drawFinger(ctx, landmarks, [0, 13, 14, 15, 16]); // Ring
-                        drawFinger(ctx, landmarks, [0, 17, 18, 19, 20]); // Pinky
+                        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+                        ctx.shadowBlur = 20; ctx.shadowColor = "#fff";
+                        // Draw silhouette
+                        landmarks.forEach(p => {
+                            ctx.beginPath(); ctx.arc(p.x * maskL.width, p.y * maskL.height, 10, 0, 7); ctx.fill();
+                        });
+                        // Connect bones
+                        ctx.strokeStyle = "#fff"; ctx.lineWidth = 12; ctx.beginPath();
+                        ctx.moveTo(landmarks[0].x * maskL.width, landmarks[0].y * maskL.height);
+                        [1,5,9,13,17].forEach(i => {
+                            ctx.lineTo(landmarks[i].x * maskL.width, landmarks[i].y * maskL.height);
+                            ctx.moveTo(landmarks[0].x * maskL.width, landmarks[0].y * maskL.height);
+                        });
+                        ctx.stroke();
                     }
                 }
             });
         }
 
-        function drawFinger(ctx, points, indices) {
-            ctx.beginPath();
-            ctx.moveTo(points[indices[0]].x * occL.width, points[indices[0]].y * occL.height);
-            for(let i=1; i<indices.length; i++) {
-                ctx.lineTo(points[indices[i]].x * occL.width, points[indices[i]].y * occL.height);
-            }
-            ctx.stroke();
-        }
-
-        // --- SYSTEM CORE ---
-        async function bootProcess() {
-            document.getElementById('system-boot').style.display = 'none';
-            initLibrary();
+        async function startSystem() {
+            document.getElementById('boot-screen').style.display = 'none';
+            fillMeTube();
             resize();
-
-            const camera = new Camera(video, { 
+            const cam = new Camera(video, { 
                 onFrame: async () => { await hands.send({image: video}); }, 
                 width: 1280, height: 720, facingMode: 'environment' 
             });
-            camera.start();
+            cam.start();
             requestAnimationFrame(renderLoop);
         }
 
@@ -308,29 +306,25 @@
             gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
             gl.texImage2D(gl.TEXTURE_2D, 0, 6407, 6407, 5121, video);
             gl.drawArrays(4, 0, 6);
-            
-            // Friction for scroll
-            if(Math.abs(scrollVelocity) > 0.1) {
-                scrollVelocity *= 0.95;
-                document.getElementById('scroll-l').scrollTop += scrollVelocity * 0.05;
-                document.getElementById('scroll-r').scrollTop += scrollVelocity * 0.05;
+            if(Math.abs(scrollMomentum) > 0.1) {
+                scrollMomentum *= 0.92;
+                document.getElementById('scroll-l').scrollTop += scrollMomentum;
+                document.getElementById('scroll-r').scrollTop += scrollMomentum;
             }
-
             requestAnimationFrame(renderLoop);
         }
 
-        function openMeTube() {
-            if(isAppOpen) return;
-            isAppOpen = true;
+        function deployApp() {
+            isAppActive = true;
             document.getElementById('win-l').style.display = document.getElementById('win-r').style.display = 'block';
-            document.getElementById('vision-trigger').style.display = 'none';
-            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial MeTube connected. Explore your library."));
+            document.getElementById('waist-trigger').style.display = 'none';
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Spatial Interface Loaded. Grab the bottom bar to move."));
         }
 
         function resize() {
             canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-            occL.width = occR.width = window.innerWidth / 2;
-            occL.height = occR.height = window.innerHeight;
+            maskL.width = maskR.width = window.innerWidth / 2;
+            maskL.height = maskR.height = window.innerHeight;
         }
 
         window.addEventListener('resize', resize);
