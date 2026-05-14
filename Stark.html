@@ -4,11 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>True Spatial AR Window</title>
+    <title>Spatial OS - Full Audio Edition</title>
     
     <!-- MediaPipe AI Models -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    
+    <!-- YouTube API for Full Song Playback -->
+    <script src="https://www.youtube.com/iframe_api"></script>
 
     <style>
         body {
@@ -19,46 +22,51 @@
             touch-action: none;
         }
 
-        /* 1. Camera Feed (Back Camera, No Mirror) */
+        /* Camera Feed */
         .video-background {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
             object-fit: cover;
             z-index: 0;
-            opacity: 0.9;
+            opacity: 0.85;
         }
 
-        /* 2. True 3D AR Scene Container */
+        /* Hidden YouTube Player */
+        #yt-container {
+            position: fixed; top: -1000px; left: -1000px;
+            width: 1px; height: 1px; opacity: 0; pointer-events: none;
+        }
+
+        /* 3D AR Scene Container */
         #scene {
             position: fixed; top: 0; left: 0;
             width: 100vw; height: 100vh;
-            perspective: 1000px; /* Field of View */
+            perspective: 1000px; 
             z-index: 5;
-            pointer-events: none; /* Let clicks pass through if needed */
+            pointer-events: none; 
         }
 
-        /* 3. The World Engine (Rotates opposite to your phone) */
+        /* The World Engine */
         #world {
             width: 100vw; height: 100vh;
             position: absolute;
             transform-style: preserve-3d;
-            transform-origin: 50% 50% 0; /* Pivots exactly from the screen surface */
+            transform-origin: 50% 50% 0; 
             will-change: transform; 
         }
 
-        /* 4. The Interactive Window (Pushed into 3D Space) */
+        /* Interactive Window */
         #bubble {
             position: absolute;
             left: 50%; top: 50%;
             width: 380px; height: 580px;
-            /* Base position: Centered, but pushed 600px away from you into the room */
             transform: translate(-50%, -50%) translate3d(0px, 0px, -600px);
-            background: rgba(15, 15, 20, 0.5);
-            backdrop-filter: blur(30px) saturate(200%);
-            -webkit-backdrop-filter: blur(30px) saturate(200%);
+            background: rgba(15, 15, 20, 0.55);
+            backdrop-filter: blur(35px) saturate(200%);
+            -webkit-backdrop-filter: blur(35px) saturate(200%);
             border: 1px solid rgba(255, 255, 255, 0.15);
             border-radius: 40px;
-            box-shadow: 0 50px 100px rgba(0,0,0,0.8), inset 0 2px 20px rgba(255,255,255,0.05);
+            box-shadow: 0 50px 100px rgba(0,0,0,0.8), inset 0 2px 20px rgba(255,255,255,0.08);
             display: flex; flex-direction: column; overflow: hidden;
             will-change: transform;
             transition: border-color 0.2s, box-shadow 0.2s;
@@ -71,7 +79,7 @@
             box-shadow: 0 0 80px rgba(0, 255, 204, 0.3), inset 0 0 30px rgba(0, 255, 204, 0.2);
         }
 
-        /* AR Pointer Cursor (Stays Flat on Screen to act as laser) */
+        /* AR Pointer Cursor */
         #ar-cursor {
             position: fixed;
             width: 22px; height: 22px;
@@ -90,7 +98,7 @@
         #ar-cursor.pinching {
             width: 14px; height: 14px;
             background: #00ffcc;
-            box-shadow: 0 0 35px #00ffcc;
+            box-shadow: 0 0 40px #00ffcc;
             border-color: #fff;
         }
 
@@ -105,14 +113,14 @@
         /* UI Elements */
         .header {
             padding: 20px 20px 25px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0));
+            background: linear-gradient(180deg, rgba(255,255,255,0.15), rgba(255,255,255,0));
             text-align: center; border-bottom: 1px solid rgba(255,255,255,0.05);
             position: relative;
         }
         
         .drag-pill {
             width: 60px; height: 6px;
-            background: rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.6);
             border-radius: 10px;
             margin: 0 auto 15px auto;
         }
@@ -126,23 +134,29 @@
             scroll-behavior: auto; 
             transition: background 0.2s;
         }
-        .song-list.list-scrolling { background: rgba(255,255,255,0.03); }
+        .song-list.list-scrolling { background: rgba(255,255,255,0.04); }
 
         .song-item {
             padding: 20px 22px; margin-bottom: 10px;
-            background: rgba(255,255,255,0.04); border-radius: 20px;
+            background: rgba(255,255,255,0.05); border-radius: 20px;
             font-size: 18px; transition: 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
             border: 1px solid transparent;
+            display: flex; flex-direction: column;
         }
         
         .song-item.ar-hover {
-            background: rgba(255,255,255,0.18);
+            background: rgba(255,255,255,0.2);
             border: 1px solid rgba(0, 255, 204, 0.6);
             transform: scale(1.03);
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         }
 
-        .song-title { font-weight: 600; display: block; pointer-events: none; }
+        .song-item.playing {
+            background: rgba(0, 255, 204, 0.15);
+            border: 1px solid #00ffcc;
+        }
+
+        .song-title { font-weight: 700; display: block; pointer-events: none; }
         .song-artist { font-size: 14px; color: #00ffcc; opacity: 0.9; pointer-events: none; margin-top: 6px; }
 
         /* Start Screen */
@@ -155,26 +169,43 @@
             background: #00ffcc; color: black; border: none;
             padding: 18px 45px; font-size: 18px; font-weight: bold; border-radius: 30px;
             cursor: pointer; margin-top: 30px; transition: transform 0.2s;
+            box-shadow: 0 0 30px rgba(0, 255, 204, 0.4);
         }
         .launch-btn:active { transform: scale(0.95); }
 
         /* Recenter Button */
         #recenter-btn {
             position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
-            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);
-            backdrop-filter: blur(15px); color: white; padding: 12px 24px; border-radius: 30px;
+            background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4);
+            backdrop-filter: blur(15px); color: white; padding: 12px 28px; border-radius: 30px;
             font-weight: 600; z-index: 100; cursor: pointer; display: none;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
         }
-        #recenter-btn:active { background: rgba(255,255,255,0.3); }
+        #recenter-btn:active { background: rgba(255,255,255,0.4); }
 
-        /* Toast */
+        /* Toast - Now Persistent */
         #toast {
-            position: fixed; top: -100px; left: 50%; transform: translateX(-50%);
-            background: rgba(0, 20, 15, 0.9); border: 1px solid #00ffcc;
-            backdrop-filter: blur(20px); padding: 18px 35px; border-radius: 30px;
-            z-index: 150; font-weight: 500; transition: top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-            box-shadow: 0 15px 40px rgba(0, 255, 204, 0.3);
-            color: white; white-space: nowrap; font-size: 18px;
+            position: fixed; top: -150px; left: 50%; transform: translateX(-50%);
+            background: rgba(10, 20, 15, 0.95); border: 1px solid #00ffcc;
+            backdrop-filter: blur(20px); padding: 20px 40px; border-radius: 40px;
+            z-index: 150; font-weight: 600; transition: top 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+            box-shadow: 0 20px 50px rgba(0, 255, 204, 0.4);
+            color: white; white-space: nowrap; font-size: 18px; display: flex; align-items: center; gap: 15px;
+        }
+        
+        .music-bars {
+            display: flex; gap: 3px; height: 15px; align-items: flex-end;
+        }
+        .bar {
+            width: 4px; background: #00ffcc; border-radius: 2px;
+            animation: bounce 0.5s infinite alternate;
+        }
+        .bar:nth-child(2) { animation-delay: 0.2s; }
+        .bar:nth-child(3) { animation-delay: 0.4s; }
+        
+        @keyframes bounce {
+            0% { height: 4px; }
+            100% { height: 15px; }
         }
     </style>
 </head>
@@ -182,18 +213,24 @@
 
     <div id="start-screen">
         <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#00ffcc" stroke-width="1.5" style="margin-bottom:20px;">
-            <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M12 16V12M12 8H12.01" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M9 18V5L21 3V16M9 18C9 19.6569 7.65685 21 6 21C4.34315 21 3 19.6569 3 18C3 16.3431 4.34315 15 6 15C7.65685 15 9 16.3431 9 18ZM21 16C21 17.6569 19.6569 19 18 19C16.3431 19 15 17.6569 15 16C15 14.3431 16.3431 13 18 13C19.6569 13 21 14.3431 21 16Z" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <h2 style="margin: 0; letter-spacing: 1px;">True 3D World Lock</h2>
+        <h2 style="margin: 0; letter-spacing: 1px;">Spatial Audio Player</h2>
         <p style="opacity: 0.7; text-align: center; max-width: 320px; line-height: 1.6; margin-top: 15px;">
-            The window is anchored into reality.<br>
-            If you walk away, tap Recenter.
+            <b>High-Speed Scroll Enabled.</b><br>
+            Air-Tap to play the full song.<br>
+            Uses YouTube Audio API.
         </p>
-        <button class="launch-btn" onclick="initAR()">Start Spatial OS</button>
+        <button class="launch-btn" onclick="initAR()">Enable Audio & Camera</button>
     </div>
 
-    <div id="toast">🎵 Playing Song</div>
+    <!-- Hidden YouTube Player for Full Audio -->
+    <div id="yt-container"><div id="player"></div></div>
+
+    <div id="toast">
+        <div class="music-bars"><div class="bar"></div><div class="bar"></div><div class="bar"></div></div>
+        <span id="toast-text">Loading...</span>
+    </div>
     
     <button id="recenter-btn" onclick="recenterAR()">Recenter View</button>
 
@@ -204,7 +241,7 @@
             <div id="bubble">
                 <div class="header drag-zone">
                     <div class="drag-pill"></div>
-                    <h3>Library</h3>
+                    <h3>Full Library</h3>
                     <p>Pinch here to drag</p>
                 </div>
                 <div class="song-list drag-zone" id="songList"></div>
@@ -216,6 +253,7 @@
     <div id="ar-cursor"></div>
 
     <script>
+        // --- DOM Elements ---
         const videoElement = document.querySelector('.video-background');
         const canvasElement = document.querySelector('.hand-overlay');
         const canvasCtx = canvasElement.getContext('2d');
@@ -225,17 +263,25 @@
         const cursor = document.getElementById('ar-cursor');
         const startScreen = document.getElementById('start-screen');
         const toast = document.getElementById('toast');
+        const toastText = document.getElementById('toast-text');
         const recenterBtn = document.getElementById('recenter-btn');
+
+        // --- YOUTUBE AUDIO API ---
+        let ytPlayer;
+        function onYouTubeIframeAPIReady() {
+            ytPlayer = new YT.Player('player', {
+                height: '10', width: '10',
+                videoId: '', // Will load dynamically
+                playerVars: { 'playsinline': 1, 'controls': 0 },
+            });
+        }
 
         // --- TRUE 3D SPATIAL SYSTEM ---
         let baseAlpha = 0, baseBeta = 0, baseGamma = 0;
         let isCalibrated = false;
-        
         let targetRotX = 0, targetRotY = 0, targetRotZ = 0;
         let currentRotX = 0, currentRotY = 0, currentRotZ = 0;
-        
-        let bubbleX = 0; // Starts strictly centered
-        let bubbleY = 0; 
+        let bubbleX = 0, bubbleY = 0; 
 
         // --- SMOOTH CURSOR ---
         let smoothCursorX = window.innerWidth / 2;
@@ -249,77 +295,87 @@
         let initialBubbleX = 0, initialBubbleY = 0;
         let initialScrollTop = 0;
 
-        // Populate Songs
-        const artists = ["Kendrick Lamar", "Malcolm Todd", "Laufey", "Steve Lacy", "Treehouse", "Frank Ocean", "Tyler, The Creator", "SZA", "Childish Gambino", "Mac DeMarco"];
-        const tracks = ["Money Trees", "Room Service", "Valentine", "Dark Red", "Evergreen", "Pink + White", "EARFQUAKE", "Kill Bill", "Redbone", "Chamber Of Reflection"];
+        // --- MUSIC LIBRARY (With Real YouTube Audio IDs) ---
+        const library = [
+            { artist: "Kendrick Lamar", title: "Money Trees", ytid: "smqhSl0u_sI" },
+            { artist: "Malcolm Todd", title: "Room Service", ytid: "3vY4rN9YpX8" },
+            { artist: "Laufey", title: "Valentine", ytid: "xKkU2N25d80" },
+            { artist: "Steve Lacy", title: "Bad Habit", ytid: "VF-FGf_GlG0" },
+            { artist: "Frank Ocean", title: "Pink + White", ytid: "uzS3WG6__G4" },
+            { artist: "Tyler, The Creator", title: "EARFQUAKE", ytid: "HmAsUQEFYGI" },
+            { artist: "SZA", title: "Good Days", ytid: "oh64haEP9g8" },
+            { artist: "Childish Gambino", title: "Redbone", ytid: "Kp7eSUU9oy8" },
+            { artist: "Mac DeMarco", title: "Chamber Of Reflection", ytid: "NY8IS0ssNXc" },
+            { artist: "Treehouse", title: "Alex G", ytid: "M2hU-wJvWfI" }
+        ];
         
-        for (let i = 1; i <= 500; i++) {
+        for (let i = 0; i < 500; i++) {
+            const track = library[i % library.length];
             const div = document.createElement('div');
             div.className = 'song-item';
-            div.dataset.title = tracks[i % tracks.length];
-            div.dataset.artist = artists[i % artists.length];
+            div.dataset.title = track.title;
+            div.dataset.artist = track.artist;
+            div.dataset.ytid = track.ytid;
             div.innerHTML = `
-                <span class="song-title">${div.dataset.title}</span>
-                <span class="song-artist">${div.dataset.artist}</span>
+                <span class="song-title">${track.title}</span>
+                <span class="song-artist">${track.artist}</span>
             `;
             songList.appendChild(div);
         }
 
-        // --- GYROSCOPE (The Spatial Lock) ---
+        // --- GYROSCOPE ---
         function handleOrientation(e) {
             if (!isCalibrated) { 
-                baseAlpha = e.alpha || 0; 
-                baseBeta = e.beta || 0; 
-                baseGamma = e.gamma || 0; 
+                baseAlpha = e.alpha || 0; baseBeta = e.beta || 0; baseGamma = e.gamma || 0; 
                 isCalibrated = true; 
             }
-            
             let dA = (e.alpha || 0) - baseAlpha;
             let dB = (e.beta || 0) - baseBeta;
             let dG = (e.gamma || 0) - baseGamma;
             
             if (dA > 180) dA -= 360; if (dA < -180) dA += 360;
             
-            // Map reality to the 3D Engine
-            // Turning phone right (alpha changes) spins world left.
             if (e.alpha !== null) {
-                targetRotX = -dB;  
-                targetRotY = dA;   
-                targetRotZ = -dG;  
+                targetRotX = -dB; targetRotY = dA; targetRotZ = -dG;  
             } else {
-                targetRotX = -dB;  
-                targetRotY = -dG; 
-                targetRotZ = 0;    
+                targetRotX = -dB; targetRotY = -dG; targetRotZ = 0;    
             }
         }
 
         function recenterAR() {
             isCalibrated = false; 
-            bubbleX = 0;
-            bubbleY = 0;
+            bubbleX = 0; bubbleY = 0;
         }
 
         // --- RENDER ENGINE ---
         function animate3D() {
-            // HIGH speed lerp (0.4) removes Slop entirely but keeps it anti-jittered
             currentRotX += (targetRotX - currentRotX) * 0.4;
             currentRotY += (targetRotY - currentRotY) * 0.4;
             currentRotZ += (targetRotZ - currentRotZ) * 0.4;
 
-            // Rotate the entire invisible 3D room opposite to the phone
             worldElement.style.transform = `rotateX(${currentRotX}deg) rotateY(${currentRotY}deg) rotateZ(${currentRotZ}deg)`;
-            
-            // Move the bubble inside the 3D room
             bubble.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, -600px)`;
             
             requestAnimationFrame(animate3D);
         }
 
-        function showToast(title, artist) {
-            toast.innerHTML = `<span style="color:#00ffcc; margin-right:8px;">▶</span> <b>${title}</b> <span style="opacity:0.6; margin-left:6px;">by ${artist}</span>`;
-            toast.style.top = "50px";
-            clearTimeout(window.toastTimeout);
-            window.toastTimeout = setTimeout(() => { toast.style.top = "-100px"; }, 3500);
+        function playSong(element) {
+            // Visual Update
+            document.querySelectorAll('.song-item').forEach(el => el.classList.remove('playing'));
+            element.classList.add('playing');
+
+            // Play Audio
+            const title = element.dataset.title;
+            const artist = element.dataset.artist;
+            const ytid = element.dataset.ytid;
+            
+            if(ytPlayer && ytPlayer.loadVideoById) {
+                ytPlayer.loadVideoById(ytid);
+            }
+
+            // Show Toast permanently while playing
+            toastText.innerHTML = `<b>${title}</b> <span style="opacity:0.7; margin-left:8px;">${artist}</span>`;
+            toast.style.top = "60px";
         }
 
         // --- LASER POINTER TRACKING ---
@@ -350,7 +406,7 @@
                 const pinchThreshold = isPinching ? 0.055 : 0.040; 
                 const currentlyPinching = currentDist < pinchThreshold; 
 
-                // 3D Raycaster (Natively understands the skewed CSS 3D Space)
+                // Raycaster
                 cursor.style.pointerEvents = 'none'; 
                 const hitElement = document.elementFromPoint(smoothCursorX, smoothCursorY);
 
@@ -385,11 +441,11 @@
                     const deltaY = smoothCursorY - pinchStartY;
 
                     if (activeAction === 'drag') {
-                        // 1.6x multiplier because the window is pushed deep (-600px) into 3D space
                         bubbleX = initialBubbleX + (deltaX * 1.6);
                         bubbleY = initialBubbleY + (deltaY * 1.6);
                     } else if (activeAction === 'scroll') {
-                        songList.scrollTop = initialScrollTop - (deltaY * 1.5);
+                        // EFFORTLESS SCROLL: Multiplied by 6.0! A tiny movement scrolls incredibly fast.
+                        songList.scrollTop = initialScrollTop - (deltaY * 6.0);
                     }
                 } 
                 else if (!currentlyPinching && isPinching) {
@@ -403,10 +459,7 @@
 
                     if (activeAction !== 'drag' && pinchDuration < 400 && deltaMath < 30) {
                         if (hitElement && hitElement.closest('.song-item')) {
-                            const song = hitElement.closest('.song-item');
-                            song.style.background = "rgba(0, 255, 204, 0.4)";
-                            setTimeout(() => song.style.background = "", 250);
-                            showToast(song.dataset.title, song.dataset.artist);
+                            playSong(hitElement.closest('.song-item'));
                         }
                     }
                     activeAction = null;
@@ -431,7 +484,13 @@
 
         // --- SYSTEM BOOT ---
         async function initAR() {
-            startScreen.innerHTML = "<h3>Generating Spatial Anchors...</h3><p>Ensure back camera is clear.</p>";
+            startScreen.innerHTML = "<h3>Booting Spatial OS...</h3><p>Please wait.</p>";
+
+            // Unlock Audio Context (Crucial for mobile browsers)
+            if(ytPlayer && ytPlayer.playVideo) {
+                ytPlayer.playVideo();
+                setTimeout(() => ytPlayer.pauseVideo(), 100);
+            }
 
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
@@ -443,7 +502,6 @@
             }
 
             const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-            
             hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.85, minTrackingConfidence: 0.85 });
             hands.onResults(onResults);
 
@@ -457,7 +515,7 @@
                 videoElement.onloadedmetadata = () => {
                     videoElement.play();
                     startScreen.style.display = "none";
-                    recenterBtn.style.display = "block"; // Show recenter button
+                    recenterBtn.style.display = "block"; 
                     animate3D();
                     bubble.style.display = "flex";
                     
