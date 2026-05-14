@@ -1,10 +1,11 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <!-- Prevent zooming to keep AR scale accurate -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VR Spatial OS - True Inverse Tracking</title>
+    <title>VR Spatial OS - Melt Physics</title>
     
     <!-- MediaPipe AI Models for Hand Tracking -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
@@ -102,7 +103,7 @@
             height: 500px;
             
             /* Initial CSS placement. Overwritten heavily by JS later */
-            transform: translate(-50%, -50%) translate3d(0px, 0px, -500px);
+            transform: translate(-50%, -50%) translate3d(0px, 0px, -500px) scale(1);
             
             /* Glassmorphism Design */
             background: rgba(15, 15, 20, 0.6);
@@ -115,7 +116,7 @@
             display: flex; 
             flex-direction: column; 
             overflow: hidden;
-            will-change: transform; 
+            will-change: transform, opacity, filter, border-radius; 
             transition: border-color 0.2s, box-shadow 0.2s; 
             pointer-events: auto;
         }
@@ -339,8 +340,8 @@
     <div id="start-screen">
         <h2 style="margin: 0; color:#00ffcc; font-size: 32px;">True VR OS Engine</h2>
         <p style="opacity: 0.8; text-align: center; max-width: 320px; line-height: 1.6; margin-top: 15px;">
-            <b>Spatial Fix Active:</b> Left/Right Yaw is now truly inverted. The window will anchor perfectly to your room.<br><br>
-            <b>Push/Pull Active:</b> Safely tracks palm size for flawless Z-Depth scaling.
+            <b>Inverse Spatial Lock:</b> Window remains anchored when turning head.<br><br>
+            <b>NEW - The Melt Shake:</b> Quickly shake/spin your wrist to melt the window and suck it into your eyes. Shake again to restore it.
         </p>
         <button class="launch-btn" onclick="initVR()">Boot System</button>
     </div>
@@ -356,7 +357,7 @@
             <div class="bar"></div>
             <div class="bar"></div>
         </div>
-        <span id="toast-text">Loading Audio...</span>
+        <span id="toast-text">System Active...</span>
     </div>
 
     <button id="recenter-btn" onclick="recenterAR()">Recenter Room</button>
@@ -373,7 +374,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Push/Pull arm to scale</p>
+                            <p>Shake wrist to melt & hide</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-left"></div>
                     </div>
@@ -392,7 +393,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Push/Pull arm to scale</p>
+                            <p>Shake wrist to melt & hide</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-right"></div>
                     </div>
@@ -483,14 +484,27 @@
         let pinchStartY = 0;
         let activeAction = null; 
         
-        // Memory variables to calculate deltas
         let initialBubbleX = 0;
         let initialBubbleY = 0;
         let initialBubbleZ = 0;
         let initialScrollTop = 0;
-        
-        // Palm size is used because fingers bend, making fingertip-based scaling buggy.
         let initialPalmSize = 0; 
+
+        /* ====================================================================
+           THE NEW MELT & SUCK ENGINE STATE
+        ==================================================================== */
+        let isSuckedIn = false;          // Tracks if the window is currently melted/sucked into eyes
+        let savedBubbleZ = -500;         // Remembers the depth so it can restore properly
+        
+        // Smooth scaling and opacity for the melt animation
+        let currentScale = 1.0;          
+        let targetScale = 1.0;
+        let currentOpacity = 1.0;
+        let targetOpacity = 1.0;
+
+        // Variables for detecting the rapid "Shake" gesture
+        let wristHistoryX = [];
+        let shakeCooldown = 0;
 
         /* ====================================================================
            MUSIC LIBRARY GENERATION
@@ -506,17 +520,13 @@
             { artist: "Childish Gambino", title: "Redbone", ytid: "Kp7eSUU9oy8" }
         ];
         
-        // We must populate exactly the same data to the left and right eyes
         function populateList(listElement) {
             for (let i = 0; i < 200; i++) {
                 const track = library[i % library.length];
                 const div = document.createElement('div');
                 div.className = 'song-item'; 
-                
-                // Keep track of the index so we can sync left/right eye clicks
                 div.dataset.index = i; 
                 div.dataset.ytid = track.ytid;
-                
                 div.innerHTML = `
                     <span class="song-title">${track.title}</span>
                     <span class="song-artist">${track.artist}</span>
@@ -529,10 +539,9 @@
         populateList(listRight);
 
         /* ====================================================================
-           THE GYROSCOPE FIX (True Inverse Logic)
+           THE GYROSCOPE (True Inverse Logic)
         ==================================================================== */
         function handleOrientation(e) {
-            // Lock the baseline on the first frame so the UI starts centered
             if (!isCalibrated) { 
                 baseAlpha = e.alpha || 0; 
                 baseBeta = e.beta || 0; 
@@ -540,83 +549,95 @@
                 isCalibrated = true; 
             }
             
-            // Calculate raw difference
             let dA = (e.alpha || 0) - baseAlpha;
             let dB = (e.beta || 0) - baseBeta;
             let dG = (e.gamma || 0) - baseGamma;
             
-            // Normalize Alpha wraparound
             if (dA > 180) { dA -= 360; } 
             if (dA < -180) { dA += 360; }
 
-            // Detect how the physical device is currently rotated
             let angle = (screen.orientation || {}).angle || window.orientation || 0;
-            
             let pitch, yaw, roll;
 
             // DYNAMIC AXIS REMAPPING
-            // When putting a phone into a VR headset, it is turned sideways (Landscape).
             if (angle === 90) {
-                // Phone is rotated left
                 pitch = dG;       
                 yaw = dA;         
                 roll = dB;        
             } else if (angle === -90 || angle === 270) {
-                // Phone is rotated right
                 pitch = -dG; 
                 yaw = dA; 
                 roll = -dB;
             } else {
-                // Standard Portrait Mode
                 pitch = dB; 
                 yaw = dA; 
                 roll = dG; 
             }
 
-            // ===========================================================
-            // THE CRITICAL FIX: TRUE INVERSE ROTATION
-            // If you look right (Yaw increases), the CSS World must 
-            // rotate LEFT (-Yaw) so the window stays anchored in place.
-            // ===========================================================
-            targetRotX = -pitch; // Look up -> World turns down
-            targetRotY = -yaw;   // Look right -> World turns left (FIXED HERE)
-            targetRotZ = -roll;  // Tilt right -> World tilts left
+            // TRUE INVERSE ROTATION: Both Pitch and Yaw are inverted
+            // so the window stays physically anchored in the room.
+            targetRotX = -pitch; 
+            targetRotY = -yaw;   
+            targetRotZ = -roll;  
         }
 
         function recenterAR() { 
             isCalibrated = false; 
             bubbleX = 0; 
             bubbleY = 0; 
-            targetBubbleZ = -500; 
+            
+            // Only reset depth if it's not currently sucked into eyes
+            if (!isSuckedIn) {
+                targetBubbleZ = -500; 
+                savedBubbleZ = -500;
+            }
+        }
+
+        function showToastMessage(msg) {
+            toastText.innerHTML = msg;
+            toast.style.top = "60px";
+            clearTimeout(window.toastTimeout);
+            window.toastTimeout = setTimeout(() => { toast.style.top = "-150px"; }, 3000);
         }
 
         /* ====================================================================
-           3D RENDER ENGINE (Physics and Parallax)
+           3D RENDER ENGINE (Physics, Parallax, and Melting)
         ==================================================================== */
         function animate3D() {
-            // Smoothly interpolate rotation to remove jitter
+            // 1. Interpolate Rotation
             currentRotX += (targetRotX - currentRotX) * 0.5;
             currentRotY += (targetRotY - currentRotY) * 0.5;
             currentRotZ += (targetRotZ - currentRotZ) * 0.5;
             
-            // Smoothly interpolate Z-depth Push/Pull
-            bubbleZ += (targetBubbleZ - bubbleZ) * 0.25; 
-
-            // Rotate both worlds synchronously
             const rotTransform = `rotateX(${currentRotX}deg) rotateY(${currentRotY}deg) rotateZ(${currentRotZ}deg)`;
             worldLeft.style.transform = rotTransform; 
             worldRight.style.transform = rotTransform;
             
-            // Calculate Base Translation (X, Y, and Depth)
+            // 2. Interpolate Z-depth and Melt Scale/Opacity
+            bubbleZ += (targetBubbleZ - bubbleZ) * 0.20; 
+            currentScale += (targetScale - currentScale) * 0.15;
+            currentOpacity += (targetOpacity - currentOpacity) * 0.15;
+
+            // 3. Calculate Dynamic Melt Effects
+            // As scale goes down to 0, blur goes up to 40px and radius becomes a perfect sphere (180px)
+            let meltBlur = (1.0 - currentScale) * 40; 
+            let meltRadius = 35 + ((1.0 - currentScale) * 145); 
+
+            // 4. Construct the physical location and scale of the window
             const baseBubbleTransform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px)`;
             
-            // APPLY STEREOSCOPIC VR PARALLAX
-            // By shifting the left eye slightly right, and the right eye slightly left,
-            // we force the user's eyes to converge, creating true stereoscopic 3D depth.
-            bubbleLeft.style.transform = baseBubbleTransform + ` translateX(15px)`;
-            bubbleRight.style.transform = baseBubbleTransform + ` translateX(-15px)`;
+            // 5. Apply Parallax, Scale, and Melt effects to Left Eye
+            bubbleLeft.style.transform = baseBubbleTransform + ` translateX(15px) scale(${currentScale})`;
+            bubbleLeft.style.opacity = currentOpacity;
+            bubbleLeft.style.filter = `blur(${meltBlur}px)`;
+            bubbleLeft.style.borderRadius = `${meltRadius}px`;
+
+            // 6. Apply Parallax, Scale, and Melt effects to Right Eye
+            bubbleRight.style.transform = baseBubbleTransform + ` translateX(-15px) scale(${currentScale})`;
+            bubbleRight.style.opacity = currentOpacity;
+            bubbleRight.style.filter = `blur(${meltBlur}px)`;
+            bubbleRight.style.borderRadius = `${meltRadius}px`;
             
-            // Loop engine
             requestAnimationFrame(animate3D);
         }
 
@@ -628,109 +649,159 @@
             const title = element.querySelector('.song-title').innerText;
             const artist = element.querySelector('.song-artist').innerText;
 
-            // Remove 'playing' class from all elements in both eyes
             Array.from(listLeft.children).forEach(el => el.classList.remove('playing'));
             Array.from(listRight.children).forEach(el => el.classList.remove('playing'));
             
-            // Add 'playing' class to the correct element in both eyes
             listLeft.children[index].classList.add('playing'); 
             listRight.children[index].classList.add('playing');
 
-            // Trigger YouTube Audio
             if(ytPlayer && ytPlayer.loadVideoById) {
                 ytPlayer.loadVideoById(element.dataset.ytid);
             }
 
-            // Update UI Toast
-            toastText.innerHTML = `<b>${title}</b> <span style="opacity:0.7; margin-left:8px;">${artist}</span>`;
-            toast.style.top = "60px";
+            showToastMessage(`<b>${title}</b> <span style="opacity:0.7; margin-left:8px;">${artist}</span>`);
         }
 
         /* ====================================================================
-           THE TRACKING ENGINE (Push/Pull Physics)
+           THE TRACKING ENGINE (Gestures, Push/Pull, and Shake)
         ==================================================================== */
         function onResults(results) {
-            // Half width for VR eyes
             const eyeW = window.innerWidth / 2;
             const eyeH = window.innerHeight;
             
-            // Update canvas dimensions
             ctxLeft.canvas.width = eyeW; 
             ctxLeft.canvas.height = eyeH; 
             ctxRight.canvas.width = eyeW; 
             ctxRight.canvas.height = eyeH;
             
-            // Clear previous frame
             ctxLeft.clearRect(0, 0, eyeW, eyeH); 
             ctxRight.clearRect(0, 0, eyeW, eyeH);
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                // Show cursors
-                curLeft.style.display = "block"; 
-                curRight.style.display = "block";
                 
                 const landmarks = results.multiHandLandmarks[0];
+                const wrist = landmarks[0];
                 
-                // Draw Wireframes to both eyes
+                // Draw Wireframes
                 drawConnectors(ctxLeft, landmarks, HAND_CONNECTIONS, {color: 'rgba(255,255,255,0.2)', lineWidth: 2});
                 drawLandmarks(ctxLeft, landmarks, {color: '#00ffcc', lineWidth: 0, radius: 3});
-                
                 drawConnectors(ctxRight, landmarks, HAND_CONNECTIONS, {color: 'rgba(255,255,255,0.2)', lineWidth: 2});
                 drawLandmarks(ctxRight, landmarks, {color: '#00ffcc', lineWidth: 0, radius: 3});
 
-                // Get key points
+                /* ==========================================
+                   1. THE MELT & SUCK "SHAKE" DETECTOR
+                ========================================== */
+                if (shakeCooldown > 0) shakeCooldown--;
+                
+                // Track wrist X history
+                wristHistoryX.push(wrist.x);
+                if (wristHistoryX.length > 15) {
+                    wristHistoryX.shift();
+                }
+                
+                // If we have enough history and are off cooldown, check for a rapid shake
+                if (shakeCooldown === 0 && wristHistoryX.length === 15) {
+                    let maxDelta = 0;
+                    let minDelta = 0;
+                    
+                    // Find the largest jump left and largest jump right
+                    for (let i = 1; i < wristHistoryX.length; i++) {
+                        let delta = wristHistoryX[i] - wristHistoryX[i - 1];
+                        if (delta > maxDelta) maxDelta = delta;
+                        if (delta < minDelta) minDelta = delta;
+                    }
+                    
+                    // If the wrist moved very fast left AND right (Shake or Twist)
+                    if (maxDelta > 0.03 && minDelta < -0.03) {
+                        
+                        // Toggle State
+                        isSuckedIn = !isSuckedIn;
+                        
+                        if (isSuckedIn) {
+                            // SUCK IN: Save current depth, pull into eyes (+600 Z), melt scale to 0
+                            savedBubbleZ = targetBubbleZ;
+                            targetBubbleZ = 600; 
+                            targetScale = 0.0;
+                            targetOpacity = 0.0;
+                            
+                            showToastMessage(`Window Melted. Shake again to restore.`);
+                            
+                            // Drop whatever we were holding
+                            isPinching = false;
+                            activeAction = null;
+                            curLeft.classList.remove('pinching'); 
+                            curRight.classList.remove('pinching');
+                            bubbleLeft.classList.remove('bubble-dragging'); 
+                            bubbleRight.classList.remove('bubble-dragging');
+                        } else {
+                            // COME OUT: Restore saved depth, scale back to 1
+                            targetBubbleZ = savedBubbleZ;
+                            targetScale = 1.0;
+                            targetOpacity = 1.0;
+                            
+                            showToastMessage(`Window Restored.`);
+                        }
+                        
+                        // Prevent triggering again immediately
+                        shakeCooldown = 60; 
+                        wristHistoryX = []; 
+                    }
+                }
+
+                // If the window is sucked in, we STOP executing raycasting and pinching.
+                // The lasers disappear, and the user can only shake to restore.
+                if (isSuckedIn) {
+                    curLeft.style.display = "none"; 
+                    curRight.style.display = "none";
+                    return; // Exit the tracking function early!
+                }
+
+                /* ==========================================
+                   2. NORMAL INTERACTION & LASER POINTER
+                ========================================== */
+                curLeft.style.display = "block"; 
+                curRight.style.display = "block";
+
                 const indexFinger = landmarks[8];
                 const thumbFinger = landmarks[4];
-                
-                /* ==========================================
-                   THE STABLE PUSH/PULL METRIC
-                ========================================== */
-                // We calculate the rigid palm size using wrist, index base, and pinky base.
-                const wrist = landmarks[0];
                 const indexBase = landmarks[5];
                 const pinkyBase = landmarks[17];
                 
+                // Calculate palm size for Z-Depth Push/Pull
                 const currentPalmSize = Math.hypot(wrist.x - indexBase.x, wrist.y - indexBase.y) + 
                                         Math.hypot(wrist.x - pinkyBase.x, wrist.y - pinkyBase.y);
 
-                // Map normalized coordinates to screen pixel dimensions
                 const rawX = indexFinger.x * eyeW; 
                 const rawY = indexFinger.y * eyeH;
                 
-                // Interpolate cursor to eliminate AI tracking jitter
                 smoothCursorX += (rawX - smoothCursorX) * 0.35; 
                 smoothCursorY += (rawY - smoothCursorY) * 0.35;
 
-                // Update cursor DOM positions
                 curLeft.style.left = smoothCursorX + 'px'; 
                 curLeft.style.top = smoothCursorY + 'px';
                 curRight.style.left = smoothCursorX + 'px'; 
                 curRight.style.top = smoothCursorY + 'px';
 
-                // Check distance between index and thumb to detect a pinch
                 const pinchDistance = Math.hypot(indexFinger.x - thumbFinger.x, indexFinger.y - thumbFinger.y);
-                const pinchThreshold = isPinching ? 0.055 : 0.040; // Hysteresis threshold
+                const pinchThreshold = isPinching ? 0.055 : 0.040; 
                 const currentlyPinching = pinchDistance < pinchThreshold;
 
-                // Perform Raycasting using the left cursor coordinate
                 curLeft.style.pointerEvents = 'none'; 
                 const hitElement = document.elementFromPoint(smoothCursorX, smoothCursorY);
 
-                // Handle Hover UI Logic
+                // Hover Logic
                 document.querySelectorAll('.ar-hover').forEach(el => el.classList.remove('ar-hover'));
                 if (hitElement && hitElement.closest('.song-item') && !isPinching) {
                     const songIndex = hitElement.closest('.song-item').dataset.index;
-                    
-                    // Apply hover class to both eyes
                     listLeft.children[songIndex].classList.add('ar-hover'); 
                     listRight.children[songIndex].classList.add('ar-hover');
                 }
 
                 /* ==========================================
-                   INTERACTION STATE MACHINE
+                   3. INTERACTION STATE MACHINE
                 ========================================== */
                 if (currentlyPinching && !isPinching) {
-                    // --- 1. PINCH START ---
+                    // PINCH START
                     isPinching = true;
                     curLeft.classList.add('pinching'); 
                     curRight.classList.add('pinching');
@@ -738,12 +809,10 @@
                     pinchStartX = smoothCursorX; 
                     pinchStartY = smoothCursorY; 
                     
-                    // Lock in the baseline palm size for depth measuring
                     initialPalmSize = currentPalmSize; 
 
                     if (hitElement) {
                         if (hitElement.closest('.header')) {
-                            // User grabbed the header -> Drag Mode
                             activeAction = 'drag';
                             bubbleLeft.classList.add('bubble-dragging'); 
                             bubbleRight.classList.add('bubble-dragging');
@@ -752,7 +821,6 @@
                             initialBubbleY = bubbleY; 
                             initialBubbleZ = bubbleZ; 
                         } else if (hitElement.closest('.song-list')) {
-                            // User grabbed the list -> Scroll Mode
                             activeAction = 'scroll';
                             listLeft.classList.add('list-scrolling'); 
                             listRight.classList.add('list-scrolling');
@@ -761,41 +829,36 @@
                     }
                 } 
                 else if (currentlyPinching && isPinching) {
-                    // --- 2. PINCH HOLD / MOVE ---
+                    // PINCH HOLD / MOVE
                     const deltaX = smoothCursorX - pinchStartX; 
                     const deltaY = smoothCursorY - pinchStartY;
 
                     if (activeAction === 'drag') {
-                        // Move X and Y coordinates 
+                        // Drag X/Y
                         bubbleX = initialBubbleX + (deltaX * 1.8);
                         bubbleY = initialBubbleY + (deltaY * 1.8);
                         
-                        // PERFECT Z-DEPTH PUSH AND PULL LOGIC
-                        // Difference between palm size when grabbed vs right now.
+                        // Push/Pull Z-Depth
                         const scaleDiff = currentPalmSize - initialPalmSize;
-                        
-                        // Multiply difference to translate deep into 3D Space
                         let newZ = initialBubbleZ + (scaleDiff * 8000); 
                         
-                        // Hard physical limits so the window doesn't break perspective
-                        if (newZ > -250) { newZ = -250; }   // Maximum Close limit
-                        if (newZ < -1500) { newZ = -1500; } // Maximum Far limit
+                        if (newZ > -250) { newZ = -250; }   
+                        if (newZ < -1500) { newZ = -1500; } 
                         
                         targetBubbleZ = newZ;
 
                     } else if (activeAction === 'scroll') {
-                        // Scroll logic - multiplier of 8.0 for effortless kinetic sliding
+                        // Kinetic Scroll
                         const newScroll = initialScrollTop - (deltaY * 8.0);
                         listLeft.scrollTop = newScroll; 
                         listRight.scrollTop = newScroll;
                     }
                 } 
                 else if (!currentlyPinching && isPinching) {
-                    // --- 3. PINCH RELEASE ---
+                    // PINCH RELEASE
                     isPinching = false; 
                     activeAction = null;
                     
-                    // Reset styling
                     curLeft.classList.remove('pinching'); 
                     curRight.classList.remove('pinching');
                     bubbleLeft.classList.remove('bubble-dragging'); 
@@ -803,7 +866,7 @@
                     listLeft.classList.remove('list-scrolling'); 
                     listRight.classList.remove('list-scrolling');
                     
-                    // Detect if this was a quick "Tap" action instead of a drag
+                    // Detect Quick Tap
                     const moveDistance = Math.hypot(smoothCursorX - pinchStartX, smoothCursorY - pinchStartY);
 
                     if (hitElement && hitElement.closest('.song-item') && moveDistance < 30) {
@@ -811,7 +874,7 @@
                     }
                 }
             } else {
-                // If hand is lost, reset everything to safe defaults
+                // If hand is completely off screen
                 curLeft.style.display = "none"; 
                 curRight.style.display = "none";
                 isPinching = false; 
@@ -827,30 +890,27 @@
            SYSTEM BOOT SEQUENCE
         ==================================================================== */
         async function initVR() {
-            startScreen.innerHTML = "<h3>Booting...</h3>";
+            startScreen.innerHTML = "<h3>Booting OS...</h3>";
             
-            // Attempt to un-mute YouTube player (Mobile browser requirement)
+            // Unmute YouTube audio engine
             if(ytPlayer && ytPlayer.playVideo) { 
                 ytPlayer.playVideo(); 
                 setTimeout(() => ytPlayer.pauseVideo(), 100); 
             }
 
-            // Request Gyroscope permissions (Crucial for iOS devices)
+            // Gyro Permissions
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try { 
                     const permissionResponse = await DeviceOrientationEvent.requestPermission(); 
                     if (permissionResponse === 'granted') {
                         window.addEventListener('deviceorientation', handleOrientation); 
                     }
-                } catch(e) { 
-                    console.error("Gyroscope error:", e);
-                }
+                } catch(e) { console.error("Gyroscope error:", e); }
             } else { 
-                // Android / Desktop fallback
                 window.addEventListener('deviceorientation', handleOrientation); 
             }
 
-            // Initialize MediaPipe AI
+            // Initialize MediaPipe AI Hand Tracker
             const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
             
             hands.setOptions({ 
@@ -863,7 +923,7 @@
             hands.onResults(onResults);
 
             try {
-                // Access Rear-Facing hardware camera
+                // Open Camera Stream
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         facingMode: "environment", 
@@ -872,23 +932,20 @@
                     } 
                 });
                 
-                // Pipe stream to all video processors
                 procVideo.srcObject = stream; 
                 vidLeft.srcObject = stream; 
                 vidRight.srcObject = stream;
                 
-                // Wait for video meta data to finish loading
                 procVideo.onloadedmetadata = () => {
                     procVideo.play(); 
                     
-                    // Reveal interface
                     startScreen.style.display = "none"; 
                     document.getElementById('recenter-btn').style.display = "block";
                     
-                    // Start render engine
                     animate3D();
+                    showToastMessage(`System Online. Welcome.`);
                     
-                    // Process video frames rapidly for AI
+                    // Render Loop
                     async function loop() {
                         if (!procVideo.paused) {
                             await hands.send({image: procVideo});
@@ -909,3 +966,6 @@
     </script>
 </body>
 </html>
+
+
+```
