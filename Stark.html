@@ -4,305 +4,297 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Air-Press VR Passthrough</title>
+    <title>AI Hand VR Passthrough</title>
+    <!-- Load MediaPipe Hand Tracking Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
-        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: white; font-family: 'Courier New', Courier, monospace; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; color: #00dfff; font-family: 'Courier New', monospace; }
         
-        canvas { display: block; width: 100vw; height: 100vh; }
+        canvas { display: block; width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; }
         video { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 
-        /* The Gaze Reticle (Center Crosshair for both eyes) */
-        .reticle {
-            position: fixed;
-            top: 50%;
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(0, 255, 255, 0.5);
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 5000;
-            pointer-events: none;
-        }
-        #reticle-l { left: 25%; }
-        #reticle-r { left: 75%; }
-
-        /* The "Air" Menu Trigger */
-        .air-trigger {
-            position: fixed;
-            top: 60%;
-            width: 100px;
-            height: 100px;
-            background: rgba(0, 150, 255, 0.1);
-            border: 1px dashed rgba(0, 255, 255, 0.4);
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s ease;
-        }
-        #trigger-l { left: 25%; }
-        #trigger-r { left: 75%; }
-
-        /* Dwell Progress Bar */
-        .dwell-progress {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            border: 4px solid #00dfff;
-            border-top-color: transparent;
-            opacity: 0;
-            transform: rotate(0deg);
+        /* AI Status Indicators */
+        #status-bar {
+            position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+            z-index: 5000; font-size: 10px; background: rgba(0,0,0,0.5); padding: 5px 15px;
+            border-radius: 20px; border: 1px solid #00dfff; pointer-events: none;
+            display: flex; gap: 10px;
         }
 
-        /* Holographic Settings Menu (Side-by-Side) */
-        .hologram-container {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 2000;
-            pointer-events: auto;
+        /* Interactive Air Buttons */
+        .air-button {
+            position: fixed; top: 65%; width: 120px; height: 120px;
+            border: 2px dashed rgba(0, 223, 255, 0.3); border-radius: 50%;
+            transform: translate(-50%, -50%); z-index: 1000;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            transition: all 0.3s ease; pointer-events: none;
         }
-        .eye-panel {
-            position: absolute;
-            top: 50%;
-            width: 40%;
-            height: 60%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 40, 80, 0.4);
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(0, 200, 255, 0.5);
-            padding: 20px;
-            box-shadow: 0 0 50px rgba(0, 100, 255, 0.3);
-            /* scanline effect */
-            background-image: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.2) 50%);
-            background-size: 100% 4px;
-            overflow: hidden;
+        #btn-l { left: 25%; }
+        #btn-r { left: 75%; }
+
+        .btn-label { font-size: 9px; margin-top: 5px; letter-spacing: 2px; }
+        
+        /* The Dwell/Charge Ring */
+        .charge-ring {
+            position: absolute; width: 100%; height: 100%;
+            border-radius: 50%; border: 4px solid #00dfff;
+            border-top-color: transparent; opacity: 0;
+            transform: rotate(0deg); transition: opacity 0.2s;
+        }
+
+        /* Hologram Menu */
+        #hologram {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 4000; pointer-events: auto;
+        }
+        .panel {
+            position: absolute; top: 50%; width: 42%; height: 65%;
+            transform: translate(-50%, -50%); background: rgba(0, 30, 60, 0.6);
+            backdrop-filter: blur(10px); border: 2px solid #00dfff; padding: 20px;
+            box-shadow: 0 0 40px rgba(0, 223, 255, 0.4);
+            background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0, 223, 255, 0.05) 3px);
         }
         #panel-l { left: 25%; }
         #panel-r { left: 75%; }
 
-        h2 { color: #00dfff; text-shadow: 0 0 10px #00dfff; margin-bottom: 15px; font-size: 14px; text-transform: uppercase; }
-        .row { margin-bottom: 15px; }
-        label { display: block; font-size: 10px; margin-bottom: 5px; color: #00dfff; }
-        
-        input[type=range] { width: 100%; appearance: none; background: rgba(0, 200, 255, 0.2); height: 3px; }
-        input[type=range]::-webkit-slider-thumb { appearance: none; width: 15px; height: 15px; background: #00dfff; border-radius: 50%; box-shadow: 0 0 8px #00dfff; }
+        .control-row { margin-bottom: 25px; }
+        label { display: block; font-size: 11px; margin-bottom: 10px; text-transform: uppercase; }
+        input[type=range] { width: 100%; appearance: none; background: rgba(0, 223, 255, 0.2); height: 4px; border-radius: 2px; }
+        input[type=range]::-webkit-slider-thumb { appearance: none; width: 22px; height: 22px; background: #00dfff; border-radius: 50%; box-shadow: 0 0 15px #00dfff; }
 
-        .btn {
-            width: 100%; padding: 8px; margin-top: 5px; font-size: 10px; font-weight: bold;
-            background: rgba(0, 200, 255, 0.1); border: 1px solid #00dfff; color: #00dfff; text-transform: uppercase;
+        .action-btn {
+            width: 100%; padding: 12px; margin-top: 10px; font-weight: bold; font-family: inherit;
+            background: rgba(0, 223, 255, 0.1); border: 1px solid #00dfff; color: #00dfff; cursor: pointer;
         }
-        .btn-red { border-color: #ff3232; color: #ff3232; background: rgba(255, 50, 50, 0.1); }
+        .action-btn:active { background: #00dfff; color: #000; }
 
-        #overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000;
-            display: flex; align-items: center; justify-content: center; z-index: 9000;
+        #boot-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 9999; display: flex; align-items: center; justify-content: center;
         }
     </style>
 </head>
 <body>
 
-    <div id="overlay" onclick="start()">
-        <div style="text-align:center;">
-            <h1>VR INITIALIZED</h1>
-            <p style="margin-top:10px; opacity:0.5;">TAP TO ENTER PASSTHROUGH</p>
+    <div id="boot-screen" onclick="initApp()">
+        <div style="text-align: center;">
+            <h1 style="font-size: 18px; letter-spacing: 5px;">AI_PASSTHROUGH_OS</h1>
+            <p style="margin-top: 20px; color: #aaa; font-size: 10px;">[ TAP TO CONNECT NEURAL INTERFACE ]</p>
         </div>
     </div>
 
-    <!-- Reticles -->
-    <div class="reticle" id="reticle-l"></div>
-    <div class="reticle" id="reticle-r"></div>
-
-    <!-- Air Triggers -->
-    <div class="air-trigger" id="trigger-l">
-        <div class="dwell-progress" id="prog-l"></div>
-        <span style="font-size: 8px; color: #00dfff;">AIR PRESS</span>
-    </div>
-    <div class="air-trigger" id="trigger-r">
-        <div class="dwell-progress" id="prog-r"></div>
-        <span style="font-size: 8px; color: #00dfff;">AIR PRESS</span>
+    <div id="status-bar">
+        <span>CAM: <span id="cam-status" style="color: #0f0;">OFF</span></span>
+        <span>AI_HANDS: <span id="ai-status" style="color: #f00;">INIT</span></span>
     </div>
 
-    <!-- Hologram Panels -->
-    <div class="hologram-container" id="menu">
-        <!-- Left Eye Panel -->
-        <div class="eye-panel" id="panel-l">
-            <h2>SYS_SETTINGS</h2>
-            <div class="row">
-                <label id="fov-l">FOV: 1.0</label>
-                <input type="range" class="fov-sync" min="0.5" max="2.0" step="0.01" value="1.0">
+    <!-- Dual Eye Buttons -->
+    <div class="air-button" id="btn-l">
+        <div class="charge-ring" id="ring-l"></div>
+        <div style="width: 10px; height: 10px; border: 1px solid #00dfff; border-radius: 50%;"></div>
+        <span class="btn-label">AIR MENU</span>
+    </div>
+    <div class="air-button" id="btn-r">
+        <div class="charge-ring" id="ring-r"></div>
+        <div style="width: 10px; height: 10px; border: 1px solid #00dfff; border-radius: 50%;"></div>
+        <span class="btn-label">AIR MENU</span>
+    </div>
+
+    <!-- Side-by-Side Hologram -->
+    <div id="hologram">
+        <div class="panel" id="panel-l">
+            <h2 style="font-size: 14px; margin-bottom: 20px;">SYSTEM CONFIG</h2>
+            <div class="control-row">
+                <label id="fov-lbl-l">FOV SENSOR: 1.0x</label>
+                <input type="range" class="fov-sync" min="0.5" max="1.5" step="0.01" value="1.0">
             </div>
-            <div class="row">
-                <label id="br-l">BRIGHTNESS: 1.0</label>
+            <div class="control-row">
+                <label id="br-lbl-l">EXPOSURE: 1.0x</label>
                 <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
             </div>
-            <button class="btn talk-nova">Nova Assist</button>
-            <button class="btn btn-red close-menu">Close Link</button>
+            <button class="action-btn talk-btn">SUMMON NOVA</button>
+            <button class="action-btn" id="close-l" style="border-color: #ff3232; color: #ff3232;">SHUTDOWN MENU</button>
         </div>
-        <!-- Right Eye Panel -->
-        <div class="eye-panel" id="panel-r">
-            <h2>SYS_SETTINGS</h2>
-            <div class="row">
-                <label id="fov-r">FOV: 1.0</label>
-                <input type="range" class="fov-sync" min="0.5" max="2.0" step="0.01" value="1.0">
+        <div class="panel" id="panel-r">
+            <h2 style="font-size: 14px; margin-bottom: 20px;">SYSTEM CONFIG</h2>
+            <div class="control-row">
+                <label id="fov-lbl-r">FOV SENSOR: 1.0x</label>
+                <input type="range" class="fov-sync" min="0.5" max="1.5" step="0.01" value="1.0">
             </div>
-            <div class="row">
-                <label id="br-r">BRIGHTNESS: 1.0</label>
+            <div class="control-row">
+                <label id="br-lbl-r">EXPOSURE: 1.0x</label>
                 <input type="range" class="br-sync" min="0.2" max="3.0" step="0.05" value="1.0">
             </div>
-            <button class="btn talk-nova">Nova Assist</button>
-            <button class="btn btn-red close-menu">Close Link</button>
+            <button class="action-btn talk-btn">SUMMON NOVA</button>
+            <button class="action-btn" id="close-r" style="border-color: #ff3232; color: #ff3232;">SHUTDOWN MENU</button>
         </div>
     </div>
 
-    <video id="v" autoplay playsinline muted></video>
-    <canvas id="c"></canvas>
+    <video id="webcam" playsinline></video>
+    <canvas id="glCanvas"></canvas>
 
     <script>
-        const video = document.getElementById('v');
-        const canvas = document.getElementById('c');
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('glCanvas');
         const gl = canvas.getContext('webgl');
         
-        let fovValue = 1.0, brightnessValue = 1.0, assistantVolume = 0.5;
-        let isGazing = false, dwellStartTime = 0;
+        let fov = 1.0, brightness = 1.0, isMenuOpen = false;
+        let dwellTime = 0, lastTime = Date.now();
 
-        const vs = `attribute vec2 pos; varying vec2 vTexCoord; uniform float fov; void main() { vTexCoord = pos * 0.5 + 0.5; vTexCoord.y = 1.0 - vTexCoord.y; gl_Position = vec4(pos * fov, 0.0, 1.0); }`;
-        const fs = `precision mediump float; uniform sampler2D tex; uniform float brightness; varying vec2 vTexCoord; void main() { vec2 uv = vTexCoord; if(uv.x < 0.5) uv.x *= 2.0; else uv.x = (uv.x - 0.5) * 2.0; vec4 color = texture2D(tex, uv); gl_FragColor = vec4(color.rgb * brightness, 1.0); }`;
-
-        function createShader(gl, type, source) {
-            const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); return s;
-        }
+        // WebGL Setup
+        const vs = `attribute vec2 pos; varying vec2 vTex; uniform float fov; void main() { vTex = pos * 0.5 + 0.5; vTex.y = 1.0 - vTex.y; gl_Position = vec4(pos * fov, 0.0, 1.0); }`;
+        const fs = `precision mediump float; uniform sampler2D t; uniform float b; varying vec2 vTex; void main() { vec2 uv = vTex; if(uv.x < 0.5) uv.x *= 2.0; else uv.x = (uv.x - 0.5) * 2.0; vec4 c = texture2D(t, uv); gl_FragColor = vec4(c.rgb * b, 1.0); }`;
 
         const program = gl.createProgram();
-        gl.attachShader(program, createShader(gl, gl.VERTEX_SHADER, vs));
-        gl.attachShader(program, createShader(gl, gl.FRAGMENT_SHADER, fs));
+        const createS = (t, s) => { const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh); return sh; };
+        gl.attachShader(program, createS(gl.VERTEX_SHADER, vs));
+        gl.attachShader(program, createS(gl.FRAGMENT_SHADER, fs));
         gl.linkProgram(program); gl.useProgram(program);
 
         const fovLoc = gl.getUniformLocation(program, 'fov');
-        const brightLoc = gl.getUniformLocation(program, 'brightness');
-        const buffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const brLoc = gl.getUniformLocation(program, 'b');
+        const buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
         gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, -1,1, 1,-1, 1,1]), gl.STATIC_DRAW);
-        const posLoc = gl.getAttribLocation(program, 'pos');
-        gl.enableVertexAttribArray(posLoc);
-        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+        const pLoc = gl.getAttribLocation(program, 'pos');
+        gl.enableVertexAttribArray(pLoc);
+        gl.vertexAttribPointer(pLoc, 2, gl.FLOAT, false, 0, 0);
 
-        const texture = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, texture);
+        const tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 
-        async function start() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 1280, height: 720 } });
-                video.srcObject = stream;
-                await video.play();
-                document.getElementById('overlay').style.display = 'none';
-                requestAnimationFrame(render);
-            } catch (e) { alert("Camera Error"); }
+        // MediaPipe Integration
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        function onResults(results) {
+            document.getElementById('ai-status').innerText = "TRACKING";
+            document.getElementById('ai-status').style.color = "#0f0";
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0 && !isMenuOpen) {
+                const hand = results.multiHandLandmarks[0];
+                const indexFinger = hand[8]; // Landmark 8 is Index Finger Tip
+
+                // Check if finger is hovering over the center-ish area (normalized coordinates)
+                // Since it's split screen, we check both halves or just the center
+                const fingerX = indexFinger.x;
+                const fingerY = indexFinger.y;
+
+                // Hitbox for the AIR PRESS buttons (roughly center-bottom)
+                if (fingerY > 0.55 && fingerY < 0.75 && fingerX > 0.2 && fingerX < 0.8) {
+                    dwellTime += (Date.now() - lastTime);
+                    updateDwellUI(true);
+                    if (dwellTime > 1000) {
+                        openMenu();
+                    }
+                } else {
+                    dwellTime = 0;
+                    updateDwellUI(false);
+                }
+            } else {
+                dwellTime = 0;
+                updateDwellUI(false);
+            }
+            lastTime = Date.now();
         }
 
-        function render(time) {
-            canvas.width = window.innerWidth * window.devicePixelRatio;
-            canvas.height = window.innerHeight * window.devicePixelRatio;
-            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        function updateDwellUI(active) {
+            const rings = [document.getElementById('ring-l'), document.getElementById('ring-r')];
+            if (active) {
+                const percent = Math.min(dwellTime / 1000, 1);
+                rings.forEach(r => {
+                    r.style.opacity = 1;
+                    r.style.transform = `rotate(${percent * 360}deg)`;
+                    r.parentElement.style.borderColor = "rgba(0, 223, 255, 0.8)";
+                    r.parentElement.style.background = "rgba(0, 223, 255, 0.2)";
+                });
+            } else {
+                rings.forEach(r => {
+                    r.style.opacity = 0;
+                    r.parentElement.style.borderColor = "rgba(0, 223, 255, 0.3)";
+                    r.parentElement.style.background = "transparent";
+                });
+            }
+        }
 
-            gl.uniform1f(fovLoc, fovValue);
-            gl.uniform1f(brightLoc, brightnessValue);
+        async function initApp() {
+            document.getElementById('boot-screen').style.display = 'none';
+            try {
+                const camera = new Camera(video, {
+                    onFrame: async () => { await hands.send({image: video}); },
+                    width: 1280, height: 720, facingMode: 'environment'
+                });
+                camera.start();
+                document.getElementById('cam-status').innerText = "READY";
+                requestAnimationFrame(renderLoop);
+            } catch (e) { alert("Permission Denied."); }
+        }
+
+        function renderLoop() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+            gl.uniform1f(fovLoc, fov);
+            gl.uniform1f(brLoc, brightness);
             gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
             gl.drawArrays(gl.TRIANGLES, 0, 6);
-
-            handleGaze(time);
-            requestAnimationFrame(render);
+            requestAnimationFrame(renderLoop);
         }
 
-        // --- THE "AIR PRESS" LOGIC ---
-        // Since we can't track hands easily, we simulate "looking" as the press trigger.
-        function handleGaze(time) {
-            const menu = document.getElementById('menu');
-            if (menu.style.display === 'block') return; // Don't track while menu is open
-
-            // In VR, the "buttons" are fixed on the screen, but the background camera moves.
-            // When you look up/down, the buttons align with your center reticle.
-            // For this demo, since we want an "air press", you just hold the center on the button.
-            
-            // To make it feel interactive, the user must tap the screen *while* looking at the button
-            // OR we use the "Dwell" timer (Gaze interaction).
-            
-            // Let's use Dwell. The triggers are at 60% top.
-            // We simulate gaze by checking if the user is holding the phone steady.
-            // Actual VR apps use Gyroscope for this.
+        function openMenu() {
+            isMenuOpen = true;
+            document.getElementById('hologram').style.display = 'block';
+            document.getElementById('btn-l').style.display = 'none';
+            document.getElementById('btn-r').style.display = 'none';
+            const msg = new SpeechSynthesisUtterance("System settings unlocked. User interface deployed.");
+            window.speechSynthesis.speak(msg);
         }
 
-        // We use click on the "Air Trigger" to simulate reaching out and pressing the floating UI.
-        document.querySelectorAll('.air-trigger').forEach(t => {
-            t.addEventListener('touchstart', (e) => {
-                e.preventDefault();
-                const progL = document.getElementById('prog-l');
-                const progR = document.getElementById('prog-r');
-                progL.style.opacity = 1; progR.style.opacity = 1;
-                
-                let start = Date.now();
-                let interval = setInterval(() => {
-                    let elapsed = Date.now() - start;
-                    let p = (elapsed / 800) * 360;
-                    progL.style.transform = `rotate(${p}deg)`;
-                    progR.style.transform = `rotate(${p}deg)`;
-                    
-                    if (elapsed >= 800) {
-                        clearInterval(interval);
-                        document.getElementById('menu').style.display = 'block';
-                        document.querySelectorAll('.air-trigger').forEach(at => at.style.display = 'none');
-                        progL.style.opacity = 0; progR.style.opacity = 0;
-                    }
-                }, 16);
+        function closeMenu() {
+            isMenuOpen = false;
+            document.getElementById('hologram').style.display = 'none';
+            document.getElementById('btn-l').style.display = 'flex';
+            document.getElementById('btn-r').style.display = 'flex';
+            dwellTime = 0;
+        }
 
-                t.addEventListener('touchend', () => {
-                    clearInterval(interval);
-                    progL.style.opacity = 0; progR.style.opacity = 0;
-                }, {once: true});
-            });
-        });
+        // Settings Logic
+        document.querySelectorAll('.fov-sync').forEach(s => s.addEventListener('input', (e) => {
+            fov = e.target.value;
+            document.querySelectorAll('.fov-sync').forEach(i => i.value = fov);
+            document.getElementById('fov-lbl-l').innerText = `FOV SENSOR: ${Number(fov).toFixed(2)}x`;
+            document.getElementById('fov-lbl-r').innerText = `FOV SENSOR: ${Number(fov).toFixed(2)}x`;
+        }));
 
-        // Syncing both eye settings
-        document.querySelectorAll('.fov-sync').forEach(s => {
-            s.addEventListener('input', (e) => {
-                fovValue = e.target.value;
-                document.querySelectorAll('.fov-sync').forEach(el => el.value = fovValue);
-                document.getElementById('fov-l').innerText = `FOV: ${fovValue}`;
-                document.getElementById('fov-r').innerText = `FOV: ${fovValue}`;
-            });
-        });
+        document.querySelectorAll('.br-sync').forEach(s => s.addEventListener('input', (e) => {
+            brightness = e.target.value;
+            document.querySelectorAll('.br-sync').forEach(i => i.value = brightness);
+            document.getElementById('br-lbl-l').innerText = `EXPOSURE: ${Number(brightness).toFixed(2)}x`;
+            document.getElementById('br-lbl-r').innerText = `EXPOSURE: ${Number(brightness).toFixed(2)}x`;
+        }));
 
-        document.querySelectorAll('.br-sync').forEach(s => {
-            s.addEventListener('input', (e) => {
-                brightnessValue = e.target.value;
-                document.querySelectorAll('.br-sync').forEach(el => el.value = brightnessValue);
-                document.getElementById('br-l').innerText = `BRIGHTNESS: ${brightnessValue}`;
-                document.getElementById('br-r').innerText = `BRIGHTNESS: ${brightnessValue}`;
-            });
-        });
+        document.querySelectorAll('.talk-btn').forEach(b => b.addEventListener('click', () => {
+            window.speechSynthesis.speak(new SpeechSynthesisUtterance("Nova active. Systems optimal. Point your finger to interact."));
+        }));
 
-        document.querySelectorAll('.close-menu').forEach(b => {
-            b.addEventListener('click', () => {
-                document.getElementById('menu').style.display = 'none';
-                document.querySelectorAll('.air-trigger').forEach(at => at.style.display = 'flex');
-            });
-        });
-
-        document.querySelectorAll('.talk-nova').forEach(b => {
-            b.addEventListener('click', () => {
-                const msg = new SpeechSynthesisUtterance("Neural link established. Settings updated.");
-                window.speechSynthesis.speak(msg);
-            });
-        });
-
-        window.addEventListener('resize', () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; });
+        document.getElementById('close-l').onclick = closeMenu;
+        document.getElementById('close-r').onclick = closeMenu;
     </script>
 </body>
 </html>
