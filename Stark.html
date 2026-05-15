@@ -1,15 +1,17 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <!-- Prevent zooming to keep AR scale accurate -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VR Spatial OS - Smooth Wave Edition</title>
+    <title>VR Spatial OS - Perfect Physics</title>
     
-    <!-- MediaPipe AI Models -->
+    <!-- MediaPipe AI Models for Hand Tracking -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     
-    <!-- YouTube API -->
+    <!-- YouTube API for Full Song Playback Streaming -->
     <script src="https://www.youtube.com/iframe_api"></script>
 
     <style>
@@ -97,13 +99,18 @@
             top: 50%;
             width: 320px; 
             height: 500px;
+            
+            /* Initial CSS placement. Overwritten heavily by JS later */
             transform: translate(-50%, -50%) translate3d(0px, 0px, -500px) scale(1) rotateZ(0deg);
+            
+            /* Glassmorphism Design */
             background: rgba(10, 15, 25, 0.90);
             backdrop-filter: blur(8px); 
             -webkit-backdrop-filter: blur(8px);
             border: 1px solid rgba(0, 255, 204, 0.2); 
             border-radius: 35px;
             box-shadow: 0 40px 80px rgba(0,0,0,0.9), inset 0 2px 20px rgba(0,255,204,0.05);
+            
             display: flex; 
             flex-direction: column; 
             overflow: hidden;
@@ -112,6 +119,7 @@
             pointer-events: auto;
         }
 
+        /* Visual glow when the user pinches the header to move it */
         .bubble.bubble-dragging { 
             border-color: #00ffcc; 
             box-shadow: 0 0 60px rgba(0, 255, 204, 0.4), inset 0 0 20px rgba(0, 255, 204, 0.2); 
@@ -135,6 +143,7 @@
             will-change: left, top; 
         }
 
+        /* Shrinks down and glows brightly when fingers are pinched */
         .ar-cursor.pinching { 
             width: 10px; 
             height: 10px; 
@@ -143,6 +152,7 @@
             border-color: #fff;
         }
 
+        /* Layer for rendering the MediaPipe Hologram skeleton */
         .hand-canvas { 
             position: absolute; 
             top: 0; 
@@ -154,10 +164,11 @@
         }
 
         /* =========================================
-           UI ELEMENTS
+           UI ELEMENTS (HEADER & LIST)
         ========================================= */
         .header {
-            padding: 18px 20px 20px; 
+            /* Increased padding so it is much easier to grab */
+            padding: 25px 20px 25px; 
             background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0));
             text-align: center; 
             border-bottom: 1px solid rgba(0,255,204,0.1);
@@ -234,7 +245,7 @@
         }
 
         /* =========================================
-           OVERLAYS
+           MENUS AND OVERLAYS
         ========================================= */
         #start-screen {
             position: fixed; 
@@ -335,8 +346,9 @@
     <div id="start-screen">
         <h2 style="margin: 0; color:#00ffcc; font-size: 32px;">VR Spatial OS</h2>
         <p style="opacity: 0.8; text-align: center; max-width: 320px; line-height: 1.6; margin-top: 15px;">
-            <b>Permissions Required:</b> You will be asked for Sensor and Camera access to enable the AR features.<br><br>
-            <b>The Wave Effect:</b> Wave goodbye (swipe hand left/right 3 times) to magically suck the window into your eyes.
+            <b>Gimbal Lock Fixed:</b> No more 360-degree spins when looking up or down.<br><br>
+            <b>Squish to Melt:</b> Make a fist to squish the window away.<br>
+            <b>Hold Open Palm:</b> Hold palm open for 2 seconds to restore.<br>
         </p>
         <button class="launch-btn" onclick="initVR()">Request Permissions</button>
     </div>
@@ -367,7 +379,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Wave goodbye to hide</p>
+                            <p>Squish to hide window</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-left"></div>
                     </div>
@@ -386,7 +398,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Wave goodbye to hide</p>
+                            <p>Squish to hide window</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-right"></div>
                     </div>
@@ -448,11 +460,12 @@
         let baseGamma = 0;
         let isCalibrated = false;
 
-        // Added continuous tracking variables to completely stop the 360 spin bug
-        let lastAlpha = null;
-        let lastBeta = null;
-        let lastGamma = null;
+        // Raw targets from the gyroscope
+        let rawTargetRotX = 0;
+        let rawTargetRotY = 0;
+        let rawTargetRotZ = 0;
 
+        // Processed targets (prevent 360 spin)
         let targetRotX = 0;
         let targetRotY = 0;
         let targetRotZ = 0;
@@ -481,7 +494,7 @@
         let initialPalmSize = 0; 
 
         /* ====================================================================
-           WAVE TRACKER ENGINE (Wave Goodbye to Melt)
+           NEW FIST/PALM TRACKER ENGINE
         ==================================================================== */
         let isSuckedIn = false;          
         let savedBubbleZ = -500;         
@@ -495,10 +508,7 @@
         let currentSpin = 0; 
         let targetSpin = 0; 
 
-        let wavePhase = 0;          
-        let waveCount = 0;          
-        let lastWaveExtremumX = 0;  
-        let lastWaveTime = 0;       
+        let openPalmStartTime = 0; // Timer for restoring the window
 
         /* ====================================================================
            MUSIC LIBRARY GENERATION
@@ -533,88 +543,66 @@
         populateList(listRight);
 
         /* ====================================================================
-           THE GYROSCOPE (True Inverse Logic)
+           THE GYROSCOPE & 360-SPIN BUG FIX
         ==================================================================== */
-        function handleOrientation(e) {
-            // Wait for valid sensor data before doing anything
-            if (e.alpha === null) return;
+        
+        // This function ensures the camera takes the shortest path to the next angle.
+        // It completely eliminates the bug where the screen flips 360 degrees.
+        function getShortestAngle(current, target) {
+            let diff = (target - current) % 360;
+            if (diff > 180) { 
+                diff -= 360; 
+            }
+            if (diff < -180) { 
+                diff += 360; 
+            }
+            return current + diff;
+        }
 
+        function handleOrientation(e) {
             if (!isCalibrated) { 
                 baseAlpha = e.alpha || 0; 
                 baseBeta = e.beta || 0; 
                 baseGamma = e.gamma || 0; 
-                
-                // Initialize the continuous trackers
-                lastAlpha = e.alpha || 0;
-                lastBeta = e.beta || 0;
-                lastGamma = e.gamma || 0;
-                
                 isCalibrated = true; 
-                return; // Skip the first frame to avoid a massive teleporting jump
             }
             
-            // Get the current raw sensor values
-            let rawA = e.alpha || 0;
-            let rawB = e.beta || 0;
-            let rawG = e.gamma || 0;
-            
-            // CALCULATE CONTINUOUS DELTAS (This is the secret sauce to fix the 360 spin)
-            // Instead of comparing to the very first frame, we compare to the frame 1 millisecond ago
-            let deltaA = rawA - lastAlpha; 
-            let deltaB = rawB - lastBeta; 
-            let deltaG = rawG - lastGamma;
+            let dA = (e.alpha || 0) - baseAlpha; 
+            let dB = (e.beta || 0) - baseBeta; 
+            let dG = (e.gamma || 0) - baseGamma;
 
-            // NORMALIZE ANGLES: This strictly prevents the "Gimbal Lock Wrap" where it spins 360 degrees
-            if (deltaA > 180) { 
-                deltaA -= 360; 
-            } else if (deltaA < -180) { 
-                deltaA += 360; 
+            if (dA > 180) { 
+                dA -= 360; 
+            } 
+            if (dA < -180) { 
+                dA += 360; 
             }
-
-            if (deltaB > 180) { 
-                deltaB -= 360; 
-            } else if (deltaB < -180) { 
-                deltaB += 360; 
-            }
-
-            // Gamma uniquely wraps at 90 degrees on mobile phones
-            if (deltaG > 90) { 
-                deltaG -= 180; 
-            } else if (deltaG < -90) { 
-                deltaG += 180; 
-            }
-
-            // Save the current angles for the next frame
-            lastAlpha = rawA;
-            lastBeta = rawB;
-            lastGamma = rawG;
 
             let angle = (screen.orientation || {}).angle || window.orientation || 0;
+            let pitch, yaw, roll;
 
-            // DYNAMIC AXIS REMAPPING: 
-            // We use '+=' to continuously add to the target rotation.
-            // Because we fixed the deltas above, it will never snap 360 degrees again.
             if (angle === 90) { 
-                targetRotX += -deltaG; 
-                targetRotY += -deltaA; 
-                targetRotZ += -deltaB; 
+                pitch = dG; 
+                yaw = dA; 
+                roll = dB; 
             } else if (angle === -90 || angle === 270) { 
-                targetRotX += deltaG; 
-                targetRotY += -deltaA; 
-                targetRotZ += deltaB; 
+                pitch = -dG; 
+                yaw = dA; 
+                roll = -dB; 
             } else { 
-                targetRotX += -deltaB; 
-                targetRotY += -deltaA; 
-                targetRotZ += -deltaG; 
+                pitch = dB; 
+                yaw = dA; 
+                roll = dG; 
             }
+
+            // TRUE INVERSE ROTATION: Both Pitch and Yaw are inverted
+            rawTargetRotX = -pitch; 
+            rawTargetRotY = -yaw;   
+            rawTargetRotZ = -roll;  
         }
 
         function recenterAR() { 
-            // To recenter now, we just softly glide the target rotation back to 0
-            targetRotX = 0;
-            targetRotY = 0;
-            targetRotZ = 0;
-            
+            isCalibrated = false; 
             bubbleX = 0; 
             bubbleY = 0; 
 
@@ -638,7 +626,12 @@
            SMOOTH 3D RENDER ENGINE (Physics, Parallax, and Melting)
         ==================================================================== */
         function animate3D() {
-            // BUTTERY SMOOTH LERP (0.25 removes jitter but feels responsive)
+            // Apply shortest-path math to prevent Gimbal Lock flips
+            targetRotX = getShortestAngle(currentRotX, rawTargetRotX);
+            targetRotY = getShortestAngle(currentRotY, rawTargetRotY);
+            targetRotZ = getShortestAngle(currentRotZ, rawTargetRotZ);
+
+            // Buttery smooth LERP interpolation
             currentRotX += (targetRotX - currentRotX) * 0.25;
             currentRotY += (targetRotY - currentRotY) * 0.25;
             currentRotZ += (targetRotZ - currentRotZ) * 0.25;
@@ -653,15 +646,14 @@
             worldLeft.style.transform = rotTransform; 
             worldRight.style.transform = rotTransform;
             
-            // Render highly optimized melt effects
             let meltRadius = 35 + ((1.0 - currentScale) * 145); 
 
-            // Left Eye
+            // Left Eye Rendering
             bubbleLeft.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(15px) scale(${currentScale}) rotateZ(${currentSpin}deg)`;
             bubbleLeft.style.opacity = currentOpacity;
             bubbleLeft.style.borderRadius = `${meltRadius}px`;
 
-            // Right Eye
+            // Right Eye Rendering
             bubbleRight.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(-15px) scale(${currentScale}) rotateZ(${currentSpin}deg)`;
             bubbleRight.style.opacity = currentOpacity;
             bubbleRight.style.borderRadius = `${meltRadius}px`;
@@ -688,7 +680,14 @@
         }
 
         /* ====================================================================
-           THE TRACKING ENGINE (Wave Logic, Gestures, Push/Pull)
+           MATH HELPER FOR FINGERS
+        ==================================================================== */
+        function getDist(p1, p2) {
+            return Math.hypot(p1.x - p2.x, p1.y - p2.y);
+        }
+
+        /* ====================================================================
+           THE TRACKING ENGINE (Fist Squish, Open Palm, and 6DoF Drag)
         ==================================================================== */
         function onResults(results) {
             const eyeW = window.innerWidth / 2;
@@ -706,7 +705,6 @@
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 
                 const landmarks = results.multiHandLandmarks[0];
-                const wrist = landmarks[0];
                 
                 drawConnectors(ctxLeft, landmarks, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
                 drawLandmarks(ctxLeft, landmarks, {color: '#fff', lineWidth: 0, radius: 2});
@@ -714,74 +712,84 @@
                 drawConnectors(ctxRight, landmarks, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
                 drawLandmarks(ctxRight, landmarks, {color: '#fff', lineWidth: 0, radius: 2});
 
+                // Key tracking landmarks
+                const wrist = landmarks[0];
+                const indexTip = landmarks[8];
+                const indexPip = landmarks[6];
+                const middleTip = landmarks[12];
+                const middlePip = landmarks[10];
+                const ringTip = landmarks[16];
+                const ringPip = landmarks[14];
+                const pinkyTip = landmarks[20];
+                const pinkyPip = landmarks[18];
+
                 /* ==========================================
-                   1. THE "WAVE GOODBYE" TRACKER
+                   1. FIST AND OPEN PALM DETECTION
                 ========================================== */
-                const now = Date.now();
-                const normalizedX = wrist.x; 
+                // A finger is "curled" if the tip is closer to the wrist than the knuckle is.
+                const isIndexCurled = getDist(indexTip, wrist) < getDist(indexPip, wrist);
+                const isMiddleCurled = getDist(middleTip, wrist) < getDist(middlePip, wrist);
+                const isRingCurled = getDist(ringTip, wrist) < getDist(ringPip, wrist);
+                const isPinkyCurled = getDist(pinkyTip, wrist) < getDist(pinkyPip, wrist);
 
-                // Reset wave sequence if no motion for 600ms
-                if (now - lastWaveTime > 600) {
-                    waveCount = 0;
-                    wavePhase = 0;
-                    lastWaveExtremumX = normalizedX;
-                }
+                // A fist is squished when all fingers are curled in.
+                const isFist = isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled;
+                
+                // An open palm is when all fingers are fully extended.
+                const isOpenPalm = !isIndexCurled && !isMiddleCurled && !isRingCurled && !isPinkyCurled;
 
-                let deltaX = normalizedX - lastWaveExtremumX;
-
-                // Move 7% to the left
-                if (wavePhase !== 1 && deltaX < -0.07) {
-                    wavePhase = 1;
-                    waveCount++;
-                    lastWaveExtremumX = normalizedX;
-                    lastWaveTime = now;
-                } 
-                // Move 7% to the right
-                else if (wavePhase !== 2 && deltaX > 0.07) {
-                    wavePhase = 2;
-                    waveCount++;
-                    lastWaveExtremumX = normalizedX;
-                    lastWaveTime = now;
-                }
-
-                // If wave left-right 5 times total (~3 full waves)
-                if (waveCount >= 5) {
-                    isSuckedIn = !isSuckedIn;
+                // --- SQUISH TO MELT LOGIC ---
+                // We ensure the user isn't just pinching (which curls some fingers) by requiring a full fist.
+                if (isFist && !isSuckedIn && !isPinching) {
+                    isSuckedIn = true;
                     
-                    if (isSuckedIn) {
-                        savedBubbleZ = targetBubbleZ;
-                        targetBubbleZ = 600; 
-                        targetScale = 0.0;   
-                        targetOpacity = 0.0; 
-                        targetSpin = 720;    
-                        
-                        showToastMessage(`OS Melted. Wave to restore.`);
-                        
-                        isPinching = false; 
-                        activeAction = null;
+                    savedBubbleZ = targetBubbleZ;
+                    targetBubbleZ = 600; 
+                    targetScale = 0.0;   
+                    targetOpacity = 0.0; 
+                    targetSpin = 720;    
+                    
+                    showToastMessage(`Window Squished. Hold open palm to restore.`);
+                    
+                    isPinching = false; 
+                    activeAction = null;
 
-                        curLeft.classList.remove('pinching'); 
-                        curRight.classList.remove('pinching');
-                        
-                        bubbleLeft.classList.remove('bubble-dragging'); 
-                        bubbleRight.classList.remove('bubble-dragging');
+                    curLeft.classList.remove('pinching'); 
+                    curRight.classList.remove('pinching');
+                    
+                    bubbleLeft.classList.remove('bubble-dragging'); 
+                    bubbleRight.classList.remove('bubble-dragging');
+                }
+
+                // --- OPEN PALM TO RESTORE LOGIC ---
+                if (isSuckedIn) {
+                    if (isOpenPalm) {
+                        if (openPalmStartTime === 0) {
+                            openPalmStartTime = Date.now();
+                            showToastMessage(`Detecting palm... keep holding...`);
+                        } else if (Date.now() - openPalmStartTime > 2000) {
+                            // 2 seconds have passed! Un-melt the window.
+                            isSuckedIn = false;
+                            
+                            targetBubbleZ = savedBubbleZ;
+                            targetScale = 1.0;
+                            targetOpacity = 1.0;
+                            targetSpin = 0;
+                            openPalmStartTime = 0;
+                            
+                            showToastMessage(`OS Restored.`);
+                        }
                     } else {
-                        targetBubbleZ = savedBubbleZ;
-                        targetScale = 1.0;
-                        targetOpacity = 1.0;
-                        targetSpin = 0;
-                        
-                        showToastMessage(`OS Restored.`);
+                        // If they close their hand before 2 seconds, reset the timer.
+                        openPalmStartTime = 0;
                     }
                     
-                    waveCount = 0; 
-                    lastWaveTime = 0; 
-                }
-
-                if (isSuckedIn) {
+                    // Hide cursors while sucked in so they don't click anything
                     curLeft.style.display = "none"; 
                     curRight.style.display = "none";
-                    return; 
+                    return; // Exit the loop entirely
+                } else {
+                    openPalmStartTime = 0;
                 }
 
                 /* ==========================================
@@ -790,18 +798,15 @@
                 curLeft.style.display = "block"; 
                 curRight.style.display = "block";
 
-                const indexFinger = landmarks[8];
                 const thumbFinger = landmarks[4];
                 const indexBase = landmarks[5];
-                const pinkyBase = landmarks[17];
                 
                 const currentPalmSize = Math.hypot(wrist.x - indexBase.x, wrist.y - indexBase.y) + 
                                         Math.hypot(wrist.x - pinkyBase.x, wrist.y - pinkyBase.y);
 
-                const rawX = indexFinger.x * eyeW; 
-                const rawY = indexFinger.y * eyeH;
+                const rawX = indexTip.x * eyeW; 
+                const rawY = indexTip.y * eyeH;
                 
-                // Cursor smoothing
                 smoothCursorX += (rawX - smoothCursorX) * 0.30; 
                 smoothCursorY += (rawY - smoothCursorY) * 0.30;
 
@@ -811,8 +816,10 @@
                 curRight.style.left = smoothCursorX + 'px'; 
                 curRight.style.top = smoothCursorY + 'px';
 
-                const pinchDistance = Math.hypot(indexFinger.x - thumbFinger.x, indexFinger.y - thumbFinger.y);
-                const currentlyPinching = pinchDistance < (isPinching ? 0.055 : 0.040);
+                // INCREASED PINCH THRESHOLD: Much easier to grab things now
+                const pinchDistance = Math.hypot(indexTip.x - thumbFinger.x, indexTip.y - thumbFinger.y);
+                const pinchThreshold = isPinching ? 0.090 : 0.070; 
+                const currentlyPinching = pinchDistance < pinchThreshold;
 
                 curLeft.style.pointerEvents = 'none'; 
                 const hitElement = document.elementFromPoint(smoothCursorX, smoothCursorY);
@@ -827,6 +834,7 @@
                 }
 
                 if (currentlyPinching && !isPinching) {
+                    // PINCH START
                     isPinching = true;
                     curLeft.classList.add('pinching'); 
                     curRight.classList.add('pinching');
@@ -855,21 +863,21 @@
                     }
                 } 
                 else if (currentlyPinching && isPinching) {
+                    // PINCH HOLD & DRAG
                     const deltaX = smoothCursorX - pinchStartX; 
                     const deltaY = smoothCursorY - pinchStartY;
 
                     if (activeAction === 'drag') {
-                        // MOVEMENT STABILIZER: Reduced the multiplier from 1.8 down to 1.1 
-                        // This stops the window from flying around wildly when you move your hand.
-                        bubbleX = initialBubbleX + (deltaX * 1.1);
-                        bubbleY = initialBubbleY + (deltaY * 1.1);
+                        // UNRESTRICTED 6DoF MOVEMENT: Increased multiplier to 2.5x 
+                        // It now smoothly follows you left, right, up, and down.
+                        bubbleX = initialBubbleX + (deltaX * 2.5);
+                        bubbleY = initialBubbleY + (deltaY * 2.5);
                         
-                        // Z-DEPTH STABILIZER: Reduced the push/pull multiplier from 8000 to 4500
-                        // This ensures the window doesn't violently shrink or grow if your hand shakes.
                         const scaleDiff = currentPalmSize - initialPalmSize;
-                        let newZ = initialBubbleZ + (scaleDiff * 4500); 
                         
-                        // Added stricter physical bounds so it can't fly behind you or through your face
+                        // Z-Depth Push/Pull Physics
+                        let newZ = initialBubbleZ + (scaleDiff * 6000); 
+                        
                         if (newZ > -250) { 
                             newZ = -250; 
                         }   
@@ -888,6 +896,7 @@
                     }
                 } 
                 else if (!currentlyPinching && isPinching) {
+                    // PINCH RELEASE
                     isPinching = false; 
                     activeAction = null;
                     
@@ -912,6 +921,7 @@
                 
                 isPinching = false; 
                 activeAction = null;
+                openPalmStartTime = 0;
                 
                 curLeft.classList.remove('pinching'); 
                 curRight.classList.remove('pinching');
@@ -932,7 +942,6 @@
                 setTimeout(() => ytPlayer.pauseVideo(), 100); 
             }
 
-            // STEP 1: Ask for Gyroscope permissions
             startScreen.innerHTML = "<h3>Requesting Sensor Access...</h3><p>Please click 'Allow' if prompted.</p>";
             
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -949,11 +958,9 @@
                 window.addEventListener('deviceorientation', handleOrientation); 
             }
 
-            // STEP 2: Ask for Camera permissions
             startScreen.innerHTML = "<h3>Requesting Camera Access...</h3><p>Please allow camera permissions in your browser popup.</p>";
 
             try {
-                // We ask for the camera here explicitly
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     video: { 
                         facingMode: "environment", 
@@ -962,15 +969,12 @@
                     } 
                 });
                 
-                // STEP 3: Load AI Models
                 startScreen.innerHTML = "<h3>Loading AI Models...</h3><p>This may take a few seconds to process.</p>";
                 
-                // Initialize MediaPipe AI Hand Tracker
                 const hands = new Hands({
                     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
                 });
                 
-                // Keep model complexity at 0 so it stays butter-smooth and doesn't lag
                 hands.setOptions({ 
                     maxNumHands: 1, 
                     modelComplexity: 0, 
@@ -991,7 +995,7 @@
                     document.getElementById('recenter-btn').style.display = "block";
                     
                     animate3D();
-                    showToastMessage(`System Online. Wave to hide UI.`);
+                    showToastMessage(`System Online. Grab to freely spin window.`);
                     
                     async function loop() {
                         if (!procVideo.paused) { 
@@ -1014,3 +1018,6 @@
     </script>
 </body>
 </html>
+
+
+```
