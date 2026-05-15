@@ -448,6 +448,11 @@
         let baseGamma = 0;
         let isCalibrated = false;
 
+        // Added continuous tracking variables to completely stop the 360 spin bug
+        let lastAlpha = null;
+        let lastBeta = null;
+        let lastGamma = null;
+
         let targetRotX = 0;
         let targetRotY = 0;
         let targetRotZ = 0;
@@ -531,49 +536,85 @@
            THE GYROSCOPE (True Inverse Logic)
         ==================================================================== */
         function handleOrientation(e) {
+            // Wait for valid sensor data before doing anything
+            if (e.alpha === null) return;
+
             if (!isCalibrated) { 
                 baseAlpha = e.alpha || 0; 
                 baseBeta = e.beta || 0; 
                 baseGamma = e.gamma || 0; 
+                
+                // Initialize the continuous trackers
+                lastAlpha = e.alpha || 0;
+                lastBeta = e.beta || 0;
+                lastGamma = e.gamma || 0;
+                
                 isCalibrated = true; 
+                return; // Skip the first frame to avoid a massive teleporting jump
             }
             
-            let dA = (e.alpha || 0) - baseAlpha; 
-            let dB = (e.beta || 0) - baseBeta; 
-            let dG = (e.gamma || 0) - baseGamma;
+            // Get the current raw sensor values
+            let rawA = e.alpha || 0;
+            let rawB = e.beta || 0;
+            let rawG = e.gamma || 0;
+            
+            // CALCULATE CONTINUOUS DELTAS (This is the secret sauce to fix the 360 spin)
+            // Instead of comparing to the very first frame, we compare to the frame 1 millisecond ago
+            let deltaA = rawA - lastAlpha; 
+            let deltaB = rawB - lastBeta; 
+            let deltaG = rawG - lastGamma;
 
-            if (dA > 180) { 
-                dA -= 360; 
-            } 
-            if (dA < -180) { 
-                dA += 360; 
+            // NORMALIZE ANGLES: This strictly prevents the "Gimbal Lock Wrap" where it spins 360 degrees
+            if (deltaA > 180) { 
+                deltaA -= 360; 
+            } else if (deltaA < -180) { 
+                deltaA += 360; 
             }
+
+            if (deltaB > 180) { 
+                deltaB -= 360; 
+            } else if (deltaB < -180) { 
+                deltaB += 360; 
+            }
+
+            // Gamma uniquely wraps at 90 degrees on mobile phones
+            if (deltaG > 90) { 
+                deltaG -= 180; 
+            } else if (deltaG < -90) { 
+                deltaG += 180; 
+            }
+
+            // Save the current angles for the next frame
+            lastAlpha = rawA;
+            lastBeta = rawB;
+            lastGamma = rawG;
 
             let angle = (screen.orientation || {}).angle || window.orientation || 0;
-            let pitch, yaw, roll;
 
+            // DYNAMIC AXIS REMAPPING: 
+            // We use '+=' to continuously add to the target rotation.
+            // Because we fixed the deltas above, it will never snap 360 degrees again.
             if (angle === 90) { 
-                pitch = dG; 
-                yaw = dA; 
-                roll = dB; 
+                targetRotX += -deltaG; 
+                targetRotY += -deltaA; 
+                targetRotZ += -deltaB; 
             } else if (angle === -90 || angle === 270) { 
-                pitch = -dG; 
-                yaw = dA; 
-                roll = -dB; 
+                targetRotX += deltaG; 
+                targetRotY += -deltaA; 
+                targetRotZ += deltaB; 
             } else { 
-                pitch = dB; 
-                yaw = dA; 
-                roll = dG; 
+                targetRotX += -deltaB; 
+                targetRotY += -deltaA; 
+                targetRotZ += -deltaG; 
             }
-
-            // TRUE INVERSE ROTATION: Both Pitch and Yaw are inverted
-            targetRotX = -pitch; 
-            targetRotY = -yaw;   
-            targetRotZ = -roll;  
         }
 
         function recenterAR() { 
-            isCalibrated = false; 
+            // To recenter now, we just softly glide the target rotation back to 0
+            targetRotX = 0;
+            targetRotY = 0;
+            targetRotZ = 0;
+            
             bubbleX = 0; 
             bubbleY = 0; 
 
@@ -818,12 +859,17 @@
                     const deltaY = smoothCursorY - pinchStartY;
 
                     if (activeAction === 'drag') {
-                        bubbleX = initialBubbleX + (deltaX * 1.8);
-                        bubbleY = initialBubbleY + (deltaY * 1.8);
+                        // MOVEMENT STABILIZER: Reduced the multiplier from 1.8 down to 1.1 
+                        // This stops the window from flying around wildly when you move your hand.
+                        bubbleX = initialBubbleX + (deltaX * 1.1);
+                        bubbleY = initialBubbleY + (deltaY * 1.1);
                         
+                        // Z-DEPTH STABILIZER: Reduced the push/pull multiplier from 8000 to 4500
+                        // This ensures the window doesn't violently shrink or grow if your hand shakes.
                         const scaleDiff = currentPalmSize - initialPalmSize;
-                        let newZ = initialBubbleZ + (scaleDiff * 8000); 
+                        let newZ = initialBubbleZ + (scaleDiff * 4500); 
                         
+                        // Added stricter physical bounds so it can't fly behind you or through your face
                         if (newZ > -250) { 
                             newZ = -250; 
                         }   
