@@ -1,361 +1,539 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- Prevent zooming to keep AR scale accurate -->
+    
+    <!-- 
+      ========================================================================
+      META CONFIGURATION
+      Prevent zooming and scaling to keep the AR stereoscopic scale accurate 
+      and prevent the user from accidentally breaking the 3D perspective.
+      ========================================================================
+    -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VR Spatial OS - Dual Hand Engine</title>
+    
+    <title>VR Spatial OS - Maximum Architecture</title>
+    
+    <!-- 
+      ========================================================================
+      EXTERNAL DEPENDENCIES & AI MODELS
+      ========================================================================
+    -->
     
     <!-- MediaPipe AI Models for Hand Tracking -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    
+    <!-- MediaPipe Drawing Utilities for rendering the Holographic UI -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
     
-    <!-- YouTube API for Full Song Playback Streaming -->
+    <!-- YouTube API for Full Song Playback Streaming in the background -->
     <script src="https://www.youtube.com/iframe_api"></script>
 
     <style>
-        /* =========================================
-           GLOBAL RESETS & TYPOGRAPHY
-        ========================================= */
+        /* ========================================================================
+          GLOBAL RESETS & TYPOGRAPHY
+          ========================================================================
+        */
         body {
-            margin: 0; 
-            padding: 0; 
-            overflow: hidden; 
-            background: #000; 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            color: white; 
+            margin-top: 0;
+            margin-right: 0;
+            margin-bottom: 0;
+            margin-left: 0;
+            padding-top: 0;
+            padding-right: 0;
+            padding-bottom: 0;
+            padding-left: 0;
+            overflow-x: hidden;
+            overflow-y: hidden;
+            background-color: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            color: #ffffff;
             touch-action: none;
         }
 
-        /* =========================================
-           VR SIDE-BY-SIDE SPLIT CONTAINER
-        ========================================= */
-        #vr-container { 
-            display: flex; 
-            width: 100vw; 
-            height: 100vh; 
+        /* ========================================================================
+          VR SIDE-BY-SIDE SPLIT CONTAINER
+          This creates the stereoscopic layout for Google Cardboard / VR Headsets
+          ========================================================================
+        */
+        #vr-container {
+            display: flex;
+            flex-direction: row;
+            width: 100vw;
+            height: 100vh;
         }
 
-        .eye { 
-            width: 50vw; 
-            height: 100vh; 
-            position: relative; 
-            overflow: hidden; 
-            border-right: 1px solid #000; 
+        .eye {
+            width: 50vw;
+            height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+            overflow-y: hidden;
+            border-right-width: 1px;
+            border-right-style: solid;
+            border-right-color: #000000;
         }
         
         .bg-video {
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
             height: 100%;
-            object-fit: fill; 
-            z-index: 0; 
+            object-fit: fill;
+            z-index: 0;
             opacity: 0.8;
         }
 
-        #hidden-processor { 
-            display: none; 
+        /* ========================================================================
+          HIDDEN PROCESSING ELEMENTS
+          ========================================================================
+        */
+        #hidden-processor {
+            display: none;
         }
 
-        #yt-container { 
-            position: fixed; 
-            top: -100px; 
-            opacity: 0; 
-            pointer-events: none; 
+        #yt-container {
+            position: fixed;
+            top: -100px;
+            left: -100px;
+            opacity: 0;
+            pointer-events: none;
         }
 
-        /* =========================================
-           3D AR SCENE & WORLD ENGINE
-        ========================================= */
+        /* ========================================================================
+          3D AR SCENE & WORLD ENGINE
+          ========================================================================
+        */
         .scene {
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
             height: 100%;
-            perspective: 800px; 
-            z-index: 5; 
-            pointer-events: none; 
+            perspective: 800px;
+            z-index: 5;
+            pointer-events: none;
         }
 
         .world {
-            width: 100%; 
-            height: 100%; 
+            width: 100%;
+            height: 100%;
             position: absolute;
-            transform-style: preserve-3d; 
-            transform-origin: 50% 50% 0; 
-            will-change: transform; 
+            transform-style: preserve-3d;
+            transform-origin: 50% 50% 0;
+            will-change: transform;
         }
 
-        /* =========================================
-           THE INTERACTIVE BUBBLE WINDOW (TINTED)
-        ========================================= */
+        /* ========================================================================
+          THE INTERACTIVE BUBBLE WINDOW
+          ========================================================================
+        */
         .bubble {
-            position: absolute; 
-            left: 50%; 
+            position: absolute;
+            left: 50%;
             top: 50%;
-            width: 320px; 
+            width: 320px;
             height: 500px;
             
-            /* Initial CSS placement. Overwritten heavily by JS later */
-            transform: translate(-50%, -50%) translate3d(0px, 0px, -500px) scale(1) rotateZ(0deg);
+            /* Initial CSS placement. Overwritten heavily by JS animation loop */
+            transform: translate(-50%, -50%) translate3d(0px, 0px, -500px);
             
-            /* Glassmorphism Design */
-            background: rgba(10, 15, 25, 0.90);
-            backdrop-filter: blur(8px); 
+            /* Glassmorphism Design Specs */
+            background-color: rgba(10, 15, 25, 0.90);
+            backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(0, 255, 204, 0.2); 
-            border-radius: 35px;
-            box-shadow: 0 40px 80px rgba(0,0,0,0.9), inset 0 2px 20px rgba(0,255,204,0.05);
             
-            display: flex; 
-            flex-direction: column; 
-            overflow: hidden;
-            will-change: transform, opacity, border-radius; 
-            transition: border-color 0.2s, box-shadow 0.2s; 
+            border-top-width: 1px;
+            border-right-width: 1px;
+            border-bottom-width: 1px;
+            border-left-width: 1px;
+            border-style: solid;
+            border-color: rgba(0, 255, 204, 0.2);
+            
+            border-top-left-radius: 35px;
+            border-top-right-radius: 35px;
+            border-bottom-right-radius: 35px;
+            border-bottom-left-radius: 35px;
+            
+            box-shadow: 0px 40px 80px rgba(0, 0, 0, 0.9), inset 0px 2px 20px rgba(0, 255, 204, 0.05);
+            
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            overflow-y: hidden;
+            
+            will-change: transform;
+            transition-property: border-color, box-shadow;
+            transition-duration: 0.2s, 0.2s;
+            transition-timing-function: ease-out, ease-out;
+            
             pointer-events: auto;
         }
 
-        /* Visual glow when the user pinches the header to move it */
-        .bubble.bubble-dragging { 
-            border-color: #00ffcc; 
-            box-shadow: 0 0 60px rgba(0, 255, 204, 0.4), inset 0 0 20px rgba(0, 255, 204, 0.2); 
+        /* Visual glow when the user pinches the header to move the window */
+        .bubble.bubble-dragging {
+            border-color: #00ffcc;
+            box-shadow: 0px 0px 60px rgba(0, 255, 204, 0.4), inset 0px 0px 20px rgba(0, 255, 204, 0.2);
         }
 
-        /* =========================================
-           AR LASER POINTER CURSOR
-        ========================================= */
+        /* ========================================================================
+          AR LASER POINTER CURSOR
+          ========================================================================
+        */
         .ar-cursor {
-            position: absolute; 
-            width: 18px; 
+            position: absolute;
+            width: 18px;
             height: 18px;
-            background: rgba(255, 255, 255, 0.9); 
-            border: 2px solid #00ffcc; 
-            border-radius: 50%;
-            pointer-events: none; 
-            z-index: 100; 
+            background-color: rgba(255, 255, 255, 0.9);
+            
+            border-top-width: 2px;
+            border-right-width: 2px;
+            border-bottom-width: 2px;
+            border-left-width: 2px;
+            border-style: solid;
+            border-color: #00ffcc;
+            
+            border-top-left-radius: 50%;
+            border-top-right-radius: 50%;
+            border-bottom-right-radius: 50%;
+            border-bottom-left-radius: 50%;
+            
+            pointer-events: none;
+            z-index: 100;
+            
             transform: translate(-50%, -50%);
-            transition: width 0.1s, height 0.1s, background 0.1s; 
-            box-shadow: 0 0 15px rgba(0, 255, 204, 0.8);
-            will-change: left, top; 
+            
+            transition-property: width, height, background-color;
+            transition-duration: 0.1s, 0.1s, 0.1s;
+            transition-timing-function: ease-out, ease-out, ease-out;
+            
+            box-shadow: 0px 0px 15px rgba(0, 255, 204, 0.8);
+            will-change: left, top;
         }
 
         /* Shrinks down and glows brightly when fingers are pinched */
-        .ar-cursor.pinching { 
-            width: 10px; 
-            height: 10px; 
-            background: #00ffcc; 
-            box-shadow: 0 0 30px #00ffcc; 
-            border-color: #fff;
+        .ar-cursor.pinching {
+            width: 10px;
+            height: 10px;
+            background-color: #00ffcc;
+            box-shadow: 0px 0px 30px #00ffcc;
+            border-color: #ffffff;
         }
 
-        /* Layer for rendering the MediaPipe Hologram skeleton */
-        .hand-canvas { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            z-index: 50; 
-            pointer-events: none; 
+        /* ========================================================================
+          HOLOGRAM OVERLAY CANVAS
+          ========================================================================
+        */
+        .hand-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 50;
+            pointer-events: none;
         }
 
-        /* =========================================
-           UI ELEMENTS (HEADER & LIST)
-        ========================================= */
+        /* ========================================================================
+          UI ELEMENTS: HEADER (DRAG ZONE)
+          ========================================================================
+        */
         .header {
-            /* Thick padding so it is easy to grab */
-            padding: 25px 20px 25px; 
-            background: linear-gradient(180deg, rgba(255,255,255,0.1), rgba(255,255,255,0));
-            text-align: center; 
-            border-bottom: 1px solid rgba(0,255,204,0.1);
+            padding-top: 25px;
+            padding-right: 20px;
+            padding-bottom: 25px;
+            padding-left: 20px;
+            background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0));
+            text-align: center;
+            border-bottom-width: 1px;
+            border-bottom-style: solid;
+            border-bottom-color: rgba(0, 255, 204, 0.1);
         }
 
-        .drag-pill { 
-            width: 50px; 
-            height: 5px; 
-            background: rgba(0, 255, 204, 0.5); 
-            border-radius: 10px; 
-            margin: 0 auto 12px auto; 
+        .drag-pill {
+            width: 50px;
+            height: 5px;
+            background-color: rgba(0, 255, 204, 0.5);
+            border-top-left-radius: 10px;
+            border-top-right-radius: 10px;
+            border-bottom-right-radius: 10px;
+            border-bottom-left-radius: 10px;
+            margin-top: 0;
+            margin-right: auto;
+            margin-bottom: 12px;
+            margin-left: auto;
         }
 
-        .header h3 { 
-            margin: 0; 
-            font-size: 20px; 
-            font-weight: 700; 
-            color: #fff;
+        .header h3 {
+            margin-top: 0;
+            margin-right: 0;
+            margin-bottom: 0;
+            margin-left: 0;
+            font-size: 20px;
+            font-weight: 700;
+            color: #ffffff;
         }
 
-        .header p { 
-            margin: 4px 0 0; 
-            font-size: 12px; 
-            color: #00ffcc; 
-            opacity: 0.8; 
+        .header p {
+            margin-top: 4px;
+            margin-right: 0;
+            margin-bottom: 0;
+            margin-left: 0;
+            font-size: 12px;
+            color: #00ffcc;
+            opacity: 0.8;
         }
 
-        .song-list { 
-            flex: 1; 
-            overflow-y: hidden; 
-            padding: 12px; 
-            scroll-behavior: auto; 
-            transition: background 0.2s; 
+        /* ========================================================================
+          UI ELEMENTS: SONG LIST (SCROLL ZONE)
+          ========================================================================
+        */
+        .song-list {
+            flex-grow: 1;
+            flex-shrink: 1;
+            flex-basis: 0%;
+            overflow-y: hidden;
+            padding-top: 12px;
+            padding-right: 12px;
+            padding-bottom: 12px;
+            padding-left: 12px;
+            scroll-behavior: auto;
+            transition-property: background-color;
+            transition-duration: 0.2s;
+            transition-timing-function: ease-out;
         }
 
-        .song-list.list-scrolling { 
-            background: rgba(0,255,204,0.03); 
+        .song-list.list-scrolling {
+            background-color: rgba(0, 255, 204, 0.03);
         }
 
         .song-item {
-            padding: 16px 18px; 
-            margin-bottom: 8px; 
-            background: rgba(255,255,255,0.05); 
-            border-radius: 18px;
-            font-size: 16px; 
-            transition: 0.1s; 
-            border: 1px solid transparent; 
-            display: flex; 
+            padding-top: 16px;
+            padding-right: 18px;
+            padding-bottom: 16px;
+            padding-left: 18px;
+            margin-bottom: 8px;
+            background-color: rgba(255, 255, 255, 0.05);
+            
+            border-top-left-radius: 18px;
+            border-top-right-radius: 18px;
+            border-bottom-right-radius: 18px;
+            border-bottom-left-radius: 18px;
+            
+            font-size: 16px;
+            transition-property: transform, background-color, border-color, box-shadow;
+            transition-duration: 0.1s, 0.1s, 0.1s, 0.1s;
+            transition-timing-function: ease-out, ease-out, ease-out, ease-out;
+            
+            border-top-width: 1px;
+            border-right-width: 1px;
+            border-bottom-width: 1px;
+            border-left-width: 1px;
+            border-style: solid;
+            border-color: transparent;
+            
+            display: flex;
             flex-direction: column;
         }
 
-        .song-item.ar-hover { 
-            background: rgba(0,255,204,0.15); 
-            border: 1px solid rgba(0, 255, 204, 0.5); 
-            transform: scale(1.03); 
+        .song-item.ar-hover {
+            background-color: rgba(0, 255, 204, 0.15);
+            border-color: rgba(0, 255, 204, 0.5);
+            transform: scale(1.03);
         }
 
-        .song-item.playing { 
-            background: rgba(0, 255, 204, 0.25); 
-            border: 1px solid #00ffcc; 
+        .song-item.playing {
+            background-color: rgba(0, 255, 204, 0.25);
+            border-color: #00ffcc;
         }
 
-        .song-title { 
-            font-weight: 700; 
-            pointer-events: none; 
+        .song-title {
+            font-weight: 700;
+            pointer-events: none;
         }
 
-        .song-artist { 
-            font-size: 13px; 
-            color: #00ffcc; 
-            opacity: 0.9; 
-            pointer-events: none; 
-            margin-top: 4px; 
+        .song-artist {
+            font-size: 13px;
+            color: #00ffcc;
+            opacity: 0.9;
+            pointer-events: none;
+            margin-top: 4px;
         }
 
-        /* =========================================
-           MENUS AND OVERLAYS
-        ========================================= */
+        /* ========================================================================
+          MENUS AND OVERLAYS
+          ========================================================================
+        */
         #start-screen {
-            position: fixed; 
-            top: 0; 
-            left: 0; 
-            width: 100vw; 
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
             height: 100vh;
-            background: rgba(0,0,0,0.95); 
-            z-index: 200; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
+            background-color: rgba(0, 0, 0, 0.95);
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             justify-content: center;
         }
 
         .launch-btn {
-            background: #00ffcc; 
-            color: black; 
-            border: none; 
-            padding: 18px 45px; 
-            font-size: 18px; 
+            background-color: #00ffcc;
+            color: #000000;
+            border-style: none;
+            padding-top: 18px;
+            padding-right: 45px;
+            padding-bottom: 18px;
+            padding-left: 45px;
+            font-size: 18px;
             font-weight: bold;
-            border-radius: 30px; 
-            cursor: pointer; 
-            margin-top: 30px; 
-            box-shadow: 0 0 30px rgba(0, 255, 204, 0.4);
+            border-top-left-radius: 30px;
+            border-top-right-radius: 30px;
+            border-bottom-right-radius: 30px;
+            border-bottom-left-radius: 30px;
+            cursor: pointer;
+            margin-top: 30px;
+            box-shadow: 0px 0px 30px rgba(0, 255, 204, 0.4);
         }
 
         #recenter-btn {
-            position: fixed; 
-            bottom: 30px; 
-            left: 50%; 
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
             transform: translateX(-50%);
-            background: rgba(0,0,0,0.8); 
-            border: 2px solid #00ffcc; 
+            background-color: rgba(0, 0, 0, 0.8);
+            border-top-width: 2px;
+            border-right-width: 2px;
+            border-bottom-width: 2px;
+            border-left-width: 2px;
+            border-style: solid;
+            border-color: #00ffcc;
             color: #00ffcc;
-            padding: 10px 20px; 
-            border-radius: 30px; 
-            font-weight: 700; 
-            z-index: 100; 
-            cursor: pointer; 
+            padding-top: 10px;
+            padding-right: 20px;
+            padding-bottom: 10px;
+            padding-left: 20px;
+            border-top-left-radius: 30px;
+            border-top-right-radius: 30px;
+            border-bottom-right-radius: 30px;
+            border-bottom-left-radius: 30px;
+            font-weight: 700;
+            z-index: 100;
+            cursor: pointer;
             display: none;
         }
 
         #toast {
-            position: fixed; 
-            top: -150px; 
-            left: 50%; 
+            position: fixed;
+            top: -150px;
+            left: 50%;
             transform: translateX(-50%);
-            background: rgba(10, 15, 25, 0.95); 
-            border: 1px solid #00ffcc; 
-            border-radius: 30px;
-            padding: 15px 30px; 
-            z-index: 150; 
-            font-weight: 600; 
-            transition: top 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
-            color: white; 
-            display: flex; 
-            align-items: center; 
-            gap: 12px; 
-            box-shadow: 0 20px 50px rgba(0, 255, 204, 0.4);
+            background-color: rgba(10, 15, 25, 0.95);
+            border-top-width: 1px;
+            border-right-width: 1px;
+            border-bottom-width: 1px;
+            border-left-width: 1px;
+            border-style: solid;
+            border-color: #00ffcc;
+            border-top-left-radius: 30px;
+            border-top-right-radius: 30px;
+            border-bottom-right-radius: 30px;
+            border-bottom-left-radius: 30px;
+            padding-top: 15px;
+            padding-right: 30px;
+            padding-bottom: 15px;
+            padding-left: 30px;
+            z-index: 150;
+            font-weight: 600;
+            transition-property: top;
+            transition-duration: 0.4s;
+            transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0px 20px 50px rgba(0, 255, 204, 0.4);
         }
         
-        .music-bars { 
-            display: flex; 
-            gap: 3px; 
-            height: 15px; 
-            align-items: flex-end; 
+        /* ========================================================================
+          AUDIO EQUALIZER ANIMATION
+          ========================================================================
+        */
+        .music-bars {
+            display: flex;
+            gap: 3px;
+            height: 15px;
+            align-items: flex-end;
         }
 
-        .bar { 
-            width: 4px; 
-            background: #00ffcc; 
-            border-radius: 2px; 
-            animation: bounce 0.5s infinite alternate; 
+        .bar {
+            width: 4px;
+            background-color: #00ffcc;
+            border-top-left-radius: 2px;
+            border-top-right-radius: 2px;
+            border-bottom-right-radius: 2px;
+            border-bottom-left-radius: 2px;
+            animation-name: bounce;
+            animation-duration: 0.5s;
+            animation-iteration-count: infinite;
+            animation-direction: alternate;
         }
 
-        .bar:nth-child(2) { 
-            animation-delay: 0.2s; 
+        .bar:nth-child(2) {
+            animation-delay: 0.2s;
         }
 
-        .bar:nth-child(3) { 
-            animation-delay: 0.4s; 
+        .bar:nth-child(3) {
+            animation-delay: 0.4s;
         }
 
-        @keyframes bounce { 
-            0% { height: 4px; } 
-            100% { height: 15px; } 
+        @keyframes bounce {
+            0% {
+                height: 4px;
+            }
+            100% {
+                height: 15px;
+            }
         }
     </style>
 </head>
 <body>
 
+    <!-- 
+      ========================================================================
+      START MENU
+      Informs user of permissions required before booting the AR context.
+      ========================================================================
+    -->
     <div id="start-screen">
-        <h2 style="margin: 0; color:#00ffcc; font-size: 32px;">VR Spatial OS</h2>
+        <h2 style="margin-top: 0; margin-bottom: 0; color:#00ffcc; font-size: 32px;">VR Spatial OS</h2>
         <p style="opacity: 0.8; text-align: center; max-width: 340px; line-height: 1.6; margin-top: 15px;">
-            <b>Dual Hand Engine Active:</b><br><br>
-            <b>1. Clap to Hide:</b> Clap your two hands together to melt the UI.<br>
-            <b>2. Pull to Show:</b> With hands together, pull them far apart to restore.<br>
-            <b>3. Fallbacks:</b> Fist Squish and Open Palm features are still fully active!
+            <b>Core Interaction Mode Activated:</b><br><br>
+            <b>1. Grab & Drag:</b> Move the window fully in 6DoF (Left, Right, Up, Down).<br>
+            <b>2. Push & Pull:</b> Move your arm out to push the window deep into the room.<br>
+            <b>3. Scroll & Select:</b> Pinch the list to kinetic scroll. Quick pinch to play.
         </p>
         <button class="launch-btn" onclick="initVR()">Request Permissions</button>
     </div>
 
+    <!-- 
+      ========================================================================
+      HIDDEN PROCESSING & AUDIO LAYER
+      ========================================================================
+    -->
     <video id="hidden-processor" playsinline autoplay muted></video>
     
     <div id="yt-container">
         <div id="player"></div>
     </div>
     
+    <!-- 
+      ========================================================================
+      SYSTEM TOAST NOTIFICATIONS
+      ========================================================================
+    -->
     <div id="toast">
         <div class="music-bars">
             <div class="bar"></div>
@@ -365,24 +543,37 @@
         <span id="toast-text">Loading Audio...</span>
     </div>
 
+    <!-- 
+      ========================================================================
+      RECENTER BUTTON
+      ========================================================================
+    -->
     <button id="recenter-btn" onclick="recenterAR()">Recenter Room</button>
 
+    <!-- 
+      ========================================================================
+      STEREOSCOPIC VR RENDERER
+      ========================================================================
+    -->
     <div id="vr-container">
+        
         <!-- LEFT EYE DISPLAY -->
         <div class="eye" id="eye-left">
             <video class="bg-video" id="video-left" playsinline autoplay muted></video>
+            
             <div class="scene">
                 <div class="world" id="world-left">
                     <div class="bubble" id="bubble-left">
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
-                            <h3>Library</h3>
-                            <p>Clap / Squish to hide</p>
+                            <h3>Music Library</h3>
+                            <p>Pinch to Grab, Push, and Drag</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-left"></div>
                     </div>
                 </div>
             </div>
+            
             <canvas class="hand-canvas" id="canvas-left"></canvas>
             <div class="ar-cursor" id="cursor-left"></div>
         </div>
@@ -390,26 +581,30 @@
         <!-- RIGHT EYE DISPLAY -->
         <div class="eye" id="eye-right">
             <video class="bg-video" id="video-right" playsinline autoplay muted></video>
+            
             <div class="scene">
                 <div class="world" id="world-right">
                     <div class="bubble" id="bubble-right">
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
-                            <h3>Library</h3>
-                            <p>Clap / Squish to hide</p>
+                            <h3>Music Library</h3>
+                            <p>Pinch to Grab, Push, and Drag</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-right"></div>
                     </div>
                 </div>
             </div>
+            
             <canvas class="hand-canvas" id="canvas-right"></canvas>
             <div class="ar-cursor" id="cursor-right"></div>
         </div>
+        
     </div>
 
     <script>
         /* ====================================================================
            DOM ELEMENT SELECTIONS
+           Caching all elements to prevent DOM lookup delays during render loops
         ==================================================================== */
         const procVideo = document.getElementById('hidden-processor');
         const vidLeft = document.getElementById('video-left');
@@ -435,10 +630,30 @@
         const toastText = document.getElementById('toast-text');
 
         /* ====================================================================
+           CONFIGURATION ENGINE
+           Centralized variables to control physics, scaling, and behavior.
+        ==================================================================== */
+        const PHYSICS_CONFIG = {
+            dragSensitivity: 2.5,
+            scrollSensitivity: 8.0,
+            pushPullSensitivity: 6000,
+            zDepthMin: -1500, // Maximum distance away from user
+            zDepthMax: -250,  // Minimum distance to user's face
+            cursorSmoothing: 0.30,
+            pinchThresholdStart: 0.070,
+            pinchThresholdHold: 0.090, // Hysteresis to prevent dropping
+            renderSmoothing: 0.25,
+            parallaxOffset: 15
+        };
+
+        /* ====================================================================
            YOUTUBE AUDIO API SETUP
         ==================================================================== */
         let ytPlayer;
 
+        /**
+         * Initializes the hidden YouTube iframe player for audio playback.
+         */
         function onYouTubeIframeAPIReady() { 
             ytPlayer = new YT.Player('player', { 
                 height: '10', 
@@ -458,30 +673,37 @@
         let baseGamma = 0;
         let isCalibrated = false;
 
+        // Raw targets from the gyroscope
         let rawTargetRotX = 0;
         let rawTargetRotY = 0;
         let rawTargetRotZ = 0;
 
+        // Processed targets (prevent 360 spin)
         let targetRotX = 0;
         let targetRotY = 0;
         let targetRotZ = 0;
 
+        // Current rendering angles
         let currentRotX = 0;
         let currentRotY = 0;
         let currentRotZ = 0;
         
+        // Window Positional Coordinates
         let bubbleX = 0;
         let bubbleY = 0;
         let bubbleZ = -500;
         let targetBubbleZ = -500;
         
+        // Cursor positioning state
         let smoothCursorX = window.innerWidth / 4;
         let smoothCursorY = window.innerHeight / 2;
         
+        // Pinch mechanics state
         let isPinching = false;
         let pinchStartX = 0;
         let pinchStartY = 0;
 
+        // State Machine Variables
         let activeAction = null;
         let initialBubbleX = 0;
         let initialBubbleY = 0;
@@ -490,69 +712,113 @@
         let initialPalmSize = 0; 
 
         /* ====================================================================
-           HIDING ENGINES (Fist Squish, Clap, Open Palm, Pull Apart)
-        ==================================================================== */
-        let isSuckedIn = false;          
-        let savedBubbleZ = -500;         
-        
-        let currentScale = 1.0; 
-        let targetScale = 1.0;
-
-        let currentOpacity = 1.0; 
-        let targetOpacity = 1.0;
-
-        let currentSpin = 0; 
-        let targetSpin = 0; 
-
-        let openPalmStartTime = 0; 
-        let wasHandsTogether = false; // Tracks if hands were clapped prior to pulling apart
-
-        /* ====================================================================
            MUSIC LIBRARY GENERATION
+           Fully expanded structure for robustness.
         ==================================================================== */
         const library = [
-            { artist: "Kendrick Lamar", title: "Money Trees", ytid: "smqhSl0u_sI" },
-            { artist: "Malcolm Todd", title: "Room Service", ytid: "3vY4rN9YpX8" },
-            { artist: "Laufey", title: "Valentine", ytid: "xKkU2N25d80" },
-            { artist: "Steve Lacy", title: "Bad Habit", ytid: "VF-FGf_GlG0" },
-            { artist: "Frank Ocean", title: "Pink + White", ytid: "uzS3WG6__G4" },
-            { artist: "Tyler, The Creator", title: "EARFQUAKE", ytid: "HmAsUQEFYGI" },
-            { artist: "SZA", title: "Good Days", ytid: "oh64haEP9g8" },
-            { artist: "Childish Gambino", title: "Redbone", ytid: "Kp7eSUU9oy8" }
+            { 
+                artist: "Kendrick Lamar", 
+                title: "Money Trees", 
+                ytid: "smqhSl0u_sI" 
+            },
+            { 
+                artist: "Malcolm Todd", 
+                title: "Room Service", 
+                ytid: "3vY4rN9YpX8" 
+            },
+            { 
+                artist: "Laufey", 
+                title: "Valentine", 
+                ytid: "xKkU2N25d80" 
+            },
+            { 
+                artist: "Steve Lacy", 
+                title: "Bad Habit", 
+                ytid: "VF-FGf_GlG0" 
+            },
+            { 
+                artist: "Frank Ocean", 
+                title: "Pink + White", 
+                ytid: "uzS3WG6__G4" 
+            },
+            { 
+                artist: "Tyler, The Creator", 
+                title: "EARFQUAKE", 
+                ytid: "HmAsUQEFYGI" 
+            },
+            { 
+                artist: "SZA", 
+                title: "Good Days", 
+                ytid: "oh64haEP9g8" 
+            },
+            { 
+                artist: "Childish Gambino", 
+                title: "Redbone", 
+                ytid: "Kp7eSUU9oy8" 
+            }
         ];
         
+        /**
+         * Populates the HTML list elements with the song library data.
+         * @param {HTMLElement} listElement - The container to append items to.
+         */
         function populateList(listElement) {
             for (let i = 0; i < 200; i++) {
                 const track = library[i % library.length];
+                
                 const div = document.createElement('div');
                 div.className = 'song-item'; 
                 div.dataset.index = i; 
                 div.dataset.ytid = track.ytid;
-                div.innerHTML = `
-                    <span class="song-title">${track.title}</span>
-                    <span class="song-artist">${track.artist}</span>
-                `;
+                
+                const titleSpan = document.createElement('span');
+                titleSpan.className = 'song-title';
+                titleSpan.innerText = track.title;
+                
+                const artistSpan = document.createElement('span');
+                artistSpan.className = 'song-artist';
+                artistSpan.innerText = track.artist;
+                
+                div.appendChild(titleSpan);
+                div.appendChild(artistSpan);
+                
                 listElement.appendChild(div);
             }
         }
 
+        // Populate both eyes to ensure visual synchronization
         populateList(listLeft); 
         populateList(listRight);
 
         /* ====================================================================
            THE GYROSCOPE & 360-SPIN BUG FIX
         ==================================================================== */
+        
+        /**
+         * Calculates the shortest rotational path to prevent Gimbal Lock flips.
+         * It mathematically prohibits the camera from doing a 360 spin.
+         * @param {number} current - The current angle
+         * @param {number} target - The target angle
+         * @returns {number} The shortest path
+         */
         function getShortestAngle(current, target) {
             let diff = (target - current) % 360;
+            
             if (diff > 180) { 
                 diff -= 360; 
             }
+            
             if (diff < -180) { 
                 diff += 360; 
             }
+            
             return current + diff;
         }
 
+        /**
+         * Translates physical device movement into inverse 3D space movement.
+         * @param {DeviceOrientationEvent} e - The hardware gyroscope event
+         */
         function handleOrientation(e) {
             if (!isCalibrated) { 
                 baseAlpha = e.alpha || 0; 
@@ -565,6 +831,7 @@
             let dB = (e.beta || 0) - baseBeta; 
             let dG = (e.gamma || 0) - baseGamma;
 
+            // Normalize values
             if (dA > 180) { 
                 dA -= 360; 
             } 
@@ -572,9 +839,11 @@
                 dA += 360; 
             }
 
+            // Detect current hardware landscape/portrait orientation
             let angle = (screen.orientation || {}).angle || window.orientation || 0;
             let pitch, yaw, roll;
 
+            // Map physical axes to the correct 3D logical axes
             if (angle === 90) { 
                 pitch = dG; 
                 yaw = dA; 
@@ -589,26 +858,30 @@
                 roll = dG; 
             }
 
-            // TRUE INVERSE ROTATION
+            // TRUE INVERSE ROTATION: Both Pitch and Yaw are inverted
             rawTargetRotX = -pitch; 
             rawTargetRotY = -yaw;   
             rawTargetRotZ = -roll;  
         }
 
+        /**
+         * Resets the gyroscope calibration and centers the UI window.
+         */
         function recenterAR() { 
             isCalibrated = false; 
             bubbleX = 0; 
             bubbleY = 0; 
-
-            if (!isSuckedIn) { 
-                targetBubbleZ = -500; 
-                savedBubbleZ = -500; 
-            }
+            targetBubbleZ = -500; 
         }
 
+        /**
+         * Displays a non-intrusive notification pill.
+         * @param {string} msg - HTML string to display
+         */
         function showToastMessage(msg) {
             toastText.innerHTML = msg; 
             toast.style.top = "60px";
+            
             clearTimeout(window.toastTimeout);
 
             window.toastTimeout = setTimeout(() => { 
@@ -617,273 +890,195 @@
         }
 
         /* ====================================================================
-           SMOOTH 3D RENDER ENGINE
+           SMOOTH 3D RENDER ENGINE (Physics and Parallax)
         ==================================================================== */
         function animate3D() {
+            // 1. Apply shortest-path math to prevent Gimbal Lock flips
             targetRotX = getShortestAngle(currentRotX, rawTargetRotX);
             targetRotY = getShortestAngle(currentRotY, rawTargetRotY);
             targetRotZ = getShortestAngle(currentRotZ, rawTargetRotZ);
 
-            currentRotX += (targetRotX - currentRotX) * 0.25;
-            currentRotY += (targetRotY - currentRotY) * 0.25;
-            currentRotZ += (targetRotZ - currentRotZ) * 0.25;
+            // 2. Buttery smooth LERP interpolation
+            currentRotX += (targetRotX - currentRotX) * PHYSICS_CONFIG.renderSmoothing;
+            currentRotY += (targetRotY - currentRotY) * PHYSICS_CONFIG.renderSmoothing;
+            currentRotZ += (targetRotZ - currentRotZ) * PHYSICS_CONFIG.renderSmoothing;
             
+            // 3. Interpolate Z-depth Push/Pull
             bubbleZ += (targetBubbleZ - bubbleZ) * 0.15; 
-            currentScale += (targetScale - currentScale) * 0.15;
-            currentOpacity += (targetOpacity - currentOpacity) * 0.15;
-            currentSpin += (targetSpin - currentSpin) * 0.10;
 
+            // 4. Construct rotation string
             const rotTransform = `rotateX(${currentRotX}deg) rotateY(${currentRotY}deg) rotateZ(${currentRotZ}deg)`;
             
+            // 5. Apply to world containers
             worldLeft.style.transform = rotTransform; 
             worldRight.style.transform = rotTransform;
-            
-            let meltRadius = 35 + ((1.0 - currentScale) * 145); 
 
-            bubbleLeft.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(15px) scale(${currentScale}) rotateZ(${currentSpin}deg)`;
-            bubbleLeft.style.opacity = currentOpacity;
-            bubbleLeft.style.borderRadius = `${meltRadius}px`;
+            // 6. Render Left Eye (with Stereoscopic Offset)
+            bubbleLeft.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(${PHYSICS_CONFIG.parallaxOffset}px)`;
 
-            bubbleRight.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(-15px) scale(${currentScale}) rotateZ(${currentSpin}deg)`;
-            bubbleRight.style.opacity = currentOpacity;
-            bubbleRight.style.borderRadius = `${meltRadius}px`;
+            // 7. Render Right Eye (with Stereoscopic Offset)
+            bubbleRight.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(-${PHYSICS_CONFIG.parallaxOffset}px)`;
             
             requestAnimationFrame(animate3D);
         }
 
+        /**
+         * Triggers the YouTube playback and updates all visual states.
+         * @param {HTMLElement} element - The DOM node representing the song
+         */
         function playSong(element) {
             const index = element.dataset.index;
             const title = element.querySelector('.song-title').innerText;
             const artist = element.querySelector('.song-artist').innerText;
 
-            Array.from(listLeft.children).forEach(el => el.classList.remove('playing')); 
-            Array.from(listRight.children).forEach(el => el.classList.remove('playing'));
+            // Remove playing state from all elements
+            const leftChildren = Array.from(listLeft.children);
+            const rightChildren = Array.from(listRight.children);
+            
+            for (let i = 0; i < leftChildren.length; i++) {
+                leftChildren[i].classList.remove('playing');
+                rightChildren[i].classList.remove('playing');
+            }
 
+            // Add playing state to the selected song
             listLeft.children[index].classList.add('playing'); 
             listRight.children[index].classList.add('playing');
 
+            // Trigger Youtube API
             if (ytPlayer && ytPlayer.loadVideoById) { 
                 ytPlayer.loadVideoById(element.dataset.ytid); 
             }
 
+            // Notification
             showToastMessage(`<b>${title}</b> <span style="opacity:0.7; margin-left:8px;">${artist}</span>`);
         }
 
-        function getDist(p1, p2) {
-            return Math.hypot(p1.x - p2.x, p1.y - p2.y);
-        }
-
         /* ====================================================================
-           THE DUAL-HAND TRACKING ENGINE
+           THE CORE TRACKING ENGINE (6DoF Drag, Push/Pull, Kinetic Scroll)
         ==================================================================== */
         function onResults(results) {
             try {
                 const eyeW = window.innerWidth / 2;
                 const eyeH = window.innerHeight;
                 
+                // Keep canvas sizes accurate to the viewport
                 ctxLeft.canvas.width = eyeW; 
                 ctxLeft.canvas.height = eyeH; 
+                
                 ctxRight.canvas.width = eyeW; 
                 ctxRight.canvas.height = eyeH;
                 
+                // Clear previous paint operations
                 ctxLeft.clearRect(0, 0, eyeW, eyeH); 
                 ctxRight.clearRect(0, 0, eyeW, eyeH);
 
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     
-                    /* ==========================================
-                       RENDER ALL VISIBLE HANDS
-                    ========================================== */
+                    // Render holograms for all detected hands
                     for (let i = 0; i < results.multiHandLandmarks.length; i++) {
                         const hand = results.multiHandLandmarks[i];
-                        drawConnectors(ctxLeft, hand, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
-                        drawLandmarks(ctxLeft, hand, {color: '#fff', lineWidth: 0, radius: 2});
                         
+                        // Left Eye Render
+                        drawConnectors(ctxLeft, hand, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
+                        drawLandmarks(ctxLeft, hand, {color: '#ffffff', lineWidth: 0, radius: 2});
+                        
+                        // Right Eye Render
                         drawConnectors(ctxRight, hand, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
-                        drawLandmarks(ctxRight, hand, {color: '#fff', lineWidth: 0, radius: 2});
+                        drawLandmarks(ctxRight, hand, {color: '#ffffff', lineWidth: 0, radius: 2});
                     }
 
-                    // Hand 0 is the dominant interaction hand
+                    /* ==========================================
+                       EXTRACT DOMINANT HAND LANDMARKS
+                    ========================================== */
                     const dominantHand = results.multiHandLandmarks[0];
-
+                    
                     const wrist = dominantHand[0];
                     const thumbTip = dominantHand[4];
                     const indexBase = dominantHand[5];
-                    const indexPip = dominantHand[6];
                     const indexTip = dominantHand[8];
-                    const middlePip = dominantHand[10];
-                    const middleTip = dominantHand[12];
-                    const ringPip = dominantHand[14];
-                    const ringTip = dominantHand[16];
                     const pinkyBase = dominantHand[17];
-                    const pinkyPip = dominantHand[18];
-                    const pinkyTip = dominantHand[20];
 
                     /* ==========================================
-                       DUAL HAND GESTURES (Clap & Pull)
-                    ========================================== */
-                    // If exactly 2 hands are detected, check the distance between their palms
-                    if (results.multiHandLandmarks.length === 2) {
-                        const hand1Base = results.multiHandLandmarks[0][5];
-                        const hand2Base = results.multiHandLandmarks[1][5];
-                        
-                        // Calculate normalized distance between both hands
-                        const handsDistance = Math.hypot(hand1Base.x - hand2Base.x, hand1Base.y - hand2Base.y);
-                        
-                        // Thresholds for Clapping and Pulling Apart
-                        const isClapping = handsDistance < 0.12; 
-                        const isPulledApart = handsDistance > 0.35;
-
-                        if (isClapping) {
-                            wasHandsTogether = true; // Primer for pulling apart
-
-                            if (!isSuckedIn && !isPinching) {
-                                // THE CLAP TRIGGER: Hide the UI
-                                isSuckedIn = true;
-                                savedBubbleZ = targetBubbleZ;
-                                targetBubbleZ = 600; 
-                                targetScale = 0.0;   
-                                targetOpacity = 0.0; 
-                                targetSpin = 720;    
-                                
-                                showToastMessage(`Window Clapped Away. Pull hands apart to restore.`);
-                                
-                                isPinching = false; 
-                                activeAction = null;
-                                curLeft.classList.remove('pinching'); 
-                                curRight.classList.remove('pinching');
-                                bubbleLeft.classList.remove('bubble-dragging'); 
-                                bubbleRight.classList.remove('bubble-dragging');
-                            }
-                        } 
-                        else if (isPulledApart && wasHandsTogether && isSuckedIn) {
-                            // THE PULL TRIGGER: Restore the UI
-                            isSuckedIn = false;
-                            wasHandsTogether = false; // Reset primer
-                            
-                            targetBubbleZ = savedBubbleZ;
-                            targetScale = 1.0;
-                            targetOpacity = 1.0;
-                            targetSpin = 0;
-                            openPalmStartTime = 0;
-                            
-                            showToastMessage(`OS Restored.`);
-                        }
-                    }
-
-                    /* ==========================================
-                       SINGLE HAND GESTURES (Fist & Open Palm)
-                    ========================================== */
-                    const isIndexCurled = getDist(indexTip, wrist) < getDist(indexPip, wrist);
-                    const isMiddleCurled = getDist(middleTip, wrist) < getDist(middlePip, wrist);
-                    const isRingCurled = getDist(ringTip, wrist) < getDist(ringPip, wrist);
-                    const isPinkyCurled = getDist(pinkyTip, wrist) < getDist(pinkyPip, wrist);
-
-                    const isFist = isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled;
-                    const isOpenPalm = !isIndexCurled && !isMiddleCurled && !isRingCurled && !isPinkyCurled;
-
-                    // Fallback Squish Trigger
-                    if (isFist && !isSuckedIn && !isPinching) {
-                        isSuckedIn = true;
-                        savedBubbleZ = targetBubbleZ;
-                        targetBubbleZ = 600; 
-                        targetScale = 0.0;   
-                        targetOpacity = 0.0; 
-                        targetSpin = 720;    
-                        
-                        showToastMessage(`Window Squished. Hold open palm or pull hands apart to restore.`);
-                        
-                        isPinching = false; 
-                        activeAction = null;
-                        curLeft.classList.remove('pinching'); 
-                        curRight.classList.remove('pinching');
-                        bubbleLeft.classList.remove('bubble-dragging'); 
-                        bubbleRight.classList.remove('bubble-dragging');
-                    }
-
-                    if (isSuckedIn) {
-                        // Fallback Open Palm Trigger
-                        if (isOpenPalm) {
-                            if (openPalmStartTime === 0) {
-                                openPalmStartTime = Date.now();
-                                showToastMessage(`Detecting open palm...`);
-                            } else if (Date.now() - openPalmStartTime > 2000) {
-                                isSuckedIn = false;
-                                targetBubbleZ = savedBubbleZ;
-                                targetScale = 1.0;
-                                targetOpacity = 1.0;
-                                targetSpin = 0;
-                                openPalmStartTime = 0;
-                                showToastMessage(`OS Restored.`);
-                            }
-                        } else {
-                            openPalmStartTime = 0;
-                        }
-                        
-                        // Hide cursors so we don't interact while UI is hidden
-                        curLeft.style.display = "none"; 
-                        curRight.style.display = "none";
-                        return; 
-                    } else {
-                        openPalmStartTime = 0;
-                    }
-
-                    /* ==========================================
-                       DOMINANT HAND INTERACTION (Laser, Drag, Push)
+                       SMOOTH LASER POINTER & POSITIONING
                     ========================================== */
                     curLeft.style.display = "block"; 
                     curRight.style.display = "block";
                     
-                    const currentPalmSize = Math.hypot(wrist.x - indexBase.x, wrist.y - indexBase.y) + 
-                                            Math.hypot(wrist.x - pinkyBase.x, wrist.y - pinkyBase.y);
+                    // Calculates the un-changing rigid palm size so Push/Pull is perfectly stable
+                    const distanceWristToIndex = Math.hypot(wrist.x - indexBase.x, wrist.y - indexBase.y);
+                    const distanceWristToPinky = Math.hypot(wrist.x - pinkyBase.x, wrist.y - pinkyBase.y);
+                    const currentPalmSize = distanceWristToIndex + distanceWristToPinky;
 
+                    // Extract raw coordinates
                     const rawX = indexTip.x * eyeW; 
                     const rawY = indexTip.y * eyeH;
                     
-                    smoothCursorX += (rawX - smoothCursorX) * 0.30; 
-                    smoothCursorY += (rawY - smoothCursorY) * 0.30;
+                    // Cursor smoothing
+                    smoothCursorX += (rawX - smoothCursorX) * PHYSICS_CONFIG.cursorSmoothing; 
+                    smoothCursorY += (rawY - smoothCursorY) * PHYSICS_CONFIG.cursorSmoothing;
 
+                    // Assign to DOM
                     curLeft.style.left = smoothCursorX + 'px'; 
                     curLeft.style.top = smoothCursorY + 'px';
                     
                     curRight.style.left = smoothCursorX + 'px'; 
                     curRight.style.top = smoothCursorY + 'px';
 
+                    // Pinch detection logic with Hysteresis
                     const pinchDistance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
-                    const pinchThreshold = isPinching ? 0.090 : 0.070; 
-                    const currentlyPinching = pinchDistance < pinchThreshold;
+                    const currentThreshold = isPinching ? PHYSICS_CONFIG.pinchThresholdHold : PHYSICS_CONFIG.pinchThresholdStart; 
+                    const currentlyPinching = pinchDistance < currentThreshold;
 
+                    // Perform Raycasting using HTML5 elementFromPoint
                     curLeft.style.pointerEvents = 'none'; 
                     const hitElement = document.elementFromPoint(smoothCursorX, smoothCursorY);
 
-                    document.querySelectorAll('.ar-hover').forEach(el => el.classList.remove('ar-hover'));
+                    // Clear previous hovers
+                    const allHovers = document.querySelectorAll('.ar-hover');
+                    for (let i = 0; i < allHovers.length; i++) {
+                        allHovers[i].classList.remove('ar-hover');
+                    }
                     
+                    // Apply new hovers if we aren't currently dragging/scrolling something
                     if (hitElement && hitElement.closest('.song-item') && !isPinching) {
-                        const songIndex = hitElement.closest('.song-item').dataset.index;
+                        const songNode = hitElement.closest('.song-item');
+                        const songIndex = songNode.dataset.index;
+                        
                         listLeft.children[songIndex].classList.add('ar-hover'); 
                         listRight.children[songIndex].classList.add('ar-hover');
                     }
 
+                    /* ==========================================
+                       STATE MACHINE: GRAB, DRAG, SCROLL, PUSH
+                    ========================================== */
                     if (currentlyPinching && !isPinching) {
+                        // --- 1. PINCH START ---
                         isPinching = true;
+                        
                         curLeft.classList.add('pinching'); 
                         curRight.classList.add('pinching');
                         
                         pinchStartX = smoothCursorX; 
                         pinchStartY = smoothCursorY; 
+                        
                         initialPalmSize = currentPalmSize; 
 
                         if (hitElement) {
                             if (hitElement.closest('.header')) {
+                                // Start dragging the window
                                 activeAction = 'drag';
+                                
                                 bubbleLeft.classList.add('bubble-dragging'); 
                                 bubbleRight.classList.add('bubble-dragging');
                                 
                                 initialBubbleX = bubbleX; 
                                 initialBubbleY = bubbleY; 
                                 initialBubbleZ = bubbleZ; 
+                                
                             } else if (hitElement.closest('.song-list')) {
+                                // Start scrolling the list
                                 activeAction = 'scroll';
+                                
                                 listLeft.classList.add('list-scrolling'); 
                                 listRight.classList.add('list-scrolling');
                                 
@@ -892,41 +1087,53 @@
                         }
                     } 
                     else if (currentlyPinching && isPinching) {
+                        // --- 2. PINCH HOLD & DRAG ---
                         const deltaX = smoothCursorX - pinchStartX; 
                         const deltaY = smoothCursorY - pinchStartY;
 
                         if (activeAction === 'drag') {
-                            // 6DoF Drag
-                            bubbleX = initialBubbleX + (deltaX * 2.5);
-                            bubbleY = initialBubbleY + (deltaY * 2.5);
+                            // UNRESTRICTED 6DoF MOVEMENT 
+                            bubbleX = initialBubbleX + (deltaX * PHYSICS_CONFIG.dragSensitivity);
+                            bubbleY = initialBubbleY + (deltaY * PHYSICS_CONFIG.dragSensitivity);
                             
-                            // Push/Pull Physics
+                            // PUSH AND PULL Z-DEPTH PHYSICS
                             const scaleDiff = currentPalmSize - initialPalmSize;
-                            let newZ = initialBubbleZ + (scaleDiff * 6000); 
+                            let newZ = initialBubbleZ + (scaleDiff * PHYSICS_CONFIG.pushPullSensitivity); 
                             
-                            if (newZ > -250) { newZ = -250; }   
-                            if (newZ < -1500) { newZ = -1500; } 
+                            // Boundaries
+                            if (newZ > PHYSICS_CONFIG.zDepthMax) { 
+                                newZ = PHYSICS_CONFIG.zDepthMax; 
+                            }   
+                            
+                            if (newZ < PHYSICS_CONFIG.zDepthMin) { 
+                                newZ = PHYSICS_CONFIG.zDepthMin; 
+                            } 
                             
                             targetBubbleZ = newZ;
 
                         } else if (activeAction === 'scroll') {
-                            // Kinetic Scroll
-                            const newScroll = initialScrollTop - (deltaY * 8.0);
+                            // KINETIC SCROLLING 
+                            const newScroll = initialScrollTop - (deltaY * PHYSICS_CONFIG.scrollSensitivity);
+                            
                             listLeft.scrollTop = newScroll; 
                             listRight.scrollTop = newScroll;
                         }
                     } 
                     else if (!currentlyPinching && isPinching) {
+                        // --- 3. PINCH RELEASE ---
                         isPinching = false; 
                         activeAction = null;
                         
                         curLeft.classList.remove('pinching'); 
                         curRight.classList.remove('pinching');
+                        
                         bubbleLeft.classList.remove('bubble-dragging'); 
                         bubbleRight.classList.remove('bubble-dragging');
+                        
                         listLeft.classList.remove('list-scrolling'); 
                         listRight.classList.remove('list-scrolling');
                         
+                        // Determine if it was a quick tap or a drag release
                         const moveDistance = Math.hypot(smoothCursorX - pinchStartX, smoothCursorY - pinchStartY);
                         
                         if (hitElement && hitElement.closest('.song-item') && moveDistance < 30) {
@@ -934,26 +1141,35 @@
                         }
                     }
                 } else {
+                    // Hand is completely off-screen, reset everything cleanly
                     curLeft.style.display = "none"; 
                     curRight.style.display = "none";
+                    
                     isPinching = false; 
                     activeAction = null;
-                    openPalmStartTime = 0;
+                    
                     curLeft.classList.remove('pinching'); 
                     curRight.classList.remove('pinching');
+                    
                     bubbleLeft.classList.remove('bubble-dragging'); 
                     bubbleRight.classList.remove('bubble-dragging');
+                    
+                    listLeft.classList.remove('list-scrolling'); 
+                    listRight.classList.remove('list-scrolling');
                 }
             } catch (error) {
+                // If a frame is corrupted by bad lighting, safely catch and ignore it
                 console.warn("Recovered from tracking error: ", error);
             }
         }
 
         /* ====================================================================
            SYSTEM BOOT SEQUENCE
+           Manages permissions, AI loading, and rendering initialization.
         ==================================================================== */
         async function initVR() {
             
+            // Unmute YouTube audio engine for mobile browsers
             if (ytPlayer && ytPlayer.playVideo) { 
                 ytPlayer.playVideo(); 
                 setTimeout(() => ytPlayer.pauseVideo(), 100); 
@@ -968,7 +1184,7 @@
                         window.addEventListener('deviceorientation', handleOrientation); 
                     }
                 } catch(e) {
-                    console.error("Gyroscope error:", e);
+                    console.error("Gyroscope permission error:", e);
                 }
             } else { 
                 window.addEventListener('deviceorientation', handleOrientation); 
@@ -991,7 +1207,6 @@
                     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
                 });
                 
-                // CRITICAL CHANGE: maxNumHands set to 2 so it tracks both hands!
                 hands.setOptions({ 
                     maxNumHands: 2, 
                     modelComplexity: 0, 
@@ -1012,14 +1227,14 @@
                     document.getElementById('recenter-btn').style.display = "block";
                     
                     animate3D();
-                    showToastMessage(`System Online. Try the Dual-Hand Clap to hide the UI.`);
+                    showToastMessage(`System Online. Grab to freely move window.`);
                     
                     async function loop() {
                         if (!procVideo.paused) { 
                             try {
                                 await hands.send({image: procVideo}); 
                             } catch (err) {
-                                console.warn("Frame skipped");
+                                console.warn("Frame processing skipped");
                             }
                         }
 
@@ -1034,11 +1249,9 @@
                 };
             } catch (err) { 
                 startScreen.innerHTML = "<h3>Camera Denied</h3><p>You must allow camera access for VR tracking.</p>"; 
+                console.error(err);
             }
         }
     </script>
 </body>
 </html>
-
-
-```
