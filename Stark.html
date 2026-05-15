@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <!-- Prevent zooming to keep AR scale accurate -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>VR Spatial OS - Ultimate Build</title>
+    <title>VR Spatial OS - Dual Hand Engine</title>
     
     <!-- MediaPipe AI Models for Hand Tracking -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
@@ -341,10 +341,11 @@
 
     <div id="start-screen">
         <h2 style="margin: 0; color:#00ffcc; font-size: 32px;">VR Spatial OS</h2>
-        <p style="opacity: 0.8; text-align: center; max-width: 320px; line-height: 1.6; margin-top: 15px;">
-            <b>All Systems Restored:</b> Crashes completely patched.<br><br>
-            <b>Squish to Melt:</b> Make a fist to squish the window away.<br>
-            <b>Hold Open Palm:</b> Hold palm completely open for 2 seconds to restore the UI.<br>
+        <p style="opacity: 0.8; text-align: center; max-width: 340px; line-height: 1.6; margin-top: 15px;">
+            <b>Dual Hand Engine Active:</b><br><br>
+            <b>1. Clap to Hide:</b> Clap your two hands together to melt the UI.<br>
+            <b>2. Pull to Show:</b> With hands together, pull them far apart to restore.<br>
+            <b>3. Fallbacks:</b> Fist Squish and Open Palm features are still fully active!
         </p>
         <button class="launch-btn" onclick="initVR()">Request Permissions</button>
     </div>
@@ -376,7 +377,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Squish to hide window</p>
+                            <p>Clap / Squish to hide</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-left"></div>
                     </div>
@@ -395,7 +396,7 @@
                         <div class="header drag-zone">
                             <div class="drag-pill"></div>
                             <h3>Library</h3>
-                            <p>Squish to hide window</p>
+                            <p>Clap / Squish to hide</p>
                         </div>
                         <div class="song-list drag-zone" id="songList-right"></div>
                     </div>
@@ -457,12 +458,10 @@
         let baseGamma = 0;
         let isCalibrated = false;
 
-        // Raw targets from the gyroscope
         let rawTargetRotX = 0;
         let rawTargetRotY = 0;
         let rawTargetRotZ = 0;
 
-        // Processed targets (prevent 360 spin)
         let targetRotX = 0;
         let targetRotY = 0;
         let targetRotZ = 0;
@@ -491,7 +490,7 @@
         let initialPalmSize = 0; 
 
         /* ====================================================================
-           FIST/PALM TRACKER ENGINE
+           HIDING ENGINES (Fist Squish, Clap, Open Palm, Pull Apart)
         ==================================================================== */
         let isSuckedIn = false;          
         let savedBubbleZ = -500;         
@@ -505,7 +504,8 @@
         let currentSpin = 0; 
         let targetSpin = 0; 
 
-        let openPalmStartTime = 0; // Timer for restoring the window
+        let openPalmStartTime = 0; 
+        let wasHandsTogether = false; // Tracks if hands were clapped prior to pulling apart
 
         /* ====================================================================
            MUSIC LIBRARY GENERATION
@@ -542,9 +542,6 @@
         /* ====================================================================
            THE GYROSCOPE & 360-SPIN BUG FIX
         ==================================================================== */
-        
-        // This function ensures the camera takes the shortest path to the next angle.
-        // It completely eliminates the bug where the screen flips 360 degrees.
         function getShortestAngle(current, target) {
             let diff = (target - current) % 360;
             if (diff > 180) { 
@@ -592,7 +589,7 @@
                 roll = dG; 
             }
 
-            // TRUE INVERSE ROTATION: Both Pitch and Yaw are inverted
+            // TRUE INVERSE ROTATION
             rawTargetRotX = -pitch; 
             rawTargetRotY = -yaw;   
             rawTargetRotZ = -roll;  
@@ -620,15 +617,13 @@
         }
 
         /* ====================================================================
-           SMOOTH 3D RENDER ENGINE (Physics, Parallax, and Melting)
+           SMOOTH 3D RENDER ENGINE
         ==================================================================== */
         function animate3D() {
-            // Apply shortest-path math to prevent Gimbal Lock flips
             targetRotX = getShortestAngle(currentRotX, rawTargetRotX);
             targetRotY = getShortestAngle(currentRotY, rawTargetRotY);
             targetRotZ = getShortestAngle(currentRotZ, rawTargetRotZ);
 
-            // Buttery smooth LERP interpolation
             currentRotX += (targetRotX - currentRotX) * 0.25;
             currentRotY += (targetRotY - currentRotY) * 0.25;
             currentRotZ += (targetRotZ - currentRotZ) * 0.25;
@@ -645,12 +640,10 @@
             
             let meltRadius = 35 + ((1.0 - currentScale) * 145); 
 
-            // Left Eye Rendering
             bubbleLeft.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(15px) scale(${currentScale}) rotateZ(${currentSpin}deg)`;
             bubbleLeft.style.opacity = currentOpacity;
             bubbleLeft.style.borderRadius = `${meltRadius}px`;
 
-            // Right Eye Rendering
             bubbleRight.style.transform = `translate(-50%, -50%) translate3d(${bubbleX}px, ${bubbleY}px, ${bubbleZ}px) translateX(-15px) scale(${currentScale}) rotateZ(${currentSpin}deg)`;
             bubbleRight.style.opacity = currentOpacity;
             bubbleRight.style.borderRadius = `${meltRadius}px`;
@@ -676,15 +669,12 @@
             showToastMessage(`<b>${title}</b> <span style="opacity:0.7; margin-left:8px;">${artist}</span>`);
         }
 
-        /* ====================================================================
-           MATH HELPER FOR FINGERS
-        ==================================================================== */
         function getDist(p1, p2) {
             return Math.hypot(p1.x - p2.x, p1.y - p2.y);
         }
 
         /* ====================================================================
-           THE TRACKING ENGINE (Fist Squish, Open Palm, and 6DoF Drag)
+           THE DUAL-HAND TRACKING ENGINE
         ==================================================================== */
         function onResults(results) {
             try {
@@ -693,7 +683,6 @@
                 
                 ctxLeft.canvas.width = eyeW; 
                 ctxLeft.canvas.height = eyeH; 
-                
                 ctxRight.canvas.width = eyeW; 
                 ctxRight.canvas.height = eyeH;
                 
@@ -702,107 +691,149 @@
 
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     
-                    const landmarks = results.multiHandLandmarks[0];
-                    
-                    // Draw Wireframes
-                    drawConnectors(ctxLeft, landmarks, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
-                    drawLandmarks(ctxLeft, landmarks, {color: '#fff', lineWidth: 0, radius: 2});
-                    
-                    drawConnectors(ctxRight, landmarks, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
-                    drawLandmarks(ctxRight, landmarks, {color: '#fff', lineWidth: 0, radius: 2});
+                    /* ==========================================
+                       RENDER ALL VISIBLE HANDS
+                    ========================================== */
+                    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                        const hand = results.multiHandLandmarks[i];
+                        drawConnectors(ctxLeft, hand, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
+                        drawLandmarks(ctxLeft, hand, {color: '#fff', lineWidth: 0, radius: 2});
+                        
+                        drawConnectors(ctxRight, hand, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
+                        drawLandmarks(ctxRight, hand, {color: '#fff', lineWidth: 0, radius: 2});
+                    }
+
+                    // Hand 0 is the dominant interaction hand
+                    const dominantHand = results.multiHandLandmarks[0];
+
+                    const wrist = dominantHand[0];
+                    const thumbTip = dominantHand[4];
+                    const indexBase = dominantHand[5];
+                    const indexPip = dominantHand[6];
+                    const indexTip = dominantHand[8];
+                    const middlePip = dominantHand[10];
+                    const middleTip = dominantHand[12];
+                    const ringPip = dominantHand[14];
+                    const ringTip = dominantHand[16];
+                    const pinkyBase = dominantHand[17];
+                    const pinkyPip = dominantHand[18];
+                    const pinkyTip = dominantHand[20];
 
                     /* ==========================================
-                       DEFINE ALL LANDMARKS PROPERLY
-                       (This fixes the Javascript freeze bug)
+                       DUAL HAND GESTURES (Clap & Pull)
                     ========================================== */
-                    const wrist = landmarks[0];
-                    const thumbTip = landmarks[4];
-                    const indexBase = landmarks[5];
-                    const indexPip = landmarks[6];
-                    const indexTip = landmarks[8];
-                    const middlePip = landmarks[10];
-                    const middleTip = landmarks[12];
-                    const ringPip = landmarks[14];
-                    const ringTip = landmarks[16];
-                    const pinkyBase = landmarks[17];
-                    const pinkyPip = landmarks[18];
-                    const pinkyTip = landmarks[20];
+                    // If exactly 2 hands are detected, check the distance between their palms
+                    if (results.multiHandLandmarks.length === 2) {
+                        const hand1Base = results.multiHandLandmarks[0][5];
+                        const hand2Base = results.multiHandLandmarks[1][5];
+                        
+                        // Calculate normalized distance between both hands
+                        const handsDistance = Math.hypot(hand1Base.x - hand2Base.x, hand1Base.y - hand2Base.y);
+                        
+                        // Thresholds for Clapping and Pulling Apart
+                        const isClapping = handsDistance < 0.12; 
+                        const isPulledApart = handsDistance > 0.35;
+
+                        if (isClapping) {
+                            wasHandsTogether = true; // Primer for pulling apart
+
+                            if (!isSuckedIn && !isPinching) {
+                                // THE CLAP TRIGGER: Hide the UI
+                                isSuckedIn = true;
+                                savedBubbleZ = targetBubbleZ;
+                                targetBubbleZ = 600; 
+                                targetScale = 0.0;   
+                                targetOpacity = 0.0; 
+                                targetSpin = 720;    
+                                
+                                showToastMessage(`Window Clapped Away. Pull hands apart to restore.`);
+                                
+                                isPinching = false; 
+                                activeAction = null;
+                                curLeft.classList.remove('pinching'); 
+                                curRight.classList.remove('pinching');
+                                bubbleLeft.classList.remove('bubble-dragging'); 
+                                bubbleRight.classList.remove('bubble-dragging');
+                            }
+                        } 
+                        else if (isPulledApart && wasHandsTogether && isSuckedIn) {
+                            // THE PULL TRIGGER: Restore the UI
+                            isSuckedIn = false;
+                            wasHandsTogether = false; // Reset primer
+                            
+                            targetBubbleZ = savedBubbleZ;
+                            targetScale = 1.0;
+                            targetOpacity = 1.0;
+                            targetSpin = 0;
+                            openPalmStartTime = 0;
+                            
+                            showToastMessage(`OS Restored.`);
+                        }
+                    }
 
                     /* ==========================================
-                       1. FIST AND OPEN PALM DETECTION
+                       SINGLE HAND GESTURES (Fist & Open Palm)
                     ========================================== */
-                    // A finger is "curled" if the tip is closer to the wrist than the knuckle is.
                     const isIndexCurled = getDist(indexTip, wrist) < getDist(indexPip, wrist);
                     const isMiddleCurled = getDist(middleTip, wrist) < getDist(middlePip, wrist);
                     const isRingCurled = getDist(ringTip, wrist) < getDist(ringPip, wrist);
                     const isPinkyCurled = getDist(pinkyTip, wrist) < getDist(pinkyPip, wrist);
 
-                    // A fist is squished when all fingers are curled in.
                     const isFist = isIndexCurled && isMiddleCurled && isRingCurled && isPinkyCurled;
-                    
-                    // An open palm is when all fingers are fully extended.
                     const isOpenPalm = !isIndexCurled && !isMiddleCurled && !isRingCurled && !isPinkyCurled;
 
-                    // --- SQUISH TO MELT LOGIC ---
+                    // Fallback Squish Trigger
                     if (isFist && !isSuckedIn && !isPinching) {
                         isSuckedIn = true;
-                        
                         savedBubbleZ = targetBubbleZ;
                         targetBubbleZ = 600; 
                         targetScale = 0.0;   
                         targetOpacity = 0.0; 
                         targetSpin = 720;    
                         
-                        showToastMessage(`Window Squished. Hold open palm to restore.`);
+                        showToastMessage(`Window Squished. Hold open palm or pull hands apart to restore.`);
                         
                         isPinching = false; 
                         activeAction = null;
-
                         curLeft.classList.remove('pinching'); 
                         curRight.classList.remove('pinching');
-                        
                         bubbleLeft.classList.remove('bubble-dragging'); 
                         bubbleRight.classList.remove('bubble-dragging');
                     }
 
-                    // --- OPEN PALM TO RESTORE LOGIC ---
                     if (isSuckedIn) {
+                        // Fallback Open Palm Trigger
                         if (isOpenPalm) {
                             if (openPalmStartTime === 0) {
                                 openPalmStartTime = Date.now();
-                                showToastMessage(`Detecting palm... keep holding...`);
+                                showToastMessage(`Detecting open palm...`);
                             } else if (Date.now() - openPalmStartTime > 2000) {
-                                // 2 seconds have passed! Un-melt the window.
                                 isSuckedIn = false;
-                                
                                 targetBubbleZ = savedBubbleZ;
                                 targetScale = 1.0;
                                 targetOpacity = 1.0;
                                 targetSpin = 0;
                                 openPalmStartTime = 0;
-                                
                                 showToastMessage(`OS Restored.`);
                             }
                         } else {
-                            // If they close their hand before 2 seconds, reset the timer.
                             openPalmStartTime = 0;
                         }
                         
-                        // Hide cursors while sucked in so they don't click anything
+                        // Hide cursors so we don't interact while UI is hidden
                         curLeft.style.display = "none"; 
                         curRight.style.display = "none";
-                        return; // Exit the loop entirely
+                        return; 
                     } else {
                         openPalmStartTime = 0;
                     }
 
                     /* ==========================================
-                       2. SMOOTH LASER POINTER & PUSH/PULL
+                       DOMINANT HAND INTERACTION (Laser, Drag, Push)
                     ========================================== */
                     curLeft.style.display = "block"; 
                     curRight.style.display = "block";
                     
-                    // Calculates the un-changing rigid palm size so Push/Pull is perfectly stable
                     const currentPalmSize = Math.hypot(wrist.x - indexBase.x, wrist.y - indexBase.y) + 
                                             Math.hypot(wrist.x - pinkyBase.x, wrist.y - pinkyBase.y);
 
@@ -818,7 +849,6 @@
                     curRight.style.left = smoothCursorX + 'px'; 
                     curRight.style.top = smoothCursorY + 'px';
 
-                    // Pinch logic
                     const pinchDistance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
                     const pinchThreshold = isPinching ? 0.090 : 0.070; 
                     const currentlyPinching = pinchDistance < pinchThreshold;
@@ -830,20 +860,17 @@
                     
                     if (hitElement && hitElement.closest('.song-item') && !isPinching) {
                         const songIndex = hitElement.closest('.song-item').dataset.index;
-                        
                         listLeft.children[songIndex].classList.add('ar-hover'); 
                         listRight.children[songIndex].classList.add('ar-hover');
                     }
 
                     if (currentlyPinching && !isPinching) {
-                        // PINCH START
                         isPinching = true;
                         curLeft.classList.add('pinching'); 
                         curRight.classList.add('pinching');
                         
                         pinchStartX = smoothCursorX; 
                         pinchStartY = smoothCursorY; 
-                        
                         initialPalmSize = currentPalmSize; 
 
                         if (hitElement) {
@@ -865,49 +892,38 @@
                         }
                     } 
                     else if (currentlyPinching && isPinching) {
-                        // PINCH HOLD & DRAG
                         const deltaX = smoothCursorX - pinchStartX; 
                         const deltaY = smoothCursorY - pinchStartY;
 
                         if (activeAction === 'drag') {
-                            // UNRESTRICTED 6DoF MOVEMENT: 
-                            // It smoothly follows you left, right, up, and down.
+                            // 6DoF Drag
                             bubbleX = initialBubbleX + (deltaX * 2.5);
                             bubbleY = initialBubbleY + (deltaY * 2.5);
                             
+                            // Push/Pull Physics
                             const scaleDiff = currentPalmSize - initialPalmSize;
-                            
-                            // Z-Depth Push/Pull Physics
                             let newZ = initialBubbleZ + (scaleDiff * 6000); 
                             
-                            if (newZ > -250) { 
-                                newZ = -250; 
-                            }   
-                            
-                            if (newZ < -1500) { 
-                                newZ = -1500; 
-                            } 
+                            if (newZ > -250) { newZ = -250; }   
+                            if (newZ < -1500) { newZ = -1500; } 
                             
                             targetBubbleZ = newZ;
 
                         } else if (activeAction === 'scroll') {
+                            // Kinetic Scroll
                             const newScroll = initialScrollTop - (deltaY * 8.0);
-                            
                             listLeft.scrollTop = newScroll; 
                             listRight.scrollTop = newScroll;
                         }
                     } 
                     else if (!currentlyPinching && isPinching) {
-                        // PINCH RELEASE
                         isPinching = false; 
                         activeAction = null;
                         
                         curLeft.classList.remove('pinching'); 
                         curRight.classList.remove('pinching');
-                        
                         bubbleLeft.classList.remove('bubble-dragging'); 
                         bubbleRight.classList.remove('bubble-dragging');
-                        
                         listLeft.classList.remove('list-scrolling'); 
                         listRight.classList.remove('list-scrolling');
                         
@@ -920,19 +936,15 @@
                 } else {
                     curLeft.style.display = "none"; 
                     curRight.style.display = "none";
-                    
                     isPinching = false; 
                     activeAction = null;
                     openPalmStartTime = 0;
-                    
                     curLeft.classList.remove('pinching'); 
                     curRight.classList.remove('pinching');
-                    
                     bubbleLeft.classList.remove('bubble-dragging'); 
                     bubbleRight.classList.remove('bubble-dragging');
                 }
             } catch (error) {
-                // Failsafe in case of bad tracking frame
                 console.warn("Recovered from tracking error: ", error);
             }
         }
@@ -979,8 +991,9 @@
                     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
                 });
                 
+                // CRITICAL CHANGE: maxNumHands set to 2 so it tracks both hands!
                 hands.setOptions({ 
-                    maxNumHands: 1, 
+                    maxNumHands: 2, 
                     modelComplexity: 0, 
                     minDetectionConfidence: 0.75, 
                     minTrackingConfidence: 0.75 
@@ -999,7 +1012,7 @@
                     document.getElementById('recenter-btn').style.display = "block";
                     
                     animate3D();
-                    showToastMessage(`System Online. Grab to freely spin window.`);
+                    showToastMessage(`System Online. Try the Dual-Hand Clap to hide the UI.`);
                     
                     async function loop() {
                         if (!procVideo.paused) { 
