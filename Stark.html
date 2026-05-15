@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -349,6 +348,7 @@
             <b>Gimbal Lock Fixed:</b> No more 360-degree spins when looking up or down.<br><br>
             <b>Squish to Melt:</b> Make a fist to squish the window away.<br>
             <b>Hold Open Palm:</b> Hold palm open for 2 seconds to restore.<br>
+            <b>Tracker Fix:</b> The AI freezing bug is completely patched.
         </p>
         <button class="launch-btn" onclick="initVR()">Request Permissions</button>
     </div>
@@ -706,22 +706,29 @@
                 
                 const landmarks = results.multiHandLandmarks[0];
                 
+                // Draw Wireframes
                 drawConnectors(ctxLeft, landmarks, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
                 drawLandmarks(ctxLeft, landmarks, {color: '#fff', lineWidth: 0, radius: 2});
                 
                 drawConnectors(ctxRight, landmarks, HAND_CONNECTIONS, {color: 'rgba(0,255,204,0.3)', lineWidth: 2});
                 drawLandmarks(ctxRight, landmarks, {color: '#fff', lineWidth: 0, radius: 2});
 
-                // Key tracking landmarks
+                /* ==========================================
+                   CRITICAL FIX: DEFINE ALL LANDMARKS PROPERLY
+                   This prevents the hidden error that caused the freezing!
+                ========================================== */
                 const wrist = landmarks[0];
-                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+                const indexBase = landmarks[5];
                 const indexPip = landmarks[6];
-                const middleTip = landmarks[12];
+                const indexTip = landmarks[8];
                 const middlePip = landmarks[10];
-                const ringTip = landmarks[16];
+                const middleTip = landmarks[12];
                 const ringPip = landmarks[14];
-                const pinkyTip = landmarks[20];
+                const ringTip = landmarks[16];
+                const pinkyBase = landmarks[17];
                 const pinkyPip = landmarks[18];
+                const pinkyTip = landmarks[20];
 
                 /* ==========================================
                    1. FIST AND OPEN PALM DETECTION
@@ -797,10 +804,8 @@
                 ========================================== */
                 curLeft.style.display = "block"; 
                 curRight.style.display = "block";
-
-                const thumbFinger = landmarks[4];
-                const indexBase = landmarks[5];
                 
+                // Calculates the un-changing rigid palm size so Push/Pull is perfectly stable
                 const currentPalmSize = Math.hypot(wrist.x - indexBase.x, wrist.y - indexBase.y) + 
                                         Math.hypot(wrist.x - pinkyBase.x, wrist.y - pinkyBase.y);
 
@@ -817,7 +822,7 @@
                 curRight.style.top = smoothCursorY + 'px';
 
                 // INCREASED PINCH THRESHOLD: Much easier to grab things now
-                const pinchDistance = Math.hypot(indexTip.x - thumbFinger.x, indexTip.y - thumbFinger.y);
+                const pinchDistance = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
                 const pinchThreshold = isPinching ? 0.090 : 0.070; 
                 const currentlyPinching = pinchDistance < pinchThreshold;
 
@@ -932,11 +937,10 @@
         }
 
         /* ====================================================================
-           SYSTEM BOOT SEQUENCE (Step-by-Step UI)
+           SYSTEM BOOT SEQUENCE (With Try/Catch Safety Net)
         ==================================================================== */
         async function initVR() {
             
-            // Un-mute YouTube audio engine
             if (ytPlayer && ytPlayer.playVideo) { 
                 ytPlayer.playVideo(); 
                 setTimeout(() => ytPlayer.pauseVideo(), 100); 
@@ -947,7 +951,6 @@
             if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try { 
                     const permissionResponse = await DeviceOrientationEvent.requestPermission(); 
-                    
                     if (permissionResponse === 'granted') { 
                         window.addEventListener('deviceorientation', handleOrientation); 
                     }
@@ -997,9 +1000,15 @@
                     animate3D();
                     showToastMessage(`System Online. Grab to freely spin window.`);
                     
+                    // CRASH-PROOF LOOP
+                    // Even if MediaPipe encounters a bad frame, the loop will recover.
                     async function loop() {
                         if (!procVideo.paused) { 
-                            await hands.send({image: procVideo}); 
+                            try {
+                                await hands.send({image: procVideo}); 
+                            } catch (error) {
+                                console.warn("MediaPipe Frame Skipped due to artifact:", error);
+                            }
                         }
 
                         if ('requestVideoFrameCallback' in procVideo) { 
@@ -1018,6 +1027,3 @@
     </script>
 </body>
 </html>
-
-
-```
