@@ -1,0 +1,717 @@
+```react
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
+import { Copy, Plus, Users, MessageSquare, ShieldAlert, Sparkles, Clock, ArrowRight, Trophy, Skull } from 'lucide-react';
+
+// --- Firebase Initialization ---
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
+const auth = app ? getAuth(app) : null;
+const db = app ? getFirestore(app) : null;
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'bluffer-default-id';
+
+// --- Game Engine Helpers ---
+const SUITS = ['♠', '♥', '♦', '♣'];
+const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+
+const createDeck = () => {
+  let deck = [];
+  for (let suit of SUITS) {
+    for (let rank of RANKS) {
+      let value = parseInt(rank);
+      if (['J', 'Q', 'K'].includes(rank)) value = 10;
+      if (rank === 'A') value = 11;
+      deck.push({ suit, rank, value, id: `${rank}-${suit}-${Math.random()}` });
+    }
+  }
+  // Shuffle
+  return deck.sort(() => Math.random() - 0.5);
+};
+
+const calculateScore = (hand, bonus = 0) => {
+  if (!hand) return 0;
+  let sum = 0;
+  let aces = 0;
+  for (let card of hand) {
+    sum += card.value;
+    if (card.rank === 'A') aces += 1;
+  }
+  while (sum > 21 && aces > 0) {
+    sum -= 10;
+    aces -= 1;
+  }
+  return sum + bonus;
+};
+
+// --- Procedural Special Cards Generator (Simulating 100+ cards) ---
+const ADJECTIVES = ["Shadow", "Mystic", "Cunning", "Devious", "Golden", "Crimson", "Void", "Astral", "Phantom", "Rogue", "Twisted", "Sly"];
+const NOUNS = ["Strike", "Whisper", "Gambit", "Trick", "Illusion", "Pact", "Curse", "Blessing", "Hex", "Boon", "Sleight", "Mirage"];
+const EFFECTS = [
+  { type: 'STEAL', desc: "Steal a random card from your opponent's hand." },
+  { type: 'SWAP', desc: "Swap a random card from your hand with your opponent's." },
+  { type: 'FORCE_HIT', desc: "Force your opponent to draw a card from the deck." },
+  { type: 'DISCARD', desc: "Force your opponent to discard a random card." },
+  { type: 'PLUS_2', desc: "Add +2 to your final hand score this round." },
+  { type: 'MINUS_2', desc: "Subtract -2 from your opponent's final hand score." },
+  { type: 'DESTROY_SPECIAL', desc: "Destroy your opponent's special card if unused." }
+];
+
+const generateSpecialCard = () => {
+  const adj = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  const effect = EFFECTS[Math.floor(Math.random() * EFFECTS.length)];
+  return {
+    id: `special-${Math.random()}`,
+    name: `${adj} ${noun}`,
+    type: effect.type,
+    desc: effect.desc
+  };
+};
+
+// --- Main App Component ---
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [roomId, setRoomId] = useState('');
+  const [roomData, setRoomData] = useState(null);
+  const [joinInput, setJoinInput] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const [timeLeft, setTimeLeft] = useState(0);
+  const chatEndRef = useRef(null);
+
+  // 1. Initialize Auth
+  useEffect(() => {
+    if (!auth) return;
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, setUser);
+    return () => unsub();
+  }, []);
+
+  // 2. Listen to Room Data
+  useEffect(() => {
+    if (!user || !roomId || !db) return;
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+    
+    const unsubscribe = onSnapshot(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setRoomData(snapshot.data());
+      } else {
+        setRoomData(null);
+      }
+    }, (error) => {
+      console.error("Room listener error:", error);
+    });
+
+    return () => unsubscribe();
+  }, [user, roomId]);
+
+  // 3. Timer Logic
+  useEffect(() => {
+    if (!roomData || roomData.status !== 'playing') {
+      setTimeLeft(0);
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.floor((roomData.state.roundEndTime - Date.now()) / 1000));
+      setTimeLeft(remaining);
+      
+      // Auto-stand if time is up and player hasn't stood
+      if (remaining === 0 && roomData.status === 'playing') {
+        const myRole = user.uid === roomData.hostId ? 'host' : 'guest';
+        if (!roomData.state[myRole].stood) {
+          handleStand();
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [roomData, user]);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [roomData?.chat]);
+
+  // --- Actions ---
+
+  const handleHostGame = async () => {
+    if (!user || !db) return;
+    const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', newRoomId);
+    
+    await setDoc(roomRef, {
+      roomId: newRoomId,
+      hostId: user.uid,
+      guestId: null,
+      status: 'lobby', // lobby, playing, reveal, game_over
+      round: 0,
+      hostWins: 0,
+      guestWins: 0,
+      chat: [],
+      state: null
+    });
+    setRoomId(newRoomId);
+  };
+
+  const handleJoinGame = async (e) => {
+    e.preventDefault();
+    if (!user || !db || !joinInput) return;
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', joinInput.toUpperCase());
+    await updateDoc(roomRef, { guestId: user.uid });
+    setRoomId(joinInput.toUpperCase());
+  };
+
+  const startRound = async () => {
+    if (!user || !db || !roomData) return;
+    
+    let deck = createDeck();
+    
+    const hostHand = [deck.pop(), deck.pop()];
+    const guestHand = [deck.pop(), deck.pop()];
+
+    const newState = {
+      deck,
+      roundEndTime: Date.now() + 120000, // 2 minutes
+      host: { hand: hostHand, special: generateSpecialCard(), stood: false, specialUsed: false, bonusScore: 0 },
+      guest: { hand: guestHand, special: generateSpecialCard(), stood: false, specialUsed: false, bonusScore: 0 }
+    };
+
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+    await updateDoc(roomRef, {
+      status: 'playing',
+      round: roomData.round + 1,
+      state: newState
+    });
+  };
+
+  const sendChat = async (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !user || !roomId) return;
+    const msg = {
+      sender: user.uid === roomData.hostId ? 'Host' : 'Guest',
+      senderId: user.uid,
+      text: chatInput.trim(),
+      time: Date.now()
+    };
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+    await updateDoc(roomRef, { chat: arrayUnion(msg) });
+    setChatInput('');
+  };
+
+  const handleHit = async () => {
+    if (!roomData || roomData.status !== 'playing') return;
+    const myRole = user.uid === roomData.hostId ? 'host' : 'guest';
+    if (roomData.state[myRole].stood) return;
+
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+    const newState = JSON.parse(JSON.stringify(roomData.state)); // Deep copy
+    
+    if (newState.deck.length > 0) {
+      newState[myRole].hand.push(newState.deck.pop());
+      await updateDoc(roomRef, { state: newState });
+    }
+  };
+
+  const handleStand = async () => {
+    if (!roomData || roomData.status !== 'playing') return;
+    const myRole = user.uid === roomData.hostId ? 'host' : 'guest';
+    const oppRole = myRole === 'host' ? 'guest' : 'host';
+    
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+    const newState = JSON.parse(JSON.stringify(roomData.state));
+    newState[myRole].stood = true;
+
+    // If both stood, transition to reveal
+    if (newState[oppRole].stood) {
+      await processRoundEnd(roomRef, newState, roomData);
+    } else {
+      await updateDoc(roomRef, { state: newState });
+    }
+  };
+
+  const processRoundEnd = async (roomRef, finalState, currentRoomData) => {
+    const hostScoreRaw = calculateScore(finalState.host.hand, finalState.host.bonusScore);
+    const guestScoreRaw = calculateScore(finalState.guest.hand, finalState.guest.bonusScore);
+    
+    // Blackjack bust logic (over 21 = bust, represented as -1 for comparison)
+    const hostScore = hostScoreRaw > 21 ? -1 : hostScoreRaw;
+    const guestScore = guestScoreRaw > 21 ? -1 : guestScoreRaw;
+
+    let hostWins = currentRoomData.hostWins;
+    let guestWins = currentRoomData.guestWins;
+
+    if (hostScore > guestScore) hostWins++;
+    else if (guestScore > hostScore) guestWins++;
+    // Ties do nothing to wins
+
+    const isGameOver = currentRoomData.round >= 3;
+
+    await updateDoc(roomRef, {
+      state: finalState,
+      status: isGameOver ? 'game_over' : 'reveal',
+      hostWins,
+      guestWins
+    });
+  };
+
+  const handleSpecialCard = async () => {
+    if (!roomData || roomData.status !== 'playing') return;
+    const myRole = user.uid === roomData.hostId ? 'host' : 'guest';
+    const oppRole = myRole === 'host' ? 'guest' : 'host';
+    
+    if (roomData.state[myRole].specialUsed) return;
+
+    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+    const newState = JSON.parse(JSON.stringify(roomData.state));
+    const card = newState[myRole].special;
+    
+    // Apply Effects
+    if (card.type === 'STEAL' && newState[oppRole].hand.length > 0) {
+      const randIdx = Math.floor(Math.random() * newState[oppRole].hand.length);
+      const stolen = newState[oppRole].hand.splice(randIdx, 1)[0];
+      newState[myRole].hand.push(stolen);
+    } 
+    else if (card.type === 'SWAP' && newState[oppRole].hand.length > 0 && newState[myRole].hand.length > 0) {
+      const myIdx = Math.floor(Math.random() * newState[myRole].hand.length);
+      const oppIdx = Math.floor(Math.random() * newState[oppRole].hand.length);
+      const temp = newState[myRole].hand[myIdx];
+      newState[myRole].hand[myIdx] = newState[oppRole].hand[oppIdx];
+      newState[oppRole].hand[oppIdx] = temp;
+    }
+    else if (card.type === 'FORCE_HIT' && newState.deck.length > 0) {
+      newState[oppRole].hand.push(newState.deck.pop());
+    }
+    else if (card.type === 'DISCARD' && newState[oppRole].hand.length > 0) {
+      const randIdx = Math.floor(Math.random() * newState[oppRole].hand.length);
+      newState[oppRole].hand.splice(randIdx, 1);
+    }
+    else if (card.type === 'PLUS_2') {
+      newState[myRole].bonusScore += 2;
+    }
+    else if (card.type === 'MINUS_2') {
+      newState[oppRole].bonusScore -= 2;
+    }
+    else if (card.type === 'DESTROY_SPECIAL') {
+      newState[oppRole].specialUsed = true; // effectively destroys it
+    }
+
+    newState[myRole].specialUsed = true;
+    
+    // Log it in chat implicitly
+    const msg = {
+      sender: 'System',
+      senderId: 'system',
+      text: `${myRole === 'host' ? 'Host' : 'Guest'} played a Special Card: ${card.name}!`,
+      time: Date.now()
+    };
+
+    await updateDoc(roomRef, { 
+      state: newState,
+      chat: arrayUnion(msg)
+    });
+  };
+
+  // --- UI Components ---
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(roomId).catch(() => {
+      const textArea = document.createElement("textarea");
+      textArea.value = roomId;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textArea);
+    });
+  };
+
+  const getSuitColor = (suit) => ['♥', '♦'].includes(suit) ? 'text-red-500' : 'text-slate-800';
+
+  const CardRender = ({ card, hidden }) => (
+    <div className={`relative w-16 h-24 sm:w-20 sm:h-28 rounded-lg shadow-md border-2 flex flex-col justify-between p-2 
+      ${hidden ? 'bg-indigo-900 border-indigo-700' : 'bg-white border-slate-200'}`}>
+      {hidden ? (
+        <div className="flex-1 flex items-center justify-center">
+          <ShieldAlert className="text-indigo-500 opacity-50" size={24} />
+        </div>
+      ) : (
+        <>
+          <span className={`text-lg font-bold leading-none ${getSuitColor(card.suit)}`}>{card.rank}</span>
+          <span className={`text-3xl self-center ${getSuitColor(card.suit)}`}>{card.suit}</span>
+          <span className={`text-lg font-bold leading-none self-end rotate-180 ${getSuitColor(card.suit)}`}>{card.rank}</span>
+        </>
+      )}
+    </div>
+  );
+
+  if (!user) {
+    return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white">Connecting to server...</div>;
+  }
+
+  if (!roomId || !roomData) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-slate-200 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-zinc-900 p-8 rounded-2xl shadow-2xl border border-zinc-800 text-center">
+          <ShieldAlert className="mx-auto text-indigo-500 mb-4" size={48} />
+          <h1 className="text-4xl font-black mb-2 tracking-tight text-white">THE BLUFFER</h1>
+          <p className="text-zinc-400 mb-8">A high-stakes game of deception, cards, and survival. Get closest to 21 without busting.</p>
+          
+          <div className="space-y-6">
+            <button 
+              onClick={handleHostGame}
+              className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 px-4 rounded-xl transition-colors"
+            >
+              <Plus size={20} /> Host New Game
+            </button>
+            
+            <div className="relative flex py-2 items-center">
+              <div className="flex-grow border-t border-zinc-700"></div>
+              <span className="flex-shrink-0 mx-4 text-zinc-500 text-sm font-medium">OR JOIN EXISTING</span>
+              <div className="flex-grow border-t border-zinc-700"></div>
+            </div>
+
+            <form onSubmit={handleJoinGame} className="flex gap-2">
+              <input 
+                type="text" 
+                placeholder="Enter Room Code" 
+                className="flex-1 bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+                value={joinInput}
+                onChange={(e) => setJoinInput(e.target.value)}
+              />
+              <button 
+                type="submit"
+                className="bg-zinc-700 hover:bg-zinc-600 text-white font-bold py-3 px-6 rounded-xl transition-colors"
+              >
+                Join
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const myRole = user.uid === roomData.hostId ? 'host' : 'guest';
+  const oppRole = myRole === 'host' ? 'guest' : 'host';
+  const isHost = myRole === 'host';
+
+  if (roomData.status === 'lobby') {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-slate-200 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="max-w-md w-full bg-zinc-900 p-8 rounded-2xl shadow-2xl border border-zinc-800 text-center">
+          <h2 className="text-2xl font-bold mb-6 text-white">Waiting Lobby</h2>
+          
+          <div className="bg-zinc-950 p-4 rounded-xl mb-6 flex items-center justify-between border border-zinc-800">
+            <div>
+              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Room Code</p>
+              <p className="text-2xl font-mono font-bold tracking-widest text-indigo-400">{roomId}</p>
+            </div>
+            <button onClick={copyToClipboard} className="p-2 hover:bg-zinc-800 rounded-lg text-zinc-400 hover:text-white transition-colors">
+              <Copy size={20} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-center gap-4 mb-8">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-12 h-12 rounded-full bg-indigo-600 flex items-center justify-center shadow-lg">
+                <Users size={20} className="text-white" />
+              </div>
+              <span className="text-sm font-medium">Host (You)</span>
+            </div>
+            <div className="w-16 border-t-2 border-dashed border-zinc-700"></div>
+            <div className="flex flex-col items-center gap-2">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-colors duration-500
+                ${roomData.guestId ? 'bg-emerald-600' : 'bg-zinc-800'}`}>
+                {roomData.guestId ? <Users size={20} className="text-white" /> : <div className="w-2 h-2 rounded-full bg-zinc-600 animate-pulse" />}
+              </div>
+              <span className="text-sm font-medium text-zinc-400">
+                {roomData.guestId ? 'Guest Joined' : 'Waiting...'}
+              </span>
+            </div>
+          </div>
+
+          {isHost && (
+            <button 
+              onClick={startRound}
+              disabled={!roomData.guestId}
+              className="w-full disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-4 rounded-xl transition-colors flex justify-center items-center gap-2"
+            >
+              Start Match <ArrowRight size={20} />
+            </button>
+          )}
+          {!isHost && (
+            <p className="text-zinc-400 animate-pulse">Waiting for host to start the game...</p>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Common UI for Game Board (Playing or Reveal)
+  const renderGameBoard = () => {
+    const oppState = roomData.state[oppRole];
+    const myState = roomData.state[myRole];
+    const isReveal = roomData.status === 'reveal' || roomData.status === 'game_over';
+
+    return (
+      <div className="flex flex-col lg:flex-row h-screen bg-zinc-950 font-sans text-slate-200 overflow-hidden">
+        
+        {/* Left Side: Game Board */}
+        <div className="flex-1 flex flex-col relative">
+          
+          {/* Top Bar Info */}
+          <div className="bg-zinc-900/80 backdrop-blur-sm border-b border-zinc-800 p-4 flex justify-between items-center z-10">
+            <div className="flex gap-4 items-center">
+              <div className="bg-zinc-800 px-3 py-1 rounded-md text-sm font-bold text-zinc-300">
+                Round {roomData.round} / 3
+              </div>
+              <div className="flex gap-2 text-sm">
+                <span className="text-indigo-400 font-bold">{myRole === 'host' ? 'You' : 'Host'}: {roomData.hostWins}</span>
+                <span className="text-zinc-600">|</span>
+                <span className="text-emerald-400 font-bold">{myRole === 'guest' ? 'You' : 'Guest'}: {roomData.guestWins}</span>
+              </div>
+            </div>
+            
+            {roomData.status === 'playing' && (
+              <div className={`flex items-center gap-2 font-mono text-xl font-bold px-4 py-1 rounded-lg ${timeLeft < 30 ? 'bg-red-900/50 text-red-400 animate-pulse' : 'bg-zinc-800 text-zinc-300'}`}>
+                <Clock size={20} />
+                {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+              </div>
+            )}
+          </div>
+
+          {/* Table Area */}
+          <div className="flex-1 overflow-y-auto flex flex-col justify-between p-4 sm:p-8 relative">
+            
+            {/* Background Decoration */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-5 pointer-events-none">
+              <ShieldAlert size={400} />
+            </div>
+
+            {/* Opponent Area */}
+            <div className="flex flex-col items-center z-10 mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="bg-zinc-800 px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider text-zinc-400 shadow-inner flex items-center gap-2">
+                  Opponent {oppState.stood && <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>}
+                </div>
+                {isReveal && (
+                  <div className="bg-emerald-900/50 text-emerald-300 border border-emerald-700 px-3 py-1 rounded-full font-bold">
+                    Score: {calculateScore(oppState.hand, oppState.bonusScore)}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap justify-center gap-[-20px] sm:gap-[-10px] perspective-1000">
+                {oppState.hand.map((card, i) => (
+                  <div key={card.id} className="transition-transform hover:-translate-y-2" style={{ transform: `rotate(${(i - oppState.hand.length/2)*3}deg)` }}>
+                    <CardRender card={card} hidden={!isReveal} />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Divider / Action Center */}
+            <div className="w-full flex items-center justify-center relative my-4">
+              <div className="h-px w-full bg-gradient-to-r from-transparent via-zinc-700 to-transparent absolute"></div>
+              {roomData.status === 'playing' && (
+                <div className="bg-zinc-900 border border-zinc-700 rounded-full px-6 py-2 z-10 shadow-xl">
+                  {myState.stood ? 'Waiting for opponent...' : 'Your Turn'}
+                </div>
+              )}
+            </div>
+
+            {/* Player Area */}
+            <div className="flex flex-col items-center z-10 mt-8">
+              <div className="flex flex-wrap justify-center gap-2 mb-6">
+                {myState.hand.map((card, i) => (
+                  <div key={card.id} className="transition-transform hover:-translate-y-4 shadow-xl" style={{ transform: `rotate(${(i - myState.hand.length/2)*2}deg) translateY(${Math.abs(i - myState.hand.length/2)*5}px)` }}>
+                    <CardRender card={card} hidden={false} />
+                  </div>
+                ))}
+              </div>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-4 w-full max-w-2xl justify-between bg-zinc-900/80 p-4 rounded-2xl border border-zinc-800 backdrop-blur-md">
+                
+                <div className="flex flex-col">
+                  <span className="text-zinc-400 text-xs uppercase tracking-widest mb-1">Your Hand</span>
+                  <div className="text-3xl font-black text-white">
+                    {calculateScore(myState.hand, myState.bonusScore)}
+                    {myState.bonusScore !== 0 && <span className="text-sm text-indigo-400 ml-2">({myState.bonusScore > 0 ? '+' : ''}{myState.bonusScore} Bonus)</span>}
+                  </div>
+                </div>
+
+                {roomData.status === 'playing' && !myState.stood && (
+                  <div className="flex gap-2">
+                    <button onClick={handleHit} className="bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-3 rounded-xl font-bold transition-colors">
+                      Hit
+                    </button>
+                    <button onClick={handleStand} className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-xl font-bold transition-colors shadow-lg shadow-indigo-900/50">
+                      Stand
+                    </button>
+                  </div>
+                )}
+                {roomData.status === 'playing' && myState.stood && (
+                  <div className="text-emerald-500 font-bold flex items-center gap-2">
+                    <ShieldAlert size={20} /> You Stood
+                  </div>
+                )}
+
+                {/* Special Card Slot */}
+                <div className="relative group">
+                  <div className={`w-32 h-20 rounded-xl border-2 flex flex-col justify-center items-center p-2 text-center transition-all cursor-help
+                    ${myState.specialUsed ? 'bg-zinc-900 border-zinc-800 opacity-50' : 'bg-purple-900/30 border-purple-500 hover:bg-purple-800/40 shadow-[0_0_15px_rgba(168,85,247,0.3)]'}`}>
+                    {myState.specialUsed ? (
+                      <span className="text-xs text-zinc-500 font-bold uppercase">Used</span>
+                    ) : (
+                      <>
+                        <Sparkles size={16} className="text-purple-400 mb-1" />
+                        <span className="text-[10px] font-bold text-purple-300 leading-tight uppercase line-clamp-2">{myState.special.name}</span>
+                      </>
+                    )}
+                  </div>
+                  
+                  {/* Tooltip & Action */}
+                  {!myState.specialUsed && roomData.status === 'playing' && !myState.stood && (
+                    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-zinc-800 border border-zinc-700 rounded-lg p-3 shadow-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto z-50">
+                      <p className="text-xs text-zinc-300 mb-3">{myState.special.desc}</p>
+                      <button onClick={handleSpecialCard} className="w-full bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold py-2 rounded-md transition-colors">
+                        Use Card
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            </div>
+          </div>
+          
+          {/* Overlay for Reveal / Game Over */}
+          {isReveal && (
+            <div className="absolute inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+              <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl shadow-2xl text-center max-w-md w-full">
+                {roomData.status === 'game_over' ? (
+                  <>
+                    <Trophy size={64} className="mx-auto text-yellow-500 mb-6" />
+                    <h2 className="text-4xl font-black text-white mb-2">Game Over</h2>
+                    <p className="text-xl text-zinc-300 mb-8">
+                      {roomData.hostWins > roomData.guestWins ? "Host Wins!" : 
+                       roomData.guestWins > roomData.hostWins ? "Guest Wins!" : "It's a Tie!"}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h2 className="text-3xl font-black text-white mb-6">Round {roomData.round} Over</h2>
+                    <div className="flex justify-around mb-8 items-center">
+                       <div className="flex flex-col items-center">
+                         <span className="text-sm text-zinc-500 uppercase">You</span>
+                         <span className="text-3xl font-bold text-white">{calculateScore(myState.hand, myState.bonusScore)}</span>
+                         {calculateScore(myState.hand, myState.bonusScore) > 21 && <span className="text-xs text-red-500 font-bold mt-1">BUST</span>}
+                       </div>
+                       <span className="text-zinc-600 font-black text-2xl">VS</span>
+                       <div className="flex flex-col items-center">
+                         <span className="text-sm text-zinc-500 uppercase">Opponent</span>
+                         <span className="text-3xl font-bold text-white">{calculateScore(oppState.hand, oppState.bonusScore)}</span>
+                         {calculateScore(oppState.hand, oppState.bonusScore) > 21 && <span className="text-xs text-red-500 font-bold mt-1">BUST</span>}
+                       </div>
+                    </div>
+                  </>
+                )}
+                
+                {isHost && roomData.status !== 'game_over' && (
+                  <button onClick={startRound} className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl transition-colors shadow-lg">
+                    Next Round
+                  </button>
+                )}
+                {!isHost && roomData.status !== 'game_over' && (
+                  <p className="text-zinc-400 animate-pulse font-medium">Waiting for Host to start next round...</p>
+                )}
+                {roomData.status === 'game_over' && isHost && (
+                  <button onClick={() => {
+                    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'bluffer_rooms', roomId);
+                    updateDoc(roomRef, { status: 'lobby', round: 0, hostWins: 0, guestWins: 0 });
+                  }} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-xl transition-colors">
+                    Play Again
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* Right Side: Chat / Bluffing Box */}
+        <div className="w-full lg:w-80 bg-zinc-900 border-l border-zinc-800 flex flex-col h-64 lg:h-auto shrink-0">
+          <div className="p-4 border-b border-zinc-800 flex items-center gap-2 bg-zinc-900">
+            <MessageSquare size={18} className="text-indigo-400" />
+            <h3 className="font-bold text-white tracking-wide">The Bluff Box</h3>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col bg-zinc-950/50 custom-scrollbar">
+            {roomData.chat.map((msg, i) => {
+              const isMe = msg.senderId === user.uid;
+              const isSys = msg.senderId === 'system';
+              return (
+                <div key={i} className={`flex flex-col ${isSys ? 'items-center' : isMe ? 'items-end' : 'items-start'}`}>
+                  {isSys ? (
+                    <span className="text-[11px] bg-purple-900/40 text-purple-300 px-3 py-1 rounded-full border border-purple-800/50 mt-2 mb-2 text-center max-w-[90%]">
+                      {msg.text}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-[10px] text-zinc-500 mb-1">{msg.sender}</span>
+                      <div className={`px-3 py-2 rounded-2xl max-w-[85%] text-sm shadow-md
+                        ${isMe ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-zinc-800 text-zinc-200 rounded-tl-none border border-zinc-700'}`}>
+                        {msg.text}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            })}
+            <div ref={chatEndRef} />
+          </div>
+
+          <form onSubmit={sendChat} className="p-3 bg-zinc-900 border-t border-zinc-800 flex gap-2">
+            <input 
+              type="text" 
+              placeholder="Type to bluff..." 
+              className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              disabled={roomData.status !== 'playing'}
+            />
+            <button 
+              type="submit" 
+              disabled={roomData.status !== 'playing' || !chatInput.trim()}
+              className="bg-indigo-600 disabled:opacity-50 hover:bg-indigo-500 text-white p-2 rounded-xl transition-colors"
+            >
+              <ArrowRight size={18} />
+            </button>
+          </form>
+        </div>
+        
+        {/* Simple CSS for custom scrollbar embedded in component to avoid extra files */}
+        <style dangerouslySetInnerHTML={{__html: `
+          .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+          .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+          .custom-scrollbar::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 10px; }
+          .perspective-1000 { perspective: 1000px; }
+        `}} />
+      </div>
+    );
+  };
+
+  return renderGameBoard();
+}
+
+```
