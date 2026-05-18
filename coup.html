@@ -312,13 +312,13 @@
         let roomTopic = "";
         let myId = Math.random().toString(36).substring(2, 9);
         let myName = "";
-        let hasReceivedState = false; // Used to determine if a host already exists
-        let queuedHellos = []; // Store players who join while host is being elected
+        let hasReceivedState = false; 
+        let queuedHellos = []; 
         
         // Host state
         let gameState = {
-            status: "lobby", // lobby, playing, finished
-            players: [], // { id, name, coins, cards: [string, string], lostCards: [string], isAlive }
+            status: "lobby", 
+            players: [], 
             deck: [],
             turnIndex: 0,
             currentAction: null,
@@ -346,14 +346,12 @@
             nameInput: document.getElementById('playerNameInput'),
             roomInput: document.getElementById('roomNameInput'),
             
-            // Lobby UI
             lobbyRoomNameDisplay: document.getElementById('lobbyRoomNameDisplay'),
             lobbyPlayerCount: document.getElementById('lobbyPlayerCount'),
             lobbyPlayerList: document.getElementById('lobbyPlayerList'),
             hostControls: document.getElementById('hostControls'),
             clientWaitingMsg: document.getElementById('clientWaitingMsg'),
 
-            // Game UI
             log: document.getElementById('gameLog'),
             playersContainer: document.getElementById('playersContainer'),
             myCardsContainer: document.getElementById('myCards'),
@@ -372,8 +370,6 @@
 
         // --- Theme Handling ---
         let isDarkTheme = true;
-        
-        // Sync header/background elements to theme changes
         const updateThemeUI = () => {
             const elements = [DOM.joinScreen, DOM.lobbyScreen, DOM.gameScreen, document.querySelector('header')];
             if (isDarkTheme) {
@@ -407,7 +403,7 @@
         function connectToLobby() {
             myName = DOM.nameInput.value.trim() || "Player_" + myId.substring(0,3);
             let roomNameRaw = DOM.roomInput.value.trim().toLowerCase();
-            let roomName = roomNameRaw.replace(/[^a-z0-9-]/g, ''); // Sanitize
+            let roomName = roomNameRaw.replace(/[^a-z0-9-]/g, ''); 
             
             if(!roomName) {
                 alert("Please enter a valid room name.");
@@ -422,7 +418,6 @@
             DOM.joinBtn.disabled = true;
             DOM.joinBtn.textContent = "Connecting...";
 
-            // Use EMQX public broker over WebSockets
             const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
             
             client = mqtt.connect(brokerUrl, {
@@ -434,19 +429,14 @@
                 DOM.connStatus.textContent = "Connected";
                 DOM.connStatus.className = "text-sm font-mono text-green-500";
                 
-                // Subscribe to room topic
                 client.subscribe(roomTopic, (err) => {
                     if (!err) {
-                        // Switch from Join Screen to Lobby Screen
                         DOM.joinScreen.classList.add('hidden');
                         DOM.lobbyScreen.classList.remove('hidden');
                         DOM.lobbyScreen.classList.add('flex');
                         
-                        // Announce presence
                         sendMsg({ type: 'hello', id: myId, name: myName });
                         
-                        // Wait to see if a host responds. If not, become host.
-                        // Add slight random jitter to prevent perfect ties
                         setTimeout(() => {
                             if(!hasReceivedState && !isHost) {
                                 becomeHost();
@@ -496,21 +486,13 @@
             hasReceivedState = true;
             DOM.debugInfo.textContent = "Role: HOST";
             
-            // Show host UI in lobby
             DOM.hostControls.classList.remove('hidden');
             DOM.clientWaitingMsg.classList.add('hidden');
             
-            // Initialize host state with self
             gameState.players = [{
-                id: myId,
-                name: myName,
-                coins: 0,
-                cards: [],
-                lostCards: [],
-                isAlive: true
+                id: myId, name: myName, coins: 0, cards: [], lostCards: [], isAlive: true
             }];
             
-            // Process anyone who said hello while we were waiting to become host
             queuedHellos.forEach(qMsg => {
                 if(!gameState.players.find(p => p.id === qMsg.id) && gameState.players.length < MAX_PLAYERS) {
                     gameState.players.push({
@@ -519,7 +501,6 @@
                 }
             });
             queuedHellos = [];
-
             broadcastState();
         }
 
@@ -543,7 +524,6 @@
                     }
                     break;
                 
-                // Action Pipeline
                 case 'action_intent': processActionIntent(senderId, msg.action, msg.targetId); break;
                 case 'reaction': processReaction(senderId, msg.reactionType, msg.targetRole); break;
                 case 'lose_influence': processInfluenceLoss(senderId, msg.cardIndex); break;
@@ -553,13 +533,10 @@
 
         function buildDeck(playerCount) {
             let deck = [];
-            // Scale copies based on players to ensure enough cards
-            // 1-6 players: 3 copies. 7-8: 4 copies. 9-10: 5 copies.
             let copies = Math.max(3, Math.ceil(playerCount / 2));
             ROLES.forEach(r => {
                 for(let i=0; i<copies; i++) deck.push(r);
             });
-            // Shuffle thoroughly
             for (let i = deck.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [deck[i], deck[j]] = [deck[j], deck[i]];
@@ -576,7 +553,6 @@
             gameState.status = 'playing';
             gameState.deck = buildDeck(gameState.players.length);
             
-            // Deal cards and starting coins
             gameState.players.forEach(p => {
                 p.coins = 2;
                 p.cards = [gameState.deck.pop(), gameState.deck.pop()];
@@ -596,7 +572,7 @@
                     return {
                         id: p.id, name: p.name, coins: p.coins,
                         cardCount: p.cards.length, lostCards: p.lostCards, isAlive: p.isAlive,
-                        myCards: (p.id === clientPlayer.id) ? p.cards : null // Only reveal to owner
+                        myCards: (p.id === clientPlayer.id) ? p.cards : null 
                     };
                 });
 
@@ -605,7 +581,7 @@
                     status: gameState.status,
                     players: sanitizedPlayers,
                     turnId: gameState.players[gameState.turnIndex].id,
-                    log: gameState.log.slice(-10), // Keep last 10 logs
+                    log: gameState.log.slice(-10), 
                     currentAction: gameState.currentAction,
                     _target: clientPlayer.id 
                 };
@@ -613,7 +589,6 @@
                 client.publish(roomTopic, JSON.stringify(payload));
             });
 
-            // Also render for the host locally
             handleClientLogic({
                 type: 'state_update', status: gameState.status,
                 players: gameState.players.map(p => ({
@@ -664,11 +639,10 @@
 
             gameState.currentAction = {
                 initiatorId, action, targetId,
-                state: 'pending', // pending, challenged, blocked, waiting_loss, exchanging
+                state: 'pending', 
                 reactions: {}
             };
 
-            // Deduct costs immediately
             if(action === 'coup') {
                 if(initiator.coins < 7) { gameState.currentAction = null; return; }
                 initiator.coins -= 7;
@@ -681,7 +655,6 @@
                 if(initiator.coins < 3) { gameState.currentAction = null; return; }
                 initiator.coins -= 3;
             }
-
             if(action === 'income') {
                 initiator.coins += 1;
                 gameState.log.push(`💰 ${initiator.name} takes Income (1 coin).`);
@@ -700,11 +673,20 @@
             
             if(reactionType === 'pass') {
                 ca.reactions[reactorId] = 'pass';
-                const aliveOthers = gameState.players.filter(p => p.isAlive && p.id !== ca.initiatorId);
+                // If action is pending, everyone but initiator needs to pass. 
+                // If block is pending, everyone but blocker needs to pass.
+                const exemptId = ca.state === 'blocked' ? ca.blockerId : ca.initiatorId;
+                const aliveOthers = gameState.players.filter(p => p.isAlive && p.id !== exemptId);
                 const allPassed = aliveOthers.every(p => ca.reactions[p.id] === 'pass');
                 
                 if(allPassed) {
-                    resolveAction();
+                    if (ca.state === 'pending') {
+                        resolveAction();
+                    } else if (ca.state === 'blocked') {
+                        // The block succeeds, the original action is cancelled.
+                        gameState.log.push(`🛡️ Block successful. Action cancelled.`);
+                        nextTurn();
+                    }
                 } else {
                      broadcastState(); // Update UI
                 }
@@ -712,10 +694,17 @@
             }
 
             if(reactionType === 'challenge') {
-                gameState.log.push(`⚠️ ${reactor.name} CHALLENGES!`);
-                ca.state = 'challenged';
-                ca.challengerId = reactorId;
-                resolveChallenge();
+                if (ca.state === 'pending') {
+                    gameState.log.push(`⚠️ ${reactor.name} CHALLENGES!`);
+                    ca.state = 'challenged';
+                    ca.challengerId = reactorId;
+                    resolveChallenge();
+                } else if (ca.state === 'blocked') {
+                    gameState.log.push(`⚠️ ${reactor.name} CHALLENGES the block!`);
+                    ca.state = 'blocked_challenged';
+                    ca.challengerId = reactorId;
+                    resolveChallenge();
+                }
                 return;
             }
             
@@ -732,39 +721,56 @@
 
         function resolveChallenge() {
             const ca = gameState.currentAction;
-            // For this version, we only handle direct action challenges (not block challenges to keep code bounded)
-            const initiator = getPlayer(ca.initiatorId);
-            const challenger = getPlayer(ca.challengerId);
-            
-            let requiredRole = "";
-            switch(ca.action) {
-                case 'tax': requiredRole = 'Duke'; break;
-                case 'assassinate': requiredRole = 'Assassin'; break;
-                case 'steal': requiredRole = 'Captain'; break;
-                case 'exchange': requiredRole = 'Ambassador'; break;
+            let accusedId, accuserId, requiredRole;
+
+            // Determine who is challenging who
+            if (ca.state === 'challenged') {
+                accusedId = ca.initiatorId;
+                accuserId = ca.challengerId;
+                switch(ca.action) {
+                    case 'tax': requiredRole = 'Duke'; break;
+                    case 'assassinate': requiredRole = 'Assassin'; break;
+                    case 'steal': requiredRole = 'Captain'; break;
+                    case 'exchange': requiredRole = 'Ambassador'; break;
+                }
+            } else if (ca.state === 'blocked_challenged') {
+                accusedId = ca.blockerId;
+                accuserId = ca.challengerId;
+                requiredRole = ca.blockRole;
             }
 
-            const hasRoleIndex = initiator.cards.indexOf(requiredRole);
+            const accused = getPlayer(accusedId);
+            const hasRoleIndex = accused.cards.indexOf(requiredRole);
             
             if(hasRoleIndex !== -1) {
                 // Truth told
-                gameState.log.push(`✅ ${initiator.name} reveals ${requiredRole}. Challenge FAILED.`);
-                initiator.cards.splice(hasRoleIndex, 1);
-                initiator.cards.push(gameState.deck.pop());
+                gameState.log.push(`✅ ${accused.name} reveals ${requiredRole}. Challenge FAILED.`);
+                accused.cards.splice(hasRoleIndex, 1);
+                accused.cards.push(gameState.deck.pop());
                 gameState.deck.push(requiredRole);
+                gameState.deck.sort(() => Math.random() - 0.5); // Shuffle
                 
-                // Shuffle logic embedded
-                for(let i=gameState.deck.length-1; i>0; i--) {
-                    const j = Math.floor(Math.random()*(i+1));
-                    [gameState.deck[i], gameState.deck[j]] = [gameState.deck[j], gameState.deck[i]];
+                requestInfluenceLoss(accuserId); // Accuser loses
+
+                if (ca.state === 'challenged') {
+                    ca.state = 'resolving'; // Original action proceeds
+                } else {
+                    // Block was challenged but truth was told. Block stands, action fails.
+                    gameState.log.push(`🛡️ Block stands. Action cancelled.`);
+                    ca.state = 'failed_action'; // End turn after accuser loses influence
                 }
-                
-                requestInfluenceLoss(challenger.id); // Challenger loses
-                ca.state = 'resolving'; 
             } else {
                 // Lie caught
-                gameState.log.push(`❌ ${initiator.name} lied! Challenge SUCCESSFUL.`);
-                requestInfluenceLoss(initiator.id); // Liar loses
+                gameState.log.push(`❌ ${accused.name} lied! Challenge SUCCESSFUL.`);
+                requestInfluenceLoss(accusedId); // Accused loses
+
+                if (ca.state === 'challenged') {
+                    // Original action was a lie and caught. Action fails.
+                    ca.state = 'failed_action';
+                } else {
+                    // Block was a lie and caught. Block fails, action proceeds.
+                    ca.state = 'resolving';
+                }
             }
         }
 
@@ -785,7 +791,7 @@
                     case 'assassinate':
                         gameState.log.push(`🔪 Assassination successful.`);
                         requestInfluenceLoss(target.id);
-                        return; // Turn ends after loss is resolved
+                        return; // Turn ends after target loses card
                     case 'exchange':
                         ca.drawnCards = [gameState.deck.pop(), gameState.deck.pop()];
                         initiator.cards.push(...ca.drawnCards);
@@ -801,7 +807,7 @@
         function requestInfluenceLoss(playerId) {
             const p = getPlayer(playerId);
             if(p.cards.length === 1) {
-                loseCard(playerId, 0);
+                loseCard(playerId, 0); // Auto-lose if only 1 card left
             } else {
                 gameState.currentAction.state = 'waiting_loss';
                 gameState.currentAction.loserId = playerId;
@@ -815,6 +821,8 @@
             if(gameState.currentAction) {
                if(gameState.currentAction.state === 'resolving') {
                    resolveAction();
+               } else if (gameState.currentAction.state === 'failed_action') {
+                   nextTurn();
                } else {
                    nextTurn();
                }
@@ -846,8 +854,7 @@
 
             p.cards = kept;
             gameState.deck.push(...returned);
-            // Quick shuffle
-            gameState.deck.sort(() => Math.random() - 0.5);
+            gameState.deck.sort(() => Math.random() - 0.5); // Shuffle
             
             gameState.log.push(`🔄 ${p.name} completed exchange.`);
             nextTurn();
@@ -856,7 +863,6 @@
         // --- Client Logic & Rendering ---
         function handleClientLogic(msg, senderId) {
             if(msg.type === 'hello' && !hasReceivedState && !isHost) {
-                // Someone else joined while we are waiting to see if there's a host. Queue them.
                 queuedHellos.push(msg);
                 return;
             }
@@ -868,7 +874,7 @@
             }
 
             if(msg.type === 'state_update' && (!msg._target || msg._target === myId)) {
-                hasReceivedState = true; // We found the host
+                hasReceivedState = true;
                 
                 const oldStatus = localState.status;
                 localState.status = msg.status;
@@ -882,12 +888,10 @@
                     localState.isAlive = me.isAlive;
                 }
 
-                // Render specific screen based on status
                 if(localState.status === 'lobby') {
                     renderLobby();
                 } else if (localState.status === 'playing' || localState.status === 'finished') {
                     if(oldStatus === 'lobby') {
-                        // Transition to game board
                         DOM.lobbyScreen.classList.add('hidden');
                         DOM.lobbyScreen.classList.remove('flex');
                         DOM.gameScreen.classList.remove('hidden');
@@ -898,7 +902,7 @@
                     msg.log.forEach(l => {
                         let type = 'info';
                         if(l.includes('💀')) type = 'error';
-                        if(l.includes('👑')) type = 'highlight';
+                        if(l.includes('👑') || l.includes('✅') || l.includes('🛡️')) type = 'highlight';
                         if(l.includes('Turn ---')) type = 'system';
                         addLog(l, type);
                     });
@@ -917,14 +921,12 @@
                 li.className = "py-2 px-4 border-b border-current border-opacity-20 flex justify-between";
                 let text = p.name;
                 if(p.id === myId) text += " (You)";
-                // The first player in the list is the host
                 if(localState.players.indexOf(p) === 0) text += ' <i class="fa-solid fa-crown text-yellow-500 text-sm ml-2" title="Host"></i>';
                 
                 li.innerHTML = `<span>${text}</span> <span class="opacity-50 text-sm font-mono">${p.id}</span>`;
                 DOM.lobbyPlayerList.appendChild(li);
             });
 
-            // Start button logic handled by becomeHost() mostly, but ensure sync
             if(isHost) {
                 DOM.hostControls.classList.remove('hidden');
                 DOM.clientWaitingMsg.classList.add('hidden');
@@ -971,7 +973,6 @@
                     <div class="mt-1 flex flex-wrap">${cardsHtml}</div>
                 `;
                 
-                // Add select button if target selection is needed
                 if(!isMe && p.isAlive && isSelectingTarget) {
                     const btn = document.createElement('button');
                     btn.className = "btn-custom btn-accent text-xs w-full mt-3 py-1 animate-pulse";
@@ -1010,7 +1011,9 @@
             if(currentAction && localState.isAlive && localState.status === 'playing') {
                 const amIInitiator = currentAction.initiatorId === myId;
                 const amITarget = currentAction.targetId === myId;
+                const amIBlocker = currentAction.blockerId === myId;
                 
+                // 1. Pending Phase (Waiting for pass/challenge/block on original action)
                 if(currentAction.state === 'pending') {
                     if(!amIInitiator) {
                         DOM.reactionArea.classList.remove('hidden');
@@ -1029,23 +1032,44 @@
                             DOM.reactionButtons.innerHTML += `<button class="btn-custom text-sm px-4 py-2" onclick="sendReaction('block', 'Contessa')">Block (Cont)</button>`;
                         }
                         
-                        // Indicate if I already passed
                         if(currentAction.reactions[myId] === 'pass') {
                             DOM.reactionPrompt.textContent = "You passed. Waiting for others...";
                             DOM.reactionButtons.innerHTML = "";
                         }
-                        
                     } else {
                         DOM.reactionArea.classList.remove('hidden');
-                        DOM.reactionPrompt.textContent = "Waiting for players to pass/challenge...";
+                        DOM.reactionPrompt.textContent = "Waiting for players to pass/challenge/block...";
                         DOM.reactionButtons.innerHTML = "";
                     }
                 }
                 
+                // 2. Blocked Phase (Waiting for pass/challenge on the BLOCK)
+                if(currentAction.state === 'blocked') {
+                    if(!amIBlocker) {
+                        DOM.reactionArea.classList.remove('hidden');
+                        DOM.reactionPrompt.textContent = `${getPlayerName(currentAction.blockerId)} claims ${currentAction.blockRole} to BLOCK!`;
+                        DOM.reactionButtons.innerHTML = `
+                            <button class="btn-custom text-sm px-4 py-2" onclick="sendReaction('pass')">Pass (Accept Block)</button>
+                            <button class="btn-custom btn-accent text-sm px-4 py-2" onclick="sendReaction('challenge')">Challenge Block!</button>
+                        `;
+                        
+                        if(currentAction.reactions[myId] === 'pass') {
+                            DOM.reactionPrompt.textContent = "You passed. Waiting for others...";
+                            DOM.reactionButtons.innerHTML = "";
+                        }
+                    } else {
+                        DOM.reactionArea.classList.remove('hidden');
+                        DOM.reactionPrompt.textContent = "You blocked! Waiting to see if anyone challenges you...";
+                        DOM.reactionButtons.innerHTML = "";
+                    }
+                }
+                
+                // 3. Waiting for Loss
                 if(currentAction.state === 'waiting_loss' && currentAction.loserId === myId) {
                      showInfluenceLossModal(meData.myCards);
                 }
 
+                // 4. Exchanging Phase
                 if(currentAction.state === 'exchanging' && currentAction.initiatorId === myId) {
                     showExchangeModal(meData.myCards);
                 }
@@ -1058,7 +1082,6 @@
 
         DOM.actionButtons.forEach(btn => {
             btn.addEventListener('click', (e) => {
-                // Find closest button element in case text/span was clicked
                 const targetBtn = e.target.closest('button');
                 const action = targetBtn.dataset.action;
                 const needsTarget = ['coup', 'assassinate', 'steal'].includes(action);
@@ -1177,5 +1200,6 @@
     </script>
 </body>
 </html>
+
 
 ```
