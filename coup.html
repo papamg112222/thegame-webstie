@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coup Web P2P</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        /* Custom Styles for a clean, contrasting Black/White theme */
+        :root {
+            --bg-dark: #121212;
+            --bg-light: #f8f9fa;
+            --text-dark: #e0e0e0;
+            --text-light: #212529;
+            --accent: #d32f2f; /* A touch of red for 'Coup' vibe */
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .theme-dark {
+            background-color: var(--bg-dark);
+            color: var(--text-dark);
+        }
+
+        .theme-light {
+            background-color: var(--bg-light);
+            color: var(--text-light);
+        }
+
+        .card {
+            border: 2px solid currentColor;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            box-shadow: 4px 4px 0px currentColor;
+            background-color: transparent;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .card:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 6px 6px 0px currentColor;
+        }
+
+        .card.dead {
+            opacity: 0.5;
+            text-decoration: line-through;
+            border-color: var(--accent);
+            box-shadow: none;
+        }
+
+        .btn-custom {
+            border: 2px solid currentColor;
+            background: transparent;
+            color: currentColor;
+            font-weight: bold;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-custom:hover:not(:disabled) {
+            background: currentColor;
+            color: var(--bg-dark); /* Reverses based on theme via JS later */
+        }
+
+        .theme-light .btn-custom:hover:not(:disabled) {
+            color: var(--bg-light);
+        }
+
+        .btn-custom:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            border-style: dashed;
+        }
+        
+        .btn-accent {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .btn-accent:hover:not(:disabled) {
+            background: var(--accent);
+            color: white !important;
+        }
+
+        .log-container {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid currentColor;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.9em;
+        }
+
+        /* Modal Overlay */
+        #overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 50;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: var(--bg-dark);
+            color: var(--text-dark);
+            padding: 2rem;
+            border: 2px solid white;
+            border-radius: 8px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+        }
+        .theme-light .modal-content {
+            background: var(--bg-light);
+            color: var(--text-light);
+            border-color: black;
+        }
+
+        .player-status {
+            border: 1px dashed currentColor;
+            padding: 8px;
+            margin: 4px;
+            border-radius: 4px;
+        }
+        .active-turn {
+            border: 2px solid var(--accent);
+            background-color: rgba(211, 47, 47, 0.1);
+        }
+
+        /* Title art placeholder */
+        .title-art {
+            font-size: 3rem;
+            font-weight: 900;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+            text-shadow: 2px 2px 0px var(--accent);
+        }
+    </style>
+</head>
+<body class="theme-dark h-screen flex flex-col overflow-hidden">
+
+    <!-- Top Bar -->
+    <header class="p-4 border-b-2 border-current flex justify-between items-center">
+        <div class="title-art select-none">
+            C<i class="fa-solid fa-masks-theater text-[var(--accent)]"></i>UP
+        </div>
+        <div class="flex gap-4 items-center">
+            <span id="connectionStatus" class="text-sm font-mono text-yellow-500">Disconnected</span>
+            <button id="themeToggle" class="btn-custom text-sm">
+                <i class="fa-solid fa-circle-half-stroke"></i> Theme
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-grow flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- Left Panel: Game State & Controls -->
+        <div class="w-full md:w-2/3 p-4 flex flex-col h-full overflow-y-auto">
+            
+            <!-- Connection / Lobby Screen -->
+            <div id="lobbyScreen" class="flex flex-col items-center justify-center h-full space-y-6">
+                <div class="text-center max-w-md">
+                    <h2 class="text-2xl font-bold mb-4">Join or Host a Game</h2>
+                    <p class="mb-4 text-sm opacity-80">Using EMQX Public P2P. Enter a unique room name. The first person to join acts as the host.</p>
+                    
+                    <div class="space-y-4">
+                        <input type="text" id="playerNameInput" placeholder="Your Name" class="w-full p-2 bg-transparent border-b-2 border-current outline-none text-center text-xl">
+                        <input type="text" id="roomNameInput" placeholder="Room Code (e.g. secret-room-99)" class="w-full p-2 bg-transparent border-b-2 border-current outline-none text-center text-xl">
+                        
+                        <div class="flex gap-4 justify-center mt-6">
+                            <button id="joinBtn" class="btn-custom w-full">Join Game</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Game Screen -->
+            <div id="gameScreen" class="hidden flex-col h-full space-y-4">
+                
+                <!-- Opponents Area -->
+                <div class="flex-grow">
+                    <h3 class="text-lg font-bold border-b border-current mb-2">Players</h3>
+                    <div id="playersContainer" class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        <!-- Player statuses will be injected here -->
+                    </div>
+                </div>
+
+                <!-- Game Board / Action Area -->
+                <div class="border-t-2 border-current pt-4 flex flex-col md:flex-row gap-4">
+                    
+                    <!-- My State -->
+                    <div class="w-full md:w-1/3 border-2 border-current p-4 rounded-lg relative">
+                        <h3 class="font-bold mb-2">My Hand <span id="myCoins" class="float-right text-yellow-500 font-bold"><i class="fa-solid fa-coins"></i> 0</span></h3>
+                        <div id="myCards" class="flex gap-2 justify-center h-32">
+                            <!-- Cards go here -->
+                        </div>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="w-full md:w-2/3">
+                        <h3 class="font-bold mb-2">Actions</h3>
+                        <div id="actionButtons" class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            <button class="btn-custom action-btn" data-action="income" title="Take 1 coin">Income (1)</button>
+                            <button class="btn-custom action-btn" data-action="foreign_aid" title="Take 2 coins. Can be blocked by Duke">Foreign Aid (2)</button>
+                            <button class="btn-custom action-btn btn-accent" data-action="coup" title="Pay 7 coins. Unblockable assassination">Coup (7)</button>
+                            <button class="btn-custom action-btn" data-action="tax" title="Duke: Take 3 coins">Tax (Duke)</button>
+                            <button class="btn-custom action-btn" data-action="assassinate" title="Assassin: Pay 3 coins. Can be blocked by Contessa">Assassinate (3)</button>
+                            <button class="btn-custom action-btn" data-action="steal" title="Captain: Steal 2 coins. Can be blocked by Capt/Amb">Steal (Capt)</button>
+                            <button class="btn-custom action-btn" data-action="exchange" title="Ambassador: Draw 2, return 2">Exchange (Amb)</button>
+                        </div>
+                        
+                        <!-- Reaction Area (Hidden by default) -->
+                        <div id="reactionArea" class="mt-4 p-4 border border-[var(--accent)] rounded hidden bg-[rgba(211,47,47,0.1)]">
+                            <h4 id="reactionPrompt" class="font-bold text-[var(--accent)] mb-2">Waiting for reaction...</h4>
+                            <div id="reactionButtons" class="flex gap-2">
+                                <!-- Dynamic reaction buttons (Block, Challenge, Pass) -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Panel: Game Log & Chat -->
+        <div class="w-full md:w-1/3 border-l-2 border-current p-4 flex flex-col h-full">
+            <h3 class="font-bold mb-2"><i class="fa-solid fa-list-ul"></i> Game Log</h3>
+            <div id="gameLog" class="log-container flex-grow mb-4 flex flex-col gap-1">
+                <div class="opacity-50 italic">Welcome to Coup P2P.</div>
+            </div>
+            
+            <div class="flex gap-2">
+                <button id="startGameBtn" class="btn-custom w-full hidden">Start Game (Host)</button>
+            </div>
+            <div class="mt-2 text-xs opacity-50 font-mono" id="debugInfo">Role: Undecided</div>
+        </div>
+    </main>
+
+    <!-- Global Modal for Selections (Targeting, Exchanging, Losing influence) -->
+    <div id="overlay" class="flex">
+        <div class="modal-content">
+            <h2 id="modalTitle" class="text-xl font-bold mb-4">Select</h2>
+            <div id="modalContent" class="flex flex-wrap gap-2 justify-center mb-4">
+                <!-- Dynamic content -->
+            </div>
+            <button id="modalConfirm" class="btn-custom hidden">Confirm</button>
+            <button id="modalCancel" class="btn-custom hidden">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Constants ---
+        const ROLES = ["Duke", "Assassin", "Captain", "Ambassador", "Contessa"];
+        // Standard deck is 3 of each role
+        const DECK_TEMPLATE = [];
+        ROLES.forEach(r => { DECK_TEMPLATE.push(r, r, r); });
+
+        // --- State Variables ---
+        let client = null;
+        let isHost = false;
+        let roomTopic = "";
+        let myId = Math.random().toString(36).substring(2, 9);
+        let myName = "";
+        
+        // Host state
+        let gameState = {
+            status: "lobby", // lobby, playing, finished
+            players: [], // { id, name, coins, cards: [string, string], lostCards: [string], isAlive }
+            deck: [],
+            turnIndex: 0,
+            currentAction: null, // { initiatorId, action, targetId, state (pending, challenged, blocked, resolving) }
+            log: []
+        };
+
+        // Client State (View of the world)
+        let localState = {
+            players: [], // Stripped down version from host
+            turnId: null,
+            myCoins: 0,
+            myCards: [], // { role, isRevealed }
+            status: "lobby"
+        };
+
+        // UI Elements
+        const DOM = {
+            themeToggle: document.getElementById('themeToggle'),
+            connStatus: document.getElementById('connectionStatus'),
+            lobbyScreen: document.getElementById('lobbyScreen'),
+            gameScreen: document.getElementById('gameScreen'),
+            joinBtn: document.getElementById('joinBtn'),
+            startBtn: document.getElementById('startGameBtn'),
+            nameInput: document.getElementById('playerNameInput'),
+            roomInput: document.getElementById('roomNameInput'),
+            log: document.getElementById('gameLog'),
+            playersContainer: document.getElementById('playersContainer'),
+            myCardsContainer: document.getElementById('myCards'),
+            myCoinsSpan: document.getElementById('myCoins'),
+            actionButtons: document.querySelectorAll('.action-btn'),
+            reactionArea: document.getElementById('reactionArea'),
+            reactionPrompt: document.getElementById('reactionPrompt'),
+            reactionButtons: document.getElementById('reactionButtons'),
+            overlay: document.getElementById('overlay'),
+            modalTitle: document.getElementById('modalTitle'),
+            modalContent: document.getElementById('modalContent'),
+            modalConfirm: document.getElementById('modalConfirm'),
+            modalCancel: document.getElementById('modalCancel'),
+            debugInfo: document.getElementById('debugInfo')
+        };
+
+        // --- Theme Handling ---
+        let isDarkTheme = true;
+        DOM.themeToggle.addEventListener('click', () => {
+            isDarkTheme = !isDarkTheme;
+            document.body.className = isDarkTheme ? 'theme-dark h-screen flex flex-col overflow-hidden' : 'theme-light h-screen flex flex-col overflow-hidden';
+        });
+
+        // --- Helper: Logger ---
+        function addLog(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.textContent = msg;
+            if(type === 'error') div.classList.add('text-[var(--accent)]');
+            if(type === 'system') div.classList.add('text-yellow-500');
+            DOM.log.appendChild(div);
+            DOM.log.scrollTop = DOM.log.scrollHeight;
+        }
+
+        // --- STREAMING_CHUNK:MQTT Communication Logic ---
+        function connectToLobby() {
+            myName = DOM.nameInput.value.trim() || "Player_" + myId.substring(0,3);
+            let roomName = DOM.roomInput.value.trim().toLowerCase();
+            
+            if(!roomName) {
+                alert("Please enter a room name");
+                return;
+            }
+
+            roomTopic = `webcoup/room/${roomName}`;
+            
+            DOM.connStatus.textContent = "Connecting...";
+            DOM.connStatus.className = "text-sm font-mono text-yellow-500";
+
+            // Use EMQX public broker over WebSockets
+            const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
+            
+            client = mqtt.connect(brokerUrl, {
+                clientId: 'coup_' + myId,
+                clean: true
+            });
+
+            client.on('connect', () => {
+                DOM.connStatus.textContent = "Connected";
+                DOM.connStatus.className = "text-sm font-mono text-green-500";
+                
+                // Subscribe to room topic
+                client.subscribe(roomTopic, (err) => {
+                    if (!err) {
+                        addLog(`Joined room: ${roomName}`, 'system');
+                        DOM.lobbyScreen.classList.add('hidden');
+                        DOM.gameScreen.classList.remove('hidden');
+                        DOM.gameScreen.classList.add('flex');
+                        
+                        // Announce presence to find host, or become host
+                        sendMsg({ type: 'hello', id: myId, name: myName });
+                        
+                        // Set a timeout to assume host role if no host replies
+                        setTimeout(() => {
+                            if(!isHost && localState.players.length === 0) {
+                                becomeHost();
+                            }
+                        }, 2000);
+                    }
+                });
+            });
+
+            client.on('message', handleMessage);
+            client.on('error', (err) => addLog('MQTT Error: ' + err.message, 'error'));
+        }
+
+        function sendMsg(payload) {
+            if(client && client.connected) {
+                // Attach sender ID to all messages
+                payload._sender = myId;
+                client.publish(roomTopic, JSON.stringify(payload));
+            }
+        }
+
+        // --- STREAMING_CHUNK:Message Routing & Host/Client Logic ---
+        function handleMessage(topic, message) {
+            try {
+                const data = JSON.parse(message.toString());
+                const sender = data._sender;
+
+                // Log network traffic for debugging
+                // console.log("RECV:", data.type, data);
+
+                if (isHost) {
+                    handleHostLogic(data, sender);
+                } else {
+                    handleClientLogic(data, sender);
+                }
+            } catch (e) {
+                console.error("Message parse error", e);
+            }
+        }
+
+        // Host becomes the source of truth
+        function becomeHost() {
+            isHost = true;
+            DOM.debugInfo.textContent = "Role: HOST";
+            DOM.startBtn.classList.remove('hidden');
+            addLog("You are the host.", 'system');
+            
+            // Initialize host state with self
+            gameState.players = [{
+                id: myId,
+                name: myName,
+                coins: 0,
+                cards: [],
+                lostCards: [],
+                isAlive: true
+            }];
+            broadcastState();
+        }
+
+        // --- STREAMING_CHUNK:Host Game Logic ---
+        function handleHostLogic(msg, senderId) {
+            switch(msg.type) {
+                case 'hello':
+                    // New player joined
+                    if(gameState.status === 'lobby') {
+                        if(!gameState.players.find(p => p.id === senderId)) {
+                            gameState.players.push({
+                                id: senderId,
+                                name: msg.name,
+                                coins: 0,
+                                cards: [],
+                                lostCards: [],
+                                isAlive: true
+                            });
+                            gameState.log.push(`${msg.name} joined the game.`);
+                            broadcastState();
+                        }
+                    } else {
+                        // Reject join if game started
+                        sendMsg({type: 'rejected', reason: 'Game in progress', target: senderId});
+                    }
+                    break;
+                case 'request_start':
+                    if(senderId === myId) startGame();
+                    break;
+                
+                // --- Action Pipeline ---
+                case 'action_intent':
+                    processActionIntent(senderId, msg.action, msg.targetId);
+                    break;
+                case 'reaction':
+                    processReaction(senderId, msg.reactionType, msg.targetRole);
+                    break;
+                case 'lose_influence':
+                    processInfluenceLoss(senderId, msg.cardIndex);
+                    break;
+                case 'exchange_return':
+                    processExchangeReturn(senderId, msg.keptIndices);
+                    break;
+            }
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function startGame() {
+            if(gameState.players.length < 2) {
+                addLog("Need at least 2 players to start.", "error");
+                return;
+            }
+            
+            gameState.status = 'playing';
+            gameState.deck = shuffle([...DECK_TEMPLATE]);
+            
+            // Deal cards and starting coins
+            gameState.players.forEach(p => {
+                p.coins = 2;
+                p.cards = [gameState.deck.pop(), gameState.deck.pop()];
+                p.lostCards = [];
+                p.isAlive = true;
+            });
+            
+            gameState.turnIndex = 0;
+            gameState.log.push("Game started! Everyone gets 2 coins.");
+            broadcastState();
+        }
+
+        function broadcastState() {
+            // Host creates a sanitized view for clients (hiding other players' cards)
+            gameState.players.forEach(clientPlayer => {
+                const sanitizedPlayers = gameState.players.map(p => {
+                    return {
+                        id: p.id,
+                        name: p.name,
+                        coins: p.coins,
+                        cardCount: p.cards.length,
+                        lostCards: p.lostCards,
+                        isAlive: p.isAlive,
+                        // Only reveal actual cards if it's the client's own data
+                        myCards: (p.id === clientPlayer.id) ? p.cards : null
+                    };
+                });
+
+                const payload = {
+                    type: 'state_update',
+                    status: gameState.status,
+                    players: sanitizedPlayers,
+                    turnId: gameState.players[gameState.turnIndex].id,
+                    log: gameState.log.slice(-5), // Send last 5 logs
+                    currentAction: gameState.currentAction,
+                    // Targeted message to a specific client
+                    _target: clientPlayer.id 
+                };
+                
+                // In a real setup, we'd use direct messaging. 
+                // Here we broadcast, but clients filter based on _target
+                client.publish(roomTopic, JSON.stringify(payload));
+            });
+
+            // Also render for host
+            renderGame(gameState.players.find(p=>p.id === myId), gameState.players[gameState.turnIndex].id);
+        }
+
+        function nextTurn() {
+            gameState.currentAction = null;
+            let checks = 0;
+            do {
+                gameState.turnIndex = (gameState.turnIndex + 1) % gameState.players.length;
+                checks++;
+            } while(!gameState.players[gameState.turnIndex].isAlive && checks < gameState.players.length);
+            
+            checkWinCondition();
+            broadcastState();
+        }
+
+        function checkWinCondition() {
+            const alive = gameState.players.filter(p => p.isAlive);
+            if(alive.length === 1) {
+                gameState.status = 'finished';
+                gameState.log.push(`👑 ${alive[0].name} wins the game!`);
+                broadcastState();
+            }
+        }
+
+        // --- STREAMING_CHUNK:Game Rules Logic (Host Side) ---
+        function getPlayer(id) { return gameState.players.find(p => p.id === id); }
+
+        function processActionIntent(initiatorId, action, targetId) {
+            const initiator = getPlayer(initiatorId);
+            if(!initiator || !initiator.isAlive) return;
+            if(initiatorId !== gameState.players[gameState.turnIndex].id) return; // Not their turn
+
+            let requiresTarget = ['coup', 'assassinate', 'steal'].includes(action);
+            if(requiresTarget && !targetId) return;
+
+            const target = targetId ? getPlayer(targetId) : null;
+            let actionText = `${initiator.name} attempts to use ${action}`;
+            if(target) actionText += ` on ${target.name}`;
+
+            gameState.currentAction = {
+                initiatorId,
+                action,
+                targetId,
+                state: 'pending', // pending, challenged, blocked, resolving
+                reactions: {} // track who passed/challenged
+            };
+
+            // Deduct costs immediately
+            if(action === 'coup') {
+                if(initiator.coins < 7) { gameState.currentAction = null; return; } // invalid
+                initiator.coins -= 7;
+                // Coup is unblockable, goes straight to resolving
+                gameState.currentAction.state = 'resolving';
+                gameState.log.push(`${initiator.name} stages a Coup against ${target.name}!`);
+                requestInfluenceLoss(targetId);
+                return;
+            }
+            if(action === 'assassinate') {
+                if(initiator.coins < 3) { gameState.currentAction = null; return; }
+                initiator.coins -= 3;
+            }
+
+            if(action === 'income') {
+                // Income cannot be blocked or challenged
+                initiator.coins += 1;
+                gameState.log.push(`${initiator.name} takes Income (1 coin).`);
+                nextTurn();
+                return;
+            }
+
+            gameState.log.push(actionText);
+            broadcastState();
+            
+            // Set a timer. If everyone passes, resolve action.
+            // For simplicity in this demo, we rely on manual passing or challenging.
+        }
+
+        // Process reactions (challenge, block, pass)
+        function processReaction(reactorId, reactionType, targetRole) {
+            if(!gameState.currentAction) return;
+            const ca = gameState.currentAction;
+            const reactor = getPlayer(reactorId);
+            
+            if(reactionType === 'pass') {
+                ca.reactions[reactorId] = 'pass';
+                // Check if all other alive players have passed
+                const aliveOthers = gameState.players.filter(p => p.isAlive && p.id !== ca.initiatorId);
+                const allPassed = aliveOthers.every(p => ca.reactions[p.id] === 'pass');
+                
+                if(allPassed) {
+                    resolveAction();
+                } else {
+                     broadcastState(); // Update UI to show someone passed
+                }
+                return;
+            }
+
+            if(reactionType === 'challenge') {
+                // Can challenge the initiator's action
+                gameState.log.push(`${reactor.name} CHALLENGES ${getPlayer(ca.initiatorId).name}!`);
+                ca.state = 'challenged';
+                ca.challengerId = reactorId;
+                resolveChallenge();
+                return;
+            }
+            
+            if(reactionType === 'block') {
+                gameState.log.push(`${reactor.name} claims ${targetRole} to BLOCK.`);
+                ca.state = 'blocked';
+                ca.blockerId = reactorId;
+                ca.blockRole = targetRole;
+                // Reset reactions for the block phase (people can now challenge the block)
+                ca.reactions = {}; 
+                broadcastState();
+                return;
+            }
+        }
+
+        function resolveChallenge() {
+            const ca = gameState.currentAction;
+            const initiator = getPlayer(ca.initiatorId);
+            const challenger = getPlayer(ca.challengerId);
+            
+            // Determine required role for the action
+            let requiredRole = "";
+            switch(ca.action) {
+                case 'tax': requiredRole = 'Duke'; break;
+                case 'assassinate': requiredRole = 'Assassin'; break;
+                case 'steal': requiredRole = 'Captain'; break;
+                case 'exchange': requiredRole = 'Ambassador'; break;
+            }
+
+            // Check if it's a challenge against a block
+            if(ca.state === 'blocked_challenged') {
+                // Logic for challenging a block (omitted for brevity in single file, focusing on base action challenge)
+                // To keep it under single file limits, we simplify:
+                // Only direct actions can be challenged in this demo.
+            }
+
+            const hasRoleIndex = initiator.cards.indexOf(requiredRole);
+            
+            if(hasRoleIndex !== -1) {
+                // Initiator WAS telling truth
+                gameState.log.push(`${initiator.name} reveals ${requiredRole}. Challenge FAILED.`);
+                // Shuffle card back, draw new one
+                initiator.cards.splice(hasRoleIndex, 1);
+                initiator.cards.push(gameState.deck.pop());
+                gameState.deck.push(requiredRole);
+                shuffle(gameState.deck);
+                
+                // Challenger loses influence
+                requestInfluenceLoss(challenger.id);
+                // Action still happens
+                ca.state = 'resolving';
+            } else {
+                // Initiator WAS lying
+                gameState.log.push(`${initiator.name} does not have ${requiredRole}. Challenge SUCCESSFUL.`);
+                // Initiator loses influence, action fails
+                requestInfluenceLoss(initiator.id);
+                // Turn ends after influence loss is handled
+            }
+        }
+
+        function resolveAction() {
+            const ca = gameState.currentAction;
+            const initiator = getPlayer(ca.initiatorId);
+            const target = ca.targetId ? getPlayer(ca.targetId) : null;
+
+            if(ca.state === 'pending' || ca.state === 'resolving') {
+                switch(ca.action) {
+                    case 'foreign_aid': initiator.coins += 2; break;
+                    case 'tax': initiator.coins += 3; break;
+                    case 'steal':
+                        let amount = Math.min(2, target.coins);
+                        target.coins -= amount;
+                        initiator.coins += amount;
+                        break;
+                    case 'assassinate':
+                        gameState.log.push(`Assassination successful.`);
+                        requestInfluenceLoss(target.id);
+                        return; // Turn ends after loss
+                    case 'exchange':
+                        // Deal 2 cards to initiator, ask them to return 2
+                        ca.drawnCards = [gameState.deck.pop(), gameState.deck.pop()];
+                        initiator.cards.push(...ca.drawnCards);
+                        ca.state = 'exchanging';
+                        broadcastState();
+                        return;
+                }
+                gameState.log.push(`${ca.action} resolved successfully.`);
+                nextTurn();
+            }
+        }
+
+        function requestInfluenceLoss(playerId) {
+            const p = getPlayer(playerId);
+            if(p.cards.length === 1) {
+                // Auto lose last card
+                loseCard(playerId, 0);
+            } else {
+                gameState.currentAction.state = 'waiting_loss';
+                gameState.currentAction.loserId = playerId;
+                broadcastState();
+            }
+        }
+
+        function processInfluenceLoss(playerId, cardIndex) {
+            loseCard(playerId, cardIndex);
+            
+            // Check if action needs to resolve after a challenge fail
+            if(gameState.currentAction) {
+               if(gameState.currentAction.state === 'resolving') {
+                   resolveAction(); // proceed with original action
+               } else {
+                   nextTurn(); // end turn if lie was caught
+               }
+            } else {
+                nextTurn();
+            }
+        }
+
+        function loseCard(playerId, index) {
+            const p = getPlayer(playerId);
+            const lostCard = p.cards.splice(index, 1)[0];
+            p.lostCards.push(lostCard);
+            gameState.log.push(`💀 ${p.name} lost influence: ${lostCard}`);
+            if(p.cards.length === 0) {
+                p.isAlive = false;
+                gameState.log.push(`💀 ${p.name} is eliminated!`);
+            }
+        }
+
+        function processExchangeReturn(playerId, keptIndices) {
+            const p = getPlayer(playerId);
+            // keptIndices should be an array of lengths 2 or 1
+            const allCards = [...p.cards];
+            const kept = [];
+            const returned = [];
+            
+            allCards.forEach((card, idx) => {
+                if(keptIndices.includes(idx)) kept.push(card);
+                else returned.push(card);
+            });
+
+            p.cards = kept;
+            gameState.deck.push(...returned);
+            shuffle(gameState.deck);
+            
+            gameState.log.push(`${p.name} completed exchange.`);
+            nextTurn();
+        }
+
+        // --- STREAMING_CHUNK:Client Logic & Rendering ---
+        function handleClientLogic(msg, senderId) {
+            if(msg.type === 'state_update' && msg._target === myId) {
+                localState.status = msg.status;
+                localState.players = msg.players;
+                localState.turnId = msg.turnId;
+                
+                // Find my specific data
+                const me = msg.players.find(p => p.id === myId);
+                if(me) {
+                    localState.myCoins = me.coins;
+                    localState.myCards = me.myCards; // Array of strings
+                    localState.isAlive = me.isAlive;
+                }
+
+                // Render Logs
+                DOM.log.innerHTML = '';
+                msg.log.forEach(l => addLog(l));
+
+                renderGame(me, msg.turnId, msg.currentAction);
+            }
+        }
+
+        function renderGame(meData, turnId, currentAction = null) {
+            // Render Players
+            DOM.playersContainer.innerHTML = '';
+            localState.players.forEach(p => {
+                const isMe = p.id === myId;
+                const isTurn = p.id === turnId;
+                const div = document.createElement('div');
+                div.className = `player-status ${isTurn ? 'active-turn' : ''} ${!p.isAlive ? 'opacity-50' : ''}`;
+                
+                let cardsHtml = '';
+                for(let i=0; i<p.cardCount; i++) cardsHtml += '<div class="w-4 h-6 border border-current bg-current inline-block mx-0.5 rounded-sm"></div>';
+                p.lostCards.forEach(c => cardsHtml += `<div class="w-4 h-6 border border-[var(--accent)] text-[var(--accent)] inline-flex items-center justify-center mx-0.5 rounded-sm text-[8px] line-through">${c[0]}</div>`);
+
+                div.innerHTML = `
+                    <div class="font-bold ${isMe ? 'text-[var(--accent)]' : ''}">${p.name} ${isMe ? '(You)' : ''}</div>
+                    <div class="text-sm"><i class="fa-solid fa-coins text-yellow-500"></i> ${p.coins}</div>
+                    <div class="mt-1">${cardsHtml}</div>
+                `;
+                
+                // Add select button if target selection is needed
+                if(!isMe && p.isAlive && isSelectingTarget) {
+                    const btn = document.createElement('button');
+                    btn.className = "btn-custom text-xs w-full mt-2";
+                    btn.textContent = "Target";
+                    btn.onclick = () => finishActionWithTarget(p.id);
+                    div.appendChild(btn);
+                }
+                
+                DOM.playersContainer.appendChild(div);
+            });
+
+            // Render My Hand
+            DOM.myCoinsSpan.innerHTML = `<i class="fa-solid fa-coins"></i> ${localState.myCoins}`;
+            DOM.myCardsContainer.innerHTML = '';
+            if(meData && meData.myCards) {
+                meData.myCards.forEach(card => {
+                    const cdiv = document.createElement('div');
+                    cdiv.className = 'card w-20 flex items-center justify-center font-bold text-sm';
+                    cdiv.textContent = card;
+                    DOM.myCardsContainer.appendChild(cdiv);
+                });
+            }
+
+            // Render Actions
+            const myTurn = turnId === myId && localState.isAlive;
+            DOM.actionButtons.forEach(btn => {
+                btn.disabled = !myTurn || currentAction !== null || (btn.dataset.action === 'coup' && localState.myCoins < 7) || (btn.dataset.action === 'assassinate' && localState.myCoins < 3);
+            });
+
+            // Handle Reactions / Prompts based on Action State
+            DOM.reactionArea.classList.add('hidden');
+            hideModal();
+
+            if(currentAction && localState.isAlive) {
+                const amIInitiator = currentAction.initiatorId === myId;
+                const amITarget = currentAction.targetId === myId;
+                
+                if(currentAction.state === 'pending') {
+                    if(!amIInitiator) {
+                        DOM.reactionArea.classList.remove('hidden');
+                        DOM.reactionPrompt.textContent = `${getPlayerName(currentAction.initiatorId)} used ${currentAction.action}`;
+                        DOM.reactionButtons.innerHTML = `
+                            <button class="btn-custom text-xs" onclick="sendReaction('pass')">Pass</button>
+                            <button class="btn-custom text-xs btn-accent" onclick="sendReaction('challenge')">Challenge!</button>
+                        `;
+                        // Add block options based on action
+                        if(currentAction.action === 'foreign_aid') {
+                            DOM.reactionButtons.innerHTML += `<button class="btn-custom text-xs" onclick="sendReaction('block', 'Duke')">Block (Duke)</button>`;
+                        } else if (currentAction.action === 'steal' && amITarget) {
+                            DOM.reactionButtons.innerHTML += `<button class="btn-custom text-xs" onclick="sendReaction('block', 'Captain')">Block (Capt)</button>`;
+                            DOM.reactionButtons.innerHTML += `<button class="btn-custom text-xs" onclick="sendReaction('block', 'Ambassador')">Block (Amb)</button>`;
+                        } else if (currentAction.action === 'assassinate' && amITarget) {
+                            DOM.reactionButtons.innerHTML += `<button class="btn-custom text-xs" onclick="sendReaction('block', 'Contessa')">Block (Contessa)</button>`;
+                        }
+                    } else {
+                        DOM.reactionArea.classList.remove('hidden');
+                        DOM.reactionPrompt.textContent = "Waiting for others to pass/challenge...";
+                        DOM.reactionButtons.innerHTML = "";
+                    }
+                }
+                
+                if(currentAction.state === 'waiting_loss' && currentAction.loserId === myId) {
+                     showInfluenceLossModal(meData.myCards);
+                }
+
+                if(currentAction.state === 'exchanging' && currentAction.initiatorId === myId) {
+                    showExchangeModal(meData.myCards);
+                }
+            }
+        }
+
+        // --- STREAMING_CHUNK:Interaction Logic ---
+        let pendingAction = null;
+        let isSelectingTarget = false;
+
+        DOM.actionButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = e.target.dataset.action;
+                const needsTarget = ['coup', 'assassinate', 'steal'].includes(action);
+                
+                if(needsTarget) {
+                    pendingAction = action;
+                    isSelectingTarget = true;
+                    addLog(`Select a target for ${action}`, 'system');
+                    // Re-render to show target buttons
+                    renderGame(localState.players.find(p=>p.id===myId), localState.turnId);
+                } else {
+                    sendMsg({ type: 'action_intent', action: action });
+                }
+            });
+        });
+
+        function finishActionWithTarget(targetId) {
+            isSelectingTarget = false;
+            sendMsg({ type: 'action_intent', action: pendingAction, targetId: targetId });
+            pendingAction = null;
+        }
+
+        window.sendReaction = function(type, role = null) {
+            DOM.reactionArea.classList.add('hidden'); // hide immediately to prevent double click
+            sendMsg({ type: 'reaction', reactionType: type, targetRole: role });
+        }
+
+        // --- Modals ---
+        function showInfluenceLossModal(cards) {
+            DOM.overlay.style.display = 'flex';
+            DOM.modalTitle.textContent = "You lost influence! Select a card to reveal & lose.";
+            DOM.modalContent.innerHTML = '';
+            
+            cards.forEach((card, index) => {
+                const btn = document.createElement('button');
+                btn.className = "card w-24 h-32 flex items-center justify-center font-bold hover:bg-[var(--accent)]";
+                btn.textContent = card;
+                btn.onclick = () => {
+                    hideModal();
+                    sendMsg({ type: 'lose_influence', cardIndex: index });
+                };
+                DOM.modalContent.appendChild(btn);
+            });
+        }
+
+        function showExchangeModal(cards) {
+            DOM.overlay.style.display = 'flex';
+            const originalCount = localState.myCards.length - 2; // Because they drew 2
+            DOM.modalTitle.textContent = `Exchange: Select ${originalCount} cards to KEEP.`;
+            DOM.modalContent.innerHTML = '';
+            
+            let selectedIndices = [];
+
+            cards.forEach((card, index) => {
+                const btn = document.createElement('button');
+                btn.className = "card w-24 h-32 flex items-center justify-center font-bold cursor-pointer border-gray-500";
+                btn.textContent = card;
+                btn.onclick = () => {
+                    if(selectedIndices.includes(index)) {
+                        selectedIndices = selectedIndices.filter(i => i !== index);
+                        btn.style.borderColor = "gray";
+                        btn.style.backgroundColor = "transparent";
+                    } else {
+                        if(selectedIndices.length < originalCount) {
+                            selectedIndices.push(index);
+                            btn.style.borderColor = "var(--accent)";
+                            btn.style.backgroundColor = "rgba(211,47,47,0.2)";
+                        }
+                    }
+                    DOM.modalConfirm.classList.toggle('hidden', selectedIndices.length !== originalCount);
+                };
+                DOM.modalContent.appendChild(btn);
+            });
+
+            DOM.modalConfirm.classList.remove('hidden');
+            DOM.modalConfirm.disabled = true; // disabled until selection correct
+            
+            // Override confirm logic
+            DOM.modalConfirm.onclick = () => {
+                if(selectedIndices.length === originalCount) {
+                    hideModal();
+                    sendMsg({ type: 'exchange_return', keptIndices: selectedIndices });
+                }
+            }
+        }
+
+        function hideModal() {
+            DOM.overlay.style.display = 'none';
+            DOM.modalConfirm.classList.add('hidden');
+            DOM.modalCancel.classList.add('hidden');
+        }
+
+        function getPlayerName(id) {
+            const p = localState.players.find(x => x.id === id);
+            return p ? p.name : "Unknown";
+        }
+
+        // --- Event Listeners ---
+        DOM.joinBtn.addEventListener('click', connectToLobby);
+        DOM.startBtn.addEventListener('click', () => {
+            if(isHost) startGame();
+        });
+
+    </script>
+</body>
+</html>
