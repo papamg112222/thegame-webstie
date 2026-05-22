@@ -4,956 +4,1030 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AR Combat: Tactical Strike</title>
+    <title>AR Combat Evolved</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; -webkit-user-select: none; }
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@500;700&display=swap');
         
-        /* Video & Canvas Layers */
-        #camera-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
-        #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; display: none; touch-action: none; }
-        #flash-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 10; opacity: 0; pointer-events: none; transition: opacity 0.2s; display: none; }
+        :root { --blue-glow: 0 0 15px #3b82f6, 0 0 30px #1d4ed8; --red-glow: 0 0 15px #ef4444, 0 0 30px #b91c1c; }
         
-        /* UI Layers */
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050505; color: white; font-family: 'Rajdhani', sans-serif; user-select: none; -webkit-user-select: none; touch-action: none; }
+        
+        /* Core Layers */
+        #camera-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; filter: contrast(1.1) brightness(0.8); display: none; }
+        #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; display: none; }
+        #flash-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #fff; z-index: 15; opacity: 0; pointer-events: none; display: none; }
+        
+        /* UI & Menus */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
         .interactive { pointer-events: auto; }
-        
-        /* Modals & Screens */
-        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; background: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; background: radial-gradient(circle at center, #1e293b 0%, #020617 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; font-family: 'Orbitron', sans-serif; }
         .hidden { display: none !important; }
         
-        /* Custom UI Elements */
-        .glass-panel { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem; padding: 1.5rem; }
+        /* Cyberpunk UI Elements */
+        .cyber-panel { background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(16px); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 1.5rem; box-shadow: 0 0 20px rgba(0,0,0,0.5); position: relative; overflow: hidden; }
+        .cyber-panel::before { content: ''; position: absolute; top: 0; left: -100%; width: 50%; height: 2px; background: linear-gradient(90deg, transparent, #38bdf8, transparent); animation: scan 3s linear infinite; }
+        @keyframes scan { 100% { left: 200%; } }
         
-        /* Action Buttons */
-        .action-btn { position: relative; flex: 1; margin: 0 4px; height: 80px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; transition: transform 0.1s; overflow: hidden; }
-        .action-btn:active { transform: scale(0.95); }
-        .btn-bunker { background: linear-gradient(145deg, #3b82f6, #1d4ed8); }
-        .btn-flash { background: linear-gradient(145deg, #eab308, #a16207); }
-        .btn-deagle { background: linear-gradient(145deg, #ef4444, #b91c1c); }
-        .btn-ar { background: linear-gradient(145deg, #10b981, #047857); }
-        .ammo-counter { font-size: 0.7rem; opacity: 0.8; margin-top: 2px; }
+        h1, h2, h3 { font-family: 'Orbitron', sans-serif; text-transform: uppercase; letter-spacing: 2px; }
         
-        .progress-bar { position: absolute; bottom: 0; left: 0; height: 4px; background: rgba(255,255,255,0.8); width: 0%; }
+        /* Buttons */
+        .btn { position: relative; padding: 0.75rem 1.5rem; font-weight: 700; text-transform: uppercase; border-radius: 4px; transition: all 0.2s; overflow: hidden; font-family: 'Orbitron', sans-serif; }
+        .btn:active { transform: scale(0.95); }
+        .btn-blue { background: rgba(37, 99, 235, 0.2); border: 1px solid #3b82f6; color: #60a5fa; box-shadow: var(--blue-glow); }
+        .btn-red { background: rgba(220, 38, 38, 0.2); border: 1px solid #ef4444; color: #f87171; box-shadow: var(--red-glow); }
+        .btn-green { background: rgba(16, 185, 129, 0.2); border: 1px solid #10b981; color: #34d399; box-shadow: 0 0 15px #10b981; }
         
-        /* Animations */
-        @keyframes damageFlash { 0% { box-shadow: inset 0 0 0 0 red; } 50% { box-shadow: inset 0 0 50px 20px red; } 100% { box-shadow: inset 0 0 0 0 red; } }
-        .damage-effect { animation: damageFlash 0.3s ease-out; }
+        /* Action Buttons (HUD) */
+        .action-btn { position: relative; flex: 1; margin: 0 4px; height: 75px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; transition: transform 0.1s; overflow: hidden; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(4px); color: #e2e8f0; font-family: 'Rajdhani', sans-serif; letter-spacing: 1px; }
+        .action-btn:active { transform: scale(0.92); border-color: white; }
+        .action-btn.active { border-color: #facc15; box-shadow: 0 0 15px #facc15; }
+        .icon { width: 28px; height: 28px; margin-bottom: 2px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+        
+        .progress-bar { position: absolute; bottom: 0; left: 0; height: 4px; background: #facc15; width: 0%; transition: width 0.05s linear; box-shadow: 0 0 10px #facc15; }
+        
+        /* Screen FX */
+        @keyframes damageFlash { 0% { box-shadow: inset 0 0 0 0 rgba(255,0,0,0); } 20% { box-shadow: inset 0 0 100px 30px rgba(255,0,0,0.8); } 100% { box-shadow: inset 0 0 0 0 rgba(255,0,0,0); } }
+        .damage-effect { animation: damageFlash 0.4s ease-out; }
+        
+        @keyframes shake { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-3px, 3px); } 50% { transform: translate(3px, -2px); } 75% { transform: translate(-2px, -3px); } }
+        .shake-effect { animation: shake 0.2s cubic-bezier(.36,.07,.19,.97) both; }
     </style>
 </head>
 <body>
 
-    <!-- SCREEN: INITIAL SETUP -->
+    <!-- SCREEN: SETUP -->
     <div id="screen-setup" class="screen">
-        <div class="glass-panel w-full max-w-md text-center">
-            <h1 class="text-3xl font-extrabold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">AR TACTICAL</h1>
-            <p class="text-sm text-gray-400 mb-6">P2P Networked Combat</p>
+        <div class="cyber-panel w-full max-w-md text-center">
+            <h1 class="text-4xl font-extrabold mb-1 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">NEXUS AR</h1>
+            <p class="text-xs text-cyan-300 mb-6 tracking-widest">TACTICAL WARFARE LINK</p>
             
-            <input type="text" id="player-name" placeholder="Enter Your Name" class="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white mb-4 focus:outline-none focus:border-blue-500" maxlength="12">
+            <input type="text" id="player-name" placeholder="CALLSIGN" class="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white mb-5 focus:outline-none focus:border-cyan-500 font-mono text-center uppercase tracking-widest" maxlength="10">
             
             <div class="grid grid-cols-2 gap-4">
-                <button onclick="showHostModal()" class="bg-blue-600 hover:bg-blue-700 p-3 rounded font-bold transition">Host Game</button>
-                <button onclick="showJoinModal()" class="bg-emerald-600 hover:bg-emerald-700 p-3 rounded font-bold transition">Join Game</button>
+                <button onclick="showHostModal()" class="btn btn-blue">HOST PROTOCOL</button>
+                <button onclick="showJoinModal()" class="btn btn-green">JOIN LINK</button>
             </div>
         </div>
     </div>
 
-    <!-- SCREEN: HOST OPTIONS -->
+    <!-- SCREEN: HOST -->
     <div id="screen-host" class="screen hidden">
-        <div class="glass-panel w-full max-w-md">
-            <h2 class="text-2xl font-bold mb-4">Host Settings</h2>
-            <label class="block text-gray-300 mb-2">Game Mode (Max players per team)</label>
-            <select id="game-mode" class="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white mb-6 focus:outline-none focus:border-blue-500">
-                <option value="1">1v1 (2 Players Total)</option>
-                <option value="2">2v2 (4 Players Total)</option>
-                <option value="3" selected>3v3 (6 Players Total)</option>
+        <div class="cyber-panel w-full max-w-md">
+            <h2 class="text-xl mb-4 text-cyan-400">HOST CONFIG</h2>
+            <label class="block text-gray-400 text-sm mb-1">TEAM CAPACITY</label>
+            <select id="game-mode" class="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white mb-6 focus:outline-none focus:border-cyan-500 font-mono">
+                <option value="1">1 VS 1</option>
+                <option value="2">2 VS 2</option>
+                <option value="3" selected>3 VS 3</option>
             </select>
             <div class="flex gap-4">
-                <button onclick="createRoom()" class="flex-1 bg-blue-600 hover:bg-blue-700 p-3 rounded font-bold transition">Create</button>
-                <button onclick="backToSetup()" class="flex-1 bg-gray-600 hover:bg-gray-700 p-3 rounded font-bold transition">Cancel</button>
+                <button onclick="createRoom()" class="btn btn-blue flex-1">INITIALIZE</button>
+                <button onclick="backToSetup()" class="btn bg-gray-800 text-gray-400 border border-gray-600 flex-1">ABORT</button>
             </div>
         </div>
     </div>
 
-    <!-- SCREEN: JOIN OPTIONS -->
+    <!-- SCREEN: JOIN -->
     <div id="screen-join" class="screen hidden">
-        <div class="glass-panel w-full max-w-md">
-            <h2 class="text-2xl font-bold mb-4">Join Room</h2>
-            <input type="text" id="room-id-input" placeholder="Enter Room ID" class="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white mb-6 focus:outline-none focus:border-emerald-500 text-center uppercase" maxlength="6">
+        <div class="cyber-panel w-full max-w-md">
+            <h2 class="text-xl mb-4 text-cyan-400">CONNECT TO LINK</h2>
+            <input type="text" id="room-id-input" placeholder="ROOM FREQUENCY" class="w-full bg-slate-900 border border-slate-700 rounded p-3 text-white mb-6 focus:outline-none focus:border-cyan-500 font-mono text-center uppercase tracking-[0.5em]" maxlength="6">
             <div class="flex gap-4">
-                <button onclick="joinRoom()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 p-3 rounded font-bold transition">Join</button>
-                <button onclick="backToSetup()" class="flex-1 bg-gray-600 hover:bg-gray-700 p-3 rounded font-bold transition">Cancel</button>
+                <button onclick="joinRoom()" class="btn btn-green flex-1">CONNECT</button>
+                <button onclick="backToSetup()" class="btn bg-gray-800 text-gray-400 border border-gray-600 flex-1">ABORT</button>
             </div>
         </div>
     </div>
 
     <!-- SCREEN: LOBBY -->
     <div id="screen-lobby" class="screen hidden">
-        <div class="glass-panel w-full max-w-md flex flex-col h-5/6">
+        <div class="cyber-panel w-full max-w-md flex flex-col h-[85vh]">
             <div class="text-center mb-4">
-                <h2 class="text-xl font-bold text-gray-300">Room ID</h2>
-                <div class="text-4xl font-extrabold tracking-widest text-emerald-400 bg-slate-900 py-2 rounded mt-1" id="lobby-room-id">------</div>
+                <p class="text-xs text-gray-400">SECURE FREQUENCY</p>
+                <div class="text-4xl font-black tracking-[0.2em] text-cyan-400 bg-slate-900 py-2 border border-slate-800 rounded mt-1 shadow-[inset_0_0_10px_rgba(0,0,0,0.8)]" id="lobby-room-id">------</div>
             </div>
             
-            <div class="flex-1 overflow-y-auto mb-4 bg-slate-800 rounded p-2 flex">
-                <div class="flex-1 border-r border-slate-600 p-2 flex flex-col">
-                    <h3 class="text-center font-bold text-blue-400 mb-2 border-b border-blue-800 pb-1">TEAM A (Blue)</h3>
-                    <ul id="team-a-list" class="space-y-1 text-sm flex-1"></ul>
-                    <button onclick="requestTeamSwap('A')" class="mt-2 w-full bg-blue-600/30 border border-blue-500 hover:bg-blue-600 p-2 rounded text-xs font-bold transition">Join Blue</button>
+            <div class="flex-1 overflow-y-auto mb-4 bg-slate-900/80 rounded border border-slate-700 p-2 flex gap-2">
+                <div class="flex-1 p-2 flex flex-col bg-blue-900/10 border border-blue-500/30 rounded">
+                    <h3 class="text-center font-bold text-blue-400 mb-2 border-b border-blue-500/50 pb-1 text-sm">COBALT TEAM</h3>
+                    <ul id="team-a-list" class="space-y-2 text-sm flex-1 font-mono"></ul>
+                    <button onclick="requestTeamSwap('A')" class="mt-2 w-full btn-blue text-xs py-2">JOIN COBALT</button>
                 </div>
-                <div class="flex-1 p-2 flex flex-col">
-                    <h3 class="text-center font-bold text-red-400 mb-2 border-b border-red-800 pb-1">TEAM B (Red)</h3>
-                    <ul id="team-b-list" class="space-y-1 text-sm flex-1"></ul>
-                    <button onclick="requestTeamSwap('B')" class="mt-2 w-full bg-red-600/30 border border-red-500 hover:bg-red-600 p-2 rounded text-xs font-bold transition">Join Red</button>
+                <div class="flex-1 p-2 flex flex-col bg-red-900/10 border border-red-500/30 rounded">
+                    <h3 class="text-center font-bold text-red-400 mb-2 border-b border-red-500/50 pb-1 text-sm">CRIMSON TEAM</h3>
+                    <ul id="team-b-list" class="space-y-2 text-sm flex-1 font-mono"></ul>
+                    <button onclick="requestTeamSwap('B')" class="mt-2 w-full btn-red text-xs py-2">JOIN CRIMSON</button>
                 </div>
             </div>
             
-            <p id="lobby-status" class="text-center text-sm text-yellow-400 mb-4 animate-pulse">Waiting for players...</p>
-            <button id="btn-start-game" onclick="startGame()" class="w-full bg-emerald-600 hover:bg-emerald-700 p-4 rounded font-bold text-lg transition hidden">START MATCH</button>
+            <p id="lobby-status" class="text-center text-xs text-yellow-400 mb-4 animate-pulse font-mono tracking-widest">AWAITING COMBATANTS...</p>
+            <button id="btn-start-game" onclick="startGame()" class="w-full btn btn-green py-4 text-lg hidden">DEPLOY TO AR</button>
         </div>
     </div>
 
-    <!-- GAME UI -->
-    <video id="camera-bg" autoplay playsinline></video>
-    <canvas id="game-canvas"></canvas>
-    
-    <div id="ui-layer" class="hidden">
-        <!-- Top HUD -->
-        <div class="p-4 flex justify-between items-start interactive">
-            <div class="bg-black/50 backdrop-blur rounded p-2 border border-white/10">
-                <div class="text-sm font-bold text-gray-300">SCORE (First to 5)</div>
-                <div class="flex gap-4 text-xl font-black mt-1">
-                    <div class="text-blue-400">Blue: <span id="score-a">0</span></div>
-                    <div class="text-red-400">Red: <span id="score-b">0</span></div>
+    <!-- GAME ENGINE VIEW -->
+    <div id="wrapper" class="relative w-full h-full">
+        <video id="camera-bg" autoplay playsinline></video>
+        <canvas id="game-canvas"></canvas>
+        <div id="flash-overlay"></div>
+        
+        <!-- HUD LAYER -->
+        <div id="ui-layer" class="hidden">
+            <!-- Top HUD -->
+            <div class="p-4 flex justify-between items-start interactive">
+                <div class="bg-slate-900/80 backdrop-blur border border-slate-600 rounded p-2 px-4 shadow-lg">
+                    <div class="text-[10px] font-bold text-gray-400 tracking-widest">MATCH DOMINANCE</div>
+                    <div class="flex gap-4 text-xl font-black mt-1 font-mono">
+                        <div class="text-blue-400 glow-text-blue">COBALT <span id="score-a">0</span></div>
+                        <div class="text-red-400 glow-text-red">CRIMSON <span id="score-b">0</span></div>
+                    </div>
                 </div>
-            </div>
-            <div class="bg-black/50 backdrop-blur rounded p-2 border border-white/10 text-right">
-                <div class="text-sm font-bold text-gray-300">ROUND</div>
-                <div class="text-xl font-black text-white" id="round-display">1</div>
-            </div>
-        </div>
-
-        <!-- Center Crosshair (CSS fallback, main is on canvas) -->
-        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-50">
-            <div class="w-1 h-1 bg-white rounded-full"></div>
-        </div>
-
-        <!-- System Messages -->
-        <div id="game-message" class="absolute top-1/3 left-0 w-full text-center text-2xl font-black text-white drop-shadow-lg opacity-0 transition-opacity pointer-events-none"></div>
-
-        <!-- Bottom HUD & Controls -->
-        <div class="interactive p-2 pb-6 bg-gradient-to-t from-black/80 to-transparent">
-            <!-- Health Bar -->
-            <div class="mb-4 px-2">
-                <div class="flex justify-between text-sm font-bold mb-1 drop-shadow-md">
-                    <span>HP</span>
-                    <span id="hp-text">150 / 150</span>
-                </div>
-                <div class="w-full h-4 bg-slate-800 rounded-full overflow-hidden border border-white/20">
-                    <div id="hp-bar" class="h-full bg-green-500 transition-all duration-200" style="width: 100%;"></div>
+                <div class="bg-slate-900/80 backdrop-blur border border-slate-600 rounded p-2 text-center w-16 shadow-lg">
+                    <div class="text-[10px] font-bold text-gray-400">RND</div>
+                    <div class="text-2xl font-black text-white font-mono" id="round-display">1</div>
                 </div>
             </div>
 
-            <!-- Action Buttons -->
-            <div class="flex justify-between w-full">
-                <button class="action-btn btn-bunker" onclick="actionBunker()">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                    BUNKER
-                    <span id="ammo-bunker" class="ammo-counter">10 Left</span>
-                </button>
-                
-                <button class="action-btn btn-flash" id="btn-flashbang">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
-                    FLASH
-                    <span id="ammo-flash" class="ammo-counter">3 Left</span>
-                    <div id="flash-progress" class="progress-bar"></div>
-                </button>
+            <!-- Central Messages -->
+            <div id="game-message" class="absolute top-1/4 left-0 w-full text-center text-4xl font-black text-white opacity-0 pointer-events-none drop-shadow-[0_0_10px_rgba(0,0,0,0.8)]" style="font-family:'Orbitron', sans-serif; text-shadow: 0 0 20px cyan; transition: opacity 0.3s, transform 0.3s; transform: scale(0.8);"></div>
 
-                <button class="action-btn btn-deagle" onclick="actionFire('deagle')">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><path d="M5 12l14-4v8l-14-4z"/></svg>
-                    DEAGLE
-                    <span id="ammo-deagle" class="ammo-counter">6 / 20</span>
-                </button>
+            <!-- Bottom Controls -->
+            <div class="interactive p-2 pb-6 bg-gradient-to-t from-black via-black/80 to-transparent">
+                <!-- HP Bar -->
+                <div class="mb-3 px-1">
+                    <div class="flex justify-between text-xs font-bold mb-1 text-cyan-200 tracking-widest">
+                        <span>INTEGRITY</span>
+                        <span id="hp-text" class="font-mono">150/150</span>
+                    </div>
+                    <div class="w-full h-3 bg-slate-900 rounded-full overflow-hidden border border-slate-700 shadow-[inset_0_0_5px_#000]">
+                        <div id="hp-bar" class="h-full bg-cyan-400 transition-all duration-200 box-shadow-[0_0_10px_cyan]" style="width: 100%;"></div>
+                    </div>
+                </div>
 
-                <button class="action-btn btn-ar" id="btn-ar">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><path d="M3 12h18m-4-4l4 4-4 4"/></svg>
-                    AR-15
-                    <span id="ammo-ar" class="ammo-counter">20 / 100</span>
-                </button>
+                <!-- Weapons -->
+                <div class="flex justify-between w-full">
+                    <button class="action-btn" onclick="actionBunker()" id="btn-bunker">
+                        <svg class="icon text-blue-400" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 2v20" stroke-dasharray="2 2"/><path d="M4 12h16" stroke-dasharray="2 2"/></svg>
+                        BARRIER
+                        <span id="ammo-bunker" class="text-[10px] text-gray-400 mt-1 font-mono">10</span>
+                    </button>
+                    
+                    <button class="action-btn" id="btn-flashbang">
+                        <svg class="icon text-yellow-400" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+                        FLASH
+                        <span id="ammo-flash" class="text-[10px] text-gray-400 mt-1 font-mono">3</span>
+                        <div id="flash-progress" class="progress-bar"></div>
+                    </button>
+
+                    <button class="action-btn" onclick="actionFire('deagle')" id="btn-deagle">
+                        <svg class="icon text-red-400" viewBox="0 0 24 24"><path d="M5 12h14v-2H5zM17 10l2-4H5l2 4M7 14v4h2v-4M15 14v4h-2v-4"/></svg>
+                        DEAGLE
+                        <span id="ammo-deagle" class="text-[10px] text-gray-400 mt-1 font-mono">6/20</span>
+                    </button>
+
+                    <button class="action-btn" id="btn-ar">
+                        <svg class="icon text-green-400" viewBox="0 0 24 24"><path d="M3 12h18M5 10l2-2 2 2M15 10l2-2 2 2M8 14v4M16 14v4"/></svg>
+                        AR-15
+                        <span id="ammo-ar" class="text-[10px] text-gray-400 mt-1 font-mono">20/100</span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-
-    <!-- Screen Flash Effect -->
-    <div id="flash-overlay"></div>
 
     <script>
-        /** * GLOBAL CONFIGURATION & STATE 
-         */
+        /*************************************************
+         * ENGINE ARCHITECTURE & STATE
+         *************************************************/
         const MAX_HP = 150;
-        const BUNKER_HP = 200;
-        const MAX_WINS = 5;
+        const WINS_REQ = 5;
+        const FOV = 70; // Wider FOV for AR
         
         const WEAPONS = {
-            deagle: { mag: 6, reserve: 20, dmgBody: 50, dmgHead: 140, fireRateMs: 300 },
-            ar: { mag: 20, reserve: 100, dmgBodyMin: 13, dmgBodyMax: 20, dmgHead: 25, fireRateMs: 120 }
+            deagle: { mag: 6, reserve: 20, dmgBody: 50, dmgHead: 140, fireRateMs: 350 },
+            ar: { mag: 20, reserve: 100, dmgBodyMin: 13, dmgBodyMax: 20, dmgHead: 25, fireRateMs: 110 }
         };
 
         const state = {
-            id: 'P_' + Math.random().toString(36).substr(2, 6).toUpperCase(),
-            name: '',
-            isHost: false,
-            roomId: '',
-            mode: 3, // Default 3v3 (Max 3 per side)
-            team: null, // 'A' or 'B'
+            id: 'OP_' + Math.random().toString(36).substr(2, 4).toUpperCase(),
+            name: '', isHost: false, roomId: '', mode: 3, team: null,
             
-            // Combat State
-            hp: MAX_HP,
-            isDead: false,
-            yaw: 0,
-            pitch: 0,
-            inventory: {
-                bunker: 10,
-                flash: 3,
-                deagle: { ammo: WEAPONS.deagle.mag, reserve: WEAPONS.deagle.reserve },
-                ar: { ammo: WEAPONS.ar.mag, reserve: WEAPONS.ar.reserve }
-            },
-            myBunker: null, 
-
-            // Engine
-            players: {}, 
-            score: { A: 0, B: 0 },
-            round: 1,
-            gameState: 'lobby' 
+            // Spatial & Status
+            hp: MAX_HP, isDead: false,
+            yaw: 0, pitch: 0, // 0-360, -90 to 90
+            inventory: { bunker: 10, flash: 3, deagle: { ammo: 6, reserve: 20 }, ar: { ammo: 20, reserve: 100 } },
+            
+            // Shared Game State
+            players: {}, // id -> {name, team, hp, isDead, yaw, pitch}
+            bunkers: {}, // global barricades. id -> {ownerId, team, hp, yaw, pitch}
+            score: { A: 0, B: 0 }, round: 1, gameState: 'lobby'
         };
 
-        // MQTT Client
+        // Engine globals
         let mqttClient = null;
         const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
-
-        // Camera & Canvas
         let videoEl = document.getElementById('camera-bg');
         let canvas = document.getElementById('game-canvas');
-        let ctx = canvas.getContext('2d');
-        let animationFrameId;
+        let ctx = canvas.getContext('2d', { alpha: false }); // Optimize
+        let cx, cy, ppd; // center X, center Y, Pixels Per Degree
+        let rafId;
 
-        // Viewport config
-        const FOV = 60; 
-        let pixelsPerDegree = 0;
+        // Visual FX Arrays
+        let particles = [];
+        let floatingTexts = [];
+        let projectiles = []; // For flashbang trajectories
 
-        // Inputs
+        // Input State
         let isDragging = false;
-        let lastTouchX = 0, lastTouchY = 0;
-        let flashChargeStart = 0;
-        let arFireInterval = null;
-        let lastFireTime = 0;
+        let lastTX = 0, lastTY = 0;
         let isReloading = false;
+        let lastFireTime = 0;
+        let arInterval = null;
+        let flashChargeStart = 0;
+        
+        // Aim Assist State
+        let lockedTarget = null; // {id, isHead}
 
-        /** * UI NAVIGATION 
-         */
+        /*************************************************
+         * UI & LOBBY LOGIC
+         *************************************************/
+        function switchScreen(id) {
+            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+            if(id) document.getElementById(id).classList.remove('hidden');
+        }
+
         function showHostModal() {
-            let n = document.getElementById('player-name').value.trim();
-            if(!n) return alert("Please enter a name");
-            state.name = n;
-            document.getElementById('screen-setup').classList.add('hidden');
-            document.getElementById('screen-host').classList.remove('hidden');
+            state.name = document.getElementById('player-name').value.trim() || 'UNKNOWN';
+            switchScreen('screen-host');
         }
 
         function showJoinModal() {
-            let n = document.getElementById('player-name').value.trim();
-            if(!n) return alert("Please enter a name");
-            state.name = n;
-            document.getElementById('screen-setup').classList.add('hidden');
-            document.getElementById('screen-join').classList.remove('hidden');
+            state.name = document.getElementById('player-name').value.trim() || 'UNKNOWN';
+            switchScreen('screen-join');
         }
 
-        function backToSetup() {
-            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
-            document.getElementById('screen-setup').classList.remove('hidden');
-        }
+        function backToSetup() { switchScreen('screen-setup'); }
 
-        /** * NETWORKING (MQTT) 
-         */
-        function connectMQTT(roomId, onSuccess) {
+        /*************************************************
+         * NETWORKING (MQTT)
+         *************************************************/
+        function connectNetwork(roomId, cb) {
             if(mqttClient) mqttClient.end();
-            
-            mqttClient = mqtt.connect(brokerUrl, {
-                clientId: state.id + '_' + Date.now(),
-                clean: true
-            });
-
+            // Use v2 prefix to isolate from previous version
+            mqttClient = mqtt.connect(brokerUrl, { clientId: state.id + '_' + Date.now() });
             mqttClient.on('connect', () => {
                 state.roomId = roomId;
-                const topic = `arfight/v1/${roomId}/#`;
-                mqttClient.subscribe(topic, (err) => {
-                    if (!err) {
-                        onSuccess();
-                    } else {
-                        alert("Network connection failed.");
-                        backToSetup();
-                    }
+                mqttClient.subscribe(`arfight/v2/${roomId}/#`, (err) => {
+                    if(!err) cb(); else alert("Network Failure.");
                 });
             });
-
-            mqttClient.on('message', handleNetworkMessage);
+            mqttClient.on('message', handleNetworkMsg);
         }
 
-        function publishMsg(type, payload) {
+        function pub(type, payload) {
             if(!mqttClient || !state.roomId) return;
-            const topic = `arfight/v1/${state.roomId}/${type}`;
-            mqttClient.publish(topic, JSON.stringify(payload), {qos: 0});
+            mqttClient.publish(`arfight/v2/${state.roomId}/${type}`, JSON.stringify(payload), {qos: 0});
         }
 
-        function handleNetworkMessage(topic, message) {
-            const parts = topic.split('/');
-            const type = parts[parts.length - 1];
-            let data;
-            try { data = JSON.parse(message.toString()); } catch(e) { return; }
+        function handleNetworkMsg(topic, msg) {
+            const type = topic.split('/').pop();
+            let d; try { d = JSON.parse(msg.toString()); } catch(e) { return; }
+
+            if(type === 'state_update' && d.id !== state.id) {
+                if(!state.players[d.id]) state.players[d.id] = {};
+                Object.assign(state.players[d.id], d);
+                return;
+            }
 
             switch(type) {
-                case 'join':
-                    if(state.isHost) handlePlayerJoin(data);
-                    break;
-                case 'team_swap_req':
-                    if(state.isHost) handleTeamSwapRequest(data);
-                    break;
-                case 'lobby_sync':
-                    syncLobby(data);
-                    break;
-                case 'start_round':
-                    startRound(data.round);
-                    break;
-                case 'state_update':
-                    if(data.id !== state.id) {
-                        if(!state.players[data.id]) state.players[data.id] = {};
-                        Object.assign(state.players[data.id], data);
-                    }
-                    break;
-                case 'hit':
-                    if(data.targetId === state.id && !state.isDead && state.gameState === 'playing') {
-                        takeDamage(data.damage, data.fromYaw);
-                    }
-                    break;
-                case 'flashbang':
-                    handleIncomingFlashbang(data);
-                    break;
-                case 'bunker_hit':
-                    if(data.ownerId === state.id && state.myBunker) {
-                        state.myBunker.hp -= data.damage;
-                        if(state.myBunker.hp <= 0) state.myBunker = null;
-                    }
-                    break;
-                case 'round_end':
-                    handleRoundEnd(data);
-                    break;
-                case 'game_over':
-                    handleGameOver(data);
-                    break;
+                case 'join': if(state.isHost) processJoin(d); break;
+                case 'swap_req': if(state.isHost) processSwap(d); break;
+                case 'lobby_sync': syncLobby(d); break;
+                case 'start_round': startRound(d.round); break;
+                case 'hit': processHit(d); break;
+                case 'spawn_bunker': state.bunkers[d.bunkerId] = d.data; break;
+                case 'bunker_hit': processBunkerHit(d); break;
+                case 'throw_flash': spawnFlashbangProjectile(d); break;
+                case 'round_end': handleRoundEnd(d); break;
             }
         }
 
-        /** * HOST & LOBBY LOGIC 
-         */
+        // Host Routing
         function createRoom() {
-            state.isHost = true;
-            state.mode = parseInt(document.getElementById('game-mode').value);
+            state.isHost = true; state.mode = parseInt(document.getElementById('game-mode').value);
             const roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
-            
-            // Add self to players
             state.players[state.id] = { id: state.id, name: state.name, team: 'A', hp: MAX_HP, isDead: false };
             state.team = 'A';
-
-            connectMQTT(roomId, () => {
-                document.getElementById('screen-host').classList.add('hidden');
-                document.getElementById('screen-lobby').classList.remove('hidden');
+            connectNetwork(roomId, () => {
+                switchScreen('screen-lobby');
                 document.getElementById('lobby-room-id').innerText = roomId;
-                document.getElementById('btn-start-game').classList.remove('hidden');
-                updateLobbyUI();
+                updateLobby();
             });
         }
 
         function joinRoom() {
             const roomId = document.getElementById('room-id-input').value.toUpperCase();
-            if(roomId.length < 5) return alert("Invalid Room ID");
-            
+            if(roomId.length < 5) return;
             state.isHost = false;
-            connectMQTT(roomId, () => {
-                document.getElementById('screen-join').classList.add('hidden');
-                document.getElementById('screen-lobby').classList.remove('hidden');
+            connectNetwork(roomId, () => {
+                switchScreen('screen-lobby');
                 document.getElementById('lobby-room-id').innerText = roomId;
-                
-                // Tell host we joined
-                publishMsg('join', { id: state.id, name: state.name });
+                pub('join', { id: state.id, name: state.name });
             });
         }
 
-        function handlePlayerJoin(data) {
-            if(!state.isHost || state.gameState !== 'lobby') return;
-            
-            // Assign team based on current counts to balance
-            let countA = 0, countB = 0;
-            Object.values(state.players).forEach(p => p.team === 'A' ? countA++ : (p.team === 'B' ? countB++ : null));
-            
-            let team = 'Spectator'; // Fallback if full
-            if(countA <= countB && countA < state.mode) team = 'A';
-            else if (countB < state.mode) team = 'B';
-            else if (countA < state.mode) team = 'A'; // Catch all if both equal but not full
-            
-            state.players[data.id] = { id: data.id, name: data.name, team: team, hp: MAX_HP, isDead: false };
-            
-            updateLobbyUI();
-            // Sync state to everyone
-            publishMsg('lobby_sync', { players: state.players, mode: state.mode });
+        function processJoin(d) {
+            let cA = 0, cB = 0;
+            Object.values(state.players).forEach(p => p.team === 'A' ? cA++ : (p.team === 'B' ? cB++ : 0));
+            let t = (cA <= cB && cA < state.mode) ? 'A' : (cB < state.mode ? 'B' : 'A');
+            state.players[d.id] = { id: d.id, name: d.name, team: t, hp: MAX_HP, isDead: false };
+            updateLobby(); pub('lobby_sync', { p: state.players, m: state.mode });
         }
 
-        function requestTeamSwap(targetTeam) {
-            if (state.gameState !== 'lobby') return;
-            // Send request to host to validate capacity
-            publishMsg('team_swap_req', { id: state.id, team: targetTeam });
-        }
+        function requestTeamSwap(t) { pub('swap_req', { id: state.id, team: t }); }
 
-        function handleTeamSwapRequest(data) {
-            if(!state.isHost || state.gameState !== 'lobby') return;
-            
-            const targetTeam = data.team;
-            let currentCount = 0;
-            Object.values(state.players).forEach(p => {
-                if(p.team === targetTeam) currentCount++;
-            });
-
-            // If the team has room, approve the swap
-            if(currentCount < state.mode) {
-                if(state.players[data.id]) {
-                    state.players[data.id].team = targetTeam;
-                    updateLobbyUI();
-                    publishMsg('lobby_sync', { players: state.players, mode: state.mode });
-                }
-            } else {
-                // Ignore or could send a "team full" message
+        function processSwap(d) {
+            let count = Object.values(state.players).filter(p => p.team === d.team).length;
+            if(count < state.mode && state.players[d.id]) {
+                state.players[d.id].team = d.team;
+                updateLobby(); pub('lobby_sync', { p: state.players, m: state.mode });
             }
         }
 
-        function syncLobby(data) {
+        function syncLobby(d) {
             if(state.isHost) return;
-            state.players = data.players;
-            state.mode = data.mode;
-            if(state.players[state.id]) {
-                state.team = state.players[state.id].team;
-            }
-            updateLobbyUI();
+            state.players = d.p; state.mode = d.m;
+            if(state.players[state.id]) state.team = state.players[state.id].team;
+            updateLobby();
         }
 
-        function updateLobbyUI() {
-            const listA = document.getElementById('team-a-list');
-            const listB = document.getElementById('team-b-list');
-            listA.innerHTML = ''; listB.innerHTML = '';
-            
-            let countA = 0, countB = 0;
+        function updateLobby() {
+            const lA = document.getElementById('team-a-list'), lB = document.getElementById('team-b-list');
+            lA.innerHTML = ''; lB.innerHTML = '';
+            let cA = 0, cB = 0;
             Object.values(state.players).forEach(p => {
                 const li = document.createElement('li');
-                li.innerText = p.name + (p.id === state.id ? " (You)" : "");
-                li.className = p.id === state.id ? "font-bold text-white bg-white/10 rounded px-1" : "text-gray-300";
-                
-                if(p.team === 'A') {
-                    listA.appendChild(li);
-                    countA++;
-                } else if(p.team === 'B') {
-                    listB.appendChild(li);
-                    countB++;
-                }
+                li.innerText = `${p.name} ${p.id === state.id ? '(YOU)' : ''}`;
+                li.className = p.id === state.id ? 'text-white font-bold bg-white/10 px-1 rounded' : 'text-gray-400';
+                if(p.team === 'A') { lA.appendChild(li); cA++; }
+                else if(p.team === 'B') { lB.appendChild(li); cB++; }
             });
 
             if(state.isHost) {
                 const btn = document.getElementById('btn-start-game');
-                // Allow start if both teams have at least 1 player
-                if(countA > 0 && countB > 0) { 
-                    btn.disabled = false;
-                    btn.classList.remove('opacity-50');
-                    document.getElementById('lobby-status').innerText = `Ready. Players: ${countA + countB} / ${state.mode * 2}`;
+                if(cA > 0 && cB > 0) { // Unbalanced allowed as long as both sides have 1
+                    btn.classList.remove('hidden');
+                    document.getElementById('lobby-status').innerText = `COMBATANTS READY: ${cA + cB}`;
                 } else {
-                    btn.disabled = true;
-                    btn.classList.add('opacity-50');
-                    document.getElementById('lobby-status').innerText = `Waiting for players on both teams...`;
+                    btn.classList.add('hidden');
+                    document.getElementById('lobby-status').innerText = `AWAITING TEAMS...`;
                 }
             }
         }
 
-        /** * GAME LIFECYCLE 
-         */
-        async function startGame() {
-            if(!state.isHost) return;
-            publishMsg('start_round', { round: 1 });
-        }
+        /*************************************************
+         * CORE GAME LIFECYCLE
+         *************************************************/
+        function startGame() { if(state.isHost) pub('start_round', { round: 1 }); }
 
-        async function startRound(roundNum) {
-            state.gameState = 'playing';
-            state.round = roundNum;
-            state.isDead = false;
-            state.hp = MAX_HP;
+        async function startRound(r) {
+            state.gameState = 'playing'; state.round = r;
+            state.hp = MAX_HP; state.isDead = false;
+            state.bunkers = {}; projectiles = []; particles = []; floatingTexts = [];
             
-            // Reset inventory
-            state.inventory.bunker = 10;
-            state.inventory.flash = 3;
-            state.inventory.deagle = { ammo: WEAPONS.deagle.mag, reserve: WEAPONS.deagle.reserve };
-            state.inventory.ar = { ammo: WEAPONS.ar.mag, reserve: WEAPONS.ar.reserve };
-            state.myBunker = null;
+            // Reset Inventory
+            state.inventory = { bunker: 10, flash: 3, deagle: { ammo: WEAPONS.deagle.mag, reserve: WEAPONS.deagle.reserve }, ar: { ammo: WEAPONS.ar.mag, reserve: WEAPONS.ar.reserve } };
 
-            // Spawning: Team A at yaw ~0, Team B at yaw ~180
+            // Spatial Setup
             state.pitch = 0;
-            if(state.team === 'A') state.yaw = (Math.random() * 40) - 20; // -20 to 20
-            else state.yaw = 180 + (Math.random() * 40) - 20; // 160 to 200
-            
+            state.yaw = state.team === 'A' ? (Math.random()*20 - 10) : (180 + Math.random()*20 - 10);
             if(state.yaw < 0) state.yaw += 360;
 
-            // Reset local player object copies
-            Object.values(state.players).forEach(p => {
-                p.hp = MAX_HP; p.isDead = false; p.bunker = null;
-            });
+            Object.values(state.players).forEach(p => { p.hp = MAX_HP; p.isDead = false; });
 
-            // UI Updates
-            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+            // UI
+            switchScreen(null);
             document.getElementById('ui-layer').classList.remove('hidden');
             document.getElementById('camera-bg').style.display = 'block';
             document.getElementById('game-canvas').style.display = 'block';
             document.getElementById('round-display').innerText = state.round;
-            updateHUD();
-            
-            showCenterMessage(`ROUND ${state.round}`);
+            updateHUD(); showMsg(`ROUND ${r}`, 2000);
 
-            // Start Camera & Engine
-            await initCamera();
-            resizeCanvas();
-            window.addEventListener('resize', resizeCanvas);
-            initControls();
+            // Init Engine
+            try {
+                const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                videoEl.srcObject = s;
+            } catch(e) { console.warn("No camera"); }
             
-            if(!animationFrameId) gameLoop();
+            resize(); window.addEventListener('resize', resize);
+            setupControls();
             
-            // Start State Broadcast
-            if(state.stateSyncInt) clearInterval(state.stateSyncInt);
-            state.stateSyncInt = setInterval(broadcastState, 100); // 10fps sync
+            if(!rafId) engineLoop();
+            if(state.syncInt) clearInterval(state.syncInt);
+            state.syncInt = setInterval(() => {
+                if(state.gameState==='playing') {
+                    pub('state_update', { id: state.id, yaw: state.yaw, pitch: state.pitch, hp: state.hp, isDead: state.isDead });
+                    if(state.isHost) checkWin();
+                }
+            }, 100);
         }
 
-        function broadcastState() {
-            if(state.gameState !== 'playing') return;
-            publishMsg('state_update', {
-                id: state.id,
-                yaw: state.yaw,
-                pitch: state.pitch,
-                hp: state.hp,
-                isDead: state.isDead,
-                bunker: state.myBunker
-            });
-            
-            // Host logic: check win condition
-            if(state.isHost) checkRoundWin();
-        }
-
-        function checkRoundWin() {
-            let aAlive = false, bAlive = false;
+        function checkWin() {
+            let aA = false, aB = false;
             Object.values(state.players).forEach(p => {
-                if(!p.isDead) {
-                    if(p.team === 'A') aAlive = true;
-                    if(p.team === 'B') bAlive = true;
-                }
+                if(!p.isDead) { if(p.team === 'A') aA = true; if(p.team === 'B') aB = true; }
             });
+            if(!aA || !aB) {
+                let w = (!aA && !aB) ? 'D' : (aA ? 'A' : 'B');
+                if(w==='A') state.score.A++; if(w==='B') state.score.B++;
+                pub('round_end', { w, sA: state.score.A, sB: state.score.B });
+            }
+        }
 
-            if(!aAlive || !bAlive) {
-                let winner = !aAlive && !bAlive ? 'Draw' : (aAlive ? 'A' : 'B');
-                if(winner === 'A') state.score.A++;
-                if(winner === 'B') state.score.B++;
+        function handleRoundEnd(d) {
+            state.gameState = 'end';
+            state.score.A = d.sA; state.score.B = d.sB;
+            document.getElementById('score-a').innerText = d.sA;
+            document.getElementById('score-b').innerText = d.sB;
+            
+            if(d.w === 'D') showMsg("DRAW");
+            else showMsg(`TEAM ${d.w === 'A' ? 'COBALT' : 'CRIMSON'} WINS ROUND`);
+
+            if(d.sA >= WINS_REQ || d.sB >= WINS_REQ) {
+                setTimeout(() => {
+                    showMsg(`TEAM ${d.w === 'A' ? 'COBALT' : 'CRIMSON'} WINS MATCH!`, 5000);
+                    setTimeout(()=>window.location.reload(), 4000);
+                }, 3000);
+            } else if(state.isHost) {
+                setTimeout(() => pub('start_round', { round: state.round + 1 }), 4000);
+            }
+        }
+
+        function showMsg(m, ms=2000) {
+            const el = document.getElementById('game-message');
+            el.innerText = m; el.style.opacity = '1'; el.style.transform = 'scale(1)';
+            setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'scale(0.8)'; }, ms);
+        }
+
+        function screenShake() {
+            const wr = document.getElementById('wrapper');
+            wr.classList.remove('shake-effect');
+            void wr.offsetWidth;
+            wr.classList.add('shake-effect');
+        }
+
+        /*************************************************
+         * MATH & SPATIAL UTILS
+         *************************************************/
+        function resize() {
+            canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            cx = canvas.width/2; cy = canvas.height/2; ppd = canvas.width / FOV;
+        }
+
+        function angleDiff(a, b) {
+            let d = (b - a + 180) % 360 - 180;
+            return d < -180 ? d + 360 : d;
+        }
+
+        function toScreen(y, p) {
+            let dx = angleDiff(state.yaw, y);
+            let dy = p - state.pitch;
+            // Only return if somewhat in front (avoids rendering stuff behind you mirroring)
+            if(Math.abs(dx) > 100) return null;
+            return { x: cx + dx * ppd, y: cy + dy * ppd, dist: Math.sqrt(dx*dx + dy*dy) };
+        }
+
+        // Raycast Check against Bunkers
+        function checkBunkerBlock(sYaw, sPitch, tYaw, tPitch, enemyTeam) {
+            // AR approximation: A bunker is placed at a specific yaw/pitch. It acts as a 2D wall in angle-space.
+            // Width ~ 20 deg, Height ~ 30 deg.
+            for(let id in state.bunkers) {
+                let b = state.bunkers[id];
+                if(b.hp <= 0 || b.team !== enemyTeam) continue;
                 
-                publishMsg('round_end', { winner, scoreA: state.score.A, scoreB: state.score.B });
-            }
-        }
-
-        function handleRoundEnd(data) {
-            state.gameState = 'round_end';
-            state.score.A = data.scoreA;
-            state.score.B = data.scoreB;
-            document.getElementById('score-a').innerText = state.score.A;
-            document.getElementById('score-b').innerText = state.score.B;
-
-            let msg = data.winner === 'Draw' ? "ROUND DRAW" : `TEAM ${data.winner === 'A' ? 'BLUE' : 'RED'} WINS ROUND`;
-            showCenterMessage(msg);
-
-            if(state.score.A >= MAX_WINS || state.score.B >= MAX_WINS) {
-                setTimeout(() => publishMsg('game_over', { winner: state.score.A >= MAX_WINS ? 'A' : 'B' }), 3000);
-            } else {
-                if(state.isHost) setTimeout(() => publishMsg('start_round', { round: state.round + 1 }), 4000);
-            }
-        }
-
-        function handleGameOver(data) {
-            state.gameState = 'game_over';
-            showCenterMessage(`TEAM ${data.winner === 'A' ? 'BLUE' : 'RED'} WINS MATCH!`, 5000);
-            setTimeout(() => {
-                window.location.reload();
-            }, 5000);
-        }
-
-        /**
-         * COMBAT ACTIONS 
-         */
-        function actionBunker() {
-            if(state.isDead || state.gameState !== 'playing' || state.inventory.bunker <= 0 || state.myBunker) return;
-            state.inventory.bunker--;
-            state.myBunker = { hp: BUNKER_HP, yaw: state.yaw };
-            updateHUD();
-        }
-
-        function actionFire(weaponType) {
-            if(state.isDead || state.gameState !== 'playing' || isReloading) return;
-            
-            const now = Date.now();
-            const wData = WEAPONS[weaponType];
-            let inv = state.inventory[weaponType];
-            
-            if(now - lastFireTime < wData.fireRateMs) return;
-
-            if(inv.ammo <= 0) {
-                reloadWeapon(weaponType);
-                return;
-            }
-
-            // Fire!
-            inv.ammo--;
-            lastFireTime = now;
-            updateHUD();
-
-            // Screen recoil effect
-            state.pitch += 1; // Kick up
-            
-            // Hit detection (Raycast center of screen)
-            checkHit(weaponType);
-        }
-
-        function reloadWeapon(type) {
-            let inv = state.inventory[type];
-            let wData = WEAPONS[type];
-            if(inv.reserve <= 0 || inv.ammo === wData.mag || isReloading) return;
-            
-            isReloading = true;
-            document.getElementById(`ammo-${type}`).innerText = "RELOADING...";
-            
-            setTimeout(() => {
-                let needed = wData.mag - inv.ammo;
-                let take = Math.min(needed, inv.reserve);
-                inv.reserve -= take;
-                inv.ammo += take;
-                isReloading = false;
-                updateHUD();
-            }, 1500);
-        }
-
-        function checkHit(weaponType) {
-            const wData = WEAPONS[weaponType];
-            
-            // Sort enemies by distance from crosshair
-            let closest = null;
-            let minDistance = 999;
-            let isHeadshot = false;
-
-            Object.values(state.players).forEach(p => {
-                if(p.id === state.id || p.team === state.team || p.isDead) return;
-
-                // Calculate screen position of enemy
-                let dYaw = getShortestAngle(state.yaw, p.yaw);
-                let dPitch = p.pitch - state.pitch;
+                // If the target (e.g. enemy player or flashbang dest) is roughly behind the bunker from my view
+                // We check if the line from Center to Target passes through Bunker Rect.
+                // Simpler: Is the Bunker angularly very close to the target?
+                let dYaw = Math.abs(angleDiff(b.yaw, tYaw));
+                let dPitch = Math.abs(b.pitch - tPitch);
                 
-                // Convert to screen pixels (approx)
-                let pxX = (dYaw * pixelsPerDegree); // 0 is center
-                let pxY = (dPitch * pixelsPerDegree);
-
-                // Hitboxes
-                // Distance to head center
-                let distHead = Math.sqrt(pxX*pxX + (pxY + 70)*(pxY + 70));
-                if(distHead < 25 && distHead < minDistance) {
-                    closest = p; minDistance = distHead; isHeadshot = true;
+                if(dYaw < 12 && dPitch < 20) {
+                    return b; // Blocked by this bunker
                 }
-                
-                // Distance to body center
-                let distBody = Math.sqrt(pxX*pxX + pxY*pxY);
-                if(distBody < 50 && distBody < minDistance && !isHeadshot) {
-                    closest = p; minDistance = distBody; isHeadshot = false;
-                }
-            });
-
-            if(closest) {
-                // Check if bunker blocks it
-                if(closest.bunker && closest.bunker.hp > 0) {
-                    // Is the attack coming from the bunker's front?
-                    let hitAngle = Math.abs(getShortestAngle(state.yaw, closest.bunker.yaw + 180));
-                    if(hitAngle < 60) {
-                        // Hit bunker instead
-                        publishMsg('bunker_hit', { ownerId: closest.id, damage: wData.dmgBodyMin || wData.dmgBody });
-                        showHitMarker('blue');
-                        return;
-                    }
-                }
-
-                // Hit Player
-                let dmg = isHeadshot ? wData.dmgHead : (wData.dmgBodyMin ? Math.floor(Math.random()*(wData.dmgBodyMax - wData.dmgBodyMin)+wData.dmgBodyMin) : wData.dmgBody);
-                publishMsg('hit', { targetId: closest.id, damage: dmg, fromYaw: state.yaw });
-                showHitMarker(isHeadshot ? 'red' : 'white');
             }
+            return null;
         }
 
-        function showHitMarker(color) {
-            // Draw an X in center of canvas for 0.1s
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 2;
-            let cx = canvas.width/2;
-            let cy = canvas.height/2;
-            ctx.beginPath();
-            ctx.moveTo(cx-10, cy-10); ctx.lineTo(cx+10, cy+10);
-            ctx.moveTo(cx+10, cy-10); ctx.lineTo(cx-10, cy+10);
-            ctx.stroke();
-            setTimeout(() => { /* handled by next frame clear */ }, 100);
-        }
-
-        function takeDamage(amount, sourceYaw) {
-            state.hp = Math.max(0, state.hp - amount);
+        /*************************************************
+         * COMBAT MECHANICS
+         *************************************************/
+        function processHit(d) {
+            if(d.targetId !== state.id || state.isDead || state.gameState !== 'playing') return;
+            state.hp = Math.max(0, state.hp - d.damage);
             
-            // Visual Effect
+            // FX
             document.getElementById('ui-layer').classList.remove('damage-effect');
-            void document.getElementById('ui-layer').offsetWidth; // trigger reflow
+            void document.getElementById('ui-layer').offsetWidth;
             document.getElementById('ui-layer').classList.add('damage-effect');
-
+            screenShake();
+            
+            floatingTexts.push({ x: cx + (Math.random()*40-20), y: cy - 50, txt: `-${d.damage}`, col: '#ff0000', life: 1 });
             updateHUD();
 
             if(state.hp === 0) {
-                state.isDead = true;
-                showCenterMessage("YOU DIED");
+                state.isDead = true; showMsg("CRITICAL FAILURE - K.I.A", 5000);
+                pub('state_update', { id: state.id, yaw: state.yaw, pitch: state.pitch, hp: 0, isDead: true });
             }
         }
 
-        // Flashbang Logic
-        const btnFlash = document.getElementById('btn-flashbang');
-        const flashProg = document.getElementById('flash-progress');
-        
-        btnFlash.addEventListener('touchstart', (e) => {
-            if(state.inventory.flash <= 0 || state.isDead) return;
-            e.preventDefault();
-            flashChargeStart = Date.now();
-            let chargeInt = setInterval(() => {
-                if(!flashChargeStart) return clearInterval(chargeInt);
-                let p = Math.min(100, (Date.now() - flashChargeStart) / 10);
-                flashProg.style.width = p + '%';
-            }, 50);
-        });
-
-        btnFlash.addEventListener('touchend', (e) => {
-            if(!flashChargeStart || state.inventory.flash <= 0) return;
-            e.preventDefault();
-            state.inventory.flash--;
-            flashChargeStart = 0;
-            flashProg.style.width = '0%';
-            updateHUD();
-            
-            // Throw to current look direction
-            publishMsg('flashbang', { targetYaw: state.yaw, targetPitch: state.pitch });
-        });
-
-        function handleIncomingFlashbang(data) {
-            if(state.isDead) return;
-            // Detonates after 1 sec
-            setTimeout(() => {
-                // If I am looking at it (within 45 deg)
-                let dYaw = Math.abs(getShortestAngle(state.yaw, data.targetYaw));
-                let dPitch = Math.abs(state.pitch - data.targetPitch);
-                
-                if(dYaw < 45 && dPitch < 45) {
-                    // Get flashed
-                    const flash = document.getElementById('flash-overlay');
-                    flash.style.display = 'block';
-                    flash.style.opacity = '1';
-                    setTimeout(() => { flash.style.opacity = '0'; }, 3000);
-                    setTimeout(() => { flash.style.display = 'none'; }, 3200);
-                }
-            }, 1000);
+        function processBunkerHit(d) {
+            let b = state.bunkers[d.bunkerId];
+            if(b) {
+                b.hp -= d.damage;
+                spawnParticles(cx, cy, '#38bdf8', 5); // Rough screen hit
+                if(b.hp <= 0) delete state.bunkers[d.bunkerId];
+            }
         }
 
-        // AR Auto-Fire Logic
+        function actionBunker() {
+            if(state.isDead || state.inventory.bunker <= 0) return;
+            state.inventory.bunker--;
+            const bId = 'B_' + Math.random().toString(16).substr(2,6);
+            const bData = { ownerId: state.id, team: state.team, hp: 200, yaw: state.yaw, pitch: state.pitch };
+            state.bunkers[bId] = bData;
+            pub('spawn_bunker', { bunkerId: bId, data: bData });
+            updateHUD();
+        }
+
+        function actionFire(type) {
+            if(state.isDead || isReloading) return;
+            let n = Date.now(), w = WEAPONS[type], inv = state.inventory[type];
+            if(n - lastFireTime < w.fireRateMs) return;
+            
+            if(inv.ammo <= 0) { reload(type); return; }
+            inv.ammo--; lastFireTime = n; updateHUD();
+            
+            // Recoil
+            state.pitch += (type==='deagle'? 2 : 0.8);
+            screenShake();
+            spawnParticles(cx, cy+20, '#facc15', 3); // Muzzle flash fake
+
+            // Smart Aim Check
+            if(lockedTarget) {
+                let e = state.players[lockedTarget.id];
+                if(!e || e.isDead) return;
+                
+                // Check Bunker
+                let blockedBy = checkBunkerBlock(state.yaw, state.pitch, e.yaw, e.pitch, e.team);
+                
+                let dmg = lockedTarget.isHead ? w.dmgHead : (w.dmgBodyMin ? Math.floor(Math.random()*(w.dmgBodyMax-w.dmgBodyMin)+w.dmgBodyMin) : w.dmgBody);
+                
+                if(blockedBy) {
+                    pub('bunker_hit', { bunkerId: Object.keys(state.bunkers).find(k=>state.bunkers[k]===blockedBy), damage: dmg });
+                    createHitMarker('#38bdf8');
+                } else {
+                    pub('hit', { targetId: e.id, damage: dmg, fromYaw: state.yaw });
+                    createHitMarker(lockedTarget.isHead ? '#ef4444' : '#ffffff');
+                }
+            }
+        }
+
+        function reload(type) {
+            let inv = state.inventory[type], w = WEAPONS[type];
+            if(inv.reserve <= 0 || inv.ammo === w.mag || isReloading) return;
+            isReloading = true;
+            document.getElementById(`ammo-${type}`).innerText = "REL...";
+            setTimeout(() => {
+                let take = Math.min(w.mag - inv.ammo, inv.reserve);
+                inv.reserve -= take; inv.ammo += take;
+                isReloading = false; updateHUD();
+            }, 1200);
+        }
+
+        function createHitMarker(col) {
+            floatingTexts.push({ x: cx, y: cy, txt: '✖', col: col, life: 0.5, isMarker: true });
+        }
+
+        // FLASHBANG MECHANICS
+        const btnF = document.getElementById('btn-flashbang');
+        const fProg = document.getElementById('flash-progress');
+        
+        btnF.addEventListener('touchstart', (e) => {
+            if(state.isDead || state.inventory.flash <= 0) return;
+            e.preventDefault(); flashChargeStart = Date.now();
+            let intId = setInterval(()=> {
+                if(!flashChargeStart) return clearInterval(intId);
+                fProg.style.width = Math.min(100, (Date.now()-flashChargeStart)/8) + '%';
+            }, 30);
+        });
+        
+        btnF.addEventListener('touchend', (e) => {
+            if(!flashChargeStart || state.inventory.flash <= 0) return;
+            e.preventDefault(); state.inventory.flash--; flashChargeStart = 0; fProg.style.width = '0%';
+            updateHUD();
+            // Broadcast throw. Target is where camera currently looks.
+            pub('throw_flash', { sY: state.yaw, sP: state.pitch+15, tY: state.yaw, tP: state.pitch, team: state.team });
+        });
+
+        function spawnFlashbangProjectile(d) {
+            projectiles.push({
+                sY: d.sY, sP: d.sP, tY: d.tY, tP: d.tP, team: d.team,
+                startT: Date.now(), dur: 800, active: true
+            });
+        }
+
+        function handleFlashDetonation(proj) {
+            // Draw explosion
+            let s = toScreen(proj.tY, proj.tP);
+            if(s) {
+                particles.push({ x: s.x, y: s.y, vx:0, vy:0, life: 1, maxLife: 1, type: 'flash_exp' });
+            }
+
+            if(state.isDead) return;
+            
+            // Check if I get flashed. 
+            // 1. Is it in my FOV?
+            let dY = Math.abs(angleDiff(state.yaw, proj.tY));
+            let dP = Math.abs(state.pitch - proj.tP);
+            
+            if(dY < 50 && dP < 40) { // Looking vaguely at it
+                // 2. Is there a bunker between me and the blast?
+                // A bunker belongs to someone. If it's my team's bunker or enemy's, it blocks light!
+                let blocked = false;
+                for(let id in state.bunkers) {
+                    let b = state.bunkers[id];
+                    if(b.hp > 0 && Math.abs(angleDiff(b.yaw, proj.tY)) < 15 && Math.abs(b.pitch - proj.tP) < 20) {
+                        blocked = true; break; // Bunker absorbed the flash
+                    }
+                }
+                
+                if(!blocked) {
+                    const overlay = document.getElementById('flash-overlay');
+                    overlay.style.display = 'block'; overlay.style.opacity = '1';
+                    setTimeout(() => { overlay.style.opacity = '0'; }, 2500);
+                    setTimeout(() => { overlay.style.display = 'none'; }, 2800);
+                }
+            }
+        }
+
+        // AR Auto-Fire
         const btnAr = document.getElementById('btn-ar');
         btnAr.addEventListener('touchstart', (e) => {
-            e.preventDefault();
-            actionFire('ar');
-            arFireInterval = setInterval(() => actionFire('ar'), WEAPONS.ar.fireRateMs);
+            e.preventDefault(); actionFire('ar'); btnAr.classList.add('active');
+            arInterval = setInterval(()=>actionFire('ar'), WEAPONS.ar.fireRateMs);
         });
-        btnAr.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            clearInterval(arFireInterval);
-        });
+        btnAr.addEventListener('touchend', (e) => { e.preventDefault(); clearInterval(arInterval); btnAr.classList.remove('active'); });
 
-
-        /**
-         * HARDWARE / INPUTS (Camera & Touch Aiming)
-         */
-        async function initCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'environment' }, audio: false 
-                });
-                videoEl.srcObject = stream;
-            } catch(e) {
-                console.warn("Camera access denied or unavailable. Fallback to black bg.");
-            }
-        }
-
-        function initControls() {
-            // Touch Drag for Aiming (Primary method, most reliable)
-            canvas.addEventListener('touchstart', e => {
-                isDragging = true;
-                lastTouchX = e.touches[0].clientX;
-                lastTouchY = e.touches[0].clientY;
-            });
-            
+        /*************************************************
+         * INPUT & CONTROLS
+         *************************************************/
+        function setupControls() {
+            canvas.addEventListener('touchstart', e => { isDragging = true; lastTX = e.touches[0].clientX; lastTY = e.touches[0].clientY; });
             canvas.addEventListener('touchmove', e => {
                 if(!isDragging || state.isDead) return;
-                const touchX = e.touches[0].clientX;
-                const touchY = e.touches[0].clientY;
-                const dx = touchX - lastTouchX;
-                const dy = touchY - lastTouchY;
-                
-                // Sensitivity
-                state.yaw = (state.yaw - dx * 0.2 + 360) % 360;
-                state.pitch = Math.max(-90, Math.min(90, state.pitch + dy * 0.2));
-                
-                lastTouchX = touchX;
-                lastTouchY = touchY;
+                let tX = e.touches[0].clientX, tY = e.touches[0].clientY;
+                state.yaw = (state.yaw - (tX - lastTX)*0.25 + 360) % 360;
+                state.pitch = Math.max(-80, Math.min(80, state.pitch + (tY - lastTY)*0.25));
+                lastTX = tX; lastTY = tY;
             });
-
             canvas.addEventListener('touchend', () => isDragging = false);
         }
 
-        /**
-         * RENDER ENGINE 
-         */
-        function resizeCanvas() {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            pixelsPerDegree = canvas.width / FOV;
-        }
-
-        function getShortestAngle(a, b) {
-            let diff = (b - a + 180) % 360 - 180;
-            return diff < -180 ? diff + 360 : diff;
-        }
-
-        function gameLoop() {
-            animationFrameId = requestAnimationFrame(gameLoop);
+        /*************************************************
+         * RENDER ENGINE
+         *************************************************/
+        function engineLoop() {
+            rafId = requestAnimationFrame(engineLoop);
             if(state.gameState !== 'playing') return;
 
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const cx = canvas.width / 2;
-            const cy = canvas.height / 2;
+            // Base clear
+            ctx.fillStyle = '#050505';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-            // Draw Opponents
-            Object.values(state.players).forEach(p => {
-                if(p.id === state.id || p.team === state.team) return; // Only draw enemies
-                if(p.isDead) return;
+            // Grid background (fake AR anchor)
+            drawWorldGrid();
 
-                let dYaw = getShortestAngle(state.yaw, p.yaw);
-                let dPitch = p.pitch - state.pitch;
+            // Logic Updates
+            updateProjectiles();
+            updateAimAssist();
 
-                // Check if in front of camera
-                if(Math.abs(dYaw) > FOV) return;
+            // Render World
+            renderBunkers();
+            renderPlayers();
+            renderProjectiles();
+            renderParticles();
+            
+            // UI Overlay
+            renderCrosshair();
+            renderFloatingTexts();
+            renderRadar();
+        }
 
-                let screenX = cx + (dYaw * pixelsPerDegree);
-                let screenY = cy + (dPitch * pixelsPerDegree);
-
-                // Draw Bunker if they have one
-                if(p.bunker && p.bunker.hp > 0) {
-                    ctx.fillStyle = 'rgba(59, 130, 246, 0.4)';
-                    ctx.strokeStyle = '#3b82f6';
-                    ctx.lineWidth = 2;
-                    ctx.fillRect(screenX - 50, screenY - 20, 100, 120);
-                    ctx.strokeRect(screenX - 50, screenY - 20, 100, 120);
-                    
-                    // HP Bar for bunker
-                    ctx.fillStyle = 'white';
-                    ctx.fillRect(screenX - 50, screenY - 30, 100 * (p.bunker.hp/BUNKER_HP), 5);
-                }
-
-                // Draw Player Sprite
-                ctx.fillStyle = p.team === 'A' ? '#60a5fa' : '#f87171'; // Blue vs Red
-                
-                // Body
-                ctx.fillRect(screenX - 30, screenY, 60, 100);
-                
-                // Head
-                ctx.beginPath();
-                ctx.arc(screenX, screenY - 25, 20, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Name tag & HP
-                ctx.fillStyle = 'white';
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(`${p.name} (${p.hp})`, screenX, screenY - 55);
-            });
-
-            // Draw My Bunker (if built, and I look at it)
-            if(state.myBunker && state.myBunker.hp > 0) {
-                let dYaw = getShortestAngle(state.yaw, state.myBunker.yaw);
-                if(Math.abs(dYaw) < FOV) {
-                    let screenX = cx + (dYaw * pixelsPerDegree);
-                    ctx.fillStyle = 'rgba(16, 185, 129, 0.2)'; // Green tint for my shield
-                    ctx.strokeStyle = '#10b981';
-                    ctx.lineWidth = 4;
-                    ctx.beginPath();
-                    // Draw curved shield outline
-                    ctx.moveTo(screenX - 150, cy - 100);
-                    ctx.quadraticCurveTo(screenX, cy - 120, screenX + 150, cy - 100);
-                    ctx.lineTo(screenX + 150, cy + 200);
-                    ctx.quadraticCurveTo(screenX, cy + 220, screenX - 150, cy + 200);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.stroke();
-
-                    ctx.fillStyle = 'white';
-                    ctx.fillText(`MY BUNKER: ${state.myBunker.hp}`, screenX, cy - 130);
-                }
+        function drawWorldGrid() {
+            ctx.strokeStyle = 'rgba(255,255,255,0.03)'; ctx.lineWidth = 1;
+            ctx.beginPath();
+            // Draw horizontal lines based on pitch
+            for(let p = -90; p <= 90; p+=15) {
+                let dy = (p - state.pitch) * ppd;
+                if(Math.abs(dy) < cy*2) { ctx.moveTo(0, cy + dy); ctx.lineTo(canvas.width, cy + dy); }
             }
-
-            // Draw Crosshair on Canvas
-            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.arc(cx, cy, 15, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(cx - 25, cy); ctx.lineTo(cx + 25, cy);
-            ctx.moveTo(cx, cy - 25); ctx.lineTo(cx, cy + 25);
+            // Vertical lines based on yaw
+            for(let y = 0; y < 360; y+=15) {
+                let s = toScreen(y, state.pitch);
+                if(s) { ctx.moveTo(s.x, 0); ctx.lineTo(s.x, canvas.height); }
+            }
             ctx.stroke();
         }
 
-        /**
-         * UI HELPERS 
-         */
+        function renderBunkers() {
+            for(let id in state.bunkers) {
+                let b = state.bunkers[id];
+                if(b.hp <= 0) continue;
+                let s = toScreen(b.yaw, b.pitch);
+                if(!s) continue;
+
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                
+                // Colors based on team
+                let isMine = b.team === state.team;
+                let cStr = isMine ? '56, 189, 248' : '239, 68, 68'; // Cyan vs Red
+                
+                ctx.fillStyle = `rgba(${cStr}, 0.15)`;
+                ctx.strokeStyle = `rgb(${cStr})`;
+                ctx.shadowColor = `rgb(${cStr})`;
+                ctx.shadowBlur = 15;
+                ctx.lineWidth = 2;
+
+                // Draw Hexagonal Shield Shape
+                ctx.beginPath();
+                ctx.moveTo(-60, -80); ctx.lineTo(60, -80); ctx.lineTo(90, 0);
+                ctx.lineTo(60, 100); ctx.lineTo(-60, 100); ctx.lineTo(-90, 0);
+                ctx.closePath();
+                ctx.fill(); ctx.stroke();
+
+                // Inner Grid pattern
+                ctx.beginPath();
+                ctx.moveTo(-60,-40); ctx.lineTo(60,-40);
+                ctx.moveTo(-75, 0); ctx.lineTo(75, 0);
+                ctx.moveTo(-60, 50); ctx.lineTo(60, 50);
+                ctx.strokeStyle = `rgba(${cStr}, 0.3)`;
+                ctx.stroke();
+
+                // HP Bar
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                ctx.fillRect(-50, -100, 100, 6);
+                ctx.fillStyle = `rgb(${cStr})`;
+                ctx.fillRect(-50, -100, 100 * (b.hp/200), 6);
+
+                ctx.restore();
+            }
+        }
+
+        function renderPlayers() {
+            Object.values(state.players).forEach(p => {
+                if(p.id === state.id || p.isDead) return;
+                let s = toScreen(p.yaw, p.pitch);
+                if(!s) return;
+
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                
+                let isFriend = p.team === state.team;
+                let col = isFriend ? '#38bdf8' : '#ef4444';
+
+                // Shadow glow
+                ctx.shadowColor = col; ctx.shadowBlur = 10;
+                
+                // Draw Sci-Fi Body Frame
+                ctx.fillStyle = 'rgba(15,23,42,0.9)';
+                ctx.strokeStyle = col; ctx.lineWidth = 2;
+                
+                // Torso
+                ctx.beginPath();
+                ctx.moveTo(-30, 0); ctx.lineTo(30, 0);
+                ctx.lineTo(20, 70); ctx.lineTo(-20, 70);
+                ctx.closePath();
+                ctx.fill(); ctx.stroke();
+                
+                // Shoulders
+                ctx.fillRect(-45, 0, 15, 30); ctx.strokeRect(-45, 0, 15, 30);
+                ctx.fillRect(30, 0, 15, 30); ctx.strokeRect(30, 0, 15, 30);
+
+                // Head/Helmet
+                ctx.beginPath();
+                ctx.arc(0, -35, 18, 0, Math.PI*2);
+                ctx.fill(); ctx.stroke();
+                
+                // Visor
+                ctx.fillStyle = col;
+                ctx.shadowBlur = 20; // Extra glow on visor
+                ctx.fillRect(-10, -40, 20, 8);
+                
+                // Info Tag
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = 'white'; ctx.font = '700 12px Orbitron'; ctx.textAlign = 'center';
+                ctx.fillText(`${p.name}`, 0, -65);
+                
+                // HP
+                ctx.fillStyle = '#333'; ctx.fillRect(-30, -58, 60, 4);
+                ctx.fillStyle = col; ctx.fillRect(-30, -58, 60 * (p.hp/MAX_HP), 4);
+
+                ctx.restore();
+            });
+        }
+
+        function updateAimAssist() {
+            lockedTarget = null;
+            let minDist = 999;
+            
+            Object.values(state.players).forEach(p => {
+                if(p.id === state.id || p.team === state.team || p.isDead) return;
+                let s = toScreen(p.yaw, p.pitch);
+                if(!s) return;
+                
+                let headY = s.y - 35, bodyY = s.y + 35;
+                let dH = Math.hypot(cx - s.x, cy - headY);
+                let dB = Math.hypot(cx - s.x, cy - bodyY);
+                
+                // Lock ranges (very generous)
+                if(dH < 60 && dH < minDist) { lockedTarget = { id: p.id, isHead: true, x: s.x, y: headY }; minDist = dH; }
+                else if(dB < 80 && dB < minDist && (!lockedTarget || !lockedTarget.isHead)) { lockedTarget = { id: p.id, isHead: false, x: s.x, y: bodyY }; minDist = dB; }
+            });
+        }
+
+        function renderCrosshair() {
+            ctx.save();
+            
+            // Aiming Trajectory for Flashbang
+            if(flashChargeStart > 0) {
+                ctx.beginPath();
+                ctx.setLineDash([5, 10]);
+                ctx.moveTo(cx, canvas.height);
+                ctx.quadraticCurveTo(cx, cy + 150, cx, cy);
+                ctx.strokeStyle = '#facc15'; ctx.lineWidth = 2;
+                ctx.stroke(); ctx.setLineDash([]);
+                
+                ctx.fillStyle = '#facc15';
+                ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI*2); ctx.fill();
+            }
+
+            // Normal Crosshair
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.lineWidth = 1;
+            
+            // Snap reticle if locked
+            if(lockedTarget) {
+                ctx.strokeStyle = lockedTarget.isHead ? '#ef4444' : '#38bdf8';
+                ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 10;
+                ctx.lineWidth = 2;
+                
+                // Draw locking box on target
+                ctx.strokeRect(lockedTarget.x - 20, lockedTarget.y - 20, 40, 40);
+                
+                // Draw line from center to target
+                ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(lockedTarget.x, lockedTarget.y); 
+                ctx.globalAlpha = 0.3; ctx.stroke(); ctx.globalAlpha = 1.0;
+            }
+
+            // Center Dot
+            ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI*2); ctx.fill();
+            ctx.restore();
+        }
+
+        function updateProjectiles() {
+            let now = Date.now();
+            for(let i=projectiles.length-1; i>=0; i--) {
+                let p = projectiles[i];
+                if(!p.active) continue;
+                let elapsed = now - p.startT;
+                if(elapsed >= p.dur) {
+                    p.active = false;
+                    handleFlashDetonation(p);
+                    projectiles.splice(i, 1);
+                }
+            }
+        }
+
+        function renderProjectiles() {
+            let now = Date.now();
+            projectiles.forEach(p => {
+                if(!p.active) return;
+                let t = (now - p.startT) / p.dur; // 0 to 1
+                
+                // Lerp angular position
+                let currYaw = p.sY + angleDiff(p.sY, p.tY) * t;
+                // Add arc height to pitch
+                let arcH = Math.sin(t * Math.PI) * 30; 
+                let currPitch = p.sP + (p.tP - p.sP) * t - arcH;
+
+                let s = toScreen(currYaw, currPitch);
+                if(s) {
+                    ctx.save(); ctx.translate(s.x, s.y);
+                    ctx.rotate(t * Math.PI * 10); // Spin
+                    ctx.fillStyle = '#facc15'; ctx.shadowColor = '#facc15'; ctx.shadowBlur = 15;
+                    ctx.fillRect(-8, -12, 16, 24);
+                    ctx.fillStyle = '#222'; ctx.fillRect(-8, -4, 16, 8); // stripes
+                    ctx.restore();
+                    
+                    // Trail
+                    particles.push({ x: s.x, y: s.y, vx:0, vy:0, life: 1, maxLife: 1, type: 'trail', col: 'rgba(250, 204, 21, 0.5)' });
+                }
+            });
+        }
+
+        function spawnParticles(x, y, col, count) {
+            for(let i=0; i<count; i++) {
+                particles.push({ x: x, y: y, vx: (Math.random()-0.5)*10, vy: (Math.random()-0.5)*10, col: col, life: 1, maxLife: 1, type: 'spark' });
+            }
+        }
+
+        function renderParticles() {
+            for(let i=particles.length-1; i>=0; i--) {
+                let p = particles[i];
+                p.life -= 0.05;
+                if(p.life <= 0) { particles.splice(i, 1); continue; }
+                
+                if(p.type === 'spark' || p.type === 'trail') {
+                    p.x += p.vx; p.y += p.vy;
+                    ctx.fillStyle = p.col || '#fff';
+                    ctx.globalAlpha = p.life;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, p.type==='spark'?3:6, 0, Math.PI*2); ctx.fill();
+                } else if (p.type === 'flash_exp') {
+                    ctx.fillStyle = '#fff'; ctx.globalAlpha = p.life;
+                    ctx.beginPath(); ctx.arc(p.x, p.y, (1-p.life)*300, 0, Math.PI*2); ctx.fill();
+                }
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function renderFloatingTexts() {
+            ctx.font = '900 24px Rajdhani'; ctx.textAlign = 'center';
+            for(let i=floatingTexts.length-1; i>=0; i--) {
+                let t = floatingTexts[i];
+                t.life -= 0.02;
+                if(t.life <= 0) { floatingTexts.splice(i, 1); continue; }
+                
+                t.y -= 1; // float up
+                ctx.fillStyle = t.col; ctx.globalAlpha = t.life;
+                ctx.shadowColor = t.col; ctx.shadowBlur = 10;
+                
+                if(t.isMarker) {
+                    ctx.font = '20px Arial';
+                    ctx.fillText(t.txt, t.x, t.y);
+                } else {
+                    ctx.font = '900 24px Rajdhani';
+                    ctx.fillText(t.txt, t.x, t.y);
+                }
+                ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+            }
+        }
+
+        function renderRadar() {
+            const rSize = 40, rx = canvas.width - rSize - 20, ry = 100;
+            ctx.save(); ctx.translate(rx, ry);
+            
+            // Background
+            ctx.fillStyle = 'rgba(15,23,42,0.8)'; ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(0, 0, rSize, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+            
+            // View cone
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0, 0, rSize, -Math.PI/2 - (FOV/2)*Math.PI/180, -Math.PI/2 + (FOV/2)*Math.PI/180); ctx.fill();
+
+            // Me (Center)
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, 2, 0, Math.PI*2); ctx.fill();
+
+            // Enemies
+            Object.values(state.players).forEach(p => {
+                if(p.id === state.id || p.isDead || p.team === state.team) return;
+                let dY = angleDiff(state.yaw, p.yaw);
+                let rad = (dY - 90) * Math.PI / 180;
+                
+                let px = Math.cos(rad) * (rSize * 0.7);
+                let py = Math.sin(rad) * (rSize * 0.7);
+                
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+            });
+            ctx.restore();
+        }
+
         function updateHUD() {
-            document.getElementById('hp-text').innerText = `${state.hp} / 150`;
+            document.getElementById('hp-text').innerText = `${state.hp}/150`;
             document.getElementById('hp-bar').style.width = `${(state.hp / 150) * 100}%`;
-            document.getElementById('ammo-bunker').innerText = `${state.inventory.bunker} Left`;
-            document.getElementById('ammo-flash').innerText = `${state.inventory.flash} Left`;
+            document.getElementById('ammo-bunker').innerText = state.inventory.bunker;
+            document.getElementById('ammo-flash').innerText = state.inventory.flash;
             
             if(!isReloading) {
-                document.getElementById('ammo-deagle').innerText = `${state.inventory.deagle.ammo} / ${state.inventory.deagle.reserve}`;
-                document.getElementById('ammo-ar').innerText = `${state.inventory.ar.ammo} / ${state.inventory.ar.reserve}`;
+                document.getElementById('ammo-deagle').innerText = `${state.inventory.deagle.ammo}/${state.inventory.deagle.reserve}`;
+                document.getElementById('ammo-ar').innerText = `${state.inventory.ar.ammo}/${state.inventory.ar.reserve}`;
             }
         }
-
-        function showCenterMessage(msg, duration = 2000) {
-            const el = document.getElementById('game-message');
-            el.innerText = msg;
-            el.style.opacity = '1';
-            setTimeout(() => { el.style.opacity = '0'; }, duration);
-        }
-
     </script>
 </body>
 </html>
-
 
 ```
