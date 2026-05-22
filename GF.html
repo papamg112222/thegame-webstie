@@ -1,0 +1,959 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AR Combat: Tactical Strike</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #111; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; -webkit-user-select: none; }
+        
+        /* Video & Canvas Layers */
+        #camera-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
+        #game-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; display: none; touch-action: none; }
+        #flash-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: white; z-index: 10; opacity: 0; pointer-events: none; transition: opacity 0.2s; display: none; }
+        
+        /* UI Layers */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+        
+        /* Modals & Screens */
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 20; background: #0f172a; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
+        .hidden { display: none !important; }
+        
+        /* Custom UI Elements */
+        .glass-panel { background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); border-radius: 1rem; padding: 1.5rem; }
+        
+        /* Action Buttons */
+        .action-btn { position: relative; flex: 1; margin: 0 4px; height: 80px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: bold; font-size: 0.8rem; text-transform: uppercase; transition: transform 0.1s; overflow: hidden; }
+        .action-btn:active { transform: scale(0.95); }
+        .btn-bunker { background: linear-gradient(145deg, #3b82f6, #1d4ed8); }
+        .btn-flash { background: linear-gradient(145deg, #eab308, #a16207); }
+        .btn-deagle { background: linear-gradient(145deg, #ef4444, #b91c1c); }
+        .btn-ar { background: linear-gradient(145deg, #10b981, #047857); }
+        .ammo-counter { font-size: 0.7rem; opacity: 0.8; margin-top: 2px; }
+        
+        .progress-bar { position: absolute; bottom: 0; left: 0; height: 4px; background: rgba(255,255,255,0.8); width: 0%; }
+        
+        /* Animations */
+        @keyframes damageFlash { 0% { box-shadow: inset 0 0 0 0 red; } 50% { box-shadow: inset 0 0 50px 20px red; } 100% { box-shadow: inset 0 0 0 0 red; } }
+        .damage-effect { animation: damageFlash 0.3s ease-out; }
+    </style>
+</head>
+<body>
+
+    <!-- SCREEN: INITIAL SETUP -->
+    <div id="screen-setup" class="screen">
+        <div class="glass-panel w-full max-w-md text-center">
+            <h1 class="text-3xl font-extrabold mb-2 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400">AR TACTICAL</h1>
+            <p class="text-sm text-gray-400 mb-6">P2P Networked Combat</p>
+            
+            <input type="text" id="player-name" placeholder="Enter Your Name" class="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white mb-4 focus:outline-none focus:border-blue-500" maxlength="12">
+            
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="showHostModal()" class="bg-blue-600 hover:bg-blue-700 p-3 rounded font-bold transition">Host Game</button>
+                <button onclick="showJoinModal()" class="bg-emerald-600 hover:bg-emerald-700 p-3 rounded font-bold transition">Join Game</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: HOST OPTIONS -->
+    <div id="screen-host" class="screen hidden">
+        <div class="glass-panel w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Host Settings</h2>
+            <label class="block text-gray-300 mb-2">Game Mode (Max players per team)</label>
+            <select id="game-mode" class="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white mb-6 focus:outline-none focus:border-blue-500">
+                <option value="1">1v1 (2 Players Total)</option>
+                <option value="2">2v2 (4 Players Total)</option>
+                <option value="3" selected>3v3 (6 Players Total)</option>
+            </select>
+            <div class="flex gap-4">
+                <button onclick="createRoom()" class="flex-1 bg-blue-600 hover:bg-blue-700 p-3 rounded font-bold transition">Create</button>
+                <button onclick="backToSetup()" class="flex-1 bg-gray-600 hover:bg-gray-700 p-3 rounded font-bold transition">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: JOIN OPTIONS -->
+    <div id="screen-join" class="screen hidden">
+        <div class="glass-panel w-full max-w-md">
+            <h2 class="text-2xl font-bold mb-4">Join Room</h2>
+            <input type="text" id="room-id-input" placeholder="Enter Room ID" class="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white mb-6 focus:outline-none focus:border-emerald-500 text-center uppercase" maxlength="6">
+            <div class="flex gap-4">
+                <button onclick="joinRoom()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 p-3 rounded font-bold transition">Join</button>
+                <button onclick="backToSetup()" class="flex-1 bg-gray-600 hover:bg-gray-700 p-3 rounded font-bold transition">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN: LOBBY -->
+    <div id="screen-lobby" class="screen hidden">
+        <div class="glass-panel w-full max-w-md flex flex-col h-5/6">
+            <div class="text-center mb-4">
+                <h2 class="text-xl font-bold text-gray-300">Room ID</h2>
+                <div class="text-4xl font-extrabold tracking-widest text-emerald-400 bg-slate-900 py-2 rounded mt-1" id="lobby-room-id">------</div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto mb-4 bg-slate-800 rounded p-2 flex">
+                <div class="flex-1 border-r border-slate-600 p-2 flex flex-col">
+                    <h3 class="text-center font-bold text-blue-400 mb-2 border-b border-blue-800 pb-1">TEAM A (Blue)</h3>
+                    <ul id="team-a-list" class="space-y-1 text-sm flex-1"></ul>
+                    <button onclick="requestTeamSwap('A')" class="mt-2 w-full bg-blue-600/30 border border-blue-500 hover:bg-blue-600 p-2 rounded text-xs font-bold transition">Join Blue</button>
+                </div>
+                <div class="flex-1 p-2 flex flex-col">
+                    <h3 class="text-center font-bold text-red-400 mb-2 border-b border-red-800 pb-1">TEAM B (Red)</h3>
+                    <ul id="team-b-list" class="space-y-1 text-sm flex-1"></ul>
+                    <button onclick="requestTeamSwap('B')" class="mt-2 w-full bg-red-600/30 border border-red-500 hover:bg-red-600 p-2 rounded text-xs font-bold transition">Join Red</button>
+                </div>
+            </div>
+            
+            <p id="lobby-status" class="text-center text-sm text-yellow-400 mb-4 animate-pulse">Waiting for players...</p>
+            <button id="btn-start-game" onclick="startGame()" class="w-full bg-emerald-600 hover:bg-emerald-700 p-4 rounded font-bold text-lg transition hidden">START MATCH</button>
+        </div>
+    </div>
+
+    <!-- GAME UI -->
+    <video id="camera-bg" autoplay playsinline></video>
+    <canvas id="game-canvas"></canvas>
+    
+    <div id="ui-layer" class="hidden">
+        <!-- Top HUD -->
+        <div class="p-4 flex justify-between items-start interactive">
+            <div class="bg-black/50 backdrop-blur rounded p-2 border border-white/10">
+                <div class="text-sm font-bold text-gray-300">SCORE (First to 5)</div>
+                <div class="flex gap-4 text-xl font-black mt-1">
+                    <div class="text-blue-400">Blue: <span id="score-a">0</span></div>
+                    <div class="text-red-400">Red: <span id="score-b">0</span></div>
+                </div>
+            </div>
+            <div class="bg-black/50 backdrop-blur rounded p-2 border border-white/10 text-right">
+                <div class="text-sm font-bold text-gray-300">ROUND</div>
+                <div class="text-xl font-black text-white" id="round-display">1</div>
+            </div>
+        </div>
+
+        <!-- Center Crosshair (CSS fallback, main is on canvas) -->
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none opacity-50">
+            <div class="w-1 h-1 bg-white rounded-full"></div>
+        </div>
+
+        <!-- System Messages -->
+        <div id="game-message" class="absolute top-1/3 left-0 w-full text-center text-2xl font-black text-white drop-shadow-lg opacity-0 transition-opacity pointer-events-none"></div>
+
+        <!-- Bottom HUD & Controls -->
+        <div class="interactive p-2 pb-6 bg-gradient-to-t from-black/80 to-transparent">
+            <!-- Health Bar -->
+            <div class="mb-4 px-2">
+                <div class="flex justify-between text-sm font-bold mb-1 drop-shadow-md">
+                    <span>HP</span>
+                    <span id="hp-text">150 / 150</span>
+                </div>
+                <div class="w-full h-4 bg-slate-800 rounded-full overflow-hidden border border-white/20">
+                    <div id="hp-bar" class="h-full bg-green-500 transition-all duration-200" style="width: 100%;"></div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="flex justify-between w-full">
+                <button class="action-btn btn-bunker" onclick="actionBunker()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    BUNKER
+                    <span id="ammo-bunker" class="ammo-counter">10 Left</span>
+                </button>
+                
+                <button class="action-btn btn-flash" id="btn-flashbang">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+                    FLASH
+                    <span id="ammo-flash" class="ammo-counter">3 Left</span>
+                    <div id="flash-progress" class="progress-bar"></div>
+                </button>
+
+                <button class="action-btn btn-deagle" onclick="actionFire('deagle')">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><path d="M5 12l14-4v8l-14-4z"/></svg>
+                    DEAGLE
+                    <span id="ammo-deagle" class="ammo-counter">6 / 20</span>
+                </button>
+
+                <button class="action-btn btn-ar" id="btn-ar">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="mb-1"><path d="M3 12h18m-4-4l4 4-4 4"/></svg>
+                    AR-15
+                    <span id="ammo-ar" class="ammo-counter">20 / 100</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Screen Flash Effect -->
+    <div id="flash-overlay"></div>
+
+    <script>
+        /** * GLOBAL CONFIGURATION & STATE 
+         */
+        const MAX_HP = 150;
+        const BUNKER_HP = 200;
+        const MAX_WINS = 5;
+        
+        const WEAPONS = {
+            deagle: { mag: 6, reserve: 20, dmgBody: 50, dmgHead: 140, fireRateMs: 300 },
+            ar: { mag: 20, reserve: 100, dmgBodyMin: 13, dmgBodyMax: 20, dmgHead: 25, fireRateMs: 120 }
+        };
+
+        const state = {
+            id: 'P_' + Math.random().toString(36).substr(2, 6).toUpperCase(),
+            name: '',
+            isHost: false,
+            roomId: '',
+            mode: 3, // Default 3v3 (Max 3 per side)
+            team: null, // 'A' or 'B'
+            
+            // Combat State
+            hp: MAX_HP,
+            isDead: false,
+            yaw: 0,
+            pitch: 0,
+            inventory: {
+                bunker: 10,
+                flash: 3,
+                deagle: { ammo: WEAPONS.deagle.mag, reserve: WEAPONS.deagle.reserve },
+                ar: { ammo: WEAPONS.ar.mag, reserve: WEAPONS.ar.reserve }
+            },
+            myBunker: null, 
+
+            // Engine
+            players: {}, 
+            score: { A: 0, B: 0 },
+            round: 1,
+            gameState: 'lobby' 
+        };
+
+        // MQTT Client
+        let mqttClient = null;
+        const brokerUrl = 'wss://broker.emqx.io:8084/mqtt';
+
+        // Camera & Canvas
+        let videoEl = document.getElementById('camera-bg');
+        let canvas = document.getElementById('game-canvas');
+        let ctx = canvas.getContext('2d');
+        let animationFrameId;
+
+        // Viewport config
+        const FOV = 60; 
+        let pixelsPerDegree = 0;
+
+        // Inputs
+        let isDragging = false;
+        let lastTouchX = 0, lastTouchY = 0;
+        let flashChargeStart = 0;
+        let arFireInterval = null;
+        let lastFireTime = 0;
+        let isReloading = false;
+
+        /** * UI NAVIGATION 
+         */
+        function showHostModal() {
+            let n = document.getElementById('player-name').value.trim();
+            if(!n) return alert("Please enter a name");
+            state.name = n;
+            document.getElementById('screen-setup').classList.add('hidden');
+            document.getElementById('screen-host').classList.remove('hidden');
+        }
+
+        function showJoinModal() {
+            let n = document.getElementById('player-name').value.trim();
+            if(!n) return alert("Please enter a name");
+            state.name = n;
+            document.getElementById('screen-setup').classList.add('hidden');
+            document.getElementById('screen-join').classList.remove('hidden');
+        }
+
+        function backToSetup() {
+            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+            document.getElementById('screen-setup').classList.remove('hidden');
+        }
+
+        /** * NETWORKING (MQTT) 
+         */
+        function connectMQTT(roomId, onSuccess) {
+            if(mqttClient) mqttClient.end();
+            
+            mqttClient = mqtt.connect(brokerUrl, {
+                clientId: state.id + '_' + Date.now(),
+                clean: true
+            });
+
+            mqttClient.on('connect', () => {
+                state.roomId = roomId;
+                const topic = `arfight/v1/${roomId}/#`;
+                mqttClient.subscribe(topic, (err) => {
+                    if (!err) {
+                        onSuccess();
+                    } else {
+                        alert("Network connection failed.");
+                        backToSetup();
+                    }
+                });
+            });
+
+            mqttClient.on('message', handleNetworkMessage);
+        }
+
+        function publishMsg(type, payload) {
+            if(!mqttClient || !state.roomId) return;
+            const topic = `arfight/v1/${state.roomId}/${type}`;
+            mqttClient.publish(topic, JSON.stringify(payload), {qos: 0});
+        }
+
+        function handleNetworkMessage(topic, message) {
+            const parts = topic.split('/');
+            const type = parts[parts.length - 1];
+            let data;
+            try { data = JSON.parse(message.toString()); } catch(e) { return; }
+
+            switch(type) {
+                case 'join':
+                    if(state.isHost) handlePlayerJoin(data);
+                    break;
+                case 'team_swap_req':
+                    if(state.isHost) handleTeamSwapRequest(data);
+                    break;
+                case 'lobby_sync':
+                    syncLobby(data);
+                    break;
+                case 'start_round':
+                    startRound(data.round);
+                    break;
+                case 'state_update':
+                    if(data.id !== state.id) {
+                        if(!state.players[data.id]) state.players[data.id] = {};
+                        Object.assign(state.players[data.id], data);
+                    }
+                    break;
+                case 'hit':
+                    if(data.targetId === state.id && !state.isDead && state.gameState === 'playing') {
+                        takeDamage(data.damage, data.fromYaw);
+                    }
+                    break;
+                case 'flashbang':
+                    handleIncomingFlashbang(data);
+                    break;
+                case 'bunker_hit':
+                    if(data.ownerId === state.id && state.myBunker) {
+                        state.myBunker.hp -= data.damage;
+                        if(state.myBunker.hp <= 0) state.myBunker = null;
+                    }
+                    break;
+                case 'round_end':
+                    handleRoundEnd(data);
+                    break;
+                case 'game_over':
+                    handleGameOver(data);
+                    break;
+            }
+        }
+
+        /** * HOST & LOBBY LOGIC 
+         */
+        function createRoom() {
+            state.isHost = true;
+            state.mode = parseInt(document.getElementById('game-mode').value);
+            const roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
+            
+            // Add self to players
+            state.players[state.id] = { id: state.id, name: state.name, team: 'A', hp: MAX_HP, isDead: false };
+            state.team = 'A';
+
+            connectMQTT(roomId, () => {
+                document.getElementById('screen-host').classList.add('hidden');
+                document.getElementById('screen-lobby').classList.remove('hidden');
+                document.getElementById('lobby-room-id').innerText = roomId;
+                document.getElementById('btn-start-game').classList.remove('hidden');
+                updateLobbyUI();
+            });
+        }
+
+        function joinRoom() {
+            const roomId = document.getElementById('room-id-input').value.toUpperCase();
+            if(roomId.length < 5) return alert("Invalid Room ID");
+            
+            state.isHost = false;
+            connectMQTT(roomId, () => {
+                document.getElementById('screen-join').classList.add('hidden');
+                document.getElementById('screen-lobby').classList.remove('hidden');
+                document.getElementById('lobby-room-id').innerText = roomId;
+                
+                // Tell host we joined
+                publishMsg('join', { id: state.id, name: state.name });
+            });
+        }
+
+        function handlePlayerJoin(data) {
+            if(!state.isHost || state.gameState !== 'lobby') return;
+            
+            // Assign team based on current counts to balance
+            let countA = 0, countB = 0;
+            Object.values(state.players).forEach(p => p.team === 'A' ? countA++ : (p.team === 'B' ? countB++ : null));
+            
+            let team = 'Spectator'; // Fallback if full
+            if(countA <= countB && countA < state.mode) team = 'A';
+            else if (countB < state.mode) team = 'B';
+            else if (countA < state.mode) team = 'A'; // Catch all if both equal but not full
+            
+            state.players[data.id] = { id: data.id, name: data.name, team: team, hp: MAX_HP, isDead: false };
+            
+            updateLobbyUI();
+            // Sync state to everyone
+            publishMsg('lobby_sync', { players: state.players, mode: state.mode });
+        }
+
+        function requestTeamSwap(targetTeam) {
+            if (state.gameState !== 'lobby') return;
+            // Send request to host to validate capacity
+            publishMsg('team_swap_req', { id: state.id, team: targetTeam });
+        }
+
+        function handleTeamSwapRequest(data) {
+            if(!state.isHost || state.gameState !== 'lobby') return;
+            
+            const targetTeam = data.team;
+            let currentCount = 0;
+            Object.values(state.players).forEach(p => {
+                if(p.team === targetTeam) currentCount++;
+            });
+
+            // If the team has room, approve the swap
+            if(currentCount < state.mode) {
+                if(state.players[data.id]) {
+                    state.players[data.id].team = targetTeam;
+                    updateLobbyUI();
+                    publishMsg('lobby_sync', { players: state.players, mode: state.mode });
+                }
+            } else {
+                // Ignore or could send a "team full" message
+            }
+        }
+
+        function syncLobby(data) {
+            if(state.isHost) return;
+            state.players = data.players;
+            state.mode = data.mode;
+            if(state.players[state.id]) {
+                state.team = state.players[state.id].team;
+            }
+            updateLobbyUI();
+        }
+
+        function updateLobbyUI() {
+            const listA = document.getElementById('team-a-list');
+            const listB = document.getElementById('team-b-list');
+            listA.innerHTML = ''; listB.innerHTML = '';
+            
+            let countA = 0, countB = 0;
+            Object.values(state.players).forEach(p => {
+                const li = document.createElement('li');
+                li.innerText = p.name + (p.id === state.id ? " (You)" : "");
+                li.className = p.id === state.id ? "font-bold text-white bg-white/10 rounded px-1" : "text-gray-300";
+                
+                if(p.team === 'A') {
+                    listA.appendChild(li);
+                    countA++;
+                } else if(p.team === 'B') {
+                    listB.appendChild(li);
+                    countB++;
+                }
+            });
+
+            if(state.isHost) {
+                const btn = document.getElementById('btn-start-game');
+                // Allow start if both teams have at least 1 player
+                if(countA > 0 && countB > 0) { 
+                    btn.disabled = false;
+                    btn.classList.remove('opacity-50');
+                    document.getElementById('lobby-status').innerText = `Ready. Players: ${countA + countB} / ${state.mode * 2}`;
+                } else {
+                    btn.disabled = true;
+                    btn.classList.add('opacity-50');
+                    document.getElementById('lobby-status').innerText = `Waiting for players on both teams...`;
+                }
+            }
+        }
+
+        /** * GAME LIFECYCLE 
+         */
+        async function startGame() {
+            if(!state.isHost) return;
+            publishMsg('start_round', { round: 1 });
+        }
+
+        async function startRound(roundNum) {
+            state.gameState = 'playing';
+            state.round = roundNum;
+            state.isDead = false;
+            state.hp = MAX_HP;
+            
+            // Reset inventory
+            state.inventory.bunker = 10;
+            state.inventory.flash = 3;
+            state.inventory.deagle = { ammo: WEAPONS.deagle.mag, reserve: WEAPONS.deagle.reserve };
+            state.inventory.ar = { ammo: WEAPONS.ar.mag, reserve: WEAPONS.ar.reserve };
+            state.myBunker = null;
+
+            // Spawning: Team A at yaw ~0, Team B at yaw ~180
+            state.pitch = 0;
+            if(state.team === 'A') state.yaw = (Math.random() * 40) - 20; // -20 to 20
+            else state.yaw = 180 + (Math.random() * 40) - 20; // 160 to 200
+            
+            if(state.yaw < 0) state.yaw += 360;
+
+            // Reset local player object copies
+            Object.values(state.players).forEach(p => {
+                p.hp = MAX_HP; p.isDead = false; p.bunker = null;
+            });
+
+            // UI Updates
+            document.querySelectorAll('.screen').forEach(el => el.classList.add('hidden'));
+            document.getElementById('ui-layer').classList.remove('hidden');
+            document.getElementById('camera-bg').style.display = 'block';
+            document.getElementById('game-canvas').style.display = 'block';
+            document.getElementById('round-display').innerText = state.round;
+            updateHUD();
+            
+            showCenterMessage(`ROUND ${state.round}`);
+
+            // Start Camera & Engine
+            await initCamera();
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            initControls();
+            
+            if(!animationFrameId) gameLoop();
+            
+            // Start State Broadcast
+            if(state.stateSyncInt) clearInterval(state.stateSyncInt);
+            state.stateSyncInt = setInterval(broadcastState, 100); // 10fps sync
+        }
+
+        function broadcastState() {
+            if(state.gameState !== 'playing') return;
+            publishMsg('state_update', {
+                id: state.id,
+                yaw: state.yaw,
+                pitch: state.pitch,
+                hp: state.hp,
+                isDead: state.isDead,
+                bunker: state.myBunker
+            });
+            
+            // Host logic: check win condition
+            if(state.isHost) checkRoundWin();
+        }
+
+        function checkRoundWin() {
+            let aAlive = false, bAlive = false;
+            Object.values(state.players).forEach(p => {
+                if(!p.isDead) {
+                    if(p.team === 'A') aAlive = true;
+                    if(p.team === 'B') bAlive = true;
+                }
+            });
+
+            if(!aAlive || !bAlive) {
+                let winner = !aAlive && !bAlive ? 'Draw' : (aAlive ? 'A' : 'B');
+                if(winner === 'A') state.score.A++;
+                if(winner === 'B') state.score.B++;
+                
+                publishMsg('round_end', { winner, scoreA: state.score.A, scoreB: state.score.B });
+            }
+        }
+
+        function handleRoundEnd(data) {
+            state.gameState = 'round_end';
+            state.score.A = data.scoreA;
+            state.score.B = data.scoreB;
+            document.getElementById('score-a').innerText = state.score.A;
+            document.getElementById('score-b').innerText = state.score.B;
+
+            let msg = data.winner === 'Draw' ? "ROUND DRAW" : `TEAM ${data.winner === 'A' ? 'BLUE' : 'RED'} WINS ROUND`;
+            showCenterMessage(msg);
+
+            if(state.score.A >= MAX_WINS || state.score.B >= MAX_WINS) {
+                setTimeout(() => publishMsg('game_over', { winner: state.score.A >= MAX_WINS ? 'A' : 'B' }), 3000);
+            } else {
+                if(state.isHost) setTimeout(() => publishMsg('start_round', { round: state.round + 1 }), 4000);
+            }
+        }
+
+        function handleGameOver(data) {
+            state.gameState = 'game_over';
+            showCenterMessage(`TEAM ${data.winner === 'A' ? 'BLUE' : 'RED'} WINS MATCH!`, 5000);
+            setTimeout(() => {
+                window.location.reload();
+            }, 5000);
+        }
+
+        /**
+         * COMBAT ACTIONS 
+         */
+        function actionBunker() {
+            if(state.isDead || state.gameState !== 'playing' || state.inventory.bunker <= 0 || state.myBunker) return;
+            state.inventory.bunker--;
+            state.myBunker = { hp: BUNKER_HP, yaw: state.yaw };
+            updateHUD();
+        }
+
+        function actionFire(weaponType) {
+            if(state.isDead || state.gameState !== 'playing' || isReloading) return;
+            
+            const now = Date.now();
+            const wData = WEAPONS[weaponType];
+            let inv = state.inventory[weaponType];
+            
+            if(now - lastFireTime < wData.fireRateMs) return;
+
+            if(inv.ammo <= 0) {
+                reloadWeapon(weaponType);
+                return;
+            }
+
+            // Fire!
+            inv.ammo--;
+            lastFireTime = now;
+            updateHUD();
+
+            // Screen recoil effect
+            state.pitch += 1; // Kick up
+            
+            // Hit detection (Raycast center of screen)
+            checkHit(weaponType);
+        }
+
+        function reloadWeapon(type) {
+            let inv = state.inventory[type];
+            let wData = WEAPONS[type];
+            if(inv.reserve <= 0 || inv.ammo === wData.mag || isReloading) return;
+            
+            isReloading = true;
+            document.getElementById(`ammo-${type}`).innerText = "RELOADING...";
+            
+            setTimeout(() => {
+                let needed = wData.mag - inv.ammo;
+                let take = Math.min(needed, inv.reserve);
+                inv.reserve -= take;
+                inv.ammo += take;
+                isReloading = false;
+                updateHUD();
+            }, 1500);
+        }
+
+        function checkHit(weaponType) {
+            const wData = WEAPONS[weaponType];
+            
+            // Sort enemies by distance from crosshair
+            let closest = null;
+            let minDistance = 999;
+            let isHeadshot = false;
+
+            Object.values(state.players).forEach(p => {
+                if(p.id === state.id || p.team === state.team || p.isDead) return;
+
+                // Calculate screen position of enemy
+                let dYaw = getShortestAngle(state.yaw, p.yaw);
+                let dPitch = p.pitch - state.pitch;
+                
+                // Convert to screen pixels (approx)
+                let pxX = (dYaw * pixelsPerDegree); // 0 is center
+                let pxY = (dPitch * pixelsPerDegree);
+
+                // Hitboxes
+                // Distance to head center
+                let distHead = Math.sqrt(pxX*pxX + (pxY + 70)*(pxY + 70));
+                if(distHead < 25 && distHead < minDistance) {
+                    closest = p; minDistance = distHead; isHeadshot = true;
+                }
+                
+                // Distance to body center
+                let distBody = Math.sqrt(pxX*pxX + pxY*pxY);
+                if(distBody < 50 && distBody < minDistance && !isHeadshot) {
+                    closest = p; minDistance = distBody; isHeadshot = false;
+                }
+            });
+
+            if(closest) {
+                // Check if bunker blocks it
+                if(closest.bunker && closest.bunker.hp > 0) {
+                    // Is the attack coming from the bunker's front?
+                    let hitAngle = Math.abs(getShortestAngle(state.yaw, closest.bunker.yaw + 180));
+                    if(hitAngle < 60) {
+                        // Hit bunker instead
+                        publishMsg('bunker_hit', { ownerId: closest.id, damage: wData.dmgBodyMin || wData.dmgBody });
+                        showHitMarker('blue');
+                        return;
+                    }
+                }
+
+                // Hit Player
+                let dmg = isHeadshot ? wData.dmgHead : (wData.dmgBodyMin ? Math.floor(Math.random()*(wData.dmgBodyMax - wData.dmgBodyMin)+wData.dmgBodyMin) : wData.dmgBody);
+                publishMsg('hit', { targetId: closest.id, damage: dmg, fromYaw: state.yaw });
+                showHitMarker(isHeadshot ? 'red' : 'white');
+            }
+        }
+
+        function showHitMarker(color) {
+            // Draw an X in center of canvas for 0.1s
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            let cx = canvas.width/2;
+            let cy = canvas.height/2;
+            ctx.beginPath();
+            ctx.moveTo(cx-10, cy-10); ctx.lineTo(cx+10, cy+10);
+            ctx.moveTo(cx+10, cy-10); ctx.lineTo(cx-10, cy+10);
+            ctx.stroke();
+            setTimeout(() => { /* handled by next frame clear */ }, 100);
+        }
+
+        function takeDamage(amount, sourceYaw) {
+            state.hp = Math.max(0, state.hp - amount);
+            
+            // Visual Effect
+            document.getElementById('ui-layer').classList.remove('damage-effect');
+            void document.getElementById('ui-layer').offsetWidth; // trigger reflow
+            document.getElementById('ui-layer').classList.add('damage-effect');
+
+            updateHUD();
+
+            if(state.hp === 0) {
+                state.isDead = true;
+                showCenterMessage("YOU DIED");
+            }
+        }
+
+        // Flashbang Logic
+        const btnFlash = document.getElementById('btn-flashbang');
+        const flashProg = document.getElementById('flash-progress');
+        
+        btnFlash.addEventListener('touchstart', (e) => {
+            if(state.inventory.flash <= 0 || state.isDead) return;
+            e.preventDefault();
+            flashChargeStart = Date.now();
+            let chargeInt = setInterval(() => {
+                if(!flashChargeStart) return clearInterval(chargeInt);
+                let p = Math.min(100, (Date.now() - flashChargeStart) / 10);
+                flashProg.style.width = p + '%';
+            }, 50);
+        });
+
+        btnFlash.addEventListener('touchend', (e) => {
+            if(!flashChargeStart || state.inventory.flash <= 0) return;
+            e.preventDefault();
+            state.inventory.flash--;
+            flashChargeStart = 0;
+            flashProg.style.width = '0%';
+            updateHUD();
+            
+            // Throw to current look direction
+            publishMsg('flashbang', { targetYaw: state.yaw, targetPitch: state.pitch });
+        });
+
+        function handleIncomingFlashbang(data) {
+            if(state.isDead) return;
+            // Detonates after 1 sec
+            setTimeout(() => {
+                // If I am looking at it (within 45 deg)
+                let dYaw = Math.abs(getShortestAngle(state.yaw, data.targetYaw));
+                let dPitch = Math.abs(state.pitch - data.targetPitch);
+                
+                if(dYaw < 45 && dPitch < 45) {
+                    // Get flashed
+                    const flash = document.getElementById('flash-overlay');
+                    flash.style.display = 'block';
+                    flash.style.opacity = '1';
+                    setTimeout(() => { flash.style.opacity = '0'; }, 3000);
+                    setTimeout(() => { flash.style.display = 'none'; }, 3200);
+                }
+            }, 1000);
+        }
+
+        // AR Auto-Fire Logic
+        const btnAr = document.getElementById('btn-ar');
+        btnAr.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            actionFire('ar');
+            arFireInterval = setInterval(() => actionFire('ar'), WEAPONS.ar.fireRateMs);
+        });
+        btnAr.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            clearInterval(arFireInterval);
+        });
+
+
+        /**
+         * HARDWARE / INPUTS (Camera & Touch Aiming)
+         */
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' }, audio: false 
+                });
+                videoEl.srcObject = stream;
+            } catch(e) {
+                console.warn("Camera access denied or unavailable. Fallback to black bg.");
+            }
+        }
+
+        function initControls() {
+            // Touch Drag for Aiming (Primary method, most reliable)
+            canvas.addEventListener('touchstart', e => {
+                isDragging = true;
+                lastTouchX = e.touches[0].clientX;
+                lastTouchY = e.touches[0].clientY;
+            });
+            
+            canvas.addEventListener('touchmove', e => {
+                if(!isDragging || state.isDead) return;
+                const touchX = e.touches[0].clientX;
+                const touchY = e.touches[0].clientY;
+                const dx = touchX - lastTouchX;
+                const dy = touchY - lastTouchY;
+                
+                // Sensitivity
+                state.yaw = (state.yaw - dx * 0.2 + 360) % 360;
+                state.pitch = Math.max(-90, Math.min(90, state.pitch + dy * 0.2));
+                
+                lastTouchX = touchX;
+                lastTouchY = touchY;
+            });
+
+            canvas.addEventListener('touchend', () => isDragging = false);
+        }
+
+        /**
+         * RENDER ENGINE 
+         */
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            pixelsPerDegree = canvas.width / FOV;
+        }
+
+        function getShortestAngle(a, b) {
+            let diff = (b - a + 180) % 360 - 180;
+            return diff < -180 ? diff + 360 : diff;
+        }
+
+        function gameLoop() {
+            animationFrameId = requestAnimationFrame(gameLoop);
+            if(state.gameState !== 'playing') return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+
+            // Draw Opponents
+            Object.values(state.players).forEach(p => {
+                if(p.id === state.id || p.team === state.team) return; // Only draw enemies
+                if(p.isDead) return;
+
+                let dYaw = getShortestAngle(state.yaw, p.yaw);
+                let dPitch = p.pitch - state.pitch;
+
+                // Check if in front of camera
+                if(Math.abs(dYaw) > FOV) return;
+
+                let screenX = cx + (dYaw * pixelsPerDegree);
+                let screenY = cy + (dPitch * pixelsPerDegree);
+
+                // Draw Bunker if they have one
+                if(p.bunker && p.bunker.hp > 0) {
+                    ctx.fillStyle = 'rgba(59, 130, 246, 0.4)';
+                    ctx.strokeStyle = '#3b82f6';
+                    ctx.lineWidth = 2;
+                    ctx.fillRect(screenX - 50, screenY - 20, 100, 120);
+                    ctx.strokeRect(screenX - 50, screenY - 20, 100, 120);
+                    
+                    // HP Bar for bunker
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(screenX - 50, screenY - 30, 100 * (p.bunker.hp/BUNKER_HP), 5);
+                }
+
+                // Draw Player Sprite
+                ctx.fillStyle = p.team === 'A' ? '#60a5fa' : '#f87171'; // Blue vs Red
+                
+                // Body
+                ctx.fillRect(screenX - 30, screenY, 60, 100);
+                
+                // Head
+                ctx.beginPath();
+                ctx.arc(screenX, screenY - 25, 20, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Name tag & HP
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${p.name} (${p.hp})`, screenX, screenY - 55);
+            });
+
+            // Draw My Bunker (if built, and I look at it)
+            if(state.myBunker && state.myBunker.hp > 0) {
+                let dYaw = getShortestAngle(state.yaw, state.myBunker.yaw);
+                if(Math.abs(dYaw) < FOV) {
+                    let screenX = cx + (dYaw * pixelsPerDegree);
+                    ctx.fillStyle = 'rgba(16, 185, 129, 0.2)'; // Green tint for my shield
+                    ctx.strokeStyle = '#10b981';
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    // Draw curved shield outline
+                    ctx.moveTo(screenX - 150, cy - 100);
+                    ctx.quadraticCurveTo(screenX, cy - 120, screenX + 150, cy - 100);
+                    ctx.lineTo(screenX + 150, cy + 200);
+                    ctx.quadraticCurveTo(screenX, cy + 220, screenX - 150, cy + 200);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.fillStyle = 'white';
+                    ctx.fillText(`MY BUNKER: ${state.myBunker.hp}`, screenX, cy - 130);
+                }
+            }
+
+            // Draw Crosshair on Canvas
+            ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(cx, cy, 15, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(cx - 25, cy); ctx.lineTo(cx + 25, cy);
+            ctx.moveTo(cx, cy - 25); ctx.lineTo(cx, cy + 25);
+            ctx.stroke();
+        }
+
+        /**
+         * UI HELPERS 
+         */
+        function updateHUD() {
+            document.getElementById('hp-text').innerText = `${state.hp} / 150`;
+            document.getElementById('hp-bar').style.width = `${(state.hp / 150) * 100}%`;
+            document.getElementById('ammo-bunker').innerText = `${state.inventory.bunker} Left`;
+            document.getElementById('ammo-flash').innerText = `${state.inventory.flash} Left`;
+            
+            if(!isReloading) {
+                document.getElementById('ammo-deagle').innerText = `${state.inventory.deagle.ammo} / ${state.inventory.deagle.reserve}`;
+                document.getElementById('ammo-ar').innerText = `${state.inventory.ar.ammo} / ${state.inventory.ar.reserve}`;
+            }
+        }
+
+        function showCenterMessage(msg, duration = 2000) {
+            const el = document.getElementById('game-message');
+            el.innerText = msg;
+            el.style.opacity = '1';
+            setTimeout(() => { el.style.opacity = '0'; }, duration);
+        }
+
+    </script>
+</body>
+</html>
+
+
+```
