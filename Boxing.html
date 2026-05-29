@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Smooth 3D Boxing Engine (EMQX)</title>
+    <title>Definitive 3D Articulated Boxing (EMQX)</title>
     
     <!-- 
       Tailwind CSS Framework
@@ -14,28 +14,26 @@
     
     <!-- 
       Three.js Library
-      The core 3D WebGL rendering engine used to draw the arena, lighting, and boxing gloves.
+      The core 3D WebGL rendering engine used to draw the arena, lighting, and articulated hands.
     -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     
     <!-- 
-      MediaPipe Pose AI Framework
-      (UPGRADE): Swapped from Holistic to Pose. This tracks only the main body joints 
-      (shoulders, wrists, nose) making it 5x faster and eliminating the lag.
+      MediaPipe AI Framework
+      Holistic model tracks both the body (for dodging/reach) and the hands (for 21-joint articulation).
     -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
     
     <!-- 
       MQTT.js (EMQX Integration)
       Uses a centralized MQTT broker over WebSockets to guarantee connection 
-      through strict firewalls and NATs.
+      through strict firewalls and NATs where WebRTC fails.
     -->
     <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <!-- 
       Application Stylesheet
-      Contains custom animations, absolute positioning for the 3D canvas, and CRT screen effects.
     -->
     <style>
         /* Core Reset & Fullscreen Setup */
@@ -61,9 +59,7 @@
             display: block;
         }
 
-        /* Advanced UI Panels 
-          Utilizes CSS backdrop-filter for a premium glassmorphism effect.
-        */
+        /* Advanced UI Panels with Glassmorphism */
         .ui-panel { 
             background: rgba(10, 15, 25, 0.85); 
             backdrop-filter: blur(16px); 
@@ -73,27 +69,15 @@
         }
 
         /* Typography Glowing Effects */
-        .glowing-text { 
-            text-shadow: 0 0 20px rgba(234, 179, 8, 0.6); 
-        }
-
-        .glowing-text-blue { 
-            text-shadow: 0 0 20px rgba(56, 189, 248, 0.6); 
-        }
+        .glowing-text { text-shadow: 0 0 20px rgba(234, 179, 8, 0.6); }
 
         /* Health Bar Smooth Transitions */
-        .health-transition { 
-            transition: width 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); 
-        }
+        .health-transition { transition: width 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
         
         /* Damage Flash Overlay Transition */
-        #hit-flash { 
-            transition: opacity 0.15s ease-out; 
-        }
+        #hit-flash { transition: opacity 0.15s ease-out; }
         
-        /* Custom Animation: Scanline 
-          Simulates an old arcade or broadcast monitor effect.
-        */
+        /* Custom Animation: Scanline */
         @keyframes scanline {
             0% { transform: translateY(-100%); }
             100% { transform: translateY(100vh); }
@@ -130,21 +114,17 @@
 <body>
 
     <!-- 
-      Hidden Video Element
-      Required by MediaPipe to process the camera stream. Hidden for immersion.
+      Hidden Video Element for MediaPipe AI Processing. 
+      Kept hidden so you only see the 3D World.
     -->
     <video id="input_video" style="display:none;" autoplay playsinline></video>
 
-    <!-- 
-      Main 3D Graphics Canvas
-    -->
+    <!-- Main 3D Graphics Canvas -->
     <canvas id="gameCanvas"></canvas>
 
     <!-- Visual Screen Overlays -->
     <div class="vignette"></div>
     <div class="scanline-effect"></div>
-    
-    <!-- Red flash container used when the local player takes damage -->
     <div id="hit-flash" class="absolute inset-0 bg-red-600 z-10 opacity-0 pointer-events-none mix-blend-color"></div>
 
     <!-- 
@@ -164,10 +144,10 @@
                 EMQX BOXING
             </h1>
             <p class="text-slate-400 mb-8 text-sm leading-relaxed">
-                Lag-free Edition. Step back so the camera sees your shoulders and hands. Punch directly at the camera!
+                Full 21-Joint Articulation Engine. Step back so the camera sees your shoulders and hands. Punch directly at the camera to reach the opponent!
             </p>
             <button onclick="System.initializeCamera()" class="w-full bg-gradient-to-r from-yellow-600 to-yellow-400 hover:from-yellow-500 hover:to-yellow-300 text-black font-black py-5 px-6 rounded-2xl text-xl shadow-[0_0_30px_rgba(234,179,8,0.3)] transition-all transform hover:scale-[1.02] active:scale-[0.98]">
-                ACTIVATE TRACKING
+                ACTIVATE AI TRACKING
             </button>
             <p id="cam-error" class="text-red-400 mt-6 hidden text-sm font-bold bg-red-500/10 p-3 rounded-lg border border-red-500/20"></p>
         </div>
@@ -183,7 +163,7 @@
                 Calibrating Engine
             </h2>
             <p class="text-slate-400 text-sm">
-                Loading High-Speed Pose Model...
+                Loading Optimized Holistic Models...
             </p>
         </div>
 
@@ -264,7 +244,6 @@
 
     <!-- 
       IN-GAME HEADS UP DISPLAY (HUD)
-      Shows Health bars, Timer, and Round status. 
     -->
     <div id="health-hud" class="absolute top-0 left-0 w-full p-8 z-30 flex justify-between items-start hidden pointer-events-none">
         
@@ -309,40 +288,37 @@
             // The Public EMQX Broker URL (Secure WebSockets)
             EMQX_BROKER_URL: 'wss://broker.emqx.io:8084/mqtt',
             
-            // Base topic prefix to ensure our game data doesn't collide with other users on the public broker
-            TOPIC_PREFIX: 'eqmx-boxing-engine-v2/',
+            // Base topic prefix to ensure our game data doesn't collide
+            TOPIC_PREFIX: 'eqmx-boxing-engine-v3-articulated/',
             
             // Health points scaled up for finer granularity during damage calculations
             MAX_HEALTH: 1000, 
             
-            // Milliseconds required between successful punches to prevent spamming
+            // Milliseconds required between successful punches
             PUNCH_COOLDOWN: 400,
             
             // Base damage dealt per successful punch
             BASE_DAMAGE: 80,
             
-            // The Hit Radius. Size of the collision sphere.
+            // Size of the collision sphere for hit detection
             HIT_RADIUS: 1.5,
             
-            // Rate at which to send network packets (in milliseconds). 
-            // 33ms is approximately 30 updates per second.
+            // Determines how "far" your arm stretches into the 3D space when you punch
+            PUNCH_STRETCH_MULTIPLIER: 22,
+            
+            // Constant size of the 3D hand regardless of how close it is to the webcam
+            FIXED_HAND_SCALE: 2.2,
+            
+            // Rate at which to send network packets (in milliseconds). ~30 FPS network
             NET_TICK_RATE: 33 
         };
 
         const Utils = {
             /**
              * Linear Interpolation function.
-             * Used to smooth out jittery AI tracking data and animate objects smoothly over time.
              */
             lerp: function(start, end, amt) {
                 return (1 - amt) * start + amt * end;
-            },
-
-            /**
-             * Compresses a 3D Vector object into a simple Array of numbers rounded to 3 decimals.
-             */
-            pack: function(x, y, z) {
-                return [ Number(x.toFixed(3)), Number(y.toFixed(3)), Number(z.toFixed(3)) ];
             }
         };
 
@@ -582,91 +558,131 @@
 
         /**
          * ============================================================================
-         * 4. BOXING GLOVE CLASS (REPLACES LAGGY PROCEDURAL HAND)
+         * 4. HIGH-PERFORMANCE ARTICULATED HAND CLASS
          * ============================================================================
-         * Swapped out the 21-joint skeleton for a single glowing low-poly sphere.
-         * This instantly solves performance lag and makes hit detection highly reliable!
+         * Uses 21 Spheres and 20 Cylinders to represent a hand.
+         * Math is decoupled from the raw AI to guarantee the hand stays a normal size
+         * while allowing the arm to stretch across the 3D space.
          */
-        class BoxingGlove {
+        class ProceduralHand {
             constructor(scene, isLocal) {
                 this.scene = scene;
+                this.isLocal = isLocal;
+                this.joints = []; 
+                this.bones = [];  
                 
-                // Color: Blue for local player, Red for opponent
-                const gloveColor = isLocal ? 0x0ea5e9 : 0xef4444;
-                
-                // Use Icosahedron for a cool glowing low-poly "sphere" look
-                const geometry = new THREE.IcosahedronGeometry(0.5, 2);
-                const material = new THREE.MeshStandardMaterial({ 
-                    color: gloveColor, 
-                    roughness: 0.2, 
-                    metalness: 0.8,
-                    emissive: gloveColor,
-                    emissiveIntensity: 0.2
-                });
-                
-                this.mesh = new THREE.Mesh(geometry, material);
-                this.mesh.position.set(0, -10, 0); // Hide initially
-                
-                // Add an outer glowing aura
-                const auraGeo = new THREE.IcosahedronGeometry(0.6, 2);
-                const auraMat = new THREE.MeshBasicMaterial({
-                    color: gloveColor,
-                    transparent: true,
-                    opacity: 0.2,
-                    blending: THREE.AdditiveBlending,
-                    wireframe: true
-                });
-                this.aura = new THREE.Mesh(auraGeo, auraMat);
-                this.mesh.add(this.aura); // Attach aura to glove
+                // Maps how the 21 MediaPipe hand landmarks connect
+                this.connections = [
+                    [0,1], [1,2], [2,3], [3,4],       
+                    [0,5], [5,6], [6,7], [7,8],       
+                    [5,9], [9,10], [10,11], [11,12],  
+                    [9,13], [13,14], [14,15], [15,16],
+                    [13,17], [17,18], [18,19], [19,20],
+                    [0,17]                            
+                ];
 
-                this.scene.add(this.mesh);
+                const color = isLocal ? 0xeab308 : 0x0ea5e9;
+                const mat = new THREE.MeshStandardMaterial({ 
+                    color: color, roughness: 0.3, metalness: 0.2 
+                });
                 
-                this.targetPos = new THREE.Vector3();
+                // Using low poly geometry for absolute maximum performance (no lag)
+                this.jointGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+                this.boneGeometry = new THREE.CylinderGeometry(0.08, 0.08, 1, 6);
+                
+                this.boneGeometry.translate(0, 0.5, 0); 
+                this.boneGeometry.rotateX(Math.PI / 2); 
+
+                // Instantiate 21 Spheres
+                for(let i = 0; i < 21; i++) {
+                    const mesh = new THREE.Mesh(this.jointGeometry, mat);
+                    mesh.position.set(0, -10, 0);
+                    this.scene.add(mesh);
+                    this.joints.push(mesh);
+                }
+
+                // Instantiate 20 Cylinders
+                for(let i = 0; i < this.connections.length; i++) {
+                    const mesh = new THREE.Mesh(this.boneGeometry, mat);
+                    mesh.position.set(0, -10, 0);
+                    this.scene.add(mesh);
+                    this.bones.push(mesh);
+                }
+
+                // Internal array to hold the absolute target positions
+                this.targetPositions = [];
+                for(let i = 0; i < 21; i++) {
+                    this.targetPositions.push(new THREE.Vector3());
+                }
+                
                 this.isActive = false;
             }
 
             /**
-             * Sets the target location where the glove should move towards.
+             * Accepts an array of 21 absolute 3D World Coordinates.
+             * This bypasses all scaling issues because the math is done centrally.
              */
-            setTarget(x, y, z) {
-                this.isActive = true;
-                this.targetPos.set(x, y, z);
+            setAbsoluteTargets(targetArray) {
+                this.isActive = !!targetArray && targetArray.length === 21;
+                if(!this.isActive) return;
+
+                for(let i = 0; i < 21; i++) {
+                    this.targetPositions[i].set(
+                        targetArray[i][0], 
+                        targetArray[i][1], 
+                        targetArray[i][2]
+                    );
+                }
             }
 
-            /**
-             * Lerps the glove toward the target position smoothly.
-             */
             update(deltaTime) {
                 if(!this.isActive) {
-                    this.mesh.position.y = Utils.lerp(this.mesh.position.y, -10, 10 * deltaTime);
+                    const currentY = this.joints[0].position.y;
+                    this.joints[0].position.y = Utils.lerp(currentY, -10, 10 * deltaTime);
                     return;
                 }
 
-                // Super fast interpolation so punches feel instant
-                this.mesh.position.lerp(this.targetPos, 25 * deltaTime);
+                const interpolationSpeed = 20 * deltaTime; 
                 
-                // Spin the aura for a cool visual effect
-                this.aura.rotation.x += 2 * deltaTime;
-                this.aura.rotation.y += 2 * deltaTime;
+                // Move spheres
+                for(let i = 0; i < 21; i++) {
+                    this.joints[i].position.lerp(this.targetPositions[i], interpolationSpeed);
+                }
+
+                // Stretch cylinders between spheres
+                for(let i = 0; i < this.connections.length; i++) {
+                    const pA = this.joints[this.connections[i][0]].position;
+                    const pB = this.joints[this.connections[i][1]].position;
+                    const currentBone = this.bones[i];
+                    
+                    currentBone.position.copy(pA);
+                    currentBone.lookAt(pB);
+                    currentBone.scale.set(1, 1, pA.distanceTo(pB));
+                }
+            }
+            
+            getHitboxCenter() {
+                if(!this.isActive) return new THREE.Vector3(0, -100, 0);
+                
+                // Using Joint 9 (Middle Finger Base Knuckle) as the primary striking point
+                return this.joints[9].position;
             }
         }
 
         /**
          * ============================================================================
-         * 5. CORE GAME ENGINE (WITH NEW PHYSICS)
+         * 5. CORE GAME ENGINE
          * ============================================================================
          */
         class GameEngine {
             constructor() {
                 this.gfx = new GraphicsEngine();
                 
-                // Initialize the 4 boxing gloves (Local Left/Right, Opponent Left/Right)
-                this.myGloveL = new BoxingGlove(this.gfx.scene, true);
-                this.myGloveR = new BoxingGlove(this.gfx.scene, true);
-                this.oppGloveL = new BoxingGlove(this.gfx.scene, false);
-                this.oppGloveR = new BoxingGlove(this.gfx.scene, false);
+                this.myHandL = new ProceduralHand(this.gfx.scene, true);
+                this.myHandR = new ProceduralHand(this.gfx.scene, true);
+                this.oppHandL = new ProceduralHand(this.gfx.scene, false);
+                this.oppHandR = new ProceduralHand(this.gfx.scene, false);
                 
-                // Initialize the opponent's head target
                 const headGeometry = new THREE.BoxGeometry(1.4, 1.8, 1.4);
                 const headMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4 });
                 
@@ -678,8 +694,7 @@
                 this.myHP = CONFIG.MAX_HEALTH; 
                 this.oppHP = CONFIG.MAX_HEALTH;
                 
-                this.myBaseZ = 4;       // Your resting Z position
-                this.oppBaseZ = -4;     // Opponent's resting Z position
+                this.myBaseZ = 4; 
                 this.oppHeadPos = new THREE.Vector3(0, 1.6, -4);
                 this.targetCam = new THREE.Vector3(0, 1.6, 6);
                 
@@ -688,9 +703,6 @@
                 
                 this.clock = new THREE.Clock(); 
                 this.fightStartTime = 0;
-
-                // Pre-allocated networking payload
-                this.payload = { h: [0, 0, 0], l: [0,0,0], r: [0,0,0] };
             }
 
             updateUI() {
@@ -741,24 +753,20 @@
                 if(this.oppHP <= 0) { this.endGame(true); }
             }
 
-            /**
-             * THE NEW PHYSICS ENGINE
-             * Checks distance from your 3D Glove mesh to the Opponent Head mesh.
-             */
             checkPhysics() {
                 if(this.state !== 'FIGHT') return;
                 
-                // Left Glove Collision
-                if(this.myGloveL.isActive) {
-                    if(this.myGloveL.mesh.position.distanceTo(this.oppHead.position) < CONFIG.HIT_RADIUS) {
-                        this.landHit(CONFIG.BASE_DAMAGE, this.myGloveL.mesh.position);
+                if(this.myHandL.isActive) {
+                    const hitPos = this.myHandL.getHitboxCenter();
+                    if(hitPos.distanceTo(this.oppHead.position) < CONFIG.HIT_RADIUS) {
+                        this.landHit(CONFIG.BASE_DAMAGE, hitPos);
                     }
                 }
                 
-                // Right Glove Collision
-                if(this.myGloveR.isActive) {
-                    if(this.myGloveR.mesh.position.distanceTo(this.oppHead.position) < CONFIG.HIT_RADIUS) {
-                        this.landHit(CONFIG.BASE_DAMAGE, this.myGloveR.mesh.position);
+                if(this.myHandR.isActive) {
+                    const hitPos = this.myHandR.getHitboxCenter();
+                    if(hitPos.distanceTo(this.oppHead.position) < CONFIG.HIT_RADIUS) {
+                        this.landHit(CONFIG.BASE_DAMAGE, hitPos);
                     }
                 }
             }
@@ -791,73 +799,113 @@
             }
 
             /**
-             * THE NEW HIT LOGIC (PUNCH EXTENSION)
-             * Tracks the distance between your shoulder and wrist to determine if you are punching.
+             * THE NEW MATH ALGORITHM
+             * Decouples the scale of the hand from the extension of the arm!
              */
+            calculateNormalizedHand(handLandmarks, poseLandmarks, isLeft) {
+                if (!handLandmarks || !poseLandmarks) return null;
+                
+                // 1. Get key landmarks
+                const wrist = handLandmarks[0];
+                const middleMcp = handLandmarks[9]; // Base of middle finger
+                
+                // 2. Calculate the apparent size of the hand on the 2D screen
+                const dx = middleMcp.x - wrist.x;
+                const dy = middleMcp.y - wrist.y;
+                const dz = middleMcp.z - wrist.z;
+                
+                // Prevent divide by zero if hand is extremely distorted
+                const apparentSize = Math.max(0.001, Math.sqrt(dx*dx + dy*dy + dz*dz));
+                
+                // 3. Determine Arm Stretch (Distance from Wrist to Shoulder on Z axis)
+                const poseWristIndex = isLeft ? 15 : 16;
+                const poseShoulderIndex = isLeft ? 11 : 12;
+                
+                const poseWrist = poseLandmarks[poseWristIndex];
+                const poseShoulder = poseLandmarks[poseShoulderIndex];
+                
+                // If wrist is closer to camera (more negative Z) than shoulder, we are stretching.
+                const stretch = Math.max(0, poseShoulder.z - poseWrist.z);
+                
+                // 4. Calculate where the Wrist *Anchor* should be in the 3D World
+                const anchorX = (0.5 - poseWrist.x) * 20; 
+                const anchorY = -(poseWrist.y - 0.5) * 15 + 1.0;
+                
+                // MAGIC FIX: Move the hand away from you into the screen based on arm stretch
+                const anchorZ = this.myBaseZ - (stretch * CONFIG.PUNCH_STRETCH_MULTIPLIER);
+                
+                // 5. Generate the final 21 absolute 3D coordinates for this hand
+                const finalPositions = handLandmarks.map(lm => {
+                    // Normalize the landmark offset based on apparent size, then scale to our fixed size
+                    const normX = ((lm.x - wrist.x) / apparentSize) * CONFIG.FIXED_HAND_SCALE;
+                    const normY = ((lm.y - wrist.y) / apparentSize) * CONFIG.FIXED_HAND_SCALE;
+                    const normZ = ((lm.z - wrist.z) / apparentSize) * CONFIG.FIXED_HAND_SCALE;
+                    
+                    return [
+                        Number((anchorX - normX).toFixed(2)), // Minus normX to mirror locally
+                        Number((anchorY - normY).toFixed(2)),
+                        Number((anchorZ + normZ).toFixed(2))
+                    ];
+                });
+                
+                return finalPositions;
+            }
+
             processLocalPose(results) {
                 if(!results.poseLandmarks || this.state !== 'FIGHT') return;
 
-                const lm = results.poseLandmarks;
-                
-                // Landmarks: 0=Nose, 11=L_Shoulder, 12=R_Shoulder, 15=L_Wrist, 16=R_Wrist
-                const nose = lm[0];
-                const L_Shoulder = lm[11];
-                const R_Shoulder = lm[12];
-                const L_Wrist = lm[15];
-                const R_Wrist = lm[16];
-                
-                // 1. Dodging (Move Camera based on nose position)
-                this.targetCam.x = (0.5 - nose.x) * 10;
-                this.targetCam.y = -(nose.y - 0.5) * 5 + 1.6;
+                // Move camera (dodge) based on nose
+                const noseLandmark = results.poseLandmarks[0];
+                this.targetCam.x = (0.5 - noseLandmark.x) * 10;
+                this.targetCam.y = -(noseLandmark.y - 0.5) * 5 + 1.6;
                 this.targetCam.z = this.myBaseZ + 2; 
 
-                // 2. Punch Extension Calculation!
-                // If Wrist Z is significantly more negative than Shoulder Z, it's extending towards camera!
-                let extendL = Math.max(0, L_Shoulder.z - L_Wrist.z);
-                let extendR = Math.max(0, R_Shoulder.z - R_Wrist.z);
+                // Calculate the final 3D coordinates for all 21 joints of both hands
+                const finalPositionsL = this.calculateNormalizedHand(results.leftHandLandmarks, results.poseLandmarks, true);
+                const finalPositionsR = this.calculateNormalizedHand(results.rightHandLandmarks, results.poseLandmarks, false);
                 
-                // Normalize extension (0.0 to 1.0)
-                // Adjusting the multiplier determines how hard you have to punch to reach the opponent.
-                let punchFactorL = Math.min(1.0, extendL * 3.5);
-                let punchFactorR = Math.min(1.0, extendR * 3.5);
+                // Update local visual hands immediately
+                this.myHandL.setAbsoluteTargets(finalPositionsL);
+                this.myHandR.setAbsoluteTargets(finalPositionsR);
 
-                // 3. Map Glove X/Y to screen, Map Glove Z across the ring based on Punch Factor
-                let gloveLX = (0.5 - L_Wrist.x) * 15;
-                let gloveLY = -(L_Wrist.y - 0.5) * 10 + 1.0;
-                // As punchFactor approaches 1, Z moves from myBase (4) to oppBase (-4)
-                let gloveLZ = Utils.lerp(this.myBaseZ, this.oppBaseZ, punchFactorL);
-
-                let gloveRX = (0.5 - R_Wrist.x) * 15;
-                let gloveRY = -(R_Wrist.y - 0.5) * 10 + 1.0;
-                let gloveRZ = Utils.lerp(this.myBaseZ, this.oppBaseZ, punchFactorR);
-
-                // Update visuals locally
-                this.myGloveL.setTarget(gloveLX, gloveLY, gloveLZ);
-                this.myGloveR.setTarget(gloveRX, gloveRY, gloveRZ);
-
-                // 4. Send Data to Network
+                // Throttle network dispatch
                 const currentTime = Date.now();
                 if(currentTime - this.lastNetTick > CONFIG.NET_TICK_RATE) {
-                    this.payload.h = Utils.pack(this.targetCam.x, this.targetCam.y, this.myBaseZ);
-                    this.payload.l = Utils.pack(gloveLX, gloveLY, gloveLZ);
-                    this.payload.r = Utils.pack(gloveRX, gloveRY, gloveRZ);
                     
-                    NetworkSys.sendPose(this.payload);
+                    // We send the ABSOLUTE coordinates to the opponent. 
+                    // No complex math required on their end, guaranteeing the hands will show up!
+                    const payload = {
+                        h: [
+                            Number(this.targetCam.x.toFixed(2)), 
+                            Number(this.targetCam.y.toFixed(2)), 
+                            Number(this.myBaseZ.toFixed(2))
+                        ],
+                        l: finalPositionsL,
+                        r: finalPositionsR
+                    };
+                    
+                    NetworkSys.sendPose(payload);
                     this.lastNetTick = currentTime;
                 }
             }
 
             processRemotePose(payload) {
-                // Opponent Head
+                // Apply Opponent Head position (mirroring X axis)
                 const oppHeadX = -payload.h[0];
                 const oppHeadY = payload.h[1];
                 const oppHeadZ = -payload.h[2];
                 this.oppHeadPos.set(oppHeadX, oppHeadY, oppHeadZ);
                 
-                // Cross over the hands (Their left payload = Our Right screen)
-                // Also negate the Z axis because they are punching from -4 towards 4
-                this.oppGloveR.setTarget(-payload.l[0], payload.l[1], -payload.l[2]);
-                this.oppGloveL.setTarget(-payload.r[0], payload.r[1], -payload.r[2]);
+                // Process the raw arrays of 21 joints received from the network
+                const mirrorHand = (handArray) => {
+                    if (!handArray) return null;
+                    // Mirror X and Z axis for the remote view
+                    return handArray.map(pt => [-pt[0], pt[1], -pt[2]]);
+                };
+
+                // Apply mirrored coordinates. Their Left = Our Right screen side.
+                this.oppHandR.setAbsoluteTargets(mirrorHand(payload.l));
+                this.oppHandL.setAbsoluteTargets(mirrorHand(payload.r));
             }
 
             loop() {
@@ -876,10 +924,10 @@
                     this.oppHead.position.lerp(this.oppHeadPos, 10 * deltaTime);
                     this.oppHead.rotation.y = Math.sin(Date.now() * 0.002) * 0.2; 
 
-                    this.myGloveL.update(deltaTime); 
-                    this.myGloveR.update(deltaTime);
-                    this.oppGloveL.update(deltaTime); 
-                    this.oppGloveR.update(deltaTime);
+                    this.myHandL.update(deltaTime); 
+                    this.myHandR.update(deltaTime);
+                    this.oppHandL.update(deltaTime); 
+                    this.oppHandR.update(deltaTime);
 
                     this.checkPhysics();
                 }
@@ -1012,6 +1060,7 @@
 
             sendPose(poseObject) { 
                 if(this.client && this.client.connected) {
+                    // Send serialized payload to EMQX. QoS 0 is used for high-frequency position data
                     this.client.publish(`${this.myBaseTopic}/pose`, JSON.stringify(poseObject), {qos: 0}); 
                 }
             }
@@ -1032,7 +1081,7 @@
 
         /**
          * ============================================================================
-         * 7. SYSTEM BOOTSTRAPPER (UPGRADED TO POSE)
+         * 7. SYSTEM BOOTSTRAPPER
          * ============================================================================
          */
         const Game = new GameEngine();
@@ -1070,15 +1119,16 @@
             },
 
             initAI: () => {
-                // UPGRADE: Switched to Pose model which is drastically lighter than Holistic.
-                System.aiInstance = new Pose({
-                    locateFile: (file) => { return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`; }
+                // We use Holistic again, but keep modelComplexity: 0 for max speed
+                System.aiInstance = new Holistic({
+                    locateFile: (file) => { return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`; }
                 });
                 
                 System.aiInstance.setOptions({
-                    modelComplexity: 0, // 0 = FASTEST.
+                    modelComplexity: 0, // 0 is absolutely necessary to eliminate lag
                     smoothLandmarks: true,   
                     enableSegmentation: false,
+                    refineFaceLandmarks: false,
                     minDetectionConfidence: 0.5,
                     minTrackingConfidence: 0.5
                 });
