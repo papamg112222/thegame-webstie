@@ -20,12 +20,11 @@
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
 
     <style>
-        /* Core Reset & Fullscreen Setup */
+        /* Core Reset & Fullscreen Setup - user-select removed to fix typing! */
         body, html { 
             margin: 0; padding: 0; width: 100%; height: 100%; 
             overflow: hidden; background-color: #020202; 
             font-family: 'Inter', 'Segoe UI', sans-serif; color: white; 
-            user-select: none; -webkit-user-select: none;
         }
 
         /* 3D Canvas Layer */
@@ -34,17 +33,6 @@
             width: 100vw; height: 100vh; z-index: 5; 
             display: block;
         }
-
-        /* Picture-in-Picture Webcam Feed (Mirrored) */
-        #webcam_feed { 
-            position: absolute; bottom: 30px; right: 30px; 
-            width: 280px; height: 210px; object-fit: cover; 
-            border-radius: 16px; border: 3px solid rgba(255, 255, 255, 0.1); 
-            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
-            opacity: 0.9; z-index: 25; transform: scaleX(-1); 
-            display: none; transition: opacity 0.3s;
-        }
-        #webcam_feed:hover { opacity: 0.2; } /* Hide on hover so it doesn't block view */
 
         /* Advanced UI Panels with Glassmorphism */
         .ui-panel { 
@@ -84,9 +72,8 @@
 </head>
 <body>
 
-    <!-- Video Elements (Hidden standard, visible PiP) -->
+    <!-- Video Element (Hidden completely, only used for AI processing) -->
     <video id="input_video" style="display:none;" autoplay playsinline></video>
-    <video id="webcam_feed" autoplay playsinline></video>
 
     <!-- 3D Graphics Canvas -->
     <canvas id="gameCanvas"></canvas>
@@ -95,7 +82,6 @@
     <div class="vignette"></div>
     <div class="scanline-effect"></div>
     <div id="hit-flash" class="absolute inset-0 bg-red-600 z-10 opacity-0 pointer-events-none mix-blend-color"></div>
-    <div id="block-flash" class="absolute inset-0 bg-blue-500 z-10 opacity-0 pointer-events-none mix-blend-color"></div>
 
     <!-- UI Layer -->
     <div id="ui-layer" class="absolute inset-0 z-20 flex flex-col items-center justify-center p-4">
@@ -133,7 +119,7 @@
             
             <!-- Host Server -->
             <div class="bg-black/50 p-6 rounded-2xl mb-6 border border-slate-800 relative overflow-hidden group">
-                <div class="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                <div class="absolute inset-0 bg-gradient-to-r from-blue-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                 <h3 class="text-sm font-bold text-blue-400 mb-3 uppercase tracking-widest flex items-center">
                     <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a2 2 0 00-2 2v2H6a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2V8a2 2 0 00-2-2h-2V4a2 2 0 00-2-2H10zm0 2h2v2h-2V4zm0 8a2 2 0 100-4 2 2 0 000 4z"></path></svg>
                     Host a Match
@@ -150,7 +136,7 @@
 
             <!-- Join Server -->
             <div class="bg-black/50 p-6 rounded-2xl border border-slate-800 relative overflow-hidden group">
-                <div class="absolute inset-0 bg-gradient-to-r from-red-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                <div class="absolute inset-0 bg-gradient-to-r from-red-600/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                 <h3 class="text-sm font-bold text-red-400 mb-3 uppercase tracking-widest flex items-center">
                     <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path></svg>
                     Join a Match
@@ -164,8 +150,8 @@
 
         <!-- STEP 4: WAITING FOR OPPONENT -->
         <div id="step-waiting" class="ui-panel p-12 rounded-3xl text-center max-w-lg w-full hidden relative overflow-hidden">
-            <div class="absolute -top-20 -right-20 w-40 h-40 bg-blue-500 rounded-full blur-[100px] opacity-20"></div>
-            <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-purple-500 rounded-full blur-[100px] opacity-20"></div>
+            <div class="absolute -top-20 -right-20 w-40 h-40 bg-blue-500 rounded-full blur-[100px] opacity-20 pointer-events-none"></div>
+            <div class="absolute -bottom-20 -left-20 w-40 h-40 bg-purple-500 rounded-full blur-[100px] opacity-20 pointer-events-none"></div>
             
             <div class="w-20 h-20 mx-auto bg-slate-800 rounded-2xl flex items-center justify-center mb-6 border border-slate-700 shadow-inner">
                 <span class="text-4xl animate-pulse">📡</span>
@@ -234,20 +220,17 @@
          */
         const CONFIG = {
             PEER_PREFIX: 'eqmx-holistic-box-v2-',
-            MAX_HEALTH: 1000, // Higher resolution health
+            MAX_HEALTH: 1000, 
             PUNCH_COOLDOWN: 400,
             BASE_DAMAGE: 80,
             HIT_RADIUS: 2.5,
-            DEPTH_SCALE: 15,   // Multiplier for Z-axis translation
-            HAND_SCALE: 1.2    // Size of the procedural hands
+            DEPTH_SCALE: 15,   
+            HAND_SCALE: 1.2    
         };
 
         const Utils = {
-            // Linear Interpolation for smooth movements
             lerp: (start, end, amt) => (1 - amt) * start + amt * end,
-            // Map a value from one range to another
             mapRange: (val, in_min, in_max, out_min, out_max) => ((val - in_min) * (out_max - out_min)) / (in_max - in_min) + out_min,
-            // Create a unique ID
             uuid: () => Math.random().toString(36).substring(2, 9)
         };
 
@@ -267,7 +250,6 @@
                 const gain = this.ctx.createGain();
                 osc.type = type;
                 osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-                // Envelope
                 gain.gain.setValueAtTime(vol, this.ctx.currentTime);
                 gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
                 
@@ -287,7 +269,6 @@
                 const noise = this.ctx.createBufferSource();
                 noise.buffer = buffer;
                 
-                // Filter to make it sound like a thud/punch
                 const filter = this.ctx.createBiquadFilter();
                 filter.type = 'lowpass';
                 filter.frequency.value = 1000;
@@ -319,16 +300,13 @@
          */
         class GraphicsEngine {
             constructor() {
-                // Scene setup
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x020202);
                 this.scene.fog = new THREE.FogExp2(0x020202, 0.04);
 
-                // Camera setup
                 this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 100);
                 this.camera.position.set(0, 1.6, 6);
 
-                // Renderer setup
                 this.renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true, powerPreference: "high-performance" });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
                 this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -338,7 +316,6 @@
                 this.buildEnvironment();
                 this.buildParticles();
 
-                // Resize handler
                 window.addEventListener('resize', () => {
                     this.camera.aspect = window.innerWidth / window.innerHeight;
                     this.camera.updateProjectionMatrix();
@@ -347,11 +324,9 @@
             }
 
             buildEnvironment() {
-                // 1. Lighting (Stadium Style)
                 const ambient = new THREE.AmbientLight(0xffffff, 0.1);
                 this.scene.add(ambient);
 
-                // Main overhead spotlight
                 this.mainLight = new THREE.SpotLight(0xffffff, 2);
                 this.mainLight.position.set(0, 15, 0);
                 this.mainLight.angle = Math.PI / 4;
@@ -363,7 +338,6 @@
                 this.mainLight.shadow.mapSize.height = 2048;
                 this.scene.add(this.mainLight);
 
-                // Rim lights (Red and Blue corner vibes)
                 const blueRim = new THREE.PointLight(0x3b82f6, 1, 20);
                 blueRim.position.set(-8, 2, -8);
                 this.scene.add(blueRim);
@@ -372,18 +346,15 @@
                 redRim.position.set(8, 2, -8);
                 this.scene.add(redRim);
 
-                // 2. The Ring Floor (Procedural Canvas Texture)
                 const texCanvas = document.createElement('canvas');
                 texCanvas.width = 1024; texCanvas.height = 1024;
                 const ctx = texCanvas.getContext('2d');
                 ctx.fillStyle = '#1e293b'; ctx.fillRect(0,0,1024,1024);
-                // Draw grid lines
                 ctx.strokeStyle = '#334155'; ctx.lineWidth = 4;
                 for(let i=0; i<=1024; i+=64) {
                     ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,1024); ctx.stroke();
                     ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(1024,i); ctx.stroke();
                 }
-                // Draw Center Logo
                 ctx.beginPath(); ctx.arc(512, 512, 150, 0, Math.PI*2);
                 ctx.strokeStyle = '#eab308'; ctx.lineWidth = 15; ctx.stroke();
                 ctx.fillStyle = '#eab308'; ctx.font = 'bold 80px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -402,7 +373,6 @@
                 floor.receiveShadow = true;
                 this.scene.add(floor);
 
-                // 3. Ropes & Posts
                 const postGeo = new THREE.CylinderGeometry(0.3, 0.3, 8, 16);
                 const postMat = new THREE.MeshStandardMaterial({color: 0x111111, roughness: 0.2});
                 const corners = [[-10,-10], [10,-10], [10,10], [-10,10]];
@@ -414,7 +384,6 @@
                     this.scene.add(post);
                 });
 
-                // Ropes (Lines)
                 const ropeMatRed = new THREE.LineBasicMaterial({ color: 0x880000, linewidth: 3 });
                 const ropeMatWhite = new THREE.LineBasicMaterial({ color: 0xdddddd, linewidth: 3 });
                 const ropeMatBlue = new THREE.LineBasicMaterial({ color: 0x000088, linewidth: 3 });
@@ -427,7 +396,7 @@
                     pts.push(new THREE.Vector3(10, y, -10));
                     pts.push(new THREE.Vector3(10, y, 10));
                     pts.push(new THREE.Vector3(-10, y, 10));
-                    pts.push(new THREE.Vector3(-10, y, -10)); // close loop
+                    pts.push(new THREE.Vector3(-10, y, -10)); 
                     const geo = new THREE.BufferGeometry().setFromPoints(pts);
                     const line = new THREE.Line(geo, mats[h]);
                     this.scene.add(line);
@@ -435,7 +404,6 @@
             }
 
             buildParticles() {
-                // Sweat/Blood impact particle system
                 const pGeo = new THREE.BufferGeometry();
                 const pCount = 200;
                 const posArray = new Float32Array(pCount * 3);
@@ -463,16 +431,13 @@
                 const positions = this.particleSystem.geometry.attributes.position.array;
                 
                 for(let i=0; i<this.particleData.length; i++) {
-                    // Activate particle
                     this.particleData[i].life = 1.0;
-                    // Start position
                     positions[i*3] = x + (Math.random() - 0.5)*0.5;
                     positions[i*3+1] = y + (Math.random() - 0.5)*0.5;
                     positions[i*3+2] = z + (Math.random() - 0.5)*0.5;
-                    // Explosive velocity
                     this.particleData[i].velocity.set(
                         (Math.random() - 0.5) * 10,
-                        (Math.random()) * 10 + 5, // Upwards arc
+                        (Math.random()) * 10 + 5, 
                         (Math.random() - 0.5) * 10
                     );
                 }
@@ -487,25 +452,19 @@
                     let p = this.particleData[i];
                     if(p.life > 0) {
                         active = true;
-                        p.life -= dt * 2; // Fade out
-                        
-                        // Gravity
+                        p.life -= dt * 2; 
                         p.velocity.y -= 25 * dt; 
                         
-                        // Apply velocity
                         positions[i*3] += p.velocity.x * dt;
                         positions[i*3+1] += p.velocity.y * dt;
                         positions[i*3+2] += p.velocity.z * dt;
                         
-                        // Floor collision
                         if(positions[i*3+1] < -2) {
                             positions[i*3+1] = -2;
-                            p.velocity.y *= -0.3; // Bounce
-                            p.velocity.x *= 0.8; // Friction
+                            p.velocity.y *= -0.3; 
+                            p.velocity.x *= 0.8; 
                             p.velocity.z *= 0.8;
                         }
-                        
-                        // Hide if dead
                         if(p.life <= 0) positions[i*3] = 1000; 
                     }
                 }
@@ -524,7 +483,6 @@
          * ==========================================
          * PROCEDURAL ARTICULATED HAND CLASS
          * ==========================================
-         * Builds a fully skeletal hand with 21 joints from MediaPipe data.
          */
         class ProceduralHand {
             constructor(scene, isLocal, isLeft) {
@@ -532,51 +490,43 @@
                 this.isLocal = isLocal;
                 this.isLeft = isLeft;
                 
-                this.joints = []; // 21 spheres
-                this.bones = [];  // 20 connecting cylinders
+                this.joints = []; 
+                this.bones = [];  
                 
-                // Hand Connections dictionary (MediaPipe standard)
                 this.connections = [
-                    [0,1],[1,2],[2,3],[3,4],       // Thumb
-                    [0,5],[5,6],[6,7],[7,8],       // Index
-                    [5,9],[9,10],[10,11],[11,12],  // Middle
-                    [9,13],[13,14],[14,15],[15,16],// Ring
-                    [13,17],[17,18],[18,19],[19,20],// Pinky
-                    [0,17]                         // Palm base
+                    [0,1],[1,2],[2,3],[3,4],       
+                    [0,5],[5,6],[6,7],[7,8],       
+                    [5,9],[9,10],[10,11],[11,12],  
+                    [9,13],[13,14],[14,15],[15,16],
+                    [13,17],[17,18],[18,19],[19,20],
+                    [0,17]                         
                 ];
 
-                // Materials: Skin tones
-                // Local player is a bit warmer, opponent is slightly cooler
                 const skinColor = isLocal ? 0xffccaa : 0xeebb99;
                 
                 this.jointMat = new THREE.MeshPhysicalMaterial({ 
-                    color: skinColor, roughness: 0.4, metalness: 0.1, clearcoat: 0.2 // Sweat effect
+                    color: skinColor, roughness: 0.4, metalness: 0.1, clearcoat: 0.2 
                 });
                 this.boneMat = new THREE.MeshPhysicalMaterial({ 
                     color: skinColor, roughness: 0.5, metalness: 0.0 
                 });
                 
                 this.jointGeo = new THREE.SphereGeometry(0.15, 16, 16);
-                // Thicker base joints, thinner fingertips. Handled during build.
 
-                // Create Joints
                 for(let i=0; i<21; i++) {
-                    // Make fingertips slightly smaller
                     const scale = (i===4||i===8||i===12||i===16||i===20) ? 0.7 : 1.0;
                     const mesh = new THREE.Mesh(this.jointGeo, this.jointMat);
                     mesh.scale.set(scale, scale, scale);
                     mesh.castShadow = true;
                     mesh.receiveShadow = true;
-                    // Start hidden below floor
                     mesh.position.set(0, -10, 0);
                     this.scene.add(mesh);
                     this.joints.push(mesh);
                 }
 
-                // Create Bones
                 this.boneGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 8);
-                this.boneGeo.translate(0, 0.5, 0); // Pivot at base
-                this.boneGeo.rotateX(Math.PI / 2); // Align with Z for lookAt
+                this.boneGeo.translate(0, 0.5, 0); 
+                this.boneGeo.rotateX(Math.PI / 2); 
 
                 for(let i=0; i<this.connections.length; i++) {
                     const mesh = new THREE.Mesh(this.boneGeo, this.boneMat);
@@ -587,32 +537,25 @@
                     this.bones.push(mesh);
                 }
 
-                // Smooth target positions for interpolation
                 this.targetPositions = Array(21).fill().map(() => new THREE.Vector3());
                 this.isActive = false;
             }
 
-            // Maps MediaPipe relative array into 3D world targets
             setTargetData(landmarks, baseZ, isAttacking) {
                 this.isActive = !!landmarks;
                 if(!landmarks) return;
 
-                // Scale up the normalized coordinates
                 for(let i=0; i<21; i++) {
                     const lm = landmarks[i];
                     
-                    // X logic: Mirror for local, un-mirror for remote. 
                     let x;
                     if(this.isLocal) {
-                        x = (0.5 - lm.x) * 15; // Camera acts as mirror
+                        x = (0.5 - lm.x) * 15; 
                     } else {
-                        x = (lm.x - 0.5) * 15; // Opponent is looking at us
+                        x = (lm.x - 0.5) * 15; 
                     }
 
-                    // Y logic
-                    let y = -(lm.y - 0.5) * 12 + 1.0; // Offset up slightly
-
-                    // Z logic: Depth relative to base shoulder depth + local finger curl depth
+                    let y = -(lm.y - 0.5) * 12 + 1.0; 
                     let localZ = (lm.z * CONFIG.DEPTH_SCALE);
                     let z = baseZ + localZ;
 
@@ -622,37 +565,28 @@
 
             update(dt) {
                 if(!this.isActive) {
-                    // Hide hands by moving them down if tracking lost
                     this.joints[0].position.y = Utils.lerp(this.joints[0].position.y, -10, 10 * dt);
                     return;
                 }
 
-                // 1. Smoothly interpolate joints to targets
-                const lerpSpeed = 15 * dt; // High responsiveness
+                const lerpSpeed = 15 * dt; 
                 for(let i=0; i<21; i++) {
                     this.joints[i].position.lerp(this.targetPositions[i], lerpSpeed);
                 }
 
-                // 2. Position and orient bones between joints
                 for(let i=0; i<this.connections.length; i++) {
                     const idxA = this.connections[i][0];
                     const idxB = this.connections[i][1];
                     const posA = this.joints[idxA].position;
                     const posB = this.joints[idxB].position;
 
-                    // Position bone at A
                     this.bones[i].position.copy(posA);
-                    
-                    // Point bone towards B
                     this.bones[i].lookAt(posB);
-                    
-                    // Scale bone length to exactly reach B
                     const dist = posA.distanceTo(posB);
                     this.bones[i].scale.set(1, 1, dist);
                 }
             }
             
-            // Get center of fist for hit detection (approximate knuckle mass)
             getHitboxCenter() {
                 if(!this.isActive) return new THREE.Vector3(0, -100, 0);
                 const k1 = this.joints[5].position;
@@ -670,40 +604,33 @@
             constructor() {
                 this.gfx = new GraphicsEngine();
                 
-                // Tracked entities
                 this.myHandL = new ProceduralHand(this.gfx.scene, true, true);
                 this.myHandR = new ProceduralHand(this.gfx.scene, true, false);
                 this.oppHandL = new ProceduralHand(this.gfx.scene, false, true);
                 this.oppHandR = new ProceduralHand(this.gfx.scene, false, false);
                 
-                // Opponent Head Target
                 const headGeo = new THREE.BoxGeometry(1.6, 2.0, 1.6);
                 const headMat = new THREE.MeshStandardMaterial({color: 0x222222, roughness: 0.6});
                 this.oppHead = new THREE.Mesh(headGeo, headMat);
-                this.oppHead.position.set(0, 1.8, -10); // Far back initially
+                this.oppHead.position.set(0, 1.8, -10); 
                 this.oppHead.castShadow = true;
                 this.gfx.scene.add(this.oppHead);
 
-                // State
-                this.state = 'MENU'; // MENU, LOBBY, WAITING, FIGHT, KO
+                this.state = 'MENU'; 
                 this.myHP = CONFIG.MAX_HEALTH;
                 this.oppHP = CONFIG.MAX_HEALTH;
                 
-                // Movement Variables
-                this.myBaseZ = 4;    // Where my body is
-                this.oppBaseZ = -4;  // Where opponent body is
+                this.myBaseZ = 4;    
+                this.oppBaseZ = -4;  
                 this.myHeadPos = new THREE.Vector3(0, 1.6, 4);
                 this.oppHeadPos = new THREE.Vector3(0, 1.6, -4);
                 this.targetCameraPos = new THREE.Vector3(0, 1.6, 6);
 
-                // Cooldowns
                 this.lastPunchTime = 0;
                 
-                // Timing
                 this.clock = new THREE.Clock();
                 this.fightStartTime = 0;
 
-                // Network Data Payloads
                 this.localPosePayload = { head: {x:0, y:0, z:0}, hands: [null, null] };
             }
 
@@ -719,37 +646,32 @@
                 this.updateUIHealth();
                 AudioSys.playHit();
                 
-                // Screen effect
                 const flash = document.getElementById('hit-flash');
                 flash.style.opacity = '0.8';
                 setTimeout(() => flash.style.opacity = '0', 200);
                 
-                // Camera shake
                 this.gfx.camera.position.x += (Math.random()-0.5)*2;
                 this.gfx.camera.position.y += (Math.random()-0.5)*2;
                 
-                // Particles
-                this.gfx.emitParticles(location.x, location.y, location.z, 0xff0000); // Blood/Sweat
+                this.gfx.emitParticles(location.x, location.y, location.z, 0xff0000); 
 
                 if(this.myHP <= 0) this.endGame(false);
             }
 
             landHit(damage, handCenter) {
                 const now = Date.now();
-                if(now - this.lastPunchTime < CONFIG.PUNCH_COOLDOWN) return; // Cooldown
+                if(now - this.lastPunchTime < CONFIG.PUNCH_COOLDOWN) return; 
                 
                 this.lastPunchTime = now;
                 this.oppHP -= damage;
                 this.updateUIHealth();
                 AudioSys.playHit();
                 
-                // Visual feedback on opponent head
                 this.oppHead.material.color.setHex(0xffffff);
                 setTimeout(() => this.oppHead.material.color.setHex(0x222222), 100);
                 
-                this.gfx.emitParticles(handCenter.x, handCenter.y, handCenter.z, 0xaabbff); // Sweat sparks
+                this.gfx.emitParticles(handCenter.x, handCenter.y, handCenter.z, 0xaabbff); 
                 
-                // Send over network
                 NetworkSys.sendHit(damage, handCenter);
 
                 if(this.oppHP <= 0) this.endGame(true);
@@ -757,21 +679,15 @@
 
             checkPhysics() {
                 if(this.state !== 'FIGHT') return;
-
-                // Hit detection: Check if My Hands intersect Opponent Head
-                const hitRadius = 1.2; // Box radius tolerance
+                const hitRadius = 1.2; 
                 
-                // My Left Hand Hit
                 if(this.myHandL.isActive) {
                     let LPos = this.myHandL.getHitboxCenter();
-                    // If Z is far enough forward into opponent space
                     if(LPos.distanceTo(this.oppHead.position) < hitRadius) {
-                        // Calculate velocity/impact (simplified here using depth depth extension)
                         this.landHit(CONFIG.BASE_DAMAGE, LPos);
                     }
                 }
                 
-                // My Right Hand Hit
                 if(this.myHandR.isActive) {
                     let RPos = this.myHandR.getHitboxCenter();
                     if(RPos.distanceTo(this.oppHead.position) < hitRadius) {
@@ -787,7 +703,6 @@
                 this.updateUIHealth();
                 this.fightStartTime = Date.now();
                 
-                // Hide all UI
                 document.querySelectorAll('.ui-panel, #game-over').forEach(el => el.classList.add('hidden'));
                 document.getElementById('health-hud').classList.remove('hidden');
                 
@@ -800,61 +715,40 @@
                 const sub = document.getElementById('end-subtext');
                 if(isWin) {
                     sub.innerText = "CHAMPION";
-                    sub.style.color = "#fbbf24"; // yellow-400
+                    sub.style.color = "#fbbf24"; 
                 } else {
                     sub.innerText = "YOU WERE DESTROYED";
-                    sub.style.color = "#ef4444"; // red-500
+                    sub.style.color = "#ef4444"; 
                 }
             }
 
-            // Called every frame to process local AI data
             processLocalPose(results) {
                 if(!results.poseLandmarks || this.state !== 'FIGHT') return;
 
-                // 1. Process Head/Body for dodging and depth
                 const nose = results.poseLandmarks[0];
                 const L_shoulder = results.poseLandmarks[11];
                 const R_shoulder = results.poseLandmarks[12];
                 
-                // Avg shoulder Z determines our body depth (stepping in/out)
                 const bodyZ = (L_shoulder.z + R_shoulder.z) / 2;
                 
-                // Map to 3D space
                 this.targetCameraPos.x = (0.5 - nose.x) * 10;
                 this.targetCameraPos.y = -(nose.y - 0.5) * 5 + 1.6;
-                // Move camera forward/back based on stepping
                 this.myBaseZ = 4 + (bodyZ * 5); 
-                this.targetCameraPos.z = this.myBaseZ + 2; // Camera is slightly behind hands
+                this.targetCameraPos.z = this.myBaseZ + 2; 
 
-                // Update payload
                 this.localPosePayload.head = { x: this.targetCameraPos.x, y: this.targetCameraPos.y, z: this.myBaseZ };
                 
-                // 2. Process Hands (Finger Tracking)
-                // We pass the raw landmarks to the ProceduralHand class.
-                // We also pass our base Z so hands extend FROM our body.
-                
-                // Holistic provides .leftHandLandmarks and .rightHandLandmarks
-                // BUT remember webcam is mirrored. Physical Left hand = Screen Right side.
-                // MediaPipe handles mirror weirdly. Usually leftHandLandmarks is the physical left hand.
                 this.myHandL.setTargetData(results.leftHandLandmarks, this.myBaseZ, false);
                 this.myHandR.setTargetData(results.rightHandLandmarks, this.myBaseZ, false);
 
-                // Prepare payload arrays for network
                 this.localPosePayload.hands[0] = results.leftHandLandmarks ? results.leftHandLandmarks.map(l => ({x:l.x, y:l.y, z:l.z})) : null;
                 this.localPosePayload.hands[1] = results.rightHandLandmarks ? results.rightHandLandmarks.map(l => ({x:l.x, y:l.y, z:l.z})) : null;
 
-                // Send to opponent
                 NetworkSys.sendPose(this.localPosePayload);
             }
 
-            // Called when network packet arrives
             processRemotePose(payload) {
-                // Update Opponent Head Target position
-                // Note: We mirror X because they are facing us
                 this.oppHeadPos.set(-payload.head.x, payload.head.y, -payload.head.z);
-                
-                // Update Opponent Hands
-                // Opponent's Left Hand (Payload [0]) maps to our right side (their left)
                 this.oppHandL.setTargetData(payload.hands[0], -payload.head.z, false);
                 this.oppHandR.setTargetData(payload.hands[1], -payload.head.z, false);
             }
@@ -864,34 +758,26 @@
                 const dt = this.clock.getDelta();
 
                 if(this.state === 'FIGHT') {
-                    // Update timer
                     const elapsed = Math.floor((Date.now() - this.fightStartTime)/1000);
                     const m = String(Math.floor(elapsed/60)).padStart(2,'0');
                     const s = String(elapsed%60).padStart(2,'0');
                     document.getElementById('fight-timer').innerText = `${m}:${s}`;
 
-                    // Smooth Camera Movement (Dodging parallax)
                     this.gfx.camera.position.lerp(this.targetCameraPos, 5 * dt);
-                    this.gfx.camera.lookAt(0, 1.6, -4); // Look at center ring
+                    this.gfx.camera.lookAt(0, 1.6, -4); 
 
-                    // Smooth Opponent Head Movement
                     this.oppHead.position.lerp(this.oppHeadPos, 10 * dt);
-                    this.oppHead.rotation.y = Math.sin(Date.now()*0.002) * 0.2; // Slight idle breathing rotation
+                    this.oppHead.rotation.y = Math.sin(Date.now()*0.002) * 0.2; 
 
-                    // Update Hands Animation
                     this.myHandL.update(dt);
                     this.myHandR.update(dt);
                     this.oppHandL.update(dt);
                     this.oppHandR.update(dt);
 
-                    // Physics Engine
                     this.checkPhysics();
                 }
 
-                // Update particle engine
                 this.gfx.updateParticles(dt);
-                
-                // Render 3D Scene
                 this.gfx.render();
             }
         }
@@ -919,9 +805,9 @@
             }
 
             initJoin(roomName) {
-                this.peer = new Peer(); // Random ID for client
+                this.peer = new Peer(); 
                 this.peer.on('open', () => {
-                    const c = this.peer.connect(CONFIG.PEER_PREFIX + roomName, { reliable: false }); // UDP style for speed
+                    const c = this.peer.connect(CONFIG.PEER_PREFIX + roomName, { reliable: false }); 
                     this.setupConnection(c);
                 });
                 this.peer.on('error', () => this.showError('Could not connect. Is Host ready?'));
@@ -951,7 +837,6 @@
             }
 
             sendPose(poseData) {
-                // Throttle/compress data here if needed. For LAN/good connections, raw array is fine.
                 if(this.conn && this.conn.open) {
                     this.conn.send({ type: 'p', d: poseData });
                 }
@@ -985,7 +870,6 @@
         
         const System = {
             video: document.getElementById('input_video'),
-            pip: document.getElementById('webcam_feed'),
             ai: null,
 
             showUI: (id) => {
@@ -998,17 +882,13 @@
             initializeCamera: async () => {
                 System.showUI('step-loading');
                 try {
-                    // Request high framerate camera
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         video: { width: 640, height: 480, frameRate: { ideal: 60, min: 30 } } 
                     });
                     System.video.srcObject = stream;
-                    System.pip.srcObject = stream;
                     
                     System.video.onloadedmetadata = () => {
                         System.video.play();
-                        System.pip.play();
-                        System.pip.style.display = 'block';
                         System.initAI();
                     };
                 } catch (err) {
@@ -1020,11 +900,10 @@
             },
 
             initAI: () => {
-                // Load MediaPipe Holistic model
                 System.ai = new Holistic({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`});
                 System.ai.setOptions({
-                    modelComplexity: 1,      // Balance speed vs accuracy
-                    smoothLandmarks: true,   // Reduces jitter
+                    modelComplexity: 1,      
+                    smoothLandmarks: true,   
                     enableSegmentation: false,
                     smoothSegmentation: false,
                     refineFaceLandmarks: false,
@@ -1034,7 +913,6 @@
                 
                 System.ai.onResults((results) => Game.processLocalPose(results));
                 
-                // Start AI Loop processing frames from video
                 const detectLoop = async () => {
                     if (System.video.readyState >= 2) {
                         await System.ai.send({image: System.video});
@@ -1043,7 +921,6 @@
                 };
                 detectLoop();
 
-                // Move to Lobby
                 System.showUI('step-lobby');
             },
 
@@ -1063,7 +940,6 @@
             }
         };
 
-        // Boot up game loop
         Game.loop();
 
     </script>
