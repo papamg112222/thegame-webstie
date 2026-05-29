@@ -203,7 +203,7 @@
                     Host a Match
                 </h3>
                 <input type="text" id="host-room-name" placeholder="CREATE ROOM NAME (e.g. ARENA1)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-5 py-4 text-white font-mono uppercase mb-4 focus:border-blue-500 outline-none transition-all placeholder-slate-600 text-lg">
-                <button onclick="System.hostRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-black text-white transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] tracking-widest text-lg">
+                <button id="host-btn" onclick="System.hostRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-black text-white transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] tracking-widest text-lg disabled:opacity-50">
                     CREATE SERVER
                 </button>
             </div>
@@ -221,7 +221,7 @@
                     Join a Match
                 </h3>
                 <input type="text" id="join-room-name" placeholder="ENTER FRIEND'S ROOM NAME" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-5 py-4 text-white font-mono uppercase mb-4 focus:border-red-500 outline-none transition-all placeholder-slate-600 text-lg">
-                <button onclick="System.joinRoom()" class="w-full bg-red-600 hover:bg-red-500 py-4 rounded-xl font-black text-white transition-all shadow-[0_0_20px_rgba(220,38,38,0.3)] tracking-widest text-lg">
+                <button id="join-btn" onclick="System.joinRoom()" class="w-full bg-red-600 hover:bg-red-500 py-4 rounded-xl font-black text-white transition-all shadow-[0_0_20px_rgba(220,38,38,0.3)] tracking-widest text-lg disabled:opacity-50">
                     ENTER RING
                 </button>
             </div>
@@ -314,7 +314,8 @@
          */
         const CONFIG = {
             // Unique prefix for PeerJS to avoid collisions on the public network
-            PEER_PREFIX: 'eqmx-voxel-box-v5-final-',
+            // Incremented to v6 to ensure a clean slate on the public STUN servers
+            PEER_PREFIX: 'eqmx-voxel-box-v6-final-',
             
             // Health points scaled up for finer granularity during damage calculations
             MAX_HEALTH: 1000, 
@@ -334,13 +335,27 @@
         };
 
         /**
+         * WebRTC STUN Servers (CRITICAL FIX FOR CONNECTION ISSUES)
+         * These Google and Twilio servers help clients punch through firewalls and NATs.
+         */
+        const PEER_OPTIONS = {
+            config: {
+                'iceServers': [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
+                ]
+            }
+        };
+
+        /**
          * Utility functions for math and data compression.
          */
         const Utils = {
             /**
              * Linear Interpolation function.
              * Used to smooth out jittery AI tracking data and animate objects smoothly over time.
-             * * @param {number} start - The current value.
+             * @param {number} start - The current value.
              * @param {number} end - The target value.
              * @param {number} amt - The interpolation amount (0.0 to 1.0).
              * @returns {number} The interpolated value.
@@ -352,7 +367,7 @@
             /**
              * Compresses a 3D Vector object into a simple Array of numbers rounded to 3 decimals.
              * This drastically reduces JSON payload sizes sent over the network, fixing lag issues.
-             * * @param {Object} vector - A MediaPipe landmark object {x, y, z}.
+             * @param {Object} vector - A MediaPipe landmark object {x, y, z}.
              * @returns {Array<number>} Compressed array [x, y, z].
              */
             pack: function(vector) {
@@ -381,7 +396,7 @@
 
             /**
              * Plays a basic tone wave with a volume envelope (fade out).
-             * * @param {number} frequency - Pitch of the tone in Hz.
+             * @param {number} frequency - Pitch of the tone in Hz.
              * @param {string} type - Wave type ('sine', 'square', 'triangle', 'sawtooth').
              * @param {number} duration - Length of the sound in seconds.
              * @param {number} volume - Initial volume level (0.0 to 1.0).
@@ -415,7 +430,7 @@
 
             /**
              * Generates a burst of white noise, useful for impact or wind sounds.
-             * * @param {number} duration - Length of the noise in seconds.
+             * @param {number} duration - Length of the noise in seconds.
              * @param {number} volume - Initial volume level.
              */
             playNoise(duration, volume) {
@@ -625,7 +640,7 @@
 
             /**
              * Triggers a burst of particles at a specific 3D location.
-             * * @param {number} x - X coordinate of impact
+             * @param {number} x - X coordinate of impact
              * @param {number} y - Y coordinate of impact
              * @param {number} z - Z coordinate of impact
              * @param {number} colorHex - Hex color for the particles (e.g., red for blood, blue for sweat)
@@ -660,7 +675,7 @@
 
             /**
              * Steps the physics simulation for all active particles.
-             * * @param {number} deltaTime - Time elapsed since last frame.
+             * @param {number} deltaTime - Time elapsed since last frame.
              */
             updateParticles(deltaTime) {
                 const positions = this.particleSystem.geometry.attributes.position.array;
@@ -730,7 +745,7 @@
         class ProceduralHand {
             /**
              * Initializes the 3D meshes for a single hand.
-             * * @param {THREE.Scene} scene - The main ThreeJS scene to attach to.
+             * @param {THREE.Scene} scene - The main ThreeJS scene to attach to.
              * @param {boolean} isLocal - True if this is the player's hand, false if opponent's.
              */
             constructor(scene, isLocal) {
@@ -806,7 +821,7 @@
 
             /**
              * Parses incoming landmark data and calculates target 3D positions for all joints.
-             * * @param {Array|null} landmarks - Array of [x,y,z] coordinates from AI or Network.
+             * @param {Array|null} landmarks - Array of [x,y,z] coordinates from AI or Network.
              * @param {number} baseZDepth - The estimated depth of the player's body to offset the hands from.
              */
             setTargetData(landmarks, baseZDepth) {
@@ -845,7 +860,7 @@
 
             /**
              * Animation step function. Moves the joints smoothly toward their targets.
-             * * @param {number} deltaTime - Time since last frame.
+             * @param {number} deltaTime - Time since last frame.
              */
             update(deltaTime) {
                 // If tracking is lost, smoothly hide the hand underground
@@ -888,7 +903,7 @@
             /**
              * Calculates the center mass of the glove for hit detection.
              * Uses the mid-point between the base of the index finger and base of the pinky.
-             * * @returns {THREE.Vector3} The center of the fist.
+             * @returns {THREE.Vector3} The center of the fist.
              */
             getHitboxCenter() {
                 if(!this.isActive) {
@@ -979,7 +994,7 @@
 
             /**
              * Processes incoming damage to the local player.
-             * * @param {number} amount - Damage taken.
+             * @param {number} amount - Damage taken.
              * @param {Object} location - 3D vector of where the hit occurred.
              */
             takeDamage(amount, location) {
@@ -1010,7 +1025,7 @@
 
             /**
              * Processes outgoing damage dealt to the opponent.
-             * * @param {number} amount - Damage dealt.
+             * @param {number} amount - Damage dealt.
              * @param {THREE.Vector3} position - 3D vector of the hit.
              */
             landHit(amount, position) {
@@ -1101,7 +1116,7 @@
 
             /**
              * Handles end of match state.
-             * * @param {boolean} isWin - Did the local player win?
+             * @param {boolean} isWin - Did the local player win?
              */
             endGame(isWin) {
                 this.state = 'KO'; 
@@ -1123,7 +1138,7 @@
 
             /**
              * Ingests local AI data, applies logic, and formats it for networking.
-             * * @param {Object} results - Raw output from MediaPipe Holistic.
+             * @param {Object} results - Raw output from MediaPipe Holistic.
              */
             processLocalPose(results) {
                 // Ignore if no body found or not in fight state
@@ -1178,7 +1193,7 @@
 
             /**
              * Ingests opponent data from the network and applies it to remote models.
-             * * @param {Object} payload - Unpacked network data.
+             * @param {Object} payload - Unpacked network data.
              */
             processRemotePose(payload) {
                 // Update opponent head target position (mirroring X axis so they face us)
@@ -1253,12 +1268,23 @@
             }
 
             /**
+             * Resets UI buttons in case of failure.
+             */
+            resetButtons() {
+                const joinBtn = document.getElementById('join-btn');
+                if(joinBtn) {
+                    joinBtn.innerText = "ENTER RING";
+                    joinBtn.disabled = false;
+                }
+            }
+
+            /**
              * Initializes this client as the host of a room.
-             * * @param {string} roomName - The unique string identifier for the room.
+             * @param {string} roomName - The unique string identifier for the room.
              */
             initHost(roomName) {
-                // Create peer with a specific ID format
-                this.peer = new Peer(CONFIG.PEER_PREFIX + roomName);
+                // Create peer with robust ICE server config to bypass firewalls
+                this.peer = new Peer(CONFIG.PEER_PREFIX + roomName, PEER_OPTIONS);
                 
                 this.peer.on('open', () => {
                     console.log("Server created successfully.");
@@ -1268,50 +1294,67 @@
                 
                 this.peer.on('error', (error) => {
                     console.error("PeerJS Error: ", error);
-                    let message = 'Network Error.';
+                    let message = 'Network Error. Check your internet connection.';
                     if(error.type === 'unavailable-id') {
                         message = 'Room name already taken. Try another.';
                     }
                     this.showError(message);
+                    this.resetButtons();
                 });
                 
                 // Wait for an incoming connection
                 this.peer.on('connection', (connection) => {
-                    this.setupConnection(connection);
+                    this.setupConnection(connection, false);
                 });
             }
 
             /**
              * Initializes this client as a joiner, connecting to an existing room.
-             * * @param {string} roomName - The room identifier to join.
+             * @param {string} roomName - The room identifier to join.
              */
             initJoin(roomName) {
-                // Create peer with random ID
-                this.peer = new Peer(); 
+                // Create peer with random ID and robust ICE config
+                this.peer = new Peer(PEER_OPTIONS); 
                 
                 this.peer.on('open', () => {
                     console.log("Client created. Attempting to connect to room:", roomName);
                     
-                    // Connect to specific host ID
-                    const connection = this.peer.connect(CONFIG.PEER_PREFIX + roomName); 
-                    this.setupConnection(connection);
+                    // Connect to specific host ID. 'reliable: true' forces guaranteed delivery initially
+                    const connection = this.peer.connect(CONFIG.PEER_PREFIX + roomName, { reliable: true }); 
+                    this.setupConnection(connection, true);
                 });
                 
                 this.peer.on('error', (error) => {
                     console.error("PeerJS Error: ", error);
-                    this.showError('Could not connect. Is the Host ready?');
+                    this.showError('Could not connect. Is the Host ready on that name?');
+                    this.resetButtons();
                 });
             }
 
             /**
              * Configures event listeners for an established data connection.
-             * * @param {DataConnection} connection - The PeerJS data channel.
+             * @param {DataConnection} connection - The PeerJS data channel.
+             * @param {boolean} isJoiner - Is this the person joining the room?
              */
-            setupConnection(connection) {
+            setupConnection(connection, isJoiner) {
                 this.conn = connection;
+                let connectionTimeout = null;
+                
+                // If we are the joiner, we need to make sure the connection actually opens
+                // before getting stuck on the "CONNECTING..." screen forever.
+                if (isJoiner) {
+                    connectionTimeout = setTimeout(() => {
+                        if (this.conn && !this.conn.open) {
+                            this.showError("Connection timed out. Network firewall might be blocking WebRTC.");
+                            this.resetButtons();
+                        }
+                    }, 10000); // 10 second timeout
+                }
                 
                 const onReadyFunction = () => { 
+                    if (connectionTimeout) clearTimeout(connectionTimeout);
                     console.log("WebRTC Connection fully established!"); 
+                    this.resetButtons();
                     Game.startFight(); 
                 };
                 
@@ -1342,7 +1385,7 @@
                 // Handle disconnection
                 this.conn.on('close', () => { 
                     console.warn("Connection closed by peer.");
-                    alert("Opponent left the match."); 
+                    alert("Opponent left the match or disconnected."); 
                     window.location.reload(); 
                 });
             }
@@ -1510,8 +1553,12 @@
             hostRoom: () => { 
                 const roomInput = document.getElementById('host-room-name');
                 const roomString = roomInput.value.trim().toUpperCase(); 
+                const hostBtn = document.getElementById('host-btn');
                 
                 if(roomString) {
+                    // Provide UI feedback
+                    hostBtn.innerText = "INITIALIZING...";
+                    hostBtn.disabled = true;
                     NetworkSys.initHost(roomString); 
                 }
             },
@@ -1522,8 +1569,13 @@
             joinRoom: () => { 
                 const roomInput = document.getElementById('join-room-name');
                 const roomString = roomInput.value.trim().toUpperCase(); 
+                const joinBtn = document.getElementById('join-btn');
                 
                 if(roomString) {
+                    // Provide UI feedback to the user while connecting
+                    joinBtn.innerText = "CONNECTING...";
+                    joinBtn.disabled = true;
+                    
                     NetworkSys.initJoin(roomString); 
                 }
             },
