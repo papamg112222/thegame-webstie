@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Professional 3D Voxel Boxing Engine</title>
+    <title>Professional 3D Voxel Boxing Engine (EMQX Network)</title>
     
     <!-- 
       Tailwind CSS Framework
@@ -20,16 +20,17 @@
     
     <!-- 
       MediaPipe AI Framework
-      Holistic model is used to track 33 body pose landmarks and 21 hand landmarks per hand.
+      Holistic model is used to track body pose landmarks and hand landmarks.
     -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
     
     <!-- 
-      PeerJS Networking Library
-      Wraps WebRTC to provide a simple API for establishing direct, low-latency Peer-to-Peer connections.
+      MQTT.js (EMQX Integration)
+      Replaces PeerJS/WebRTC. Uses a centralized MQTT broker over WebSockets 
+      to guarantee connection through strict firewalls and NATs.
     -->
-    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
     <!-- 
       Application Stylesheet
@@ -133,14 +134,12 @@
 
     <!-- 
       Hidden Video Element
-      This is required by MediaPipe to process the camera stream. 
-      It is hidden via CSS to maintain full 3D immersion.
+      Required by MediaPipe to process the camera stream. Hidden for immersion.
     -->
     <video id="input_video" style="display:none;" autoplay playsinline></video>
 
     <!-- 
       Main 3D Graphics Canvas
-      Three.js binds to this element to render the WebGL scene.
     -->
     <canvas id="gameCanvas"></canvas>
 
@@ -165,7 +164,7 @@
                 </svg>
             </div>
             <h1 class="text-5xl font-black mb-4 text-yellow-400 glowing-text tracking-tighter uppercase">
-                Voxel Boxing
+                EMQX Voxel Boxing
             </h1>
             <p class="text-slate-400 mb-8 text-sm leading-relaxed">
                 Step back so the camera sees your upper body. Pure 3D immersion—no camera feed is shown on screen.
@@ -193,9 +192,10 @@
 
         <!-- STEP 3: MULTIPLAYER NETWORKING LOBBY -->
         <div id="step-lobby" class="ui-panel p-10 rounded-3xl max-w-xl w-full hidden">
-            <h2 class="text-4xl font-black text-center mb-8 text-white tracking-tighter">
-                FIGHT LOBBY
+            <h2 class="text-4xl font-black text-center mb-8 text-white tracking-tighter flex justify-center items-center">
+                <span class="mr-3 text-green-400 text-2xl">●</span> EMQX LOBBY
             </h2>
+            <p class="text-center text-slate-400 mb-6 text-sm">Powered by Public MQTT Broker (Bypasses Firewalls)</p>
             
             <!-- Host Server Section -->
             <div class="bg-black/50 p-6 rounded-2xl mb-6 border border-slate-800">
@@ -204,7 +204,7 @@
                 </h3>
                 <input type="text" id="host-room-name" placeholder="CREATE ROOM NAME (e.g. ARENA1)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-5 py-4 text-white font-mono uppercase mb-4 focus:border-blue-500 outline-none transition-all placeholder-slate-600 text-lg">
                 <button id="host-btn" onclick="System.hostRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-black text-white transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)] tracking-widest text-lg disabled:opacity-50">
-                    CREATE SERVER
+                    CONNECT TO EMQX
                 </button>
             </div>
 
@@ -235,10 +235,10 @@
                 <span class="text-4xl animate-pulse">📡</span>
             </div>
             <h2 class="text-3xl font-black text-white mb-3 tracking-tight">
-                Broadcasting...
+                Listening on MQTT...
             </h2>
             <p class="text-slate-400 text-sm mb-6">
-                Your server is live. Tell your opponent to join using this ID:
+                Connected to EMQX Broker. Tell your opponent to join using this ID:
             </p>
             <div class="bg-black/80 py-4 px-6 rounded-xl border border-blue-500/30 inline-block">
                 <span id="display-room-name" class="text-5xl font-black text-blue-400 font-mono tracking-widest"></span>
@@ -268,7 +268,6 @@
     <!-- 
       IN-GAME HEADS UP DISPLAY (HUD)
       Shows Health bars, Timer, and Round status. 
-      Hidden until the fight starts.
     -->
     <div id="health-hud" class="absolute top-0 left-0 w-full p-8 z-30 flex justify-between items-start hidden pointer-events-none">
         
@@ -309,13 +308,12 @@
          * ============================================================================
          */
 
-        /**
-         * Global configuration constants used throughout the game engine.
-         */
         const CONFIG = {
-            // Unique prefix for PeerJS to avoid collisions on the public network
-            // Incremented to v7 to ensure a perfectly clean slate on public signaling servers
-            PEER_PREFIX: 'eqmx-voxel-box-v7-final-',
+            // The Public EMQX Broker URL (Secure WebSockets)
+            EMQX_BROKER_URL: 'wss://broker.emqx.io:8084/mqtt',
+            
+            // Base topic prefix to ensure our game data doesn't collide with other users on the public broker
+            TOPIC_PREFIX: 'eqmx-boxing-engine-v1/',
             
             // Health points scaled up for finer granularity during damage calculations
             MAX_HEALTH: 1000, 
@@ -330,40 +328,14 @@
             DEPTH_SCALE: 15,
             
             // Rate at which to send network packets (in milliseconds). 
-            // 33ms is approximately 30 updates per second, ideal for preventing WebRTC clogging.
+            // 33ms is approximately 30 updates per second.
             NET_TICK_RATE: 33 
         };
 
-        /**
-         * WebRTC STUN Servers (CRITICAL FIX FOR CONNECTION ISSUES)
-         * These Google and Twilio servers help clients punch through firewalls and NATs.
-         * Providing multiple fallback URLs guarantees the best chance of WebRTC success.
-         */
-        const PEER_OPTIONS = {
-            debug: 2, // Helps identify signaling issues in the browser console
-            config: {
-                'iceServers': [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' },
-                    { urls: 'stun:stun2.l.google.com:19302' },
-                    { urls: 'stun:stun3.l.google.com:19302' },
-                    { urls: 'stun:stun4.l.google.com:19302' },
-                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
-                ]
-            }
-        };
-
-        /**
-         * Utility functions for math and data compression.
-         */
         const Utils = {
             /**
              * Linear Interpolation function.
              * Used to smooth out jittery AI tracking data and animate objects smoothly over time.
-             * @param {number} start - The current value.
-             * @param {number} end - The target value.
-             * @param {number} amt - The interpolation amount (0.0 to 1.0).
-             * @returns {number} The interpolated value.
              */
             lerp: function(start, end, amt) {
                 return (1 - amt) * start + amt * end;
@@ -371,9 +343,7 @@
 
             /**
              * Compresses a 3D Vector object into a simple Array of numbers rounded to 3 decimals.
-             * This drastically reduces JSON payload sizes sent over the network, fixing lag issues.
-             * @param {Object} vector - A MediaPipe landmark object {x, y, z}.
-             * @returns {Array<number>} Compressed array [x, y, z].
+             * This drastically reduces JSON payload sizes sent over MQTT.
              */
             pack: function(vector) {
                 return [
@@ -388,85 +358,54 @@
          * ============================================================================
          * 2. PROCEDURAL AUDIO SYNTHESIZER ENGINE
          * ============================================================================
-         * Generates all sound effects mathematically using the Web Audio API.
-         * This eliminates the need to load external .mp3 or .wav files.
          */
         class AudioEngine {
             constructor() {
-                // Initialize the audio context. 
-                // Browsers often require a user interaction before this is allowed to run.
                 const AudioContextClass = window.AudioContext || window.webkitAudioContext;
                 this.ctx = new AudioContextClass();
             }
 
-            /**
-             * Plays a basic tone wave with a volume envelope (fade out).
-             * @param {number} frequency - Pitch of the tone in Hz.
-             * @param {string} type - Wave type ('sine', 'square', 'triangle', 'sawtooth').
-             * @param {number} duration - Length of the sound in seconds.
-             * @param {number} volume - Initial volume level (0.0 to 1.0).
-             */
             playTone(frequency, type, duration, volume) {
-                // Ensure context is running (fixes autoplay policies)
-                if (this.ctx.state === 'suspended') {
-                    this.ctx.resume();
-                }
+                if (this.ctx.state === 'suspended') this.ctx.resume();
 
-                // Create oscillator and gain (volume) nodes
                 const oscillator = this.ctx.createOscillator();
                 const gainNode = this.ctx.createGain();
                 
-                // Configure oscillator
                 oscillator.type = type; 
                 oscillator.frequency.setValueAtTime(frequency, this.ctx.currentTime);
                 
-                // Configure volume envelope (ADSR)
                 gainNode.gain.setValueAtTime(volume, this.ctx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
                 
-                // Connect nodes to output
                 oscillator.connect(gainNode); 
                 gainNode.connect(this.ctx.destination);
                 
-                // Start and schedule stop
                 oscillator.start(); 
                 oscillator.stop(this.ctx.currentTime + duration);
             }
 
-            /**
-             * Generates a burst of white noise, useful for impact or wind sounds.
-             * @param {number} duration - Length of the noise in seconds.
-             * @param {number} volume - Initial volume level.
-             */
             playNoise(duration, volume) {
-                if (this.ctx.state === 'suspended') {
-                    this.ctx.resume();
-                }
+                if (this.ctx.state === 'suspended') this.ctx.resume();
 
-                // Create a buffer and fill it with random values (white noise)
                 const bufferSize = this.ctx.sampleRate * duration;
                 const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
                 const data = buffer.getChannelData(0);
                 
                 for (let i = 0; i < bufferSize; i++) {
-                    // Random value between -1.0 and 1.0
                     data[i] = Math.random() * 2 - 1;
                 }
                 
                 const noiseSource = this.ctx.createBufferSource(); 
                 noiseSource.buffer = buffer;
                 
-                // Add a lowpass filter to make the noise sound more like a "thud" than static
                 const filter = this.ctx.createBiquadFilter(); 
                 filter.type = 'lowpass'; 
                 filter.frequency.value = 1000;
                 
-                // Apply volume envelope
                 const gainNode = this.ctx.createGain(); 
                 gainNode.gain.setValueAtTime(volume, this.ctx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
                 
-                // Connect graph
                 noiseSource.connect(filter); 
                 filter.connect(gainNode); 
                 gainNode.connect(this.ctx.destination);
@@ -474,51 +413,34 @@
                 noiseSource.start();
             }
 
-            /**
-             * Plays the sound of a heavy boxing punch landing.
-             * Mixes a low-frequency square wave with a burst of filtered noise.
-             */
             playHit() { 
                 this.playNoise(0.4, 1.5); 
                 this.playTone(80, 'square', 0.3, 0.8); 
             }
             
-            /**
-             * Plays the classic "Ding Ding!" boxing bell sound.
-             * Uses two sine waves played in sequence.
-             */
             playBell() { 
                 this.playTone(800, 'sine', 1.5, 0.8); 
-                setTimeout(() => {
-                    this.playTone(800, 'sine', 1.5, 0.8);
-                }, 300); 
+                setTimeout(() => { this.playTone(800, 'sine', 1.5, 0.8); }, 300); 
             }
         }
         
-        // Instantiate global audio system
         const AudioSys = new AudioEngine();
 
         /**
          * ============================================================================
          * 3. THREE.JS GRAPHICS ENGINE
          * ============================================================================
-         * Handles rendering the 3D environment, the lighting, and the particle systems.
          */
         class GraphicsEngine {
             constructor() {
-                // Initialize main scene
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x050505);
-                
-                // Add a thin, subtle fog to create depth, but not so thick it blocks vision
                 this.scene.fog = new THREE.FogExp2(0x050505, 0.015);
                 
-                // Initialize Perspective Camera
                 const aspect = window.innerWidth / window.innerHeight;
                 this.camera = new THREE.PerspectiveCamera(65, aspect, 0.1, 100);
                 this.camera.position.set(0, 1.6, 6);
 
-                // Initialize WebGL Renderer with performance optimizations
                 const canvasElement = document.getElementById('gameCanvas');
                 this.renderer = new THREE.WebGLRenderer({ 
                     canvas: canvasElement, 
@@ -526,33 +448,23 @@
                     powerPreference: "high-performance" 
                 });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
-                
-                // Cap pixel ratio to 2 to prevent extreme lag on ultra-high-res displays
                 this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 
-                // Construct world elements
                 this.buildLighting();
                 this.buildRing();
                 this.buildParticles();
 
-                // Handle window resizing to keep aspect ratio correct
                 window.addEventListener('resize', this.onWindowResize.bind(this), false);
             }
 
-            /**
-             * Constructs the dynamic lighting setup for the arena.
-             */
             buildLighting() {
-                // 1. High Ambient light for a brighter overall scene, ensuring visibility
                 const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
                 this.scene.add(ambientLight);
                 
-                // 2. Strong directional fill light facing the scene from the front
                 const fillLight = new THREE.DirectionalLight(0xffffff, 1.5);
                 fillLight.position.set(5, 10, 10);
                 this.scene.add(fillLight);
                 
-                // 3. Main overhead stadium spotlight (Wide angle, bright)
                 const mainLight = new THREE.SpotLight(0xffffff, 5);
                 mainLight.position.set(0, 15, 0); 
                 mainLight.angle = Math.PI / 3; 
@@ -561,7 +473,6 @@
                 mainLight.decay = 1;
                 this.scene.add(mainLight);
 
-                // 4. Corner rim lights to create cool edge highlights on players
                 const blueCornerLight = new THREE.PointLight(0x3b82f6, 4, 30);
                 blueCornerLight.position.set(-8, 3, -8);
                 this.scene.add(blueCornerLight);
@@ -571,171 +482,107 @@
                 this.scene.add(redCornerLight);
             }
 
-            /**
-             * Constructs the Boxing Ring geometry (Floor and Ropes).
-             */
             buildRing() {
-                // Floor grid to give perspective and depth perception
                 const gridHelper = new THREE.GridHelper(30, 30, 0x475569, 0x1e293b);
                 gridHelper.position.y = -2;
                 this.scene.add(gridHelper);
 
-                // Build the ring ropes using basic lines
-                // Array of materials corresponding to rope colors
                 const ropeMaterials = [
-                    new THREE.LineBasicMaterial({ color: 0xff3333 }), // Bottom (Red)
-                    new THREE.LineBasicMaterial({ color: 0xffffff }), // Middle (White)
-                    new THREE.LineBasicMaterial({ color: 0x3333ff })  // Top (Blue)
+                    new THREE.LineBasicMaterial({ color: 0xff3333 }),
+                    new THREE.LineBasicMaterial({ color: 0xffffff }),
+                    new THREE.LineBasicMaterial({ color: 0x3333ff }) 
                 ];
                 
-                // Loop to create 3 tiers of ropes
                 for(let ropeIndex = 0; ropeIndex < 3; ropeIndex++) {
                     const heightY = 0.5 + (ropeIndex * 1.5);
-                    
-                    // Define the 4 corners of the ring
                     const points = [
                         new THREE.Vector3(-10, heightY, -10),
                         new THREE.Vector3(10, heightY, -10),
                         new THREE.Vector3(10, heightY, 10),
                         new THREE.Vector3(-10, heightY, 10),
-                        new THREE.Vector3(-10, heightY, -10) // Connect back to start
+                        new THREE.Vector3(-10, heightY, -10)
                     ];
-                    
                     const ropeGeometry = new THREE.BufferGeometry().setFromPoints(points);
                     const ropeLine = new THREE.Line(ropeGeometry, ropeMaterials[ropeIndex]);
-                    
                     this.scene.add(ropeLine);
                 }
             }
 
-            /**
-             * Initializes the BufferGeometry required for the Particle System.
-             */
             buildParticles() {
                 const particleGeometry = new THREE.BufferGeometry();
                 this.maxParticleCount = 100;
                 
-                // Create a Float32Array to hold x,y,z coordinates for every particle
                 const positionArray = new Float32Array(this.maxParticleCount * 3);
-                particleGeometry.setAttribute(
-                    'position', 
-                    new THREE.BufferAttribute(positionArray, 3)
-                );
+                particleGeometry.setAttribute('position', new THREE.BufferAttribute(positionArray, 3));
                 
-                // Create material with additive blending for a glowing effect
                 const particleMaterial = new THREE.PointsMaterial({ 
-                    size: 0.2, 
-                    color: 0xffffff, 
-                    transparent: true, 
-                    blending: THREE.AdditiveBlending 
+                    size: 0.2, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending 
                 });
                 
                 this.particleSystem = new THREE.Points(particleGeometry, particleMaterial);
                 this.scene.add(this.particleSystem);
                 
-                // Internal data structure to track physics for each particle
                 this.particlePhysicsData = [];
                 for(let i = 0; i < this.maxParticleCount; i++) {
-                    this.particlePhysicsData.push({ 
-                        velocity: new THREE.Vector3(), 
-                        life: 0 
-                    });
+                    this.particlePhysicsData.push({ velocity: new THREE.Vector3(), life: 0 });
                 }
             }
 
-            /**
-             * Triggers a burst of particles at a specific 3D location.
-             * @param {number} x - X coordinate of impact
-             * @param {number} y - Y coordinate of impact
-             * @param {number} z - Z coordinate of impact
-             * @param {number} colorHex - Hex color for the particles (e.g., red for blood, blue for sweat)
-             */
             emitParticles(x, y, z, colorHex) {
-                // Update material color
                 this.particleSystem.material.color.setHex(colorHex);
-                
-                // Get direct access to position buffer array
                 const positions = this.particleSystem.geometry.attributes.position.array;
                 
                 for(let i = 0; i < this.maxParticleCount; i++) {
-                    // Reset life to maximum
                     this.particlePhysicsData[i].life = 1.0;
-                    
-                    // Set starting position with slight randomization
                     positions[i * 3] = x + (Math.random() - 0.5) * 0.5;
                     positions[i * 3 + 1] = y + (Math.random() - 0.5) * 0.5;
                     positions[i * 3 + 2] = z + (Math.random() - 0.5) * 0.5;
-                    
-                    // Give it an explosive upward and outward velocity
                     this.particlePhysicsData[i].velocity.set(
                         (Math.random() - 0.5) * 10,
                         (Math.random() * 8) + 4, 
                         (Math.random() - 0.5) * 10
                     );
                 }
-                
-                // Flag buffer for update on next render
                 this.particleSystem.geometry.attributes.position.needsUpdate = true;
             }
 
-            /**
-             * Steps the physics simulation for all active particles.
-             * @param {number} deltaTime - Time elapsed since last frame.
-             */
             updateParticles(deltaTime) {
                 const positions = this.particleSystem.geometry.attributes.position.array;
                 let isAnyParticleActive = false;
                 
                 for(let i = 0; i < this.maxParticleCount; i++) {
                     let particle = this.particlePhysicsData[i];
-                    
                     if(particle.life > 0) {
                         isAnyParticleActive = true;
-                        
-                        // Decrease life over time
                         particle.life -= deltaTime * 2; 
-                        
-                        // Apply Gravity to Y velocity
                         particle.velocity.y -= 20 * deltaTime;
-                        
-                        // Apply velocity to position
                         positions[i * 3] += particle.velocity.x * deltaTime; 
                         positions[i * 3 + 1] += particle.velocity.y * deltaTime; 
                         positions[i * 3 + 2] += particle.velocity.z * deltaTime;
                         
-                        // Handle collision with the floor (Y = -2)
                         if(positions[i * 3 + 1] < -2) { 
                             positions[i * 3 + 1] = -2; 
-                            particle.velocity.y *= -0.3; // Bounce factor
-                            particle.velocity.x *= 0.8;  // Friction
+                            particle.velocity.y *= -0.3;
+                            particle.velocity.x *= 0.8;
                         }
-                        
-                        // Hide particle if life is depleted by moving it far away
                         if(particle.life <= 0) {
                             positions[i * 3] = 1000;
                         }
                     }
                 }
                 
-                // If particles are active, tell WebGL to update the buffer and fade opacity
                 if(isAnyParticleActive) {
                     this.particleSystem.geometry.attributes.position.needsUpdate = true;
                     this.particleSystem.material.opacity = Math.max(0, this.particlePhysicsData[0].life);
                 }
             }
 
-            /**
-             * Callback for window resize events.
-             */
             onWindowResize() {
                 this.camera.aspect = window.innerWidth / window.innerHeight;
                 this.camera.updateProjectionMatrix();
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
             }
 
-            /**
-             * Triggers the final WebGL render call for the current frame.
-             */
             render() { 
                 this.renderer.render(this.scene, this.camera); 
             }
@@ -745,77 +592,48 @@
          * ============================================================================
          * 4. PROCEDURAL VOXEL HAND GENERATION
          * ============================================================================
-         * Dynamically generates a 3D hand based on the 21 landmarks provided by the AI.
          */
         class ProceduralHand {
-            /**
-             * Initializes the 3D meshes for a single hand.
-             * @param {THREE.Scene} scene - The main ThreeJS scene to attach to.
-             * @param {boolean} isLocal - True if this is the player's hand, false if opponent's.
-             */
             constructor(scene, isLocal) {
                 this.scene = scene;
                 this.isLocal = isLocal;
-                
-                // Arrays to hold the instantiated mesh objects
                 this.joints = []; 
                 this.bones = [];  
-                
-                // MediaPipe Hand Landmark Connections Map
-                // Defines which joint index connects to which to form the skeletal structure.
                 this.connections = [
-                    [0,1], [1,2], [2,3], [3,4],       // Thumb joints
-                    [0,5], [5,6], [6,7], [7,8],       // Index finger joints
-                    [5,9], [9,10], [10,11], [11,12],  // Middle finger joints
-                    [9,13], [13,14], [14,15], [15,16],// Ring finger joints
-                    [13,17], [17,18], [18,19], [19,20],// Pinky finger joints
-                    [0,17]                            // Base palm connection
+                    [0,1], [1,2], [2,3], [3,4],       
+                    [0,5], [5,6], [6,7], [7,8],       
+                    [5,9], [9,10], [10,11], [11,12],  
+                    [9,13], [13,14], [14,15], [15,16],
+                    [13,17], [17,18], [18,19], [19,20],
+                    [0,17]                            
                 ];
 
-                // Determine color: Local player gets yellow/gold, remote gets cyan/blue
                 const voxelColor = isLocal ? 0xeab308 : 0x0ea5e9;
-                
-                // Material configuration for the voxels
                 const voxelMaterial = new THREE.MeshStandardMaterial({ 
-                    color: voxelColor, 
-                    roughness: 0.3, 
-                    metalness: 0.2 
+                    color: voxelColor, roughness: 0.3, metalness: 0.2 
                 });
                 
-                // Base geometries for the blocks
                 this.jointGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-                
                 this.boneGeometry = new THREE.BoxGeometry(0.12, 1, 0.12);
-                // Shift pivot point of the bone to its base so it rotates correctly
                 this.boneGeometry.translate(0, 0.5, 0); 
-                // Rotate to align with the Z axis (forward) for lookAt function
                 this.boneGeometry.rotateX(Math.PI / 2); 
 
-                // Generate 21 joints
                 for(let i = 0; i < 21; i++) {
-                    // Make fingertips slightly smaller for aesthetic
                     const scaleFactor = (i===4 || i===8 || i===12 || i===16 || i===20) ? 0.7 : 1.0;
-                    
                     const jointMesh = new THREE.Mesh(this.jointGeometry, voxelMaterial);
                     jointMesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
-                    
-                    // Start hidden below the floor
                     jointMesh.position.set(0, -10, 0);
-                    
                     this.scene.add(jointMesh);
                     this.joints.push(jointMesh);
                 }
 
-                // Generate bones between connections
                 for(let i = 0; i < this.connections.length; i++) {
                     const boneMesh = new THREE.Mesh(this.boneGeometry, voxelMaterial);
                     boneMesh.position.set(0, -10, 0);
-                    
                     this.scene.add(boneMesh);
                     this.bones.push(boneMesh);
                 }
 
-                // Array of Vector3 used to store the target position the AI wants the joint to go to
                 this.targetPositions = [];
                 for(let i = 0; i < 21; i++) {
                     this.targetPositions.push(new THREE.Vector3());
@@ -824,104 +642,56 @@
                 this.isActive = false;
             }
 
-            /**
-             * Parses incoming landmark data and calculates target 3D positions for all joints.
-             * @param {Array|null} landmarks - Array of [x,y,z] coordinates from AI or Network.
-             * @param {number} baseZDepth - The estimated depth of the player's body to offset the hands from.
-             */
             setTargetData(landmarks, baseZDepth) {
                 this.isActive = !!landmarks;
-                
                 if(!landmarks) return;
 
                 for(let i = 0; i < 21; i++) {
                     const currentLandmark = landmarks[i];
+                    let rawX = currentLandmark[0], rawY = currentLandmark[1], rawZ = currentLandmark[2];
                     
-                    // Extract packed data
-                    let rawX = currentLandmark[0];
-                    let rawY = currentLandmark[1];
-                    let rawZ = currentLandmark[2];
-                    
-                    // Calculate World X
-                    // Local player needs X mirrored so it acts like a true mirror.
-                    // Remote player needs standard mapping.
                     let targetX;
-                    if(this.isLocal) {
-                        targetX = (0.5 - rawX) * 15; 
-                    } else {
-                        targetX = (rawX - 0.5) * 15; 
-                    }
-
-                    // Calculate World Y
+                    if(this.isLocal) { targetX = (0.5 - rawX) * 15; } else { targetX = (rawX - 0.5) * 15; }
                     let targetY = -(rawY - 0.5) * 12 + 1.0; 
-                    
-                    // Calculate World Z based on body position + local hand depth
                     let targetZ = baseZDepth + (rawZ * CONFIG.DEPTH_SCALE);
 
-                    // Update the target vector
                     this.targetPositions[i].set(targetX, targetY, targetZ);
                 }
             }
 
-            /**
-             * Animation step function. Moves the joints smoothly toward their targets.
-             * @param {number} deltaTime - Time since last frame.
-             */
             update(deltaTime) {
-                // If tracking is lost, smoothly hide the hand underground
                 if(!this.isActive) {
                     const currentY = this.joints[0].position.y;
-                    const newY = Utils.lerp(currentY, -10, 10 * deltaTime);
-                    this.joints[0].position.y = newY;
+                    this.joints[0].position.y = Utils.lerp(currentY, -10, 10 * deltaTime);
                     return;
                 }
 
                 const interpolationSpeed = 15 * deltaTime; 
                 
-                // 1. Move all joints toward targets
                 for(let i = 0; i < 21; i++) {
                     this.joints[i].position.lerp(this.targetPositions[i], interpolationSpeed);
                 }
 
-                // 2. Position and stretch the connecting bones
                 for(let i = 0; i < this.connections.length; i++) {
                     const jointAIndex = this.connections[i][0];
                     const jointBIndex = this.connections[i][1];
-                    
                     const positionA = this.joints[jointAIndex].position;
                     const positionB = this.joints[jointBIndex].position;
-                    
                     const currentBone = this.bones[i];
                     
-                    // Move bone to start of joint A
                     currentBone.position.copy(positionA);
-                    
-                    // Point bone towards joint B
                     currentBone.lookAt(positionB);
-                    
-                    // Stretch bone on Z axis to bridge the gap perfectly
-                    const distanceBetweenJoints = positionA.distanceTo(positionB);
-                    currentBone.scale.set(1, 1, distanceBetweenJoints);
+                    currentBone.scale.set(1, 1, positionA.distanceTo(positionB));
                 }
             }
             
-            /**
-             * Calculates the center mass of the glove for hit detection.
-             * Uses the mid-point between the base of the index finger and base of the pinky.
-             * @returns {THREE.Vector3} The center of the fist.
-             */
             getHitboxCenter() {
-                if(!this.isActive) {
-                    return new THREE.Vector3(0, -100, 0);
-                }
-                
+                if(!this.isActive) return new THREE.Vector3(0, -100, 0);
                 const knuckleIndex = this.joints[5].position;
                 const knucklePinky = this.joints[17].position;
-                
                 const centerPoint = new THREE.Vector3();
                 centerPoint.addVectors(knuckleIndex, knucklePinky);
                 centerPoint.multiplyScalar(0.5);
-                
                 return centerPoint;
             }
         }
@@ -930,206 +700,123 @@
          * ============================================================================
          * 5. CORE GAME ENGINE
          * ============================================================================
-         * Manages game state, logic, collision detection, and synchronization.
          */
         class GameEngine {
             constructor() {
                 this.gfx = new GraphicsEngine();
                 
-                // Initialize all 4 procedural hands
                 this.myHandL = new ProceduralHand(this.gfx.scene, true);
                 this.myHandR = new ProceduralHand(this.gfx.scene, true);
                 this.oppHandL = new ProceduralHand(this.gfx.scene, false);
                 this.oppHandR = new ProceduralHand(this.gfx.scene, false);
                 
-                // Initialize the opponent's head target
-                // Bright grey so it stands out easily against the dark background
                 const headGeometry = new THREE.BoxGeometry(1.6, 2.0, 1.6);
-                const headMaterial = new THREE.MeshStandardMaterial({
-                    color: 0x888888, 
-                    roughness: 0.4
-                });
+                const headMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.4 });
                 
                 this.oppHead = new THREE.Mesh(headGeometry, headMaterial);
                 this.oppHead.position.set(0, 1.8, -10); 
                 this.gfx.scene.add(this.oppHead);
 
-                // Initialize internal state variables
-                this.state = 'MENU'; // Possible states: MENU, LOBBY, WAITING, FIGHT, KO
-                
+                this.state = 'MENU'; 
                 this.myHP = CONFIG.MAX_HEALTH; 
                 this.oppHP = CONFIG.MAX_HEALTH;
                 
-                // Depth tracking variables
                 this.myBaseZ = 4; 
                 this.oppHeadPos = new THREE.Vector3(0, 1.6, -4);
                 this.targetCam = new THREE.Vector3(0, 1.6, 6);
                 
-                // Cooldown and Timing trackers
                 this.lastPunchTime = 0; 
                 this.lastNetTick = 0;
                 
                 this.clock = new THREE.Clock(); 
                 this.fightStartTime = 0;
 
-                // Pre-allocated object for network payloads to avoid garbage collection spikes
-                this.payload = { 
-                    h: [0, 0, 0], // Head [x,y,z]
-                    l: null,      // Left hand array
-                    r: null       // Right hand array
-                };
+                this.payload = { h: [0, 0, 0], l: null, r: null };
             }
 
-            /**
-             * Updates the HTML DOM elements representing the health bars.
-             */
             updateUI() {
-                // Update text numbers
                 document.getElementById('my-hp-text').innerText = Math.max(0, Math.ceil(this.myHP / 10));
                 document.getElementById('opp-hp-text').innerText = Math.max(0, Math.ceil(this.oppHP / 10));
                 
-                // Calculate percentage
                 const myPercent = (this.myHP / CONFIG.MAX_HEALTH) * 100;
                 const oppPercent = (this.oppHP / CONFIG.MAX_HEALTH) * 100;
                 
-                // Update CSS widths
                 document.getElementById('my-health').style.width = Math.max(0, myPercent) + '%';
                 document.getElementById('opp-health').style.width = Math.max(0, oppPercent) + '%';
             }
 
-            /**
-             * Processes incoming damage to the local player.
-             * @param {number} amount - Damage taken.
-             * @param {Object} location - 3D vector of where the hit occurred.
-             */
             takeDamage(amount, location) {
                 this.myHP -= amount; 
                 this.updateUI(); 
                 AudioSys.playHit();
                 
-                // Trigger screen flash effect
                 const flashOverlay = document.getElementById('hit-flash');
                 flashOverlay.style.opacity = '0.8'; 
-                setTimeout(() => {
-                    flashOverlay.style.opacity = '0';
-                }, 200);
+                setTimeout(() => { flashOverlay.style.opacity = '0'; }, 200);
                 
-                // Apply a random screen shake to the camera
                 const shakeX = (Math.random() - 0.5) * 2;
                 const shakeY = (Math.random() - 0.5) * 2;
                 this.gfx.camera.position.add(new THREE.Vector3(shakeX, shakeY, 0));
                 
-                // Emit blood/sweat particles
                 this.gfx.emitParticles(location.x, location.y, location.z, 0xff0000); 
                 
-                // Check death condition
-                if(this.myHP <= 0) {
-                    this.endGame(false);
-                }
+                if(this.myHP <= 0) { this.endGame(false); }
             }
 
-            /**
-             * Processes outgoing damage dealt to the opponent.
-             * @param {number} amount - Damage dealt.
-             * @param {THREE.Vector3} position - 3D vector of the hit.
-             */
             landHit(amount, position) {
                 const currentTime = Date.now();
-                
-                // Enforce punch cooldown
-                if(currentTime - this.lastPunchTime < CONFIG.PUNCH_COOLDOWN) {
-                    return; 
-                }
+                if(currentTime - this.lastPunchTime < CONFIG.PUNCH_COOLDOWN) return; 
                 
                 this.lastPunchTime = currentTime;
                 this.oppHP -= amount; 
                 this.updateUI(); 
                 AudioSys.playHit();
                 
-                // Make opponent's head flash white
                 this.oppHead.material.color.setHex(0xffffff);
-                setTimeout(() => {
-                    this.oppHead.material.color.setHex(0x888888);
-                }, 100);
+                setTimeout(() => { this.oppHead.material.color.setHex(0x888888); }, 100);
                 
-                // Emit hit spark particles
                 this.gfx.emitParticles(position.x, position.y, position.z, 0x0ea5e9); 
                 
-                // Notify opponent via network
                 NetworkSys.sendHit(amount, position);
                 
-                // Check win condition
-                if(this.oppHP <= 0) {
-                    this.endGame(true);
-                }
+                if(this.oppHP <= 0) { this.endGame(true); }
             }
 
-            /**
-             * Collision detection routine run every frame.
-             */
             checkPhysics() {
                 if(this.state !== 'FIGHT') return;
-                
                 const collisionRadius = 1.2; 
                 
-                // Check Left Hand Collision
                 if(this.myHandL.isActive) {
                     const leftCenter = this.myHandL.getHitboxCenter();
-                    const distanceToHead = leftCenter.distanceTo(this.oppHead.position);
-                    
-                    if(distanceToHead < collisionRadius) {
+                    if(leftCenter.distanceTo(this.oppHead.position) < collisionRadius) {
                         this.landHit(CONFIG.BASE_DAMAGE, leftCenter);
                     }
                 }
                 
-                // Check Right Hand Collision
                 if(this.myHandR.isActive) {
                     const rightCenter = this.myHandR.getHitboxCenter();
-                    const distanceToHead = rightCenter.distanceTo(this.oppHead.position);
-                    
-                    if(distanceToHead < collisionRadius) {
+                    if(rightCenter.distanceTo(this.oppHead.position) < collisionRadius) {
                         this.landHit(CONFIG.BASE_DAMAGE, rightCenter);
                     }
                 }
             }
 
-            /**
-             * Transitions the game state into active combat.
-             */
             startFight() {
                 this.state = 'FIGHT'; 
-                
-                // Reset health
                 this.myHP = CONFIG.MAX_HEALTH; 
                 this.oppHP = CONFIG.MAX_HEALTH;
                 this.updateUI(); 
-                
-                // Start timer
                 this.fightStartTime = Date.now();
                 
-                // Hide menu UIs
-                const uiPanels = document.querySelectorAll('.ui-panel, #game-over');
-                uiPanels.forEach(element => {
-                    element.classList.add('hidden');
-                });
-                
-                // Show game HUD
+                document.querySelectorAll('.ui-panel, #game-over').forEach(element => { element.classList.add('hidden'); });
                 document.getElementById('health-hud').classList.remove('hidden');
                 
                 AudioSys.playBell();
             }
 
-            /**
-             * Handles end of match state.
-             * @param {boolean} isWin - Did the local player win?
-             */
             endGame(isWin) {
                 this.state = 'KO'; 
-                
-                // Show game over screen
                 document.getElementById('game-over').classList.remove('hidden');
-                
-                // Update text based on result
                 const subtextElement = document.getElementById('end-subtext');
                 
                 if (isWin) {
@@ -1141,159 +828,104 @@
                 }
             }
 
-            /**
-             * Ingests local AI data, applies logic, and formats it for networking.
-             * @param {Object} results - Raw output from MediaPipe Holistic.
-             */
             processLocalPose(results) {
-                // Ignore if no body found or not in fight state
-                if(!results.poseLandmarks || this.state !== 'FIGHT') {
-                    return;
-                }
+                if(!results.poseLandmarks || this.state !== 'FIGHT') return;
 
-                // 1. Calculate body depth based on shoulder Z positions
                 const leftShoulderZ = results.poseLandmarks[11].z;
                 const rightShoulderZ = results.poseLandmarks[12].z;
                 const averageShoulderZ = (leftShoulderZ + rightShoulderZ) / 2;
                 
-                // 2. Calculate Camera Target (Dodging/Leaning logic)
                 const noseLandmark = results.poseLandmarks[0];
                 this.targetCam.x = (0.5 - noseLandmark.x) * 10;
                 this.targetCam.y = -(noseLandmark.y - 0.5) * 5 + 1.6;
                 
-                // 3. Move base Z forward/backward based on stepping
                 this.myBaseZ = 4 + (averageShoulderZ * 5); 
                 this.targetCam.z = this.myBaseZ + 2; 
 
-                // 4. Update procedural hand visuals immediately
-                // Compress landmark arrays before passing them down
                 const compressedLeft = results.leftHandLandmarks ? results.leftHandLandmarks.map(Utils.pack) : null;
                 const compressedRight = results.rightHandLandmarks ? results.rightHandLandmarks.map(Utils.pack) : null;
                 
                 this.myHandL.setTargetData(compressedLeft, this.myBaseZ);
                 this.myHandR.setTargetData(compressedRight, this.myBaseZ);
 
-                // 5. Throttled Network Dispatch
                 const currentTime = Date.now();
-                
                 if(currentTime - this.lastNetTick > CONFIG.NET_TICK_RATE) {
-                    
-                    // Build head payload [x,y,z]
                     this.payload.h = [
                         Number(this.targetCam.x.toFixed(3)), 
                         Number(this.targetCam.y.toFixed(3)), 
                         Number(this.myBaseZ.toFixed(3))
                     ];
-                    
-                    // Build hand payloads
                     this.payload.l = compressedLeft;
                     this.payload.r = compressedRight;
                     
-                    // Send to opponent
                     NetworkSys.sendPose(this.payload);
-                    
                     this.lastNetTick = currentTime;
                 }
             }
 
-            /**
-             * Ingests opponent data from the network and applies it to remote models.
-             * @param {Object} payload - Unpacked network data.
-             */
             processRemotePose(payload) {
-                // Update opponent head target position (mirroring X axis so they face us)
                 const oppHeadX = -payload.h[0];
                 const oppHeadY = payload.h[1];
                 const oppHeadZ = -payload.h[2];
                 
                 this.oppHeadPos.set(oppHeadX, oppHeadY, oppHeadZ);
-                
-                // Opponent's left hand (payload.l) goes to our right side model, and vice versa
                 this.oppHandL.setTargetData(payload.l, oppHeadZ);
                 this.oppHandR.setTargetData(payload.r, oppHeadZ);
             }
 
-            /**
-             * Main Game Loop executed every animation frame.
-             */
             loop() {
-                // Request next frame
                 requestAnimationFrame(this.loop.bind(this));
-                
-                // Get time elapsed since last frame for smooth physics regardless of framerate
                 const deltaTime = this.clock.getDelta();
 
                 if(this.state === 'FIGHT') {
-                    
-                    // 1. Update Match Timer UI
                     const elapsedSeconds = Math.floor((Date.now() - this.fightStartTime) / 1000);
                     const minutes = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
                     const seconds = String(elapsedSeconds % 60).padStart(2, '0');
                     document.getElementById('fight-timer').innerText = `${minutes}:${seconds}`;
 
-                    // 2. Smoothly move camera towards target (Parallax dodging effect)
                     this.gfx.camera.position.lerp(this.targetCam, 5 * deltaTime);
                     this.gfx.camera.lookAt(0, 1.6, -4); 
 
-                    // 3. Smoothly move opponent head towards target
                     this.oppHead.position.lerp(this.oppHeadPos, 10 * deltaTime);
-                    
-                    // Add a slight idle breathing animation to opponent head
-                    const idleRotation = Math.sin(Date.now() * 0.002) * 0.2;
-                    this.oppHead.rotation.y = idleRotation; 
+                    this.oppHead.rotation.y = Math.sin(Date.now() * 0.002) * 0.2; 
 
-                    // 4. Update all procedural hands
                     this.myHandL.update(deltaTime); 
                     this.myHandR.update(deltaTime);
                     this.oppHandL.update(deltaTime); 
                     this.oppHandR.update(deltaTime);
 
-                    // 5. Run physics checks
                     this.checkPhysics();
                 }
-
-                // Update particle systems
                 this.gfx.updateParticles(deltaTime); 
-                
-                // Render final scene
                 this.gfx.render();
             }
         }
 
         /**
          * ============================================================================
-         * 6. PEER-TO-PEER NETWORK ENGINE (WITH SMART RETRIES)
+         * 6. EMQX / MQTT NETWORK ENGINE (BYPASSES FIREWALLS)
          * ============================================================================
-         * Wraps PeerJS. Includes automatic retries and aggressive STUN fallbacks to 
-         * guarantee connection even across strict NATs and firewalls.
+         * Uses the public broker.emqx.io cluster via Secure WebSockets to completely
+         * sidestep WebRTC firewall and NAT traversal issues.
          */
         class NetworkEngine {
             constructor() { 
-                this.peer = null; 
-                this.conn = null; 
-                this.connectionTimeoutId = null;
+                this.client = null;
+                this.room = null;
+                this.isHost = false;
+                
+                // Topic structure: prefix/roomName/{role}/{action}
+                this.myBaseTopic = "";
+                this.oppBaseTopic = "";
             }
 
-            /**
-             * Resets the Join/Host buttons to their default enabled state.
-             */
             resetButtons() {
                 const joinBtn = document.getElementById('join-btn');
                 const hostBtn = document.getElementById('host-btn');
-                
-                if(joinBtn) {
-                    joinBtn.innerText = "ENTER RING";
-                    joinBtn.disabled = false;
-                }
-                if(hostBtn) {
-                    hostBtn.innerText = "CREATE SERVER";
-                    hostBtn.disabled = false;
-                }
+                if(joinBtn) { joinBtn.innerText = "ENTER RING"; joinBtn.disabled = false; }
+                if(hostBtn) { hostBtn.innerText = "CREATE SERVER"; hostBtn.disabled = false; }
             }
 
-            /**
-             * Displays an error message on the lobby UI.
-             */
             showError(messageText) { 
                 const errorElement = document.getElementById('lobby-error'); 
                 errorElement.innerText = messageText; 
@@ -1301,284 +933,192 @@
             }
 
             /**
-             * Initializes this client as the host of a room.
-             * @param {string} roomName - The unique string identifier for the room.
+             * Internal helper to connect to EMQX public broker via WebSocket
+             */
+            connectToBroker(onSuccess) {
+                console.log("Connecting to EMQX Broker via WebSockets...");
+                
+                // Disconnect existing if any
+                if(this.client) {
+                    this.client.end(true);
+                }
+
+                // Connect to EMQX public broker.
+                // Using WSS (WebSocket Secure) to avoid mixed-content blocks on HTTPS sites
+                this.client = mqtt.connect(CONFIG.EMQX_BROKER_URL, {
+                    clientId: 'eqmx_boxer_' + Math.random().toString(16).substr(2, 8),
+                    clean: true,
+                    connectTimeout: 5000
+                });
+
+                this.client.on('connect', () => {
+                    console.log("Successfully connected to EMQX Broker!");
+                    onSuccess();
+                });
+
+                this.client.on('error', (err) => {
+                    console.error("EMQX Connection error: ", err);
+                    this.showError("Failed to connect to EMQX server. Check internet.");
+                    this.resetButtons();
+                });
+
+                this.client.on('message', (topic, message) => {
+                    this.handleIncomingMessage(topic, message);
+                });
+            }
+
+            /**
+             * Host configures their MQTT topics and waits for Joiner
              */
             initHost(roomName) {
-                // If a peer already exists, clean it up
-                if (this.peer) {
-                    this.peer.destroy();
-                }
-
-                // Create peer with robust ICE server config to bypass firewalls
-                this.peer = new Peer(CONFIG.PEER_PREFIX + roomName, PEER_OPTIONS);
+                this.room = roomName;
+                this.isHost = true;
                 
-                this.peer.on('open', () => {
-                    console.log("Server created successfully on signaling server.");
-                    document.getElementById('display-room-name').innerText = roomName;
-                    System.showUI('step-waiting');
-                    this.resetButtons();
-                });
-                
-                this.peer.on('error', (error) => {
-                    console.error("PeerJS Host Error: ", error);
-                    let message = 'Network Error. Check your internet connection.';
-                    if(error.type === 'unavailable-id') {
-                        message = 'That room name is currently active. Try another.';
-                    }
-                    this.showError(message);
-                    this.resetButtons();
-                });
-                
-                // Wait for an incoming connection from a Joiner
-                this.peer.on('connection', (connection) => {
-                    this.setupDataChannel(connection);
-                });
-            }
+                this.myBaseTopic = `${CONFIG.TOPIC_PREFIX}${this.room}/host`;
+                this.oppBaseTopic = `${CONFIG.TOPIC_PREFIX}${this.room}/joiner`;
 
-            /**
-             * Initializes this client as a joiner, attempting to connect to a host.
-             * Includes a recursive retry mechanism to handle race conditions where the 
-             * host hasn't finished registering yet.
-             * * @param {string} roomName - The room identifier to join.
-             * @param {number} retryAttempt - The current retry count.
-             */
-            initJoin(roomName, retryAttempt = 0) {
-                // Update UI to show retry status
-                const joinBtn = document.getElementById('join-btn');
-                if (joinBtn) {
-                    if (retryAttempt === 0) {
-                        joinBtn.innerText = "CONNECTING...";
-                    } else {
-                        joinBtn.innerText = `RETRYING (${retryAttempt}/4)...`;
-                    }
-                    joinBtn.disabled = true;
-                }
-
-                // Clean up any dead peer instance before trying again
-                if (this.peer) {
-                    this.peer.destroy();
-                }
-
-                // Create a new client peer
-                this.peer = new Peer(PEER_OPTIONS); 
-                
-                this.peer.on('open', () => {
-                    console.log(`Client ID ready. Attempting to connect to room: ${roomName}`);
-                    
-                    // Attempt to connect to the specific host ID.
-                    // 'reliable: true' forces guaranteed delivery during initial handshake.
-                    const connection = this.peer.connect(CONFIG.PEER_PREFIX + roomName, { reliable: true }); 
-                    
-                    this.setupDataChannel(connection);
-                    
-                    // Set a timeout. If the data channel doesn't open within 5 seconds, force a retry.
-                    // This catches silent network drops where PeerJS doesn't fire an explicit 'error'.
-                    this.connectionTimeoutId = setTimeout(() => {
-                        if (!this.conn || !this.conn.open) {
-                            console.warn("Connection timed out waiting for data channel to open.");
-                            this.handleJoinFailure(roomName, retryAttempt);
+                this.connectToBroker(() => {
+                    // Subscribe to all messages from the joiner
+                    this.client.subscribe(`${this.oppBaseTopic}/#`, (err) => {
+                        if (!err) {
+                            document.getElementById('display-room-name').innerText = roomName;
+                            System.showUI('step-waiting');
+                            this.resetButtons();
+                        } else {
+                            this.showError("Failed to subscribe to room topics.");
                         }
-                    }, 5000); 
-                });
-                
-                this.peer.on('error', (error) => {
-                    console.error("PeerJS Joiner Error: ", error.type, error);
-                    
-                    // If the specific error is that the peer wasn't found, try again.
-                    if (error.type === 'peer-unavailable') {
-                        this.handleJoinFailure(roomName, retryAttempt);
-                    } else {
-                        // For generic network errors, fail immediately.
-                        this.showError('Critical network error. Check your firewall settings.');
-                        this.resetButtons();
-                    }
+                    });
                 });
             }
 
             /**
-             * Handles the logic for retrying a failed join attempt.
+             * Joiner configures topics and notifies Host
              */
-            handleJoinFailure(roomName, currentAttempt) {
-                // Clear any pending timeouts so they don't stack up
-                if (this.connectionTimeoutId) {
-                    clearTimeout(this.connectionTimeoutId);
-                }
-
-                const maxRetries = 4;
+            initJoin(roomName) {
+                this.room = roomName;
+                this.isHost = false;
                 
-                if (currentAttempt < maxRetries) {
-                    console.log(`Join attempt ${currentAttempt} failed. Retrying in 2 seconds...`);
-                    // Wait 2 seconds before trying again to give the host time to stabilize
-                    setTimeout(() => {
-                        this.initJoin(roomName, currentAttempt + 1);
-                    }, 2000);
-                } else {
-                    console.error("Max retries reached. Host could not be reached.");
-                    this.showError('Host not found. Ensure they created the room first and you typed the exact name.');
-                    this.resetButtons();
-                }
+                this.myBaseTopic = `${CONFIG.TOPIC_PREFIX}${this.room}/joiner`;
+                this.oppBaseTopic = `${CONFIG.TOPIC_PREFIX}${this.room}/host`;
+
+                this.connectToBroker(() => {
+                    // Subscribe to all messages from the host
+                    this.client.subscribe(`${this.oppBaseTopic}/#`, (err) => {
+                        if (!err) {
+                            // Tell the host we have arrived so they can start the game!
+                            this.client.publish(`${this.myBaseTopic}/ready`, "PING");
+                            this.resetButtons();
+                            Game.startFight();
+                        } else {
+                            this.showError("Failed to subscribe to room topics.");
+                            this.resetButtons();
+                        }
+                    });
+                });
             }
 
             /**
-             * Configures event listeners for the established data connection.
-             * @param {DataConnection} connection - The PeerJS data channel.
+             * Parses incoming MQTT messages and routes to the Game Engine
              */
-            setupDataChannel(connection) {
-                this.conn = connection;
-                
-                const onChannelOpen = () => { 
-                    // Clear the timeout watcher since we successfully connected
-                    if (this.connectionTimeoutId) {
-                        clearTimeout(this.connectionTimeoutId);
-                    }
-                    
-                    console.log("WebRTC Data Channel is OPEN and ready for game data!"); 
-                    this.resetButtons();
-                    Game.startFight(); 
-                };
-                
-                // Fire immediately if already open, otherwise wait for the event
-                if (this.conn.open) {
-                    onChannelOpen();
-                } else {
-                    this.conn.on('open', onChannelOpen);
+            handleIncomingMessage(topic, messageBuffer) {
+                // Ignore our own messages (shouldn't happen due to topic structure, but safe check)
+                if(topic.startsWith(this.myBaseTopic)) return;
+
+                const messageString = messageBuffer.toString();
+                const action = topic.split('/').pop(); // Gets the last part of the topic string
+
+                if (action === 'ready' && this.isHost) {
+                    console.log("Joiner signaled ready! Starting match.");
+                    Game.startFight();
+                } 
+                else if (action === 'pose') {
+                    // Because JSON.parse is slightly slow, we only do it for gameplay payloads
+                    try {
+                        const payload = JSON.parse(messageString);
+                        Game.processRemotePose(payload);
+                    } catch (e) { console.warn("Bad pose JSON"); }
+                } 
+                else if (action === 'hit') {
+                    try {
+                        const payload = JSON.parse(messageString);
+                        Game.takeDamage(payload.d, payload.loc);
+                    } catch (e) { console.warn("Bad hit JSON"); }
+                } 
+                else if (action === 'rematch') {
+                    Game.startFight();
                 }
-                
-                // Handle incoming game packets
-                this.conn.on('data', (dataPayload) => {
-                    if(!dataPayload) return;
-                    
-                    // Route data based on 't' (type) flag to minimize bandwidth
-                    if(dataPayload.t === 'p') {
-                        Game.processRemotePose(dataPayload.d);
-                    } 
-                    else if (dataPayload.t === 'h') {
-                        Game.takeDamage(dataPayload.d, dataPayload.loc);
-                    } 
-                    else if (dataPayload.t === 'r') {
-                        console.log("Rematch requested by opponent.");
-                        Game.startFight();
-                    }
-                });
-                
-                // Handle disconnection gracefully
-                this.conn.on('close', () => { 
-                    console.warn("Connection closed by peer.");
-                    alert("Opponent left the match or disconnected."); 
-                    window.location.reload(); 
-                });
             }
 
             /**
-             * Dispatches pose data over the network.
+             * Format and send outgoing network requests via MQTT Publish
              */
             sendPose(poseObject) { 
-                if(this.conn && this.conn.open) {
-                    this.conn.send({ t: 'p', d: poseObject }); 
+                if(this.client && this.client.connected) {
+                    // MQTT payload must be string or buffer
+                    this.client.publish(`${this.myBaseTopic}/pose`, JSON.stringify(poseObject), {qos: 0}); 
                 }
             }
             
-            /**
-             * Dispatches a hit confirmation over the network.
-             */
             sendHit(damageAmount, hitLocation) { 
-                if(this.conn && this.conn.open) {
-                    this.conn.send({ t: 'h', d: damageAmount, loc: hitLocation }); 
+                if(this.client && this.client.connected) {
+                    const payload = JSON.stringify({ d: damageAmount, loc: hitLocation });
+                    this.client.publish(`${this.myBaseTopic}/hit`, payload, {qos: 1}); // QoS 1 ensures delivery
                 }
             }
             
-            /**
-             * Dispatches a request to restart the match.
-             */
             sendRematch() { 
-                if(this.conn && this.conn.open) {
-                    this.conn.send({ t: 'r' }); 
+                if(this.client && this.client.connected) {
+                    this.client.publish(`${this.myBaseTopic}/rematch`, "PING", {qos: 1}); 
                 }
             }
         }
 
         /**
          * ============================================================================
-         * 7. SYSTEM BOOTSTRAPPER & EVENT WIRING
+         * 7. SYSTEM BOOTSTRAPPER
          * ============================================================================
          */
-        
-        // Instantiate Global Engines
         const Game = new GameEngine();
         const NetworkSys = new NetworkEngine();
         
         const System = {
-            // DOM References
             videoElement: document.getElementById('input_video'),
-            
-            // State
             aiInstance: null,
-            isProcessingFrame: false, // Concurrency lock for performance
+            isProcessingFrame: false, 
 
-            /**
-             * Helper to switch between central UI panels.
-             */
             showUI: (panelId) => {
                 const steps = ['step-camera', 'step-loading', 'step-lobby', 'step-waiting'];
                 steps.forEach(stepId => {
                     document.getElementById(stepId).classList.add('hidden');
                 });
-                
-                if(panelId) {
-                    document.getElementById(panelId).classList.remove('hidden');
-                }
+                if(panelId) document.getElementById(panelId).classList.remove('hidden');
             },
 
-            /**
-             * Requests access to the user's webcam and starts the stream.
-             */
             initializeCamera: async () => {
                 System.showUI('step-loading');
-                
                 try {
-                    // Request video stream with ideal constraints for tracking
-                    const streamConstraints = { 
-                        video: { 
-                            width: 640, 
-                            height: 480, 
-                            frameRate: { ideal: 60 } 
-                        } 
-                    };
-                    
+                    const streamConstraints = { video: { width: 640, height: 480, frameRate: { ideal: 60 } } };
                     const stream = await navigator.mediaDevices.getUserMedia(streamConstraints);
                     System.videoElement.srcObject = stream;
-                    
-                    // Wait for video metadata to load before proceeding
                     System.videoElement.onloadedmetadata = () => { 
                         System.videoElement.play(); 
                         System.initAI(); 
                     };
-                    
                 } catch (error) {
-                    console.error("Camera access error: ", error);
                     System.showUI('step-camera');
-                    
                     const errorDisplay = document.getElementById('cam-error'); 
                     errorDisplay.innerText = "Camera Denied. Please check your browser permissions."; 
                     errorDisplay.classList.remove('hidden');
                 }
             },
 
-            /**
-             * Initializes the MediaPipe Holistic AI model and sets up the processing loop.
-             */
             initAI: () => {
-                // Initialize Holistic class from imported MediaPipe library
                 System.aiInstance = new Holistic({
-                    locateFile: (file) => {
-                        return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
-                    }
+                    locateFile: (file) => { return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`; }
                 });
                 
-                // Configure AI settings for maximum performance
                 System.aiInstance.setOptions({
-                    modelComplexity: 0, // 0 = FASTEST. Crucial for eliminating lag!
+                    modelComplexity: 0, 
                     smoothLandmarks: true,   
                     enableSegmentation: false,
                     refineFaceLandmarks: false,
@@ -1586,81 +1126,51 @@
                     minTrackingConfidence: 0.5
                 });
                 
-                // Attach callback for when AI finishes processing a frame
                 System.aiInstance.onResults((results) => { 
                     Game.processLocalPose(results); 
-                    
-                    // Release the processing lock
                     System.isProcessingFrame = false; 
                 });
                 
-                // Start asynchronous detection loop
                 const runDetectionLoop = async () => {
-                    // Ensure video is playing and we aren't already processing a frame
-                    const isVideoReady = System.videoElement.readyState >= 2;
-                    
-                    if (isVideoReady && !System.isProcessingFrame) {
+                    if (System.videoElement.readyState >= 2 && !System.isProcessingFrame) {
                         System.isProcessingFrame = true;
-                        
-                        // Send current video frame to AI
-                        await System.aiInstance.send({
-                            image: System.videoElement
-                        });
+                        await System.aiInstance.send({ image: System.videoElement });
                     }
-                    
-                    // Queue next check on next animation frame
                     requestAnimationFrame(runDetectionLoop);
                 };
-                
                 runDetectionLoop();
 
-                // Move user to lobby screen
                 System.showUI('step-lobby');
             },
 
-            /**
-             * Reads host input and creates a room.
-             */
             hostRoom: () => { 
-                const roomInput = document.getElementById('host-room-name');
-                const roomString = roomInput.value.trim().toUpperCase(); 
+                const roomString = document.getElementById('host-room-name').value.trim().toUpperCase(); 
                 const hostBtn = document.getElementById('host-btn');
-                
                 if(roomString) {
-                    // Provide UI feedback
-                    hostBtn.innerText = "INITIALIZING...";
+                    hostBtn.innerText = "CONNECTING TO EMQX...";
                     hostBtn.disabled = true;
                     NetworkSys.initHost(roomString); 
                 }
             },
             
-            /**
-             * Reads join input and attempts connection.
-             */
             joinRoom: () => { 
-                // Hide any previous errors
                 document.getElementById('lobby-error').classList.add('hidden');
-
-                const roomInput = document.getElementById('join-room-name');
-                const roomString = roomInput.value.trim().toUpperCase(); 
-                
+                const roomString = document.getElementById('join-room-name').value.trim().toUpperCase(); 
+                const joinBtn = document.getElementById('join-btn');
                 if(roomString) {
-                    // The UI feedback (disabling button, changing text) is now handled 
-                    // dynamically inside NetworkSys.initJoin() to support the retry loop.
+                    joinBtn.innerText = "CONNECTING TO EMQX...";
+                    joinBtn.disabled = true;
                     NetworkSys.initJoin(roomString); 
                 }
             },
             
-            /**
-             * Initiates a rematch sequence.
-             */
             requestRematch: () => { 
                 NetworkSys.sendRematch(); 
                 Game.startFight(); 
             }
         };
 
-        // Kick off the Three.js rendering loop immediately
+        // Boot up game
         Game.loop();
 
     </script>
