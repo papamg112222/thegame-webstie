@@ -4,64 +4,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>EQMX P2P Boxing</title>
-    <!-- Tailwind for UI Styling -->
+    <title>3D EQMX Boxing</title>
+    
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- MediaPipe AI for Hand Tracking -->
+    
+    <!-- Three.js for 3D Graphics -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- MediaPipe AI for Full Body Pose Tracking -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    
     <!-- PeerJS for P2P Networking -->
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
 
     <style>
-        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #0f172a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; }
-        #gameCanvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; display: none; }
-        #webcam_feed { position: absolute; inset: 0; width: 100vw; height: 100vh; object-fit: cover; opacity: 0.2; z-index: 5; transform: scaleX(-1); display: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; }
+        #gameCanvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 5; }
+        #webcam_feed { position: absolute; bottom: 20px; right: 20px; width: 240px; height: 180px; object-fit: cover; border-radius: 12px; border: 2px solid rgba(255,255,255,0.2); opacity: 0.8; z-index: 25; transform: scaleX(-1); display: none; }
         
-        .ui-panel { background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(148, 163, 184, 0.2); }
-        .glowing-text { text-shadow: 0 0 10px rgba(56, 189, 248, 0.8); }
-        .health-transition { transition: width 0.2s ease-out; }
+        .ui-panel { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.3); box-shadow: 0 0 30px rgba(0, 0, 0, 0.8); }
+        .glowing-text { text-shadow: 0 0 15px rgba(56, 189, 248, 0.9); }
+        .health-transition { transition: width 0.15s cubic-bezier(0.4, 0, 0.2, 1); }
+        #hit-flash { transition: opacity 0.1s; }
     </style>
 </head>
 <body>
 
-    <!-- Hidden video for processing, visible faint video for background -->
+    <!-- Hidden video for processing, visible PiP video -->
     <video id="input_video" style="display:none;" autoplay playsinline></video>
     <video id="webcam_feed" autoplay playsinline></video>
 
-    <!-- Main Game Canvas -->
+    <!-- 3D Canvas -->
     <canvas id="gameCanvas"></canvas>
+
+    <!-- Red flash overlay when hit -->
+    <div id="hit-flash" class="absolute inset-0 bg-red-600 z-10 opacity-0 pointer-events-none mix-blend-overlay"></div>
 
     <!-- UI Overlay container -->
     <div id="ui-layer" class="absolute inset-0 z-20 flex flex-col items-center justify-center p-4">
         
         <!-- STEP 1: START CAMERA -->
-        <div id="step-camera" class="ui-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full">
-            <h1 class="text-4xl font-black mb-2 text-blue-400 glowing-text">EQMX BOXING</h1>
-            <p class="text-slate-300 mb-8">Motion controlled P2P fighting.</p>
+        <div id="step-camera" class="ui-panel p-8 rounded-2xl text-center max-w-md w-full">
+            <h1 class="text-4xl font-black mb-2 text-cyan-400 glowing-text tracking-wider">3D P2P BOXING</h1>
+            <p class="text-slate-300 mb-6 text-sm">Stand back so the camera sees your head and hands. Dodge physically, punch forward!</p>
             
-            <button onclick="initializeCamera()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl text-xl shadow-lg transition transform hover:scale-105 active:scale-95">
-                Enable Camera to Start
+            <button onclick="initializeCamera()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-4 px-6 rounded-xl text-xl shadow-[0_0_20px_rgba(8,145,178,0.5)] transition transform hover:scale-105 active:scale-95">
+                Enable Camera
             </button>
             <p id="cam-error" class="text-red-400 mt-4 hidden text-sm font-semibold"></p>
         </div>
 
         <!-- STEP 2: LOADING -->
-        <div id="step-loading" class="ui-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full hidden">
-            <div class="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <h2 class="text-2xl font-bold text-blue-400 animate-pulse">Warming up AI...</h2>
-            <p class="text-slate-400 mt-2">Loading hand tracking models.</p>
+        <div id="step-loading" class="ui-panel p-8 rounded-2xl text-center max-w-md w-full hidden">
+            <div class="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <h2 class="text-2xl font-bold text-cyan-400 animate-pulse">Initializing Pose AI...</h2>
+            <p class="text-slate-400 mt-2 text-sm">Please stand back from your camera.</p>
         </div>
 
         <!-- STEP 3: SERVER LOBBY -->
-        <div id="step-lobby" class="ui-panel p-8 rounded-2xl shadow-2xl max-w-lg w-full hidden">
-            <h2 class="text-3xl font-black text-center mb-6 text-yellow-400 drop-shadow-md">GAME LOBBY</h2>
+        <div id="step-lobby" class="ui-panel p-8 rounded-2xl max-w-lg w-full hidden">
+            <h2 class="text-3xl font-black text-center mb-6 text-yellow-400 drop-shadow-md tracking-widest">LOBBY</h2>
             
-            <!-- Host Section -->
-            <div class="bg-slate-800 p-4 rounded-xl mb-6 border border-slate-700">
-                <h3 class="text-lg font-bold text-slate-200 mb-2">Host a Room</h3>
-                <input type="text" id="host-room-name" placeholder="Enter Room Name (e.g. RING1)" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono uppercase mb-3 focus:border-blue-500 outline-none">
-                <button onclick="hostRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold text-white transition shadow-md">Create Server</button>
+            <div class="bg-slate-900/50 p-4 rounded-xl mb-6 border border-slate-700">
+                <input type="text" id="host-room-name" placeholder="Room Name (e.g. ARENA1)" class="w-full bg-slate-950 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono uppercase mb-3 focus:border-cyan-500 outline-none">
+                <button onclick="hostRoom()" class="w-full bg-cyan-600 hover:bg-cyan-500 py-3 rounded-lg font-bold text-white transition shadow-md tracking-wider">HOST ROOM</button>
             </div>
 
             <div class="flex items-center my-4">
@@ -70,72 +78,70 @@
                 <div class="flex-grow border-t border-slate-600"></div>
             </div>
 
-            <!-- Join Section -->
-            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
-                <h3 class="text-lg font-bold text-slate-200 mb-2">Join a Room</h3>
-                <input type="text" id="join-room-name" placeholder="Enter Friend's Room Name" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono uppercase mb-3 focus:border-red-500 outline-none">
-                <button onclick="joinRoom()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold text-white transition shadow-md">Join Server</button>
+            <div class="bg-slate-900/50 p-4 rounded-xl border border-slate-700">
+                <input type="text" id="join-room-name" placeholder="Friend's Room Name" class="w-full bg-slate-950 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono uppercase mb-3 focus:border-red-500 outline-none">
+                <button onclick="joinRoom()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold text-white transition shadow-[0_0_15px_rgba(220,38,38,0.4)] tracking-wider">JOIN ROOM</button>
             </div>
             
-            <p id="lobby-error" class="text-red-400 mt-4 hidden text-center font-semibold"></p>
+            <p id="lobby-error" class="text-red-400 mt-4 hidden text-center font-semibold text-sm"></p>
         </div>
 
-        <!-- STEP 4: WAITING FOR PLAYER -->
-        <div id="step-waiting" class="ui-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full hidden">
-            <div class="text-6xl mb-4">⏳</div>
+        <!-- STEP 4: WAITING -->
+        <div id="step-waiting" class="ui-panel p-8 rounded-2xl text-center max-w-md w-full hidden">
+            <div class="text-6xl mb-4 animate-bounce">🥊</div>
             <h2 class="text-2xl font-bold text-white mb-2">Waiting for Challenger...</h2>
-            <p class="text-slate-300">Tell your friend to join room:</p>
-            <div id="display-room-name" class="text-4xl font-black text-yellow-400 font-mono my-4 tracking-widest bg-slate-900 py-2 rounded border border-yellow-500/50"></div>
-            <p class="text-sm text-slate-500">The game will start automatically.</p>
+            <div id="display-room-name" class="text-4xl font-black text-cyan-400 font-mono my-4 tracking-widest bg-slate-900 py-2 rounded border border-cyan-500/50"></div>
         </div>
 
         <!-- GAME OVER SCREEN -->
-        <div id="game-over" class="hidden absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center z-50">
+        <div id="game-over" class="hidden absolute inset-0 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center z-50">
             <h2 id="end-text" class="text-7xl font-black mb-4 text-white tracking-tighter drop-shadow-2xl">K.O.</h2>
             <p id="end-subtext" class="text-4xl font-bold mb-10">...</p>
-            <button onclick="window.location.reload()" class="bg-white text-slate-900 px-10 py-5 rounded-full font-black text-2xl hover:scale-105 transition transform">
-                MAIN MENU
+            <button onclick="window.location.reload()" class="bg-white text-black px-10 py-5 rounded-full font-black text-2xl hover:scale-105 transition transform shadow-[0_0_30px_rgba(255,255,255,0.5)]">
+                RETURN TO MENU
             </button>
         </div>
     </div>
 
-    <!-- HUD (Moved outside central UI layer so it sits at top) -->
+    <!-- HUD -->
     <div id="health-hud" class="absolute top-0 left-0 w-full p-6 z-30 flex justify-between items-center hidden pointer-events-none">
         <div class="flex-1 max-w-md">
-            <div class="text-xl font-black mb-1 text-blue-400 drop-shadow-md">YOU</div>
-            <div class="w-full bg-slate-900 h-8 rounded-full overflow-hidden border-2 border-slate-700">
-                <div id="my-health" class="health-transition bg-blue-500 h-full w-full"></div>
+            <div class="text-xl font-black mb-1 text-cyan-400 drop-shadow-md">YOU</div>
+            <div class="w-full bg-slate-900 h-6 rounded-full overflow-hidden border border-slate-700">
+                <div id="my-health" class="health-transition bg-gradient-to-r from-cyan-600 to-cyan-400 h-full w-full"></div>
             </div>
         </div>
-        <div class="px-8 font-black text-4xl text-yellow-500 drop-shadow-md italic">VS</div>
+        <div class="px-8 font-black text-3xl text-yellow-500 drop-shadow-md italic">VS</div>
         <div class="flex-1 max-w-md text-right">
-            <div class="text-xl font-black mb-1 text-red-400 drop-shadow-md">OPPONENT</div>
-            <div class="w-full bg-slate-900 h-8 rounded-full overflow-hidden border-2 border-slate-700 flex justify-end">
-                <div id="opp-health" class="health-transition bg-red-500 h-full w-full"></div>
+            <div class="text-xl font-black mb-1 text-red-500 drop-shadow-md">OPPONENT</div>
+            <div class="w-full bg-slate-900 h-6 rounded-full overflow-hidden border border-slate-700 flex justify-end">
+                <div id="opp-health" class="health-transition bg-gradient-to-l from-red-700 to-red-500 h-full w-full"></div>
             </div>
         </div>
     </div>
 
     <script>
-        // --- Game State ---
+        // --- Game State & Networking ---
         let gameActive = false;
-        let myHealth = 100;
-        let oppHealth = 100;
-        let localHands = [];
-        let prevHands = [];
-        let remoteHands = [];
-        let hitFlashTimer = 0;
-        let damageFlashTimer = 0;
+        let myHealth = 100, oppHealth = 100;
+        let peer = null, conn = null;
+        const PEER_PREFIX = 'eqmx-3d-boxing-';
         
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        const videoElement = document.getElementById('input_video');
-        const bgVideo = document.getElementById('webcam_feed');
+        let lastHitTime = 0;
 
-        // --- PeerJS Setup ---
-        let peer = null;
-        let conn = null;
-        const PEER_PREFIX = 'eqmx-boxing-v1-';
+        // Local Tracking Data
+        let myPoseData = {
+            head: { x: 0, y: 0 },
+            left: { x: -2, y: -1, ext: 0 }, // ext = extension (0 = guarding, 1 = punched)
+            right: { x: 2, y: -1, ext: 0 }
+        };
+
+        // Opponent Tracking Data
+        let oppPoseData = {
+            head: { x: 0, y: 0 },
+            left: { x: 2, y: -1, ext: 0 },
+            right: { x: -2, y: -1, ext: 0 }
+        };
 
         function showUI(id) {
             ['step-camera', 'step-loading', 'step-lobby', 'step-waiting'].forEach(step => {
@@ -144,32 +150,103 @@
             if(id) document.getElementById(id).classList.remove('hidden');
         }
 
-        // --- 1. Camera & AI Initialization ---
-        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
-        
-        hands.onResults((results) => {
-            prevHands = [...localHands];
-            localHands = [];
-            if (results.multiHandLandmarks) {
-                for (const landmarks of results.multiHandLandmarks) {
-                    const knuckle = landmarks[9]; 
-                    // EXACT MIRROR: Flip X coordinate
-                    localHands.push({ x: 1 - knuckle.x, y: knuckle.y, speed: 0 });
-                }
-            }
+        // --- THREE.js 3D Engine Setup ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x050505, 0.05);
 
-            if (gameActive) {
-                processPunches();
-                if (conn && conn.open) conn.send({ type: 'hands', data: localHands });
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0x38bdf8, 1, 20);
+        pointLight.position.set(0, 5, -3);
+        scene.add(pointLight);
+
+        // Environment (The Ring)
+        const grid = new THREE.GridHelper(30, 30, 0x38bdf8, 0x1e293b);
+        grid.position.y = -3;
+        scene.add(grid);
+        
+        // Ropes (Box Helper)
+        const ropeGeo = new THREE.BoxGeometry(16, 6, 16);
+        const ropeEdges = new THREE.EdgesGeometry(ropeGeo);
+        const ropeMat = new THREE.LineBasicMaterial({ color: 0x0ea5e9, linewidth: 2 });
+        const ropes = new THREE.LineSegments(ropeEdges, ropeMat);
+        ropes.position.set(0, 0, -4);
+        scene.add(ropes);
+
+        // Materials & Geometries
+        const gloveGeo = new THREE.IcosahedronGeometry(0.6, 2);
+        const headGeo = new THREE.DodecahedronGeometry(0.8, 1);
+        
+        const myMat = new THREE.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.2, metalness: 0.8 });
+        const oppMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.2, metalness: 0.8 });
+        const oppHeadMatBase = new THREE.MeshStandardMaterial({ color: 0xfacc15, roughness: 0.4, metalness: 0.5 });
+        const oppHeadMatHit = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff });
+
+        // My Meshes (Visible to me in foreground)
+        const myGloveL = new THREE.Mesh(gloveGeo, myMat);
+        const myGloveR = new THREE.Mesh(gloveGeo, myMat);
+        scene.add(myGloveL); scene.add(myGloveR);
+
+        // Opponent Meshes (In background)
+        const oppHead = new THREE.Mesh(headGeo, oppHeadMatBase);
+        const oppGloveL = new THREE.Mesh(gloveGeo, oppMat);
+        const oppGloveR = new THREE.Mesh(gloveGeo, oppMat);
+        scene.add(oppHead); scene.add(oppGloveL); scene.add(oppGloveR);
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+
+        // --- MediaPipe Pose AI Setup ---
+        const videoElement = document.getElementById('input_video');
+        const bgVideo = document.getElementById('webcam_feed');
+
+        const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+        pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        
+        pose.onResults((results) => {
+            if (!results.poseLandmarks) return;
+            const lm = results.poseLandmarks;
+
+            // Coordinate mapping: Mirror X, Map to roughly [-6, 6] for X and [-4, 4] for Y
+            const mapX = (val) => (0.5 - val) * 12; // Reversed for mirror
+            const mapY = (val) => -(val - 0.5) * 8;
+
+            // Nose
+            myPoseData.head.x = mapX(lm[0].x);
+            myPoseData.head.y = mapY(lm[0].y);
+
+            // Left Hand (Physical left hand appears on left side of mirrored screen)
+            myPoseData.left.x = mapX(lm[15].x);
+            myPoseData.left.y = mapY(lm[15].y);
+            // Punch Extension: Compare wrist Z to shoulder Z.
+            // If wrist is closer to camera (more negative Z) than shoulder, extension increases.
+            let extL = lm[11].z - lm[15].z; 
+            myPoseData.left.ext = Math.max(0, Math.min(1, (extL - 0.1) * 3)); // Normalize to 0-1
+
+            // Right Hand
+            myPoseData.right.x = mapX(lm[16].x);
+            myPoseData.right.y = mapY(lm[16].y);
+            let extR = lm[12].z - lm[16].z;
+            myPoseData.right.ext = Math.max(0, Math.min(1, (extR - 0.1) * 3));
+
+            if (gameActive && conn && conn.open) {
+                conn.send({ type: 'pose', data: myPoseData });
             }
         });
 
-        async function detectHandsLoop() {
-            if (videoElement.readyState >= 2) {
-                await hands.send({image: videoElement});
-            }
-            requestAnimationFrame(detectHandsLoop);
+        async function detectPoseLoop() {
+            if (videoElement.readyState >= 2) await pose.send({image: videoElement});
+            requestAnimationFrame(detectPoseLoop);
         }
 
         async function initializeCamera() {
@@ -180,41 +257,35 @@
                 bgVideo.srcObject = stream;
                 
                 videoElement.onloadedmetadata = () => {
-                    videoElement.play();
-                    bgVideo.play();
-                    bgVideo.style.display = 'block'; // Show faint background
-                    detectHandsLoop(); // Start AI Processing
-                    showUI('step-lobby'); // Move to server selection
+                    videoElement.play(); bgVideo.play();
+                    bgVideo.style.display = 'block'; 
+                    detectPoseLoop();
+                    showUI('step-lobby');
                 };
             } catch (err) {
-                console.error(err);
                 showUI('step-camera');
                 const errEl = document.getElementById('cam-error');
-                errEl.innerText = "Camera access denied. Please allow permissions and try again.";
+                errEl.innerText = "Camera access denied. Please allow permissions.";
                 errEl.classList.remove('hidden');
             }
         }
 
-        // --- 2. Multiplayer Lobby Logic ---
+        // --- P2P Networking Logic ---
         function hostRoom() {
             const roomName = document.getElementById('host-room-name').value.trim().toUpperCase();
             if (!roomName) return;
-            
             document.getElementById('lobby-error').classList.add('hidden');
             
             peer = new Peer(PEER_PREFIX + roomName);
-            
             peer.on('open', () => {
                 document.getElementById('display-room-name').innerText = roomName;
                 showUI('step-waiting');
             });
-
-            peer.on('error', (err) => {
+            peer.on('error', () => {
                 const errEl = document.getElementById('lobby-error');
-                errEl.innerText = "Room name might already be taken. Try another.";
+                errEl.innerText = "Room name already taken or invalid.";
                 errEl.classList.remove('hidden');
             });
-
             peer.on('connection', (connection) => {
                 conn = connection;
                 setupConnectionListeners();
@@ -225,22 +296,18 @@
         function joinRoom() {
             const roomName = document.getElementById('join-room-name').value.trim().toUpperCase();
             if (!roomName) return;
-
             document.getElementById('lobby-error').classList.add('hidden');
 
-            peer = new Peer(); // Joiner gets random ID
-            
+            peer = new Peer(); 
             peer.on('open', () => {
                 conn = peer.connect(PEER_PREFIX + roomName);
-                
                 conn.on('open', () => {
                     setupConnectionListeners();
                     startGame();
                 });
-
                 conn.on('error', () => {
                     const errEl = document.getElementById('lobby-error');
-                    errEl.innerText = "Could not find that room. Is the host ready?";
+                    errEl.innerText = "Could not find that room.";
                     errEl.classList.remove('hidden');
                 });
             });
@@ -248,27 +315,26 @@
 
         function setupConnectionListeners() {
             conn.on('data', (payload) => {
-                if (payload.type === 'hands') remoteHands = payload.data;
-                else if (payload.type === 'hit') {
+                if (payload.type === 'pose') {
+                    oppPoseData = payload.data;
+                } else if (payload.type === 'hit') {
                     myHealth -= payload.damage;
-                    damageFlashTimer = 20; 
-                    updateHealthUI();
+                    triggerDamageEffect();
                     checkGameOver();
                 }
             });
         }
 
-        // --- 3. Game Logic ---
+        // --- Game Logic & Animation ---
         function startGame() {
-            showUI(''); // Hide all central UI
+            showUI('');
             document.getElementById('ui-layer').classList.add('pointer-events-none');
             document.getElementById('health-hud').classList.remove('hidden');
-            canvas.style.display = 'block';
             
             myHealth = 100; oppHealth = 100;
             updateHealthUI();
             gameActive = true;
-            requestAnimationFrame(gameLoop);
+            animate();
         }
 
         function updateHealthUI() {
@@ -284,121 +350,104 @@
                 
                 const subtext = document.getElementById('end-subtext');
                 if (myHealth <= 0) {
-                    subtext.innerText = 'You Got Knocked Out!';
+                    subtext.innerText = 'YOU GOT KNOCKED OUT';
                     subtext.className = 'text-4xl font-bold mb-10 text-red-500';
                 } else {
-                    subtext.innerText = 'You Are The Champion!';
-                    subtext.className = 'text-4xl font-bold mb-10 text-yellow-500';
+                    subtext.innerText = 'YOU ARE THE CHAMPION';
+                    subtext.className = 'text-4xl font-bold mb-10 text-yellow-400';
                 }
             }
         }
 
-        // Helper for velocity calculation
-        function getClosestHand(curr, prevList) {
-            let minD = Infinity; let match = null;
-            for (let p of prevList) {
-                let d = Math.pow(curr.x - p.x, 2) + Math.pow(curr.y - p.y, 2);
-                if (d < minD) { minD = d; match = p; }
-            }
-            return match;
-        }
-
-        function processPunches() {
-            const targetX = 0.5; const targetY = 0.35; // Enemy face position
-            const hitRadius = 0.15; 
-            const speedThreshold = 0.04; 
-
-            for (let i = 0; i < localHands.length; i++) {
-                const current = localHands[i];
-                const prev = getClosestHand(current, prevHands);
-
-                if (prev) {
-                    const vx = current.x - prev.x;
-                    const vy = current.y - prev.y;
-                    const speed = Math.sqrt(vx*vx + vy*vy);
-                    current.speed = speed;
-
-                    // If moving fast, check collision
-                    if (speed > speedThreshold) {
-                        const distToFace = Math.sqrt(Math.pow(current.x - targetX, 2) + Math.pow(current.y - targetY, 2));
-                        
-                        if (distToFace < hitRadius) {
-                            let dmg = Math.min(15, Math.floor(speed * 180)); // Calculate damage
-                            
-                            if (conn && conn.open) conn.send({ type: 'hit', damage: dmg });
-                            
-                            oppHealth -= dmg;
-                            hitFlashTimer = 15; 
-                            updateHealthUI();
-                            checkGameOver();
-                            
-                            current.x = -10; // Prevent multi-hits
-                        }
-                    }
-                }
-            }
-        }
-
-        // --- 4. Rendering ---
-        function gameLoop() {
-            if (!gameActive) return;
-
-            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
-                canvas.width = window.innerWidth;
-                canvas.height = window.innerHeight;
-            }
-
-            const W = canvas.width; const H = canvas.height;
-            ctx.clearRect(0, 0, W, H);
-
-            // Flashes
-            if (hitFlashTimer > 0) {
-                ctx.fillStyle = `rgba(250, 204, 21, ${hitFlashTimer / 20})`; ctx.fillRect(0, 0, W, H); hitFlashTimer--;
-            }
-            if (damageFlashTimer > 0) {
-                ctx.fillStyle = `rgba(239, 68, 68, ${damageFlashTimer / 20})`; ctx.fillRect(0, 0, W, H); damageFlashTimer--;
-            }
-
-            // Draw Opponent Face
-            const faceX = W * 0.5; const faceY = H * 0.35;
-            const pulse = 1 + Math.sin(Date.now() / 200) * 0.05;
-            ctx.font = `${120 * pulse}px Arial`;
-            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-            ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 15;
-            ctx.fillText(hitFlashTimer > 5 ? '😵' : '😠', faceX, faceY);
-            ctx.shadowBlur = 0;
-
-            // Draw Opponent Hands (Red)
-            for (let hand of remoteHands) {
-                const rx = (1 - hand.x) * W; const ry = hand.y * H;
-                const distToTheirTarget = Math.sqrt(Math.pow(hand.x - 0.5, 2) + Math.pow(hand.y - 0.35, 2));
-                const scale = 1 + Math.max(0, (0.4 - distToTheirTarget) * 4); 
-
-                ctx.font = `${100 * scale}px Arial`;
-                ctx.shadowColor = 'rgba(239, 68, 68, 0.8)'; ctx.shadowBlur = 20;
-                ctx.fillText('🥊', rx, ry);
-            }
-
-            // Draw My Hands (Blue)
-            for (let hand of localHands) {
-                if (hand.x < 0) continue; 
-                const lx = hand.x * W; const ly = hand.y * H;
-                const scale = hand.speed > 0.03 ? 1.4 : 1.1;
-                
-                ctx.font = `${120 * scale}px Arial`;
-                ctx.shadowColor = 'rgba(56, 189, 248, 0.8)'; ctx.shadowBlur = 30;
-                
-                // Action lines for speed
-                if (hand.speed > 0.05) {
-                    ctx.beginPath(); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 4;
-                    ctx.moveTo(lx, ly); ctx.lineTo(lx, ly + 60); ctx.stroke();
-                }
-
-                ctx.fillText('🥊', lx, ly);
-            }
+        function triggerDamageEffect() {
+            updateHealthUI();
+            const flash = document.getElementById('hit-flash');
+            flash.style.opacity = '0.5';
+            setTimeout(() => { flash.style.opacity = '0'; }, 150);
             
-            ctx.shadowBlur = 0;
-            requestAnimationFrame(gameLoop);
+            // Camera Shake
+            camera.position.x += (Math.random() - 0.5) * 1;
+            camera.position.y += (Math.random() - 0.5) * 1;
+        }
+
+        function checkCollisions() {
+            const now = Date.now();
+            if (now - lastHitTime < 500) return; // Half second cooldown between hits
+
+            // If My Glove is fully extended, check distance to Opponent Head
+            // We use 3D distance on the XY plane mostly, since Z is dictated by extension.
+            
+            // Calculate actual 3D positions for collision checking
+            const myL_Pos = myGloveL.position;
+            const myR_Pos = myGloveR.position;
+            const oppH_Pos = oppHead.position;
+            
+            const hitRadius = 1.8;
+
+            if (myPoseData.left.ext > 0.8) {
+                if (myL_Pos.distanceTo(oppH_Pos) < hitRadius) { registerHit(); return; }
+            }
+            if (myPoseData.right.ext > 0.8) {
+                if (myR_Pos.distanceTo(oppH_Pos) < hitRadius) { registerHit(); return; }
+            }
+        }
+
+        function registerHit() {
+            lastHitTime = Date.now();
+            let dmg = 15;
+            oppHealth -= dmg;
+            updateHealthUI();
+            
+            // Visual feedback on opponent
+            oppHead.material = oppHeadMatHit;
+            setTimeout(() => { oppHead.material = oppHeadMatBase; }, 150);
+
+            if (conn && conn.open) {
+                conn.send({ type: 'hit', damage: dmg });
+            }
+            checkGameOver();
+        }
+
+        // --- Render Loop ---
+        function animate() {
+            if (!gameActive) return;
+            requestAnimationFrame(animate);
+
+            // Interpolation factor for smooth movement
+            const lerp = 0.2;
+
+            // 1. Move Camera based on My Head (Dodging / Parallax)
+            camera.position.x += (myPoseData.head.x * 0.4 - camera.position.x) * lerp;
+            camera.position.y += ((myPoseData.head.y * 0.4 + 1) - camera.position.y) * lerp;
+            camera.lookAt(0, 0, -8);
+
+            // 2. Position My Gloves (Foreground, Z goes from -2 down to -8 when punching)
+            myGloveL.position.x += (myPoseData.left.x - myGloveL.position.x) * lerp;
+            myGloveL.position.y += (myPoseData.left.y - myGloveL.position.y) * lerp;
+            myGloveL.position.z += ((-2 - (myPoseData.left.ext * 6)) - myGloveL.position.z) * lerp;
+
+            myGloveR.position.x += (myPoseData.right.x - myGloveR.position.x) * lerp;
+            myGloveR.position.y += (myPoseData.right.y - myGloveR.position.y) * lerp;
+            myGloveR.position.z += ((-2 - (myPoseData.right.ext * 6)) - myGloveR.position.z) * lerp;
+
+            // 3. Position Opponent Head (Background, Z = -8)
+            oppHead.position.x += (oppPoseData.head.x - oppHead.position.x) * lerp;
+            oppHead.position.y += (oppPoseData.head.y - oppHead.position.y) * lerp;
+            oppHead.position.z = -8;
+
+            // 4. Position Opponent Gloves (Background Z=-8, comes towards camera to Z=-2)
+            oppGloveL.position.x += (oppPoseData.left.x - oppGloveL.position.x) * lerp;
+            oppGloveL.position.y += (oppPoseData.left.y - oppGloveL.position.y) * lerp;
+            oppGloveL.position.z += ((-8 + (oppPoseData.left.ext * 6)) - oppGloveL.position.z) * lerp;
+
+            oppGloveR.position.x += (oppPoseData.right.x - oppGloveR.position.x) * lerp;
+            oppGloveR.position.y += (oppPoseData.right.y - oppGloveR.position.y) * lerp;
+            oppGloveR.position.z += ((-8 + (oppPoseData.right.ext * 6)) - oppGloveR.position.z) * lerp;
+
+            // Run Physics / Hits
+            checkCollisions();
+
+            renderer.render(scene, camera);
         }
     </script>
 </body>
