@@ -1,0 +1,408 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EQMX P2P Boxing</title>
+    <!-- Tailwind for UI Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MediaPipe AI for Hand Tracking -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <!-- PeerJS for P2P Networking -->
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #0f172a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white; }
+        #gameCanvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 10; display: none; }
+        #webcam_feed { position: absolute; inset: 0; width: 100vw; height: 100vh; object-fit: cover; opacity: 0.2; z-index: 5; transform: scaleX(-1); display: none; }
+        
+        .ui-panel { background: rgba(30, 41, 59, 0.9); backdrop-filter: blur(10px); border: 1px solid rgba(148, 163, 184, 0.2); }
+        .glowing-text { text-shadow: 0 0 10px rgba(56, 189, 248, 0.8); }
+        .health-transition { transition: width 0.2s ease-out; }
+    </style>
+</head>
+<body>
+
+    <!-- Hidden video for processing, visible faint video for background -->
+    <video id="input_video" style="display:none;" autoplay playsinline></video>
+    <video id="webcam_feed" autoplay playsinline></video>
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI Overlay container -->
+    <div id="ui-layer" class="absolute inset-0 z-20 flex flex-col items-center justify-center p-4">
+        
+        <!-- STEP 1: START CAMERA -->
+        <div id="step-camera" class="ui-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full">
+            <h1 class="text-4xl font-black mb-2 text-blue-400 glowing-text">EQMX BOXING</h1>
+            <p class="text-slate-300 mb-8">Motion controlled P2P fighting.</p>
+            
+            <button onclick="initializeCamera()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 px-6 rounded-xl text-xl shadow-lg transition transform hover:scale-105 active:scale-95">
+                Enable Camera to Start
+            </button>
+            <p id="cam-error" class="text-red-400 mt-4 hidden text-sm font-semibold"></p>
+        </div>
+
+        <!-- STEP 2: LOADING -->
+        <div id="step-loading" class="ui-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full hidden">
+            <div class="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <h2 class="text-2xl font-bold text-blue-400 animate-pulse">Warming up AI...</h2>
+            <p class="text-slate-400 mt-2">Loading hand tracking models.</p>
+        </div>
+
+        <!-- STEP 3: SERVER LOBBY -->
+        <div id="step-lobby" class="ui-panel p-8 rounded-2xl shadow-2xl max-w-lg w-full hidden">
+            <h2 class="text-3xl font-black text-center mb-6 text-yellow-400 drop-shadow-md">GAME LOBBY</h2>
+            
+            <!-- Host Section -->
+            <div class="bg-slate-800 p-4 rounded-xl mb-6 border border-slate-700">
+                <h3 class="text-lg font-bold text-slate-200 mb-2">Host a Room</h3>
+                <input type="text" id="host-room-name" placeholder="Enter Room Name (e.g. RING1)" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono uppercase mb-3 focus:border-blue-500 outline-none">
+                <button onclick="hostRoom()" class="w-full bg-blue-600 hover:bg-blue-500 py-3 rounded-lg font-bold text-white transition shadow-md">Create Server</button>
+            </div>
+
+            <div class="flex items-center my-4">
+                <div class="flex-grow border-t border-slate-600"></div>
+                <span class="mx-4 text-slate-500 font-bold text-sm">OR</span>
+                <div class="flex-grow border-t border-slate-600"></div>
+            </div>
+
+            <!-- Join Section -->
+            <div class="bg-slate-800 p-4 rounded-xl border border-slate-700">
+                <h3 class="text-lg font-bold text-slate-200 mb-2">Join a Room</h3>
+                <input type="text" id="join-room-name" placeholder="Enter Friend's Room Name" class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white font-mono uppercase mb-3 focus:border-red-500 outline-none">
+                <button onclick="joinRoom()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold text-white transition shadow-md">Join Server</button>
+            </div>
+            
+            <p id="lobby-error" class="text-red-400 mt-4 hidden text-center font-semibold"></p>
+        </div>
+
+        <!-- STEP 4: WAITING FOR PLAYER -->
+        <div id="step-waiting" class="ui-panel p-8 rounded-2xl shadow-2xl text-center max-w-md w-full hidden">
+            <div class="text-6xl mb-4">⏳</div>
+            <h2 class="text-2xl font-bold text-white mb-2">Waiting for Challenger...</h2>
+            <p class="text-slate-300">Tell your friend to join room:</p>
+            <div id="display-room-name" class="text-4xl font-black text-yellow-400 font-mono my-4 tracking-widest bg-slate-900 py-2 rounded border border-yellow-500/50"></div>
+            <p class="text-sm text-slate-500">The game will start automatically.</p>
+        </div>
+
+        <!-- GAME OVER SCREEN -->
+        <div id="game-over" class="hidden absolute inset-0 bg-slate-950/90 flex flex-col items-center justify-center z-50">
+            <h2 id="end-text" class="text-7xl font-black mb-4 text-white tracking-tighter drop-shadow-2xl">K.O.</h2>
+            <p id="end-subtext" class="text-4xl font-bold mb-10">...</p>
+            <button onclick="window.location.reload()" class="bg-white text-slate-900 px-10 py-5 rounded-full font-black text-2xl hover:scale-105 transition transform">
+                MAIN MENU
+            </button>
+        </div>
+    </div>
+
+    <!-- HUD (Moved outside central UI layer so it sits at top) -->
+    <div id="health-hud" class="absolute top-0 left-0 w-full p-6 z-30 flex justify-between items-center hidden pointer-events-none">
+        <div class="flex-1 max-w-md">
+            <div class="text-xl font-black mb-1 text-blue-400 drop-shadow-md">YOU</div>
+            <div class="w-full bg-slate-900 h-8 rounded-full overflow-hidden border-2 border-slate-700">
+                <div id="my-health" class="health-transition bg-blue-500 h-full w-full"></div>
+            </div>
+        </div>
+        <div class="px-8 font-black text-4xl text-yellow-500 drop-shadow-md italic">VS</div>
+        <div class="flex-1 max-w-md text-right">
+            <div class="text-xl font-black mb-1 text-red-400 drop-shadow-md">OPPONENT</div>
+            <div class="w-full bg-slate-900 h-8 rounded-full overflow-hidden border-2 border-slate-700 flex justify-end">
+                <div id="opp-health" class="health-transition bg-red-500 h-full w-full"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Game State ---
+        let gameActive = false;
+        let myHealth = 100;
+        let oppHealth = 100;
+        let localHands = [];
+        let prevHands = [];
+        let remoteHands = [];
+        let hitFlashTimer = 0;
+        let damageFlashTimer = 0;
+        
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('input_video');
+        const bgVideo = document.getElementById('webcam_feed');
+
+        // --- PeerJS Setup ---
+        let peer = null;
+        let conn = null;
+        const PEER_PREFIX = 'eqmx-boxing-v1-';
+
+        function showUI(id) {
+            ['step-camera', 'step-loading', 'step-lobby', 'step-waiting'].forEach(step => {
+                document.getElementById(step).classList.add('hidden');
+            });
+            if(id) document.getElementById(id).classList.remove('hidden');
+        }
+
+        // --- 1. Camera & AI Initialization ---
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        
+        hands.onResults((results) => {
+            prevHands = [...localHands];
+            localHands = [];
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    const knuckle = landmarks[9]; 
+                    // EXACT MIRROR: Flip X coordinate
+                    localHands.push({ x: 1 - knuckle.x, y: knuckle.y, speed: 0 });
+                }
+            }
+
+            if (gameActive) {
+                processPunches();
+                if (conn && conn.open) conn.send({ type: 'hands', data: localHands });
+            }
+        });
+
+        async function detectHandsLoop() {
+            if (videoElement.readyState >= 2) {
+                await hands.send({image: videoElement});
+            }
+            requestAnimationFrame(detectHandsLoop);
+        }
+
+        async function initializeCamera() {
+            showUI('step-loading');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                videoElement.srcObject = stream;
+                bgVideo.srcObject = stream;
+                
+                videoElement.onloadedmetadata = () => {
+                    videoElement.play();
+                    bgVideo.play();
+                    bgVideo.style.display = 'block'; // Show faint background
+                    detectHandsLoop(); // Start AI Processing
+                    showUI('step-lobby'); // Move to server selection
+                };
+            } catch (err) {
+                console.error(err);
+                showUI('step-camera');
+                const errEl = document.getElementById('cam-error');
+                errEl.innerText = "Camera access denied. Please allow permissions and try again.";
+                errEl.classList.remove('hidden');
+            }
+        }
+
+        // --- 2. Multiplayer Lobby Logic ---
+        function hostRoom() {
+            const roomName = document.getElementById('host-room-name').value.trim().toUpperCase();
+            if (!roomName) return;
+            
+            document.getElementById('lobby-error').classList.add('hidden');
+            
+            peer = new Peer(PEER_PREFIX + roomName);
+            
+            peer.on('open', () => {
+                document.getElementById('display-room-name').innerText = roomName;
+                showUI('step-waiting');
+            });
+
+            peer.on('error', (err) => {
+                const errEl = document.getElementById('lobby-error');
+                errEl.innerText = "Room name might already be taken. Try another.";
+                errEl.classList.remove('hidden');
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupConnectionListeners();
+                startGame();
+            });
+        }
+
+        function joinRoom() {
+            const roomName = document.getElementById('join-room-name').value.trim().toUpperCase();
+            if (!roomName) return;
+
+            document.getElementById('lobby-error').classList.add('hidden');
+
+            peer = new Peer(); // Joiner gets random ID
+            
+            peer.on('open', () => {
+                conn = peer.connect(PEER_PREFIX + roomName);
+                
+                conn.on('open', () => {
+                    setupConnectionListeners();
+                    startGame();
+                });
+
+                conn.on('error', () => {
+                    const errEl = document.getElementById('lobby-error');
+                    errEl.innerText = "Could not find that room. Is the host ready?";
+                    errEl.classList.remove('hidden');
+                });
+            });
+        }
+
+        function setupConnectionListeners() {
+            conn.on('data', (payload) => {
+                if (payload.type === 'hands') remoteHands = payload.data;
+                else if (payload.type === 'hit') {
+                    myHealth -= payload.damage;
+                    damageFlashTimer = 20; 
+                    updateHealthUI();
+                    checkGameOver();
+                }
+            });
+        }
+
+        // --- 3. Game Logic ---
+        function startGame() {
+            showUI(''); // Hide all central UI
+            document.getElementById('ui-layer').classList.add('pointer-events-none');
+            document.getElementById('health-hud').classList.remove('hidden');
+            canvas.style.display = 'block';
+            
+            myHealth = 100; oppHealth = 100;
+            updateHealthUI();
+            gameActive = true;
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateHealthUI() {
+            document.getElementById('my-health').style.width = Math.max(0, myHealth) + '%';
+            document.getElementById('opp-health').style.width = Math.max(0, oppHealth) + '%';
+        }
+
+        function checkGameOver() {
+            if (myHealth <= 0 || oppHealth <= 0) {
+                gameActive = false;
+                document.getElementById('game-over').classList.remove('hidden');
+                document.getElementById('ui-layer').classList.remove('pointer-events-none');
+                
+                const subtext = document.getElementById('end-subtext');
+                if (myHealth <= 0) {
+                    subtext.innerText = 'You Got Knocked Out!';
+                    subtext.className = 'text-4xl font-bold mb-10 text-red-500';
+                } else {
+                    subtext.innerText = 'You Are The Champion!';
+                    subtext.className = 'text-4xl font-bold mb-10 text-yellow-500';
+                }
+            }
+        }
+
+        // Helper for velocity calculation
+        function getClosestHand(curr, prevList) {
+            let minD = Infinity; let match = null;
+            for (let p of prevList) {
+                let d = Math.pow(curr.x - p.x, 2) + Math.pow(curr.y - p.y, 2);
+                if (d < minD) { minD = d; match = p; }
+            }
+            return match;
+        }
+
+        function processPunches() {
+            const targetX = 0.5; const targetY = 0.35; // Enemy face position
+            const hitRadius = 0.15; 
+            const speedThreshold = 0.04; 
+
+            for (let i = 0; i < localHands.length; i++) {
+                const current = localHands[i];
+                const prev = getClosestHand(current, prevHands);
+
+                if (prev) {
+                    const vx = current.x - prev.x;
+                    const vy = current.y - prev.y;
+                    const speed = Math.sqrt(vx*vx + vy*vy);
+                    current.speed = speed;
+
+                    // If moving fast, check collision
+                    if (speed > speedThreshold) {
+                        const distToFace = Math.sqrt(Math.pow(current.x - targetX, 2) + Math.pow(current.y - targetY, 2));
+                        
+                        if (distToFace < hitRadius) {
+                            let dmg = Math.min(15, Math.floor(speed * 180)); // Calculate damage
+                            
+                            if (conn && conn.open) conn.send({ type: 'hit', damage: dmg });
+                            
+                            oppHealth -= dmg;
+                            hitFlashTimer = 15; 
+                            updateHealthUI();
+                            checkGameOver();
+                            
+                            current.x = -10; // Prevent multi-hits
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- 4. Rendering ---
+        function gameLoop() {
+            if (!gameActive) return;
+
+            if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+            }
+
+            const W = canvas.width; const H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+
+            // Flashes
+            if (hitFlashTimer > 0) {
+                ctx.fillStyle = `rgba(250, 204, 21, ${hitFlashTimer / 20})`; ctx.fillRect(0, 0, W, H); hitFlashTimer--;
+            }
+            if (damageFlashTimer > 0) {
+                ctx.fillStyle = `rgba(239, 68, 68, ${damageFlashTimer / 20})`; ctx.fillRect(0, 0, W, H); damageFlashTimer--;
+            }
+
+            // Draw Opponent Face
+            const faceX = W * 0.5; const faceY = H * 0.35;
+            const pulse = 1 + Math.sin(Date.now() / 200) * 0.05;
+            ctx.font = `${120 * pulse}px Arial`;
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 15;
+            ctx.fillText(hitFlashTimer > 5 ? '😵' : '😠', faceX, faceY);
+            ctx.shadowBlur = 0;
+
+            // Draw Opponent Hands (Red)
+            for (let hand of remoteHands) {
+                const rx = (1 - hand.x) * W; const ry = hand.y * H;
+                const distToTheirTarget = Math.sqrt(Math.pow(hand.x - 0.5, 2) + Math.pow(hand.y - 0.35, 2));
+                const scale = 1 + Math.max(0, (0.4 - distToTheirTarget) * 4); 
+
+                ctx.font = `${100 * scale}px Arial`;
+                ctx.shadowColor = 'rgba(239, 68, 68, 0.8)'; ctx.shadowBlur = 20;
+                ctx.fillText('🥊', rx, ry);
+            }
+
+            // Draw My Hands (Blue)
+            for (let hand of localHands) {
+                if (hand.x < 0) continue; 
+                const lx = hand.x * W; const ly = hand.y * H;
+                const scale = hand.speed > 0.03 ? 1.4 : 1.1;
+                
+                ctx.font = `${120 * scale}px Arial`;
+                ctx.shadowColor = 'rgba(56, 189, 248, 0.8)'; ctx.shadowBlur = 30;
+                
+                // Action lines for speed
+                if (hand.speed > 0.05) {
+                    ctx.beginPath(); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 4;
+                    ctx.moveTo(lx, ly); ctx.lineTo(lx, ly + 60); ctx.stroke();
+                }
+
+                ctx.fillText('🥊', lx, ly);
+            }
+            
+            ctx.shadowBlur = 0;
+            requestAnimationFrame(gameLoop);
+        }
+    </script>
+</body>
+</html>
+
+
+```
