@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Perfect Connectivity 3D Boxing (EMQX)</title>
+    <title>Definitive 3D Articulated Boxing (EMQX)</title>
     
     <!-- 
       Tailwind CSS Framework
@@ -157,7 +157,7 @@
                 PRO BOXING
             </h1>
             <p class="text-slate-400 mb-8 text-sm leading-relaxed">
-                Step back so the camera sees your shoulders, elbows, and hands. Punch directly at the screen!
+                Step back so the camera sees your shoulders, elbows, and hands. Lean left/right to dodge. Punch directly at the screen!
             </p>
             <button onclick="System.initializeCamera()" class="w-full bg-gradient-to-r from-yellow-600 to-yellow-400 hover:from-yellow-500 hover:to-yellow-300 text-black font-black py-5 px-6 rounded-2xl text-xl shadow-[0_0_30px_rgba(234,179,8,0.3)] transition-all transform hover:scale-[1.02] active:scale-[0.98]">
                 ACTIVATE CAMERA
@@ -168,7 +168,6 @@
         <!-- STEP 2: LOADING AI RESOURCES -->
         <div id="step-loading" class="ui-panel p-10 rounded-3xl text-center max-w-lg w-full hidden">
             <div class="relative w-24 h-24 mx-auto mb-8">
-                <div class="absolute inset-0 border-4 border-slate-700 rounded-full"></div>
                 <div class="absolute inset-0 border-4 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
                 <div class="absolute inset-0 flex items-center justify-center text-yellow-400 font-bold">AI</div>
             </div>
@@ -279,7 +278,7 @@
         const CONFIG = {
             // EMQX Broker Configuration
             EMQX_BROKER_URL: 'wss://broker.emqx.io:8084/mqtt',
-            TOPIC_PREFIX: 'eqmx-perfect-box-v2/',
+            TOPIC_PREFIX: 'eqmx-perfect-box-v4/',
             
             // Gameplay Constants
             MAX_HEALTH: 1000, 
@@ -287,8 +286,9 @@
             BASE_DAMAGE: 150,
             
             // Physics & Scale
-            HIT_RADIUS: 2.5,        // Very generous hit detection radius
-            PUNCH_MULTIPLIER: 3.5,  // Multiplies your arm reach so you can hit the opponent
+            HIT_RADIUS: 2.0,        // Radius for detecting hits on head and torso
+            PUNCH_MULTIPLIER: 2.0,  // Realistic multiplier to extend the arm across the ring
+            MAX_STRETCH: 1.5,       // Cap the stretch so the arm doesn't get fake/long
             
             // Networking
             NET_TICK_RATE: 33       // ~30 FPS networking
@@ -335,9 +335,7 @@
             }
 
             /**
-             * Generates a burst of filtered white noise.
-             * @param {number} dur - Duration in seconds.
-             * @param {number} vol - Volume level.
+             * Generates a burst of filtered white noise for hit impacts.
              */
             playNoise(dur, vol) {
                 if (this.ctx.state === 'suspended') {
@@ -370,17 +368,11 @@
                 noise.start();
             }
 
-            /**
-             * Triggers the sound effect for a successful hit.
-             */
             playHit() { 
                 this.playNoise(0.3, 1.8); 
                 this.playTone(60, 'square', 0.2, 1.0); 
             }
 
-            /**
-             * Triggers the sound effect for the round bell.
-             */
             playBell() { 
                 this.playTone(800, 'sine', 1.5, 0.8); 
                 setTimeout(() => {
@@ -389,14 +381,13 @@
             }
         }
         
-        // Initialize Global Audio System
         const AudioSys = new AudioEngine();
 
         /**
          * ============================================================================
          * 3. GRAPHICS ENGINE
          * ============================================================================
-         * Handles the Three.js Scene, Camera, Renderer, Lighting, and Environment.
+         * Handles the Three.js Scene, Camera, Renderer, Lighting, and Particles.
          */
         class GraphicsEngine {
             constructor() {
@@ -404,9 +395,11 @@
                 this.scene.background = new THREE.Color(0x050505);
                 this.scene.fog = new THREE.FogExp2(0x050505, 0.015);
                 
+                // Set up the camera
                 this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 100);
-                // FIXED CAMERA POSITION: Above and slightly behind the local player
-                this.camera.position.set(0, 4, 11);
+                
+                // FIX: Camera is placed above and behind the player to guarantee a good view
+                this.camera.position.set(0, 3.5, 9);
                 this.camera.lookAt(0, 1.5, 0);
 
                 this.renderer = new THREE.WebGLRenderer({ 
@@ -423,9 +416,6 @@
                 window.addEventListener('resize', this.onWindowResize.bind(this), false);
             }
 
-            /**
-             * Constructs the dynamic lighting setup for the arena.
-             */
             buildLighting() {
                 const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
                 this.scene.add(ambientLight);
@@ -449,9 +439,6 @@
                 this.scene.add(redRimLight);
             }
 
-            /**
-             * Constructs the Boxing Ring geometry (Floor and Ropes).
-             */
             buildRing() {
                 const gridHelper = new THREE.GridHelper(30, 30, 0x475569, 0x1e293b); 
                 gridHelper.position.y = -2; 
@@ -479,9 +466,6 @@
                 }
             }
 
-            /**
-             * Initializes the BufferGeometry required for the Particle System.
-             */
             buildParticles() {
                 const particleGeometry = new THREE.BufferGeometry(); 
                 this.maxParticleCount = 50;
@@ -508,9 +492,6 @@
                 }
             }
 
-            /**
-             * Triggers a burst of particles at a specific 3D location.
-             */
             emitParticles(x, y, z, colorHex) {
                 this.particleSystem.material.color.setHex(colorHex);
                 const positions = this.particleSystem.geometry.attributes.position.array;
@@ -532,9 +513,6 @@
                 this.particleSystem.geometry.attributes.position.needsUpdate = true;
             }
 
-            /**
-             * Steps the physics simulation for all active particles.
-             */
             updateParticles(deltaTime) {
                 const positions = this.particleSystem.geometry.attributes.position.array; 
                 let isActive = false;
@@ -570,18 +548,12 @@
                 }
             }
             
-            /**
-             * Handles window resizing events to adjust the camera aspect ratio.
-             */
             onWindowResize() {
                 this.camera.aspect = window.innerWidth / window.innerHeight;
                 this.camera.updateProjectionMatrix();
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
             }
 
-            /**
-             * Triggers the WebGL render call.
-             */
             render() { 
                 this.renderer.render(this.scene, this.camera); 
             }
@@ -591,12 +563,13 @@
          * ============================================================================
          * 4. PROCEDURAL RIGGED CHARACTER
          * ============================================================================
-         * Perfectly anchors limbs and fingers to parent joints to prevent floating parts.
+         * Creates a fully rigged 3D character with perfectly connected limbs.
          */
         class ProceduralCharacter {
-            constructor(scene, isLocal) {
+            constructor(scene, isLocal, baseZ) {
                 this.scene = scene;
                 this.isLocal = isLocal;
+                this.baseZ = baseZ;
                 
                 // Color Assignments: Local = White Skin, Remote = Brown Skin
                 this.skinColor = isLocal ? 0xffe0bd : 0x8b5a2b;
@@ -606,43 +579,42 @@
                     roughness: 0.6 
                 });
 
-                // 1. Instantiate Head & Torso
-                const headGeo = new THREE.BoxGeometry(1.4, 1.8, 1.4);
+                // 1. Head
+                const headGeo = new THREE.BoxGeometry(1.2, 1.6, 1.2);
                 this.head = new THREE.Mesh(headGeo, this.material);
                 
-                const torsoGeo = new THREE.BoxGeometry(3.5, 3.5, 1.2);
+                // 2. Torso
+                const torsoGeo = new THREE.BoxGeometry(2.5, 3.0, 1.0);
                 this.torso = new THREE.Mesh(torsoGeo, this.material);
                 
-                // Helper to create and configure bone geometry
+                // Helper to create cylinder bones pivoting at their base
                 const createBone = (radius, length) => {
                     const geometry = new THREE.CylinderGeometry(radius, radius * 0.8, length, 8);
-                    // Shift pivot point to the end of the cylinder so it rotates from the joint
                     geometry.translate(0, length / 2, 0); 
-                    // Rotate to align with the Z axis for the lookAt function
                     geometry.rotateX(Math.PI / 2); 
                     return new THREE.Mesh(geometry, this.material);
                 };
                 
-                // 2. Instantiate Arms
-                this.armUpperLeft = createBone(0.3, 1); 
-                this.armUpperRight = createBone(0.3, 1); 
-                this.armLowerLeft = createBone(0.25, 1); 
-                this.armLowerRight = createBone(0.25, 1); 
+                // 3. Arms
+                this.armUpperLeft = createBone(0.25, 1); 
+                this.armUpperRight = createBone(0.25, 1); 
+                this.armLowerLeft = createBone(0.2, 1); 
+                this.armLowerRight = createBone(0.2, 1); 
 
-                // 3. Instantiate Solid Palms (Fixes the hole in the hand)
-                const palmGeo = new THREE.BoxGeometry(0.8, 0.8, 0.4);
+                // 4. Solid Palms (Fixes the hole in the hand)
+                const palmGeo = new THREE.BoxGeometry(0.7, 0.7, 0.3);
                 this.palmLeft = new THREE.Mesh(palmGeo, this.material);
                 this.palmRight = new THREE.Mesh(palmGeo, this.material);
 
-                // 4. Instantiate Fingers (20 per hand)
+                // 5. Fingers
                 this.fingersLeft = []; 
                 this.fingersRight = [];
                 for (let i = 0; i < 20; i++) {
-                    this.fingersLeft.push(createBone(0.08, 1));
-                    this.fingersRight.push(createBone(0.08, 1));
+                    this.fingersLeft.push(createBone(0.06, 1));
+                    this.fingersRight.push(createBone(0.06, 1));
                 }
 
-                // Collect all meshes and add to scene
+                // Add all to scene
                 const allMeshes = [
                     this.head, this.torso, 
                     this.armUpperLeft, this.armUpperRight, 
@@ -652,12 +624,10 @@
                 ];
                 
                 allMeshes.forEach(mesh => { 
-                    // Hide meshes underground initially
-                    mesh.position.set(0, -20, 0); 
                     this.scene.add(mesh); 
                 });
 
-                // Initialize target coordinate tracking vectors
+                // Target Vectors
                 this.target = {
                     head: new THREE.Vector3(),
                     shoulderLeft: new THREE.Vector3(), 
@@ -670,23 +640,36 @@
                     handRight: Array(21).fill().map(() => new THREE.Vector3())
                 };
                 
-                this.isActive = false;
+                // Set default idle stance so they are ALWAYS visible
+                this.setDefaultIdlePose();
             }
 
             /**
-             * Sets absolute 3D target coordinates for the entire body.
-             * @param {Object} data - The parsed network or local AI data payload.
+             * Ensures the character is visible in a boxing guard if tracking drops.
              */
+            setDefaultIdlePose() {
+                this.target.head.set(0, 2.5, this.baseZ);
+                this.target.shoulderLeft.set(-1.2, 2.0, this.baseZ);
+                this.target.shoulderRight.set(1.2, 2.0, this.baseZ);
+                this.target.elbowLeft.set(-1.0, 1.2, this.baseZ + 0.5);
+                this.target.elbowRight.set(1.0, 1.2, this.baseZ + 0.5);
+                this.target.wristLeft.set(-0.5, 2.0, this.baseZ + 1.0);
+                this.target.wristRight.set(0.5, 2.0, this.baseZ + 1.0);
+                
+                // Clump fingers around the wrist
+                for (let i = 0; i < 21; i++) {
+                    this.target.handLeft[i].set(-0.5, 2.0 + (i*0.01), this.baseZ + 1.0);
+                    this.target.handRight[i].set(0.5, 2.0 + (i*0.01), this.baseZ + 1.0);
+                }
+            }
+
             setAbsoluteTargets(data) {
                 if (!data || !data.p) { 
-                    this.isActive = false; 
+                    this.setDefaultIdlePose();
                     return; 
                 }
-                
-                this.isActive = true;
 
-                // Destructure main pose array
-                // Map: 0=Head, 1=ShoulderL, 2=ShoulderR, 3=ElbowL, 4=ElbowR, 5=WristL, 6=WristR
+                // Destructure main pose
                 this.target.head.fromArray(data.p[0]);
                 this.target.shoulderLeft.fromArray(data.p[1]); 
                 this.target.shoulderRight.fromArray(data.p[2]);
@@ -695,101 +678,63 @@
                 this.target.wristLeft.fromArray(data.p[5]); 
                 this.target.wristRight.fromArray(data.p[6]);
 
-                // Update Hand Landmarks if present
                 if (data.hl) {
-                    for (let i = 0; i < 21; i++) {
-                        this.target.handLeft[i].fromArray(data.hl[i]);
-                    }
+                    for (let i = 0; i < 21; i++) this.target.handLeft[i].fromArray(data.hl[i]);
                 }
                 
                 if (data.hr) {
-                    for (let i = 0; i < 21; i++) {
-                        this.target.handRight[i].fromArray(data.hr[i]);
-                    }
+                    for (let i = 0; i < 21; i++) this.target.handRight[i].fromArray(data.hr[i]);
                 }
             }
 
-            /**
-             * Animates a cylinder mesh to bridge the gap perfectly between two points.
-             * @param {THREE.Mesh} mesh - The bone to move.
-             * @param {THREE.Vector3} point1 - The starting coordinate.
-             * @param {THREE.Vector3} point2 - The ending coordinate.
-             */
             anchorBone(mesh, point1, point2) {
-                // If the target is hidden underground, hide the mesh
-                if (point1.y < -10 || point2.y < -10) { 
-                    mesh.position.y = -20; 
-                    return; 
-                }
-                
                 mesh.position.copy(point1);
                 mesh.lookAt(point2);
-                
-                // Stretch the Z axis of the bone to match the distance
                 const distance = point1.distanceTo(point2);
                 mesh.scale.set(1, 1, Math.max(0.1, distance));
             }
 
-            /**
-             * Animates a solid palm box based on the Wrist and Index/Pinky Knuckles.
-             */
             anchorPalm(mesh, wrist, knuckleIndex, knucklePinky) {
-                if (wrist.y < -10) { 
-                    mesh.position.y = -20; 
-                    return; 
-                }
-                
-                // Position palm at the exact center of the wrist and base knuckles
                 mesh.position.set( 
                     (wrist.x + knuckleIndex.x + knucklePinky.x) / 3, 
                     (wrist.y + knuckleIndex.y + knucklePinky.y) / 3, 
                     (wrist.z + knuckleIndex.z + knucklePinky.z) / 3 
                 );
-                
-                // Point palm towards the index knuckle
                 mesh.lookAt(knuckleIndex);
             }
 
-            /**
-             * Main animation step function.
-             */
             update(deltaTime) {
-                if (!this.isActive) { 
-                    this.head.position.y = -20; 
-                    return; 
-                }
-                
                 const speed = 20 * deltaTime;
 
-                // 1. Move Head
+                // Move Head
                 this.head.position.lerp(this.target.head, speed);
                 
-                // 2. Calculate and Move Torso
+                // Calculate and Move Torso
                 const torsoPosition = new THREE.Vector3();
                 torsoPosition.addVectors(this.target.shoulderLeft, this.target.shoulderRight);
-                torsoPosition.multiplyScalar(0.5); // Center between shoulders
-                torsoPosition.y -= 1.5; // Offset downward to form the chest
+                torsoPosition.multiplyScalar(0.5); 
+                torsoPosition.y -= 1.2; 
                 
                 this.torso.position.lerp(torsoPosition, speed);
                 this.torso.lookAt(this.target.head);
 
-                // 3. Anchor Arms perfectly
+                // Anchor Arms perfectly
                 this.anchorBone(this.armUpperLeft, this.target.shoulderLeft, this.target.elbowLeft);
                 this.anchorBone(this.armUpperRight, this.target.shoulderRight, this.target.elbowRight);
                 this.anchorBone(this.armLowerLeft, this.target.elbowLeft, this.target.wristLeft);
                 this.anchorBone(this.armLowerRight, this.target.elbowRight, this.target.wristRight);
 
-                // 4. Anchor Palms perfectly
+                // Anchor Palms perfectly
                 this.anchorPalm(this.palmLeft, this.target.wristLeft, this.target.handLeft[5], this.target.handLeft[17]);
                 this.anchorPalm(this.palmRight, this.target.wristRight, this.target.handRight[5], this.target.handRight[17]);
 
-                // 5. Anchor Fingers perfectly
+                // Anchor Fingers perfectly
                 const fingerConnections = [ 
-                    [0,1],[1,2],[2,3],[3,4],     // Thumb
-                    [0,5],[5,6],[6,7],[7,8],     // Index
-                    [5,9],[9,10],[10,11],[11,12], // Middle
-                    [9,13],[13,14],[14,15],[15,16], // Ring
-                    [13,17],[17,18],[18,19],[19,20] // Pinky
+                    [0,1],[1,2],[2,3],[3,4],     
+                    [0,5],[5,6],[6,7],[7,8],     
+                    [5,9],[9,10],[10,11],[11,12], 
+                    [9,13],[13,14],[14,15],[15,16], 
+                    [13,17],[17,18],[18,19],[19,20] 
                 ];
                 
                 for (let i = 0; i < 20; i++) {
@@ -810,16 +755,10 @@
                 }
             }
 
-            /**
-             * Exposes body mesh positions for hit detection logic.
-             */
             getHitboxes() { 
                 return [this.head.position, this.torso.position]; 
             }
             
-            /**
-             * Exposes hand mesh positions for hit logic.
-             */
             getFists() { 
                 return [this.palmLeft.position, this.palmRight.position]; 
             }
@@ -829,21 +768,24 @@
          * ============================================================================
          * 5. CORE GAME ENGINE
          * ============================================================================
-         * Handles game state, physics, rendering loops, and synchronization logic.
          */
         class GameEngine {
             constructor() {
                 this.gfx = new GraphicsEngine();
-                this.localChar = new ProceduralCharacter(this.gfx.scene, true);
-                this.remoteChar = new ProceduralCharacter(this.gfx.scene, false);
+                
+                // Bring players much closer to make hits easier to land naturally
+                this.myBaseZ = 2.5; 
+                this.oppBaseZ = -2.5; 
+                
+                this.localChar = new ProceduralCharacter(this.gfx.scene, true, this.myBaseZ);
+                this.remoteChar = new ProceduralCharacter(this.gfx.scene, false, this.oppBaseZ);
 
                 this.state = 'MENU'; 
                 this.myHP = CONFIG.MAX_HEALTH; 
                 this.oppHP = CONFIG.MAX_HEALTH;
                 
-                // Lock players to specific Z depths so the camera remains stable
-                this.myBaseZ = 4.0; 
-                this.oppBaseZ = -2.0; 
+                // Decouple camera from the player. It only moves a little bit.
+                this.targetCam = new THREE.Vector3(0, 3.5, 9);
                 
                 this.lastPunchTime = 0; 
                 this.lastNetTick = 0;
@@ -852,18 +794,13 @@
                 this.fightStartTime = 0;
             }
 
-            /**
-             * Updates the HTML DOM elements representing the health bars.
-             */
             updateUI() {
-                // Determine display values
                 const myDisplayHP = Math.max(0, Math.ceil(this.myHP / 10));
                 const oppDisplayHP = Math.max(0, Math.ceil(this.oppHP / 10));
                 
                 document.getElementById('my-hp-text').innerText = myDisplayHP;
                 document.getElementById('opp-hp-text').innerText = oppDisplayHP;
                 
-                // Calculate percentages for the CSS width transition
                 const myPercentage = (this.myHP / CONFIG.MAX_HEALTH) * 100;
                 const oppPercentage = (this.oppHP / CONFIG.MAX_HEALTH) * 100;
                 
@@ -871,63 +808,42 @@
                 document.getElementById('opp-health').style.width = Math.max(0, oppPercentage) + '%';
             }
 
-            /**
-             * Processes incoming damage to the local player.
-             */
             applyDamageToMe(amount, location) {
-                // If game is over, ignore further damage
                 if (this.state === 'KO') {
                     return; 
                 }
                 
-                // Apply damage
                 this.myHP -= amount; 
-                if (this.myHP < 0) {
-                    this.myHP = 0;
-                }
+                if (this.myHP < 0) this.myHP = 0;
                 
                 this.updateUI(); 
                 AudioSys.playHit();
                 
-                // Trigger screen flash
                 const flashOverlay = document.getElementById('hit-flash'); 
                 flashOverlay.style.opacity = '0.8'; 
-                setTimeout(() => { 
-                    flashOverlay.style.opacity = '0'; 
-                }, 200);
+                setTimeout(() => { flashOverlay.style.opacity = '0'; }, 200);
                 
-                // Trigger screen shake
                 const shakeX = (Math.random() - 0.5) * 2;
                 const shakeY = (Math.random() - 0.5) * 2;
                 this.gfx.camera.position.add(new THREE.Vector3(shakeX, shakeY, 0));
                 
-                // Emit blood/sweat particles
                 this.gfx.emitParticles(location.x, location.y, location.z, 0xff0000); 
 
-                // Dispatch Sync packet to ensure opponent sees my exact health drop
                 NetworkSys.sendSyncHealth(this.myHP);
                 
-                // Check death condition
                 if (this.myHP === 0) { 
                     this.state = 'KO'; 
-                    // Tell opponent they won to prevent desyncs
                     NetworkSys.sendFatality(); 
                     this.endGame(false); 
                 }
             }
 
-            /**
-             * Ingests a sync packet from the opponent updating their health.
-             */
             syncRemoteHealth(healthAmount) { 
                 if (this.state === 'KO') return; 
                 this.oppHP = healthAmount; 
                 this.updateUI(); 
             }
             
-            /**
-             * Ingests a fatality packet from the opponent, confirming their death.
-             */
             executeFatality() { 
                 if (this.state === 'KO') return; 
                 this.state = 'KO'; 
@@ -936,68 +852,42 @@
                 this.endGame(true); 
             }
 
-            /**
-             * Processes an outgoing hit against the opponent.
-             */
             landHit(amount, position) {
                 const currentTime = Date.now();
-                if (currentTime - this.lastPunchTime < CONFIG.PUNCH_COOLDOWN) {
-                    return; 
-                }
+                if (currentTime - this.lastPunchTime < CONFIG.PUNCH_COOLDOWN) return; 
                 
                 this.lastPunchTime = currentTime; 
                 AudioSys.playHit();
                 
-                // Visual flash feedback on the remote character's head
                 this.remoteChar.head.material.color.setHex(0xffffff);
                 setTimeout(() => { 
                     this.remoteChar.head.material.color.setHex(this.remoteChar.skinColor); 
                 }, 100);
                 
-                // Emit blue impact sparks
                 this.gfx.emitParticles(position.x, position.y, position.z, 0x0ea5e9); 
-                
-                // Dispatch network payload
                 NetworkSys.sendHit(amount, position);
             }
 
-            /**
-             * Primary physics checking loop to detect hits against the opponent.
-             */
             checkPhysics() {
-                if (this.state !== 'FIGHT' || !this.remoteChar.isActive) {
-                    return;
-                }
+                if (this.state !== 'FIGHT') return;
                 
-                // Get the location of the opponent's hitboxes
                 const enemyHitboxes = this.remoteChar.getHitboxes();
-                
-                // Get the location of my fists
                 const myFists = this.localChar.getFists();
 
                 for (let i = 0; i < myFists.length; i++) {
                     const fistPosition = myFists[i];
                     
-                    // Skip if hand is hidden/lost tracking
-                    if (fistPosition.y < -10) continue;
-                    
-                    // Check against all enemy hitboxes
                     for (let j = 0; j < enemyHitboxes.length; j++) {
                         const hitboxPosition = enemyHitboxes[j];
                         
                         if (fistPosition.distanceTo(hitboxPosition) < CONFIG.HIT_RADIUS) {
                             this.landHit(CONFIG.BASE_DAMAGE, fistPosition);
-                            
-                            // Exit function after a successful hit to prevent double-hitting
                             return; 
                         }
                     }
                 }
             }
 
-            /**
-             * Triggers the start of the match sequence.
-             */
             startFight() {
                 this.state = 'FIGHT'; 
                 this.myHP = CONFIG.MAX_HEALTH; 
@@ -1005,21 +895,13 @@
                 this.updateUI(); 
                 this.fightStartTime = Date.now();
                 
-                // Hide all lobby UI elements
                 const panels = document.querySelectorAll('.ui-panel, #game-over');
-                panels.forEach(element => { 
-                    element.classList.add('hidden'); 
-                });
+                panels.forEach(element => { element.classList.add('hidden'); });
                 
-                // Show game HUD
                 document.getElementById('health-hud').classList.remove('hidden');
-                
                 AudioSys.playBell();
             }
 
-            /**
-             * Triggers the end of match sequence.
-             */
             endGame(isWin) {
                 document.getElementById('game-over').classList.remove('hidden');
                 const subtextElement = document.getElementById('end-subtext');
@@ -1034,8 +916,9 @@
             }
 
             /**
-             * THE MAGIC ALGORITHM: Converts MediaPipe relative coordinates to 3D world space.
-             * This function is responsible for the "Punch Amplifier" effect.
+             * THE MAGIC ALGORITHM FIXES
+             * 1. Dodging multiplier increased to 25.
+             * 2. Arm stretch capped so it doesn't look fake.
              */
             processLocalPose(results) {
                 if (!results.poseLandmarks || this.state !== 'FIGHT') {
@@ -1044,18 +927,18 @@
 
                 const poseData = results.poseLandmarks;
                 
-                // Helper to map normalized points to Absolute 3D coordinates
+                // DODGE LOGIC: Amplify the X movement so the character actively dodges across the screen
+                const dodgeX = (0.5 - poseData[0].x) * 25; 
+                
+                // CAMERA LOGIC: Only move the camera a little bit so you can clearly see your dodge!
+                this.targetCam.x = (0.5 - poseData[0].x) * 5; 
+
                 const mapBodyToWorld = (landmark) => {
                     if (!landmark) return [0, -20, 0];
                     
-                    // X axis is mirrored so the screen acts like a mirror
-                    let targetX = (0.5 - landmark.x) * 20; 
-                    
-                    // Y axis is inverted and offset upwards
+                    let targetX = dodgeX; 
                     let targetY = -(landmark.y - 0.5) * 15 + 2.0; 
-                    
-                    // Z axis maps depth from the camera to 3D space
-                    let targetZ = this.myBaseZ + (landmark.z * 15);
+                    let targetZ = this.myBaseZ + (landmark.z * 12);
                     
                     return [ 
                         Number(targetX.toFixed(2)), 
@@ -1064,75 +947,58 @@
                     ];
                 };
 
-                // 1. Extract core joint coordinates
                 let poseArray = [
-                    mapBodyToWorld(poseData[0]),  // Head [0]
-                    mapBodyToWorld(poseData[11]), // Shoulder Left [1]
-                    mapBodyToWorld(poseData[12]), // Shoulder Right [2]
-                    mapBodyToWorld(poseData[13]), // Elbow Left [3]
-                    mapBodyToWorld(poseData[14]), // Elbow Right [4]
-                    mapBodyToWorld(poseData[15]), // Wrist Left [5]
-                    mapBodyToWorld(poseData[16])  // Wrist Right [6]
+                    mapBodyToWorld(poseData[0]),  
+                    mapBodyToWorld(poseData[11]), 
+                    mapBodyToWorld(poseData[12]), 
+                    mapBodyToWorld(poseData[13]), 
+                    mapBodyToWorld(poseData[14]), 
+                    mapBodyToWorld(poseData[15]), 
+                    mapBodyToWorld(poseData[16])  
                 ];
 
-                // 2. THE PUNCH AMPLIFIER
-                // We measure how far the wrist is in front of the shoulder.
-                // Left Stretch (Z axis difference)
+                // FIXED PUNCH AMPLIFIER
                 let leftStretch = Math.max(0, poseArray[1][2] - poseArray[5][2]); 
-                
-                // Right Stretch (Z axis difference)
                 let rightStretch = Math.max(0, poseArray[2][2] - poseArray[6][2]);
                 
-                // Apply the Amplifier to push the arm deep into the screen
-                // Elbow moves half as much as the wrist
+                // Cap the stretch so the arms don't become noodles
+                leftStretch = Math.min(leftStretch, CONFIG.MAX_STRETCH);
+                rightStretch = Math.min(rightStretch, CONFIG.MAX_STRETCH);
+                
                 poseArray[3][2] -= leftStretch * (CONFIG.PUNCH_MULTIPLIER * 0.5); 
                 poseArray[5][2] -= leftStretch * CONFIG.PUNCH_MULTIPLIER;         
 
                 poseArray[4][2] -= rightStretch * (CONFIG.PUNCH_MULTIPLIER * 0.5);
                 poseArray[6][2] -= rightStretch * CONFIG.PUNCH_MULTIPLIER;
 
-                // 3. MAP HANDS (Fingers) EXACTLY TO THE NEW AMPLIFIED WRIST POSITIONS
                 const mapHandToWorld = (handLandmarks, wristWorldPosition) => {
                     if (!handLandmarks) return null;
-                    
                     const internalHandRoot = handLandmarks[0];
                     let handArray = [];
                     
                     for (let i = 0; i < 21; i++) {
                         let landmark = handLandmarks[i];
-                        
-                        // Calculate offset from Mediapipes internal wrist mapping
                         let deltaX = landmark.x - internalHandRoot.x;
                         let deltaY = landmark.y - internalHandRoot.y;
                         let deltaZ = landmark.z - internalHandRoot.z;
                         
-                        // Add offset to our new Amplified World Wrist Position
-                        // Multiply the deltas to scale the size of the fingers
                         handArray.push([
                             Number((wristWorldPosition[0] + (-deltaX * 12)).toFixed(2)), 
                             Number((wristWorldPosition[1] + (-deltaY * 12)).toFixed(2)),
                             Number((wristWorldPosition[2] + (deltaZ * 12)).toFixed(2))
                         ]);
                     }
-                    
                     return handArray;
                 };
 
-                // Generate full arrays for the hands
                 let leftHandArray = mapHandToWorld(results.leftHandLandmarks, poseArray[5]);
                 let rightHandArray = mapHandToWorld(results.rightHandLandmarks, poseArray[6]);
 
-                // Construct payload
-                const dataPayload = { 
-                    p: poseArray, 
-                    hl: leftHandArray, 
-                    hr: rightHandArray 
-                };
+                const dataPayload = { p: poseArray, hl: leftHandArray, hr: rightHandArray };
                 
-                // Update local visual meshes immediately
+                // Update local visual meshes
                 this.localChar.setAbsoluteTargets(dataPayload);
 
-                // 4. Throttle Network Outbound Dispatch
                 const currentTime = Date.now();
                 if (currentTime - this.lastNetTick > CONFIG.NET_TICK_RATE) {
                     NetworkSys.sendPose(dataPayload);
@@ -1140,58 +1006,47 @@
                 }
             }
 
-            /**
-             * Processes coordinates received from the opponent over the network.
-             */
             processRemotePose(payload) {
                 if (!payload || !payload.p) return;
                 
-                // Helper to reverse X and Z axes so the opponent faces us properly
                 const unmirrorCoordinates = (array) => {
                     if (!array) return null;
                     return array.map(point => [ -point[0], point[1], -point[2] ]); 
                 };
 
-                // Construct data object. 
-                // We cross map Left and Right because the opponent's physical Left arm 
-                // appears on the Right side of our screen.
                 const remoteDataObject = {
                     p: [
                         unmirrorCoordinates([payload.p[0]])[0],
-                        unmirrorCoordinates([payload.p[2]])[0], // Cross Shoulders
+                        unmirrorCoordinates([payload.p[2]])[0], 
                         unmirrorCoordinates([payload.p[1]])[0], 
-                        unmirrorCoordinates([payload.p[4]])[0], // Cross Elbows
+                        unmirrorCoordinates([payload.p[4]])[0], 
                         unmirrorCoordinates([payload.p[3]])[0], 
-                        unmirrorCoordinates([payload.p[6]])[0], // Cross Wrists
+                        unmirrorCoordinates([payload.p[6]])[0], 
                         unmirrorCoordinates([payload.p[5]])[0]  
                     ],
-                    hl: unmirrorCoordinates(payload.hr), // Cross Hands
+                    hl: unmirrorCoordinates(payload.hr), 
                     hr: unmirrorCoordinates(payload.hl)
                 };
 
-                // Apply to remote character mesh
                 this.remoteChar.setAbsoluteTargets(remoteDataObject);
             }
 
-            /**
-             * Main Game Loop executed every animation frame.
-             */
             loop() {
                 requestAnimationFrame(this.loop.bind(this));
                 const deltaTime = this.clock.getDelta();
 
                 if (this.state === 'FIGHT') {
-                    // Update Time UI
                     const elapsedSeconds = Math.floor((Date.now() - this.fightStartTime) / 1000);
                     const formattedMinutes = String(Math.floor(elapsedSeconds / 60)).padStart(2, '0');
                     const formattedSeconds = String(elapsedSeconds % 60).padStart(2, '0');
                     document.getElementById('fight-timer').innerText = `${formattedMinutes}:${formattedSeconds}`;
 
-                    // Update Meshes
+                    this.gfx.camera.position.lerp(this.targetCam, 5 * deltaTime);
+                    this.gfx.camera.lookAt(0, 1.5, 0); 
+
                     this.localChar.update(deltaTime); 
                     this.remoteChar.update(deltaTime);
                     
-                    // Run logic
                     this.checkPhysics();
                 }
                 
@@ -1204,76 +1059,40 @@
          * ============================================================================
          * 6. EMQX / MQTT NETWORK ENGINE
          * ============================================================================
-         * Uses the public broker.emqx.io cluster via Secure WebSockets.
          */
         class NetworkEngine {
             constructor() { 
                 this.client = null; 
                 this.room = null; 
                 this.isHost = false;
-                
-                // Setup distinct topics to prevent echo
                 this.myTopic = ""; 
                 this.oppTopic = "";
             }
 
-            /**
-             * Restores UI buttons to active state.
-             */
             resetButtons() {
                 const joinButton = document.getElementById('join-btn');
                 const hostButton = document.getElementById('host-btn');
                 
-                if(joinButton) { 
-                    joinButton.innerText = "ENTER RING"; 
-                    joinButton.disabled = false; 
-                }
-                if(hostButton) { 
-                    hostButton.innerText = "CONNECT TO EMQX"; 
-                    hostButton.disabled = false; 
-                }
+                if(joinButton) { joinButton.innerText = "ENTER RING"; joinButton.disabled = false; }
+                if(hostButton) { hostButton.innerText = "CONNECT TO EMQX"; hostButton.disabled = false; }
             }
 
-            /**
-             * Displays an error message to the user.
-             */
             showError(messageText) { 
                 const errorElement = document.getElementById('lobby-error');
                 errorElement.innerText = messageText; 
                 errorElement.classList.remove('hidden'); 
             }
 
-            /**
-             * Establishes connection to the public MQTT broker.
-             */
             connect(onSuccessCallback) {
-                // Ensure clean state
-                if (this.client) {
-                    this.client.end(true);
-                }
-                
+                if (this.client) { this.client.end(true); }
                 const clientID = 'box_pro_' + Math.random().toString(16).substr(2, 8);
                 
-                this.client = mqtt.connect(CONFIG.EMQX_BROKER_URL, { 
-                    clientId: clientID, 
-                    clean: true 
-                });
-                
+                this.client = mqtt.connect(CONFIG.EMQX_BROKER_URL, { clientId: clientID, clean: true });
                 this.client.on('connect', onSuccessCallback);
-                
-                this.client.on('error', () => { 
-                    this.showError("EMQX Connection Failed. Check your network."); 
-                    this.resetButtons(); 
-                });
-                
-                this.client.on('message', (topicString, messageBuffer) => {
-                    this.handleIncomingMessage(topicString, messageBuffer);
-                });
+                this.client.on('error', () => { this.showError("EMQX Connection Failed. Check your network."); this.resetButtons(); });
+                this.client.on('message', (topicString, messageBuffer) => { this.handleIncomingMessage(topicString, messageBuffer); });
             }
 
-            /**
-             * Bootstraps the host configuration.
-             */
             initHost(roomName) {
                 this.room = roomName; 
                 this.isHost = true;
@@ -1293,9 +1112,6 @@
                 });
             }
 
-            /**
-             * Bootstraps the joiner configuration.
-             */
             initJoin(roomName) {
                 this.room = roomName; 
                 this.isHost = false;
@@ -1305,7 +1121,6 @@
                 this.connect(() => {
                     this.client.subscribe(`${this.oppTopic}/#`, (err) => {
                         if (!err) { 
-                            // Publish readiness flag to alert Host
                             this.client.publish(`${this.myTopic}/rdy`, "1"); 
                             this.resetButtons(); 
                             Game.startFight(); 
@@ -1316,14 +1131,8 @@
                 });
             }
 
-            /**
-             * Parses and routes incoming MQTT packets.
-             */
             handleIncomingMessage(topicString, messageBuffer) {
-                // Discard loopback messages
-                if (topicString.startsWith(this.myTopic)) {
-                    return;
-                }
+                if (topicString.startsWith(this.myTopic)) return;
                 
                 const dataString = messageBuffer.toString();
                 const actionCode = topicString.split('/').pop(); 
@@ -1332,15 +1141,10 @@
                     Game.startFight(); 
                 } 
                 else if (actionCode === 'pos') { 
-                    try { 
-                        Game.processRemotePose(JSON.parse(dataString)); 
-                    } catch(e) { console.error("Parse Error: pos"); } 
+                    try { Game.processRemotePose(JSON.parse(dataString)); } catch(e) {} 
                 } 
                 else if (actionCode === 'hit') { 
-                    try { 
-                        let payload = JSON.parse(dataString); 
-                        Game.applyDamageToMe(payload.d, payload.loc); 
-                    } catch(e) { console.error("Parse Error: hit"); } 
+                    try { let payload = JSON.parse(dataString); Game.applyDamageToMe(payload.d, payload.loc); } catch(e) {} 
                 } 
                 else if (actionCode === 'syn') { 
                     Game.syncRemoteHealth(parseInt(dataString)); 
@@ -1353,51 +1157,11 @@
                 }
             }
 
-            /**
-             * Dispatches character position payload.
-             */
-            sendPose(payloadObject) { 
-                if (this.client) {
-                    this.client.publish(`${this.myTopic}/pos`, JSON.stringify(payloadObject), { qos: 0 }); 
-                }
-            }
-            
-            /**
-             * Dispatches hit confirmation payload.
-             */
-            sendHit(damage, hitLocation) { 
-                if (this.client) {
-                    const payloadString = JSON.stringify({ d: damage, loc: hitLocation });
-                    this.client.publish(`${this.myTopic}/hit`, payloadString, { qos: 1 }); 
-                }
-            }
-            
-            /**
-             * Dispatches health sync payload.
-             */
-            sendSyncHealth(healthValue) { 
-                if (this.client) {
-                    this.client.publish(`${this.myTopic}/syn`, healthValue.toString(), { qos: 1 }); 
-                }
-            }
-            
-            /**
-             * Dispatches fatality (KO) payload.
-             */
-            sendFatality() { 
-                if (this.client) {
-                    this.client.publish(`${this.myTopic}/fat`, "1", { qos: 2 }); 
-                }
-            } 
-            
-            /**
-             * Dispatches rematch request payload.
-             */
-            sendRematch() { 
-                if (this.client) {
-                    this.client.publish(`${this.myTopic}/rem`, "1", { qos: 1 }); 
-                }
-            }
+            sendPose(payloadObject) { if (this.client) this.client.publish(`${this.myTopic}/pos`, JSON.stringify(payloadObject), { qos: 0 }); }
+            sendHit(damage, hitLocation) { if (this.client) this.client.publish(`${this.myTopic}/hit`, JSON.stringify({ d: damage, loc: hitLocation }), { qos: 1 }); }
+            sendSyncHealth(healthValue) { if (this.client) this.client.publish(`${this.myTopic}/syn`, healthValue.toString(), { qos: 1 }); }
+            sendFatality() { if (this.client) this.client.publish(`${this.myTopic}/fat`, "1", { qos: 2 }); } 
+            sendRematch() { if (this.client) this.client.publish(`${this.myTopic}/rem`, "1", { qos: 1 }); }
         }
 
         /**
@@ -1413,38 +1177,18 @@
             aiInstance: null, 
             isProcessing: false, 
 
-            /**
-             * Toggles visibility of UI overlay panels.
-             */
             showUI: (panelId) => {
                 const allPanels = ['step-camera', 'step-loading', 'step-lobby', 'step-waiting'];
-                
-                allPanels.forEach(selector => {
-                    document.getElementById(selector).classList.add('hidden');
-                });
-                
-                if (panelId) {
-                    document.getElementById(panelId).classList.remove('hidden');
-                }
+                allPanels.forEach(selector => { document.getElementById(selector).classList.add('hidden'); });
+                if (panelId) { document.getElementById(panelId).classList.remove('hidden'); }
             },
 
-            /**
-             * Requests access to webcam hardware.
-             */
             initializeCamera: async () => {
                 System.showUI('step-loading');
                 try {
-                    const constraints = { 
-                        video: { 
-                            width: 640, 
-                            height: 480, 
-                            frameRate: { ideal: 60 } 
-                        } 
-                    };
-                    
+                    const constraints = { video: { width: 640, height: 480, frameRate: { ideal: 60 } } };
                     const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
                     System.videoElement.srcObject = mediaStream;
-                    
                     System.videoElement.onloadedmetadata = () => { 
                         System.videoElement.play(); 
                         System.initAI(); 
@@ -1457,25 +1201,10 @@
                 }
             },
 
-            /**
-             * Bootstraps the MediaPipe Holistic AI.
-             */
             initAI: () => {
-                System.aiInstance = new Holistic({ 
-                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` 
-                });
-                
-                System.aiInstance.setOptions({ 
-                    modelComplexity: 0, 
-                    smoothLandmarks: true, 
-                    minDetectionConfidence: 0.5, 
-                    minTrackingConfidence: 0.5 
-                });
-                
-                System.aiInstance.onResults((resultsData) => { 
-                    Game.processLocalPose(resultsData); 
-                    System.isProcessing = false; 
-                });
+                System.aiInstance = new Holistic({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}` });
+                System.aiInstance.setOptions({ modelComplexity: 0, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                System.aiInstance.onResults((resultsData) => { Game.processLocalPose(resultsData); System.isProcessing = false; });
                 
                 const detectionLoop = async () => {
                     if (System.videoElement.readyState >= 2 && !System.isProcessing) {
@@ -1489,46 +1218,29 @@
                 System.showUI('step-lobby');
             },
 
-            /**
-             * Reads inputs and executes Host creation.
-             */
             hostRoom: () => { 
                 const inputElement = document.getElementById('host-room-name');
                 const roomString = inputElement.value.trim().toUpperCase(); 
-                
                 if (roomString) { 
                     const buttonElement = document.getElementById('host-btn');
-                    buttonElement.disabled = true; 
-                    buttonElement.innerText = "CONNECTING...";
+                    buttonElement.disabled = true; buttonElement.innerText = "CONNECTING...";
                     NetworkSys.initHost(roomString); 
                 }
             },
             
-            /**
-             * Reads inputs and executes Join logic.
-             */
             joinRoom: () => { 
                 const inputElement = document.getElementById('join-room-name');
                 const roomString = inputElement.value.trim().toUpperCase(); 
-                
                 if (roomString) { 
                     const buttonElement = document.getElementById('join-btn');
-                    buttonElement.disabled = true; 
-                    buttonElement.innerText = "CONNECTING...";
+                    buttonElement.disabled = true; buttonElement.innerText = "CONNECTING...";
                     NetworkSys.initJoin(roomString); 
                 }
             },
             
-            /**
-             * Triggers a match restart.
-             */
-            requestRematch: () => { 
-                NetworkSys.sendRematch(); 
-                Game.startFight(); 
-            }
+            requestRematch: () => { NetworkSys.sendRematch(); Game.startFight(); }
         };
 
-        // Initialize the WebGL loop
         Game.loop();
 
     </script>
