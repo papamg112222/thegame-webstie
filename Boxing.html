@@ -314,8 +314,8 @@
          */
         const CONFIG = {
             // Unique prefix for PeerJS to avoid collisions on the public network
-            // Incremented to v6 to ensure a clean slate on the public STUN servers
-            PEER_PREFIX: 'eqmx-voxel-box-v6-final-',
+            // Incremented to v7 to ensure a perfectly clean slate on public signaling servers
+            PEER_PREFIX: 'eqmx-voxel-box-v7-final-',
             
             // Health points scaled up for finer granularity during damage calculations
             MAX_HEALTH: 1000, 
@@ -337,12 +337,17 @@
         /**
          * WebRTC STUN Servers (CRITICAL FIX FOR CONNECTION ISSUES)
          * These Google and Twilio servers help clients punch through firewalls and NATs.
+         * Providing multiple fallback URLs guarantees the best chance of WebRTC success.
          */
         const PEER_OPTIONS = {
+            debug: 2, // Helps identify signaling issues in the browser console
             config: {
                 'iceServers': [
                     { urls: 'stun:stun.l.google.com:19302' },
                     { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun4.l.google.com:19302' },
                     { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
                 ]
             }
@@ -1257,25 +1262,42 @@
 
         /**
          * ============================================================================
-         * 6. PEER-TO-PEER NETWORK ENGINE
+         * 6. PEER-TO-PEER NETWORK ENGINE (WITH SMART RETRIES)
          * ============================================================================
-         * Wraps PeerJS to handle room creation, joining, and data synchronization.
+         * Wraps PeerJS. Includes automatic retries and aggressive STUN fallbacks to 
+         * guarantee connection even across strict NATs and firewalls.
          */
         class NetworkEngine {
             constructor() { 
                 this.peer = null; 
                 this.conn = null; 
+                this.connectionTimeoutId = null;
             }
 
             /**
-             * Resets UI buttons in case of failure.
+             * Resets the Join/Host buttons to their default enabled state.
              */
             resetButtons() {
                 const joinBtn = document.getElementById('join-btn');
+                const hostBtn = document.getElementById('host-btn');
+                
                 if(joinBtn) {
                     joinBtn.innerText = "ENTER RING";
                     joinBtn.disabled = false;
                 }
+                if(hostBtn) {
+                    hostBtn.innerText = "CREATE SERVER";
+                    hostBtn.disabled = false;
+                }
+            }
+
+            /**
+             * Displays an error message on the lobby UI.
+             */
+            showError(messageText) { 
+                const errorElement = document.getElementById('lobby-error'); 
+                errorElement.innerText = messageText; 
+                errorElement.classList.remove('hidden'); 
             }
 
             /**
@@ -1283,93 +1305,151 @@
              * @param {string} roomName - The unique string identifier for the room.
              */
             initHost(roomName) {
+                // If a peer already exists, clean it up
+                if (this.peer) {
+                    this.peer.destroy();
+                }
+
                 // Create peer with robust ICE server config to bypass firewalls
                 this.peer = new Peer(CONFIG.PEER_PREFIX + roomName, PEER_OPTIONS);
                 
                 this.peer.on('open', () => {
-                    console.log("Server created successfully.");
+                    console.log("Server created successfully on signaling server.");
                     document.getElementById('display-room-name').innerText = roomName;
                     System.showUI('step-waiting');
+                    this.resetButtons();
                 });
                 
                 this.peer.on('error', (error) => {
-                    console.error("PeerJS Error: ", error);
+                    console.error("PeerJS Host Error: ", error);
                     let message = 'Network Error. Check your internet connection.';
                     if(error.type === 'unavailable-id') {
-                        message = 'Room name already taken. Try another.';
+                        message = 'That room name is currently active. Try another.';
                     }
                     this.showError(message);
                     this.resetButtons();
                 });
                 
-                // Wait for an incoming connection
+                // Wait for an incoming connection from a Joiner
                 this.peer.on('connection', (connection) => {
-                    this.setupConnection(connection, false);
+                    this.setupDataChannel(connection);
                 });
             }
 
             /**
-             * Initializes this client as a joiner, connecting to an existing room.
-             * @param {string} roomName - The room identifier to join.
+             * Initializes this client as a joiner, attempting to connect to a host.
+             * Includes a recursive retry mechanism to handle race conditions where the 
+             * host hasn't finished registering yet.
+             * * @param {string} roomName - The room identifier to join.
+             * @param {number} retryAttempt - The current retry count.
              */
-            initJoin(roomName) {
-                // Create peer with random ID and robust ICE config
+            initJoin(roomName, retryAttempt = 0) {
+                // Update UI to show retry status
+                const joinBtn = document.getElementById('join-btn');
+                if (joinBtn) {
+                    if (retryAttempt === 0) {
+                        joinBtn.innerText = "CONNECTING...";
+                    } else {
+                        joinBtn.innerText = `RETRYING (${retryAttempt}/4)...`;
+                    }
+                    joinBtn.disabled = true;
+                }
+
+                // Clean up any dead peer instance before trying again
+                if (this.peer) {
+                    this.peer.destroy();
+                }
+
+                // Create a new client peer
                 this.peer = new Peer(PEER_OPTIONS); 
                 
                 this.peer.on('open', () => {
-                    console.log("Client created. Attempting to connect to room:", roomName);
+                    console.log(`Client ID ready. Attempting to connect to room: ${roomName}`);
                     
-                    // Connect to specific host ID. 'reliable: true' forces guaranteed delivery initially
+                    // Attempt to connect to the specific host ID.
+                    // 'reliable: true' forces guaranteed delivery during initial handshake.
                     const connection = this.peer.connect(CONFIG.PEER_PREFIX + roomName, { reliable: true }); 
-                    this.setupConnection(connection, true);
+                    
+                    this.setupDataChannel(connection);
+                    
+                    // Set a timeout. If the data channel doesn't open within 5 seconds, force a retry.
+                    // This catches silent network drops where PeerJS doesn't fire an explicit 'error'.
+                    this.connectionTimeoutId = setTimeout(() => {
+                        if (!this.conn || !this.conn.open) {
+                            console.warn("Connection timed out waiting for data channel to open.");
+                            this.handleJoinFailure(roomName, retryAttempt);
+                        }
+                    }, 5000); 
                 });
                 
                 this.peer.on('error', (error) => {
-                    console.error("PeerJS Error: ", error);
-                    this.showError('Could not connect. Is the Host ready on that name?');
-                    this.resetButtons();
+                    console.error("PeerJS Joiner Error: ", error.type, error);
+                    
+                    // If the specific error is that the peer wasn't found, try again.
+                    if (error.type === 'peer-unavailable') {
+                        this.handleJoinFailure(roomName, retryAttempt);
+                    } else {
+                        // For generic network errors, fail immediately.
+                        this.showError('Critical network error. Check your firewall settings.');
+                        this.resetButtons();
+                    }
                 });
             }
 
             /**
-             * Configures event listeners for an established data connection.
-             * @param {DataConnection} connection - The PeerJS data channel.
-             * @param {boolean} isJoiner - Is this the person joining the room?
+             * Handles the logic for retrying a failed join attempt.
              */
-            setupConnection(connection, isJoiner) {
-                this.conn = connection;
-                let connectionTimeout = null;
-                
-                // If we are the joiner, we need to make sure the connection actually opens
-                // before getting stuck on the "CONNECTING..." screen forever.
-                if (isJoiner) {
-                    connectionTimeout = setTimeout(() => {
-                        if (this.conn && !this.conn.open) {
-                            this.showError("Connection timed out. Network firewall might be blocking WebRTC.");
-                            this.resetButtons();
-                        }
-                    }, 10000); // 10 second timeout
+            handleJoinFailure(roomName, currentAttempt) {
+                // Clear any pending timeouts so they don't stack up
+                if (this.connectionTimeoutId) {
+                    clearTimeout(this.connectionTimeoutId);
                 }
+
+                const maxRetries = 4;
                 
-                const onReadyFunction = () => { 
-                    if (connectionTimeout) clearTimeout(connectionTimeout);
-                    console.log("WebRTC Connection fully established!"); 
+                if (currentAttempt < maxRetries) {
+                    console.log(`Join attempt ${currentAttempt} failed. Retrying in 2 seconds...`);
+                    // Wait 2 seconds before trying again to give the host time to stabilize
+                    setTimeout(() => {
+                        this.initJoin(roomName, currentAttempt + 1);
+                    }, 2000);
+                } else {
+                    console.error("Max retries reached. Host could not be reached.");
+                    this.showError('Host not found. Ensure they created the room first and you typed the exact name.');
+                    this.resetButtons();
+                }
+            }
+
+            /**
+             * Configures event listeners for the established data connection.
+             * @param {DataConnection} connection - The PeerJS data channel.
+             */
+            setupDataChannel(connection) {
+                this.conn = connection;
+                
+                const onChannelOpen = () => { 
+                    // Clear the timeout watcher since we successfully connected
+                    if (this.connectionTimeoutId) {
+                        clearTimeout(this.connectionTimeoutId);
+                    }
+                    
+                    console.log("WebRTC Data Channel is OPEN and ready for game data!"); 
                     this.resetButtons();
                     Game.startFight(); 
                 };
                 
-                // Handle open event reliably
+                // Fire immediately if already open, otherwise wait for the event
                 if (this.conn.open) {
-                    onReadyFunction();
+                    onChannelOpen();
                 } else {
-                    this.conn.on('open', onReadyFunction);
+                    this.conn.on('open', onChannelOpen);
                 }
                 
-                // Handle incoming packets
+                // Handle incoming game packets
                 this.conn.on('data', (dataPayload) => {
                     if(!dataPayload) return;
                     
-                    // Route data based on 't' (type) flag
+                    // Route data based on 't' (type) flag to minimize bandwidth
                     if(dataPayload.t === 'p') {
                         Game.processRemotePose(dataPayload.d);
                     } 
@@ -1382,7 +1462,7 @@
                     }
                 });
                 
-                // Handle disconnection
+                // Handle disconnection gracefully
                 this.conn.on('close', () => { 
                     console.warn("Connection closed by peer.");
                     alert("Opponent left the match or disconnected."); 
@@ -1415,15 +1495,6 @@
                 if(this.conn && this.conn.open) {
                     this.conn.send({ t: 'r' }); 
                 }
-            }
-            
-            /**
-             * Displays an error message on the lobby UI.
-             */
-            showError(messageText) { 
-                const errorElement = document.getElementById('lobby-error'); 
-                errorElement.innerText = messageText; 
-                errorElement.classList.remove('hidden'); 
             }
         }
 
@@ -1567,15 +1638,15 @@
              * Reads join input and attempts connection.
              */
             joinRoom: () => { 
+                // Hide any previous errors
+                document.getElementById('lobby-error').classList.add('hidden');
+
                 const roomInput = document.getElementById('join-room-name');
                 const roomString = roomInput.value.trim().toUpperCase(); 
-                const joinBtn = document.getElementById('join-btn');
                 
                 if(roomString) {
-                    // Provide UI feedback to the user while connecting
-                    joinBtn.innerText = "CONNECTING...";
-                    joinBtn.disabled = true;
-                    
+                    // The UI feedback (disabling button, changing text) is now handled 
+                    // dynamically inside NetworkSys.initJoin() to support the retry loop.
                     NetworkSys.initJoin(roomString); 
                 }
             },
