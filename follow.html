@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Motion Capture Avatar</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js for 3D Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- MediaPipe Libraries for Holistic Detection (Pose + Hands + Face) -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #18181b; color: white; font-family: sans-serif; }
+        #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        video { display: none; }
+        
+        /* PIP Video for debugging */
+        .pip-video { display: block !important; position: absolute; bottom: 20px; right: 20px; width: 240px; border-radius: 8px; border: 2px solid #3b82f6; transform: scaleX(-1); opacity: 0.8; z-index: 10; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        
+        .loader { border: 4px solid #3f3f46; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer" class="absolute inset-0 flex flex-col items-center justify-center z-20 bg-zinc-900/90 backdrop-blur-md transition-opacity duration-700">
+        <h1 class="text-4xl md:text-5xl font-extrabold text-white mb-4 drop-shadow-md">
+            3D Motion <span class="text-blue-500">Avatar</span>
+        </h1>
+        <p class="text-zinc-400 mb-8 max-w-lg text-center text-sm md:text-base">
+            Uses full-body and finger tracking. Stand back so the camera sees your upper body and hands. Your movements are smoothed and mapped to a 3D character perfectly.
+        </p>
+        
+        <div id="loading-indicator" class="flex flex-col items-center hidden">
+            <div class="loader mb-4"></div>
+            <p class="text-blue-400 animate-pulse font-medium">Loading AI 3D Model & Camera...</p>
+        </div>
+
+        <button id="start-btn" class="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-full shadow-lg transition-transform hover:scale-105 active:scale-95">
+            Start Camera Tracking
+        </button>
+
+        <p id="error-msg" class="text-red-400 mt-4 hidden bg-red-900/30 px-4 py-2 rounded-lg border border-red-800"></p>
+    </div>
+
+    <!-- Main 3D Rendering Area -->
+    <div id="canvas-container"></div>
+    <video id="input_video" autoplay playsinline></video>
+
+    <!-- Controls -->
+    <div class="absolute top-6 left-6 z-10 flex gap-4">
+        <button id="toggle-cam-btn" class="px-4 py-2 bg-zinc-800/80 hover:bg-zinc-700 text-xs md:text-sm rounded-lg border border-zinc-600 backdrop-blur transition-colors hidden shadow-md">
+            Toggle Real Camera View
+        </button>
+    </div>
+
+    <script>
+        // --- 1. SETUP THREE.JS SCENE ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x27272a); // Studio Gray
+        scene.fog = new THREE.Fog(0x27272a, 20, 80);
+
+        const camera3D = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        // FIX 1: Moved camera much further back and slightly down to fix the extreme zoom
+        camera3D.position.set(0, -3, 50); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        // Lighting (Crucial for realistic look)
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        hemiLight.position.set(0, 20, 0);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(0, 20, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.camera.top = 20;
+        dirLight.shadow.camera.bottom = -20;
+        dirLight.shadow.camera.left = -20;
+        dirLight.shadow.camera.right = 20;
+        scene.add(dirLight);
+
+        // Floor (Studio floor)
+        const floorGeo = new THREE.PlaneGeometry(100, 100);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x1f1f22, roughness: 0.1, metalness: 0.5 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -15;
+        floor.receiveShadow = true;
+        scene.add(floor);
+        
+        // Add a subtle grid
+        const grid = new THREE.GridHelper(100, 20, 0x3f3f46, 0x3f3f46);
+        grid.position.y = -14.99;
+        scene.add(grid);
+
+        // --- 2. BUILD THE 3D MANNEQUIN ---
+        
+        // FIX 2: Unified materials for a sleek, cohesive mannequin look to hide ugly overlapping seams
+        const matBody = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.4, metalness: 0.1 }); // Light matte grey
+        const matJoint = new THREE.MeshStandardMaterial({ color: 0xa1a1aa, roughness: 0.5 }); // Slightly darker joints
+
+        const joints = [];    
+        const bones = [];     
+        const targetPositions = []; 
+        const targetVisibilities = []; 
+        
+        // FIX 1: Increased sphere detail from 16 to 32 segments for a perfectly smooth look
+        const sphereGeo = new THREE.SphereGeometry(1, 32, 32);
+        
+        // We removed the generic cylinderGeo here because we will create custom tapered ones for every single bone!
+
+        for(let i = 0; i < 75; i++) {
+            // Alternate material slightly for joints vs body parts
+            const mesh = new THREE.Mesh(sphereGeo, matJoint);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            // Adjusted scales for better human proportions
+            if (i < 33) {
+                if (i === 0) {
+                    mesh.scale.set(2.2, 2.8, 2.2); // Head slightly smaller
+                    mesh.material = matBody;
+
+                    // NEW: Add a sleek visor to the head so rotation is easily visible!
+                    const visorGeo = new THREE.CylinderGeometry(0.5, 0.5, 1.4, 16);
+                    visorGeo.rotateZ(Math.PI / 2);
+                    visorGeo.rotateX(Math.PI / 2);
+                    const visorMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.2, metalness: 0.8 });
+                    const visor = new THREE.Mesh(visorGeo, visorMat);
+                    visor.position.set(0, 0.1, 0.85); // Placed on the "face" area
+                    mesh.add(visor);
+                }
+                // FIX: MediaPipe's base body tracker ALSO tracks crude hands (indices 17-22).
+                // We MUST hide them, or they render as giant body spheres inside our detailed fingers!
+                else if ((i >= 1 && i <= 10) || (i >= 17 && i <= 22)) {
+                    mesh.scale.set(0.0001, 0.0001, 0.0001); 
+                    mesh.visible = false;
+                }
+                else {
+                    // FIX: Perfectly sized joint spheres that blend seamlessly into the new tapered limbs
+                    if ([11, 12].includes(i)) mesh.scale.set(1.4, 1.4, 1.4);      // Shoulders
+                    else if ([23, 24].includes(i)) mesh.scale.set(1.8, 1.8, 1.8); // Hips
+                    else if ([25, 26].includes(i)) mesh.scale.set(1.2, 1.2, 1.2); // Knees
+                    else if ([13, 14].includes(i)) mesh.scale.set(1.0, 1.0, 1.0); // Elbows
+                    else if ([27, 28].includes(i)) mesh.scale.set(0.8, 0.8, 0.8); // Ankles
+                    else mesh.scale.set(0.9, 0.9, 0.9); // Default
+                }
+            } else {
+                // Construct a solid palm. 
+                const isRightHand = i >= 54;
+                const handIdx = isRightHand ? i - 54 : i - 33;
+                
+                // 0=Wrist, 1=Thumb base, 5,9,13,17=Knuckles
+                if (handIdx === 0) mesh.scale.set(0.6, 0.6, 0.6); 
+                else if ([1, 5, 9, 13, 17].includes(handIdx)) mesh.scale.set(0.45, 0.45, 0.45);
+                else mesh.scale.set(0.3, 0.3, 0.3); // Finger joints
+                mesh.material = matBody; 
+            }
+            
+            mesh.visible = false; 
+            scene.add(mesh);
+            joints.push(mesh);
+            targetPositions.push(new THREE.Vector3(0, 0, 0));
+            targetVisibilities.push(0);
+        }
+
+        // FIX: Completely rewrote connections to use [startIdx, endIdx, material, radiusStart, radiusEnd]
+        // This allows natural tapering of human muscles!
+        const connections = [
+            // NEW: Strong, Athletic Muscular Framework (Superhero V-Taper)
+            [11, 12, matBody, 1.4, 1.4], // Broad, strong Collarbone/Upper Chest 
+            [23, 24, matBody, 1.0, 1.0], // Tighter, narrow Pelvis floor 
+            [11, 23, matBody, 1.3, 0.7], // Left Lat (Thick at top, tapers tightly to waist)
+            [12, 24, matBody, 1.3, 0.7], // Right Lat (Thick at top, tapers tightly to waist)
+
+            // Arms (Biceps -> Forearms)
+            [11, 13, matBody, 1.4, 1.0], 
+            [13, 15, matBody, 1.0, 0.7], 
+            [12, 14, matBody, 1.4, 1.0], 
+            [14, 16, matBody, 1.0, 0.7],
+            
+            // Legs (Thighs -> Calves)
+            [23, 25, matBody, 1.8, 1.2], 
+            [25, 27, matBody, 1.2, 0.8], 
+            [24, 26, matBody, 1.8, 1.2], 
+            [26, 28, matBody, 1.2, 0.8],
+            
+            // Feet
+            [27, 31, matBody, 0.8, 0.5], 
+            [28, 32, matBody, 0.8, 0.5],
+        ];
+
+        // NEW: Sleek, athletic "V-Taper" chest plate. Completely removed the "square" look!
+        const coreGeo = new THREE.CylinderGeometry(0.6, 0.25, 1, 32); // Broad chest (0.6) tapering to tiny waist (0.25)
+        const coreMesh = new THREE.Mesh(coreGeo, matBody);
+        coreMesh.castShadow = true;
+        scene.add(coreMesh);
+
+        // Define Finger Connections for Left and Right hands
+        const addFingers = (offset) => {
+            // 1. Build the Solid Palm Pad (Thicker bones, tapered toward knuckles)
+            [[0,1], [1,2], [0,5], [0,9], [0,13], [0,17]].forEach(p => 
+                connections.push([p[0] + offset, p[1] + offset, matBody, 0.6, 0.45]));
+                
+            // Webbing (knuckle to knuckle)
+            [[5,9], [9,13], [13,17]].forEach(p => 
+                connections.push([p[0] + offset, p[1] + offset, matBody, 0.45, 0.45]));
+
+            // 2. Build the Articulated Fingers (Tapering naturally to the tips)
+            const fingerPairs = [
+                [2,3], [3,4], [5,6], [6,7], [7,8], [9,10], [10,11], [11,12], 
+                [13,14], [14,15], [15,16], [17,18], [18,19], [19,20]
+            ];
+            fingerPairs.forEach(p => 
+                connections.push([p[0] + offset, p[1] + offset, matBody, 0.38, 0.25]));
+        };
+        
+        addFingers(33); 
+        addFingers(54); 
+
+        // Create visual bones with UNIQUE native tapering geometries
+        connections.forEach(conn => {
+            const rStart = conn[3];
+            const rEnd = conn[4];
+            
+            // Three.js puts radiusTop at +Y and radiusBottom at -Y. 
+            // By passing rEnd first, it guarantees the limb tapers correctly from start to finish!
+            const geo = new THREE.CylinderGeometry(rEnd, rStart, 1, 16);
+            geo.translate(0, 0.5, 0); // pivot at start
+            
+            const mesh = new THREE.Mesh(geo, conn[2]);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.visible = false;
+            scene.add(mesh);
+            bones.push({ mesh, startId: conn[0], endId: conn[1] });
+        });
+
+        // --- 3. UI & CAMERA SETUP ---
+        const videoElement = document.getElementById('input_video');
+        const uiLayer = document.getElementById('ui-layer');
+        const startBtn = document.getElementById('start-btn');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const errorMsg = document.getElementById('error-msg');
+        const toggleCamBtn = document.getElementById('toggle-cam-btn');
+
+        let isCameraVisible = false;
+        let videoRatio = 16 / 9;
+
+        // --- 4. MEDIAPIPE HOLISTIC AI SETUP ---
+        const holistic = new Holistic({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`
+        });
+
+        holistic.setOptions({
+            modelComplexity: 1, // High quality enough for hands, fast enough for real-time
+            smoothLandmarks: true, // Internal AI smoothing
+            enableSegmentation: false,
+            smoothSegmentation: false,
+            refineFaceLandmarks: false,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        holistic.onResults(onResults);
+
+        startBtn.addEventListener('click', async () => {
+            startBtn.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
+            errorMsg.classList.add('hidden');
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } 
+                });
+                videoElement.srcObject = stream;
+                
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await holistic.send({image: videoElement});
+                    },
+                    width: 1280,
+                    height: 720
+                });
+
+                await camera.start();
+                
+                // Hide UI
+                uiLayer.style.opacity = '0';
+                setTimeout(() => { 
+                    uiLayer.classList.add('hidden'); 
+                    toggleCamBtn.classList.remove('hidden');
+                }, 700);
+
+            } catch (err) {
+                console.error(err);
+                startBtn.classList.remove('hidden');
+                loadingIndicator.classList.add('hidden');
+                errorMsg.innerText = "Camera access denied. Please allow permissions in your browser.";
+                errorMsg.classList.remove('hidden');
+            }
+        });
+
+        toggleCamBtn.addEventListener('click', () => {
+            isCameraVisible = !isCameraVisible;
+            if (isCameraVisible) {
+                videoElement.classList.add('pip-video');
+            } else {
+                videoElement.classList.remove('pip-video');
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            camera3D.aspect = window.innerWidth / window.innerHeight;
+            camera3D.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+
+        // --- 5. LOGIC: MAPPING 2D/3D LANDMARKS TO THREE.JS ---
+
+        // FIX 3: Added Z-Dampening. MediaPipe Z-depth stretches insanely relative to the camera. 
+        // We squish it down so the body doesn't look distorted ("spaghetti limbs").
+        function calculate3DPos(lm, isHand = false) {
+            const SCALE_Y = 26; 
+            const SCALE_X = 26 * videoRatio;
+            
+            const x = (0.5 - lm.x) * SCALE_X;
+            const y = (0.5 - lm.y) * SCALE_Y;
+            
+            // Dampen depth heavily for body, slightly less for hands
+            const zMultiplier = isHand ? 0.3 : 0.15;
+            const z = -lm.z * SCALE_X * zMultiplier; 
+
+            return new THREE.Vector3(x, y, z);
+        }
+
+        // Setup a memory cache to keep hands attached even if the wrist is temporarily lost
+        const lastHandOffsets = { 33: new THREE.Vector3(), 54: new THREE.Vector3() };
+
+        function onResults(results) {
+            if (videoElement.videoWidth > 0) {
+                videoRatio = videoElement.videoWidth / videoElement.videoHeight;
+            }
+
+            // 1. Process Body Pose
+            if (results.poseLandmarks) {
+                results.poseLandmarks.forEach((lm, index) => {
+                    // FIX: Lowered confidence threshold and added a "Keep-Alive" timer (10 frames)
+                    // This prevents the body from violently flickering if tracking drops for a split second
+                    if (lm.visibility > 0.3) {
+                        targetVisibilities[index] = 10; 
+                        targetPositions[index].copy(calculate3DPos(lm, false));
+                    }
+                });
+                
+                joints[0].rotation.y = 0; 
+            }
+
+            // Helper for attaching Hands to Wrists seamlessly
+            const processHand = (handLandmarks, poseWristIndex, startIndex) => {
+                if (handLandmarks) {
+                    let offset = lastHandOffsets[startIndex];
+                    
+                    // Update the glue offset ONLY if the wrist is visible.
+                    // If the wrist is lost, it falls back to the last known offset so the hand doesn't vanish!
+                    if (targetVisibilities[poseWristIndex] > 0) {
+                        const wristPos3D = targetPositions[poseWristIndex];
+                        const handRootRaw = calculate3DPos(handLandmarks[0], true);
+                        offset = wristPos3D.clone().sub(handRootRaw);
+                        lastHandOffsets[startIndex].copy(offset);
+                    }
+
+                    handLandmarks.forEach((lm, index) => {
+                        const targetId = startIndex + index;
+                        targetVisibilities[targetId] = 10; // Anti-Flicker keep-alive timer
+                        targetPositions[targetId].copy(calculate3DPos(lm, true).add(offset));
+                    });
+                }
+            };
+
+            // FIX: Map Left Hand Landmarks to Left Wrist (15) and Right Hand Landmarks to Right Wrist (16)
+            processHand(results.leftHandLandmarks, 15, 33);
+            processHand(results.rightHandLandmarks, 16, 54);
+        }
+
+
+        // --- 6. RENDER LOOP (The "Smoothness" Engine) ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            for(let i = 0; i < 75; i++) {
+                if (targetVisibilities[i] > 0) {
+                    
+                    targetVisibilities[i] -= 1; // Decay the Anti-Flicker timer every frame
+
+                    // FIX: Make absolutely sure the redundant body pose hand joints (17-22) are never set to visible
+                    if ((i >= 1 && i <= 10) || (i >= 17 && i <= 22)) {
+                        joints[i].visible = false; // Hide face tracking points and pose hands
+                    } else {
+                        joints[i].visible = true;
+                    }
+                    
+                    // FIX: Even smoother LERP to glide like butter
+                    const LERP_FACTOR = (i >= 33) ? 0.12 : 0.15; 
+                    joints[i].position.lerp(targetPositions[i], LERP_FACTOR);
+                } else {
+                    joints[i].visible = false;
+                }
+            }
+
+            // NEW: Compute organic articulated Torso (Neck completely removed!)
+            if (joints[11].visible && joints[12].visible && joints[23].visible && joints[24].visible && joints[0].visible) {
+                coreMesh.visible = true;
+                
+                const midShoulder = new THREE.Vector3().addVectors(joints[11].position, joints[12].position).multiplyScalar(0.5);
+                const midHip = new THREE.Vector3().addVectors(joints[23].position, joints[24].position).multiplyScalar(0.5);
+                
+                const torsoDir = new THREE.Vector3().subVectors(midShoulder, midHip);
+                const torsoHeight = torsoDir.length();
+                
+                // Build orientation matrix so the chest actually faces forward and twists with shoulders!
+                const upDir = torsoDir.clone().normalize();
+                const rightDir = new THREE.Vector3().subVectors(joints[11].position, joints[12].position).normalize();
+                const fwdDir = new THREE.Vector3().crossVectors(rightDir, upDir).normalize();
+                rightDir.crossVectors(upDir, fwdDir).normalize(); // Ensure orthogonality
+                
+                const torsoMatrix = new THREE.Matrix4().makeBasis(rightDir, upDir, fwdDir);
+                const torsoQuat = new THREE.Quaternion().setFromRotationMatrix(torsoMatrix);
+
+                const shoulderDist = joints[11].position.distanceTo(joints[12].position);
+
+                // FIX: Athletic V-Taper core. Shifted slightly up for a broad chest.
+                const midTorso = new THREE.Vector3().addVectors(midShoulder, midHip).multiplyScalar(0.5);
+                coreMesh.position.copy(midTorso).add(torsoDir.clone().multiplyScalar(0.1)); 
+                coreMesh.quaternion.copy(torsoQuat);
+                
+                // Scale X fits the shoulder width perfectly, Scale Y fits height, Scale Z is flattened to 0.15 (completely flat stomach)
+                coreMesh.scale.set(shoulderDist * 0.9, torsoHeight * 0.9, shoulderDist * 0.15);
+            } else {
+                coreMesh.visible = false;
+            }
+
+            // NEW: Calculate Head Rotation based on Ears and Nose
+            // Requires joints 0 (Nose), 7 & 8 (Ears) to be tracked by the AI
+            if (joints[0].visible && targetVisibilities[7] > 0 && targetVisibilities[8] > 0) {
+                // MediaPipe gives us mirrored ear data. 
+                const rightScreenEar = joints[7].position; 
+                const leftScreenEar = joints[8].position; 
+                const nose = joints[0].position;
+
+                const earCenter = new THREE.Vector3().addVectors(leftScreenEar, rightScreenEar).multiplyScalar(0.5);
+                
+                // Construct vectors pointing Forward, Right, and Up based on your actual facial structure
+                let forward = new THREE.Vector3().subVectors(nose, earCenter).normalize();
+                let right = new THREE.Vector3().subVectors(rightScreenEar, leftScreenEar).normalize(); 
+                let up = new THREE.Vector3().crossVectors(right, forward).normalize();
+                
+                // Enforce perfect 90-degree angles
+                right.crossVectors(up, forward).normalize();
+
+                const headMatrix = new THREE.Matrix4().makeBasis(right, up, forward);
+                joints[0].quaternion.setFromRotationMatrix(headMatrix);
+            } else {
+                // Fallback to looking straight ahead if ears are occluded
+                joints[0].rotation.y = 0;
+            }
+
+            // 2. Update Bones based on newly glided joints
+            bones.forEach(bone => {
+                const j1 = joints[bone.startId];
+                const j2 = joints[bone.endId];
+
+                if (j1.visible && j2.visible) {
+                    bone.mesh.visible = true;
+                    
+                    const p1 = j1.position;
+                    const p2 = j2.position;
+                    const distance = p1.distanceTo(p2);
+                    
+                    // Position at start joint
+                    bone.mesh.position.copy(p1);
+                    
+                    // SCALE Y ONLY! X and Z remain 1 because the muscular radius is natively baked into the geometry now
+                    bone.mesh.scale.set(1, distance, 1);
+                    
+                    // Point the cylinder towards the second joint
+                    bone.mesh.quaternion.setFromUnitVectors(
+                        new THREE.Vector3(0, 1, 0), 
+                        p2.clone().sub(p1).normalize()
+                    );
+                } else {
+                    bone.mesh.visible = false;
+                }
+            });
+
+            renderer.render(scene, camera3D);
+        }
+
+        // Start 3D Loop immediately
+        animate();
+
+    </script>
+</body>
+</html>
