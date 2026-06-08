@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GIZMO | Premium Electronics</title>
+    
+    <!-- Dependencies: Tailwind, Lucide Icons, Cropper.js, ColorThief -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/color-thief/2.3.0/color-thief.umd.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&family=Montserrat:wght@800&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Dynamic Theme Variables (Updated via JS/Firebase) */
+        :root {
+            --color-gizmo-accent-rgb: 79 70 229;     /* Default Indigo */
+            --color-gizmo-accent-hover-rgb: 67 56 202; 
+        }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #09090b; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+        html { scroll-padding-top: 5rem; }
+        
+        /* Smooth transition for theme colors */
+        .theme-transition { transition: all 0.8s ease; }
+        
+        /* DYNAMIC TOP BAR CLASSES */
+        .glass-nav { 
+            /* Subtle tint based on accent color */
+            background: linear-gradient(rgba(var(--color-gizmo-accent-rgb), 0.1), rgba(var(--color-gizmo-accent-rgb), 0.02)), rgba(9, 9, 11, 0.85); 
+            backdrop-filter: blur(16px); 
+            -webkit-backdrop-filter: blur(16px); 
+            border-bottom: 1px solid rgba(var(--color-gizmo-accent-rgb), 0.2); 
+            transition: all 0.4s ease;
+        }
+        
+        .nav-scrolled {
+            /* Deeper tint and stronger border/shadow on scroll */
+            background: linear-gradient(rgba(var(--color-gizmo-accent-rgb), 0.3), rgba(var(--color-gizmo-accent-rgb), 0.05)), rgba(9, 9, 11, 0.95);
+            border-bottom: 1px solid rgba(var(--color-gizmo-accent-rgb), 0.6);
+            box-shadow: 0 10px 30px rgba(var(--color-gizmo-accent-rgb), 0.2);
+        }
+
+        .glass-modal { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+        
+        /* Admin specific styles */
+        .admin-only { display: none; }
+        body.admin-mode .admin-only { display: flex; }
+
+        /* Custom Cropper Styles for Dark Mode */
+        .cropper-modal { background-color: rgba(0, 0, 0, 0.8); }
+        .cropper-view-box { outline-color: rgb(var(--color-gizmo-accent-rgb)); transition: outline-color 0.8s ease; }
+        .cropper-line, .cropper-point { background-color: rgb(var(--color-gizmo-accent-rgb)); transition: background-color 0.8s ease; }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        gizmo: {
+                            bg: '#09090b',       
+                            section: '#18181b',  
+                            card: '#27272a',     
+                            border: '#3f3f46',   
+                            text: '#a1a1aa',     
+                            // Using the CSS variables for Tailwind
+                            accent: 'rgb(var(--color-gizmo-accent-rgb) / <alpha-value>)',   
+                            accentHover: 'rgb(var(--color-gizmo-accent-hover-rgb) / <alpha-value>)'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Montserrat', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        'glow': '0 0 20px rgb(var(--color-gizmo-accent-rgb) / 0.25)',
+                        'glow-strong': '0 0 30px rgb(var(--color-gizmo-accent-rgb) / 0.5)',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gizmo-bg text-gray-100 font-sans antialiased flex flex-col min-h-screen selection:bg-gizmo-accent selection:text-white">
+
+    <!-- Admin Indicator Banner (Now matches Accent Color!) -->
+    <div id="admin-banner" class="bg-gizmo-accent text-white text-center py-2 text-sm font-bold tracking-widest hidden admin-only w-full sticky top-0 z-[60] shadow-md justify-between items-center px-4 theme-transition">
+        <div class="w-20"></div> <!-- Spacer for centering -->
+        <div class="flex items-center justify-center text-xs sm:text-sm">
+            <i data-lucide="shield-alert" class="w-4 h-4 mr-2 hidden sm:block"></i> ADMIN MODE ACTIVE - CLICK IMAGES/LOGOS TO UPDATE
+        </div>
+        <!-- EXIT ADMIN BUTTON -->
+        <button onclick="exitAdminMode()" class="w-20 bg-white/20 hover:bg-white/30 text-white py-1 px-3 rounded text-xs transition-colors border border-white/30 font-bold tracking-normal">
+            Exit
+        </button>
+    </div>
+
+    <!-- Navigation (Top UI Bar) -->
+    <nav class="glass-nav sticky top-0 z-50 theme-transition" id="navbar">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-24 items-center">
+                
+                <!-- Editable Logo Section -->
+                <div class="flex-shrink-0 flex items-center group">
+                    <div class="relative cursor-pointer" onclick="if(isAdmin) triggerLogoUpload()">
+                        <!-- Admin Edit Overlay for Logo -->
+                        <div class="absolute inset-0 z-10 bg-black/80 rounded-lg flex-col items-center justify-center admin-only opacity-0 hover:opacity-100 transition-opacity backdrop-blur-sm">
+                            <i data-lucide="image-plus" class="w-6 h-6 text-white"></i>
+                        </div>
+                        
+                        <!-- Main Logo Image -->
+                        <img id="main-site-logo" src="data:image/svg+xml;utf8,<svg viewBox='0 0 100 100' class='h-14 w-14' fill='none' xmlns='http://www.w3.org/2000/svg'><path d='M50 10 L85 30 L85 70 L50 90 L15 70 L15 30 Z' stroke='%23a1a1aa' stroke-width='8' stroke-linejoin='miter'/><path d='M50 50 L50 10 M15 30 L50 50 M85 30 L50 50' stroke='%23a1a1aa' stroke-width='8' stroke-linecap='round'/><path d='M50 50 L85 70' stroke='%23a1a1aa' stroke-width='8' stroke-linecap='round'/><path d='M35 41 L35 60 L50 68 L65 60 L65 50 L50 50' stroke='%2309090b' stroke-width='12' stroke-linejoin='round' fill='none'/><path d='M50 72 L50 95' stroke='%2309090b' stroke-width='12' stroke-linecap='round'/><path d='M65 24 L65 37 L50 46' stroke='%2309090b' stroke-width='12' stroke-linejoin='round' fill='none'/></svg>" 
+                             class="h-14 w-14 object-contain drop-shadow-md transition-transform duration-300 group-hover:scale-105" alt="Gizmo Logo">
+                    </div>
+                    <span class="ml-4 text-[26px] font-display font-extrabold tracking-[0.25em] text-[#a1a1aa] mt-1 cursor-default">GIZMO</span>
+                </div>
+
+                <!-- Desktop Menu -->
+                <div class="hidden md:flex space-x-8 items-center">
+                    <a href="#laptops" class="text-xs font-bold tracking-widest text-gray-300 hover:text-white transition-colors">LAPTOPS</a>
+                    <a href="#phones" class="text-xs font-bold tracking-widest text-gray-300 hover:text-white transition-colors">PHONES</a>
+                    <a href="#community" class="text-xs font-bold tracking-widest text-gray-300 hover:text-white transition-colors">GALLERY</a>
+                    <a href="#builder" class="text-xs font-bold tracking-widest text-white bg-gizmo-accent/20 px-5 py-2.5 rounded-full border border-gizmo-accent/30 hover:bg-gizmo-accent transition-all flex items-center shadow-glow theme-transition">
+                        <i data-lucide="wrench" class="w-4 h-4 mr-2"></i> BUILD PC
+                    </a>
+                </div>
+
+                <!-- Icons -->
+                <div class="flex items-center space-x-6">
+                    <button class="text-gray-300 hover:text-white relative transition-colors p-2" onclick="toggleCart()">
+                        <i data-lucide="shopping-cart" class="h-6 w-6"></i>
+                        <span id="cart-badge" class="absolute top-0 right-0 bg-gizmo-accent text-white text-[10px] font-bold rounded-full h-5 w-5 flex items-center justify-center hidden shadow-glow-strong theme-transition">0</span>
+                    </button>
+                    <button class="md:hidden text-gray-300 hover:text-white transition-colors p-2" onclick="toggleMobileMenu()">
+                        <i data-lucide="menu" class="h-6 w-6"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Menu (Matches Top Bar Tint) -->
+        <div id="mobile-menu" class="hidden md:hidden shadow-2xl absolute w-full z-40 theme-transition" style="background: linear-gradient(rgba(var(--color-gizmo-accent-rgb), 0.15), rgba(var(--color-gizmo-accent-rgb), 0.05)), #18181b; border-bottom: 1px solid rgba(var(--color-gizmo-accent-rgb), 0.5);">
+            <div class="px-4 py-6 space-y-2">
+                <a href="#laptops" onclick="toggleMobileMenu()" class="block px-4 py-3 font-bold text-gray-300 hover:bg-white/10 rounded-xl transition-colors">Laptops</a>
+                <a href="#phones" onclick="toggleMobileMenu()" class="block px-4 py-3 font-bold text-gray-300 hover:bg-white/10 rounded-xl transition-colors">Phones</a>
+                <a href="#community" onclick="toggleMobileMenu()" class="block px-4 py-3 font-bold text-gray-300 hover:bg-white/10 rounded-xl transition-colors">Gallery</a>
+                <a href="#builder" onclick="toggleMobileMenu()" class="block px-4 py-3 font-bold text-white bg-gizmo-accent/20 hover:bg-gizmo-accent/40 rounded-xl transition-colors theme-transition">Custom PC</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="flex-grow">
+        <!-- Hero Section -->
+        <section id="home" class="relative bg-gizmo-bg text-white py-24 lg:py-36 overflow-hidden border-b border-gizmo-border">
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gizmo-accent opacity-10 rounded-full blur-[150px] pointer-events-none theme-transition"></div>
+            <div class="max-w-7xl mx-auto px-4 relative z-10 flex flex-col items-center text-center">
+                <div class="inline-block mb-6 px-4 py-1.5 rounded-full border border-gizmo-border bg-gizmo-card/50 backdrop-blur-sm text-xs font-bold tracking-widest text-gizmo-text uppercase">
+                    Next Generation Tech is Here
+                </div>
+                <h1 class="text-5xl md:text-7xl font-black tracking-tight mb-6 text-white leading-tight">
+                    Define Your <br/>
+                    <span class="text-gizmo-accent theme-transition drop-shadow-lg">Setup.</span>
+                </h1>
+                <p class="text-lg md:text-xl text-gray-400 mb-10 max-w-2xl font-light">
+                    Premium electronics built for creators and professionals. Shop top-tier gear or configure your ultimate dream rig from scratch.
+                </p>
+                <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-6">
+                    <a href="#builder" class="bg-gizmo-accent hover:bg-gizmo-accentHover text-white px-8 py-4 rounded-xl font-bold shadow-glow transition-all duration-300 transform hover:-translate-y-1 theme-transition">Build Custom PC</a>
+                    <a href="#laptops" class="bg-gizmo-section hover:bg-gizmo-card text-white px-8 py-4 rounded-xl font-bold border border-gizmo-border transition-all duration-300">Explore Hardware</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dynamic Products Container -->
+        <div id="shop-sections"></div>
+
+        <!-- Custom PC Builder Section -->
+        <section id="builder" class="bg-gizmo-section py-24 border-t border-gizmo-border relative overflow-hidden">
+            <div class="max-w-7xl mx-auto px-4 relative z-10">
+                <div class="text-center max-w-3xl mx-auto mb-16">
+                    <span class="text-gizmo-accent font-bold uppercase tracking-widest text-sm theme-transition">Configurator</span>
+                    <h2 class="text-4xl font-black text-white mt-2">Build Your Dream Rig</h2>
+                    <p class="text-gray-400 mt-4">Select your components and let us handle the perfect assembly.</p>
+                </div>
+
+                <div class="flex flex-col lg:flex-row gap-10">
+                    <div class="lg:w-2/3 space-y-6">
+                        <div class="bg-gizmo-card p-6 rounded-2xl border border-gizmo-border shadow-lg">
+                            <h3 class="font-bold flex items-center mb-6 text-white"><i data-lucide="cpu" class="w-5 h-5 mr-3 text-gizmo-accent theme-transition"></i> Processor (CPU)</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4" id="cpu-options"></div>
+                        </div>
+                        <div class="bg-gizmo-card p-6 rounded-2xl border border-gizmo-border shadow-lg">
+                            <h3 class="font-bold flex items-center mb-6 text-white"><i data-lucide="monitor-play" class="w-5 h-5 mr-3 text-gizmo-accent theme-transition"></i> Graphics (GPU)</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" id="gpu-options"></div>
+                        </div>
+                        <div class="bg-gizmo-card p-6 rounded-2xl border border-gizmo-border shadow-lg">
+                            <h3 class="font-bold flex items-center mb-6 text-white"><i data-lucide="memory-stick" class="w-5 h-5 mr-3 text-gizmo-accent theme-transition"></i> Memory (RAM)</h3>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4" id="ram-options"></div>
+                        </div>
+                        <div class="bg-gizmo-card p-6 rounded-2xl border border-gizmo-border shadow-lg">
+                            <h3 class="font-bold flex items-center mb-6 text-white"><i data-lucide="hard-drive" class="w-5 h-5 mr-3 text-gizmo-accent theme-transition"></i> Storage</h3>
+                            <div class="grid grid-cols-2 gap-4" id="storage-options"></div>
+                        </div>
+                    </div>
+
+                    <div class="lg:w-1/3">
+                        <div class="bg-gizmo-bg p-8 rounded-3xl border border-gizmo-border sticky top-32 shadow-2xl">
+                            <h3 class="text-xl font-black mb-6 pb-4 border-b border-gizmo-border text-white">Build Summary</h3>
+                            <div class="space-y-4 mb-8 text-sm text-gray-400">
+                                <div class="flex justify-between items-center"><span class="bg-gizmo-section px-2 py-1 rounded text-xs border border-gizmo-border">CPU</span><span id="summary-cpu" class="text-right font-medium text-gray-200"></span></div>
+                                <div class="flex justify-between items-center"><span class="bg-gizmo-section px-2 py-1 rounded text-xs border border-gizmo-border">GPU</span><span id="summary-gpu" class="text-right font-medium text-gray-200"></span></div>
+                                <div class="flex justify-between items-center"><span class="bg-gizmo-section px-2 py-1 rounded text-xs border border-gizmo-border">RAM</span><span id="summary-ram" class="text-right font-medium text-gray-200"></span></div>
+                                <div class="flex justify-between items-center"><span class="bg-gizmo-section px-2 py-1 rounded text-xs border border-gizmo-border">Storage</span><span id="summary-storage" class="text-right font-medium text-gray-200"></span></div>
+                            </div>
+                            <div class="border-t border-gizmo-border pt-6 mb-8 flex justify-between items-end">
+                                <span class="text-gray-400 font-medium">Total</span>
+                                <span class="text-4xl font-black text-white" id="builder-total">$0</span>
+                            </div>
+                            <button onclick="addCustomPCToCart()" class="w-full bg-gizmo-accent hover:bg-gizmo-accentHover text-white py-4 rounded-xl font-bold flex items-center justify-center transition-all shadow-glow hover:shadow-glow-strong theme-transition">
+                                <i data-lucide="shopping-cart" class="mr-2 w-5 h-5"></i> Add to Cart
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Community Setup Gallery -->
+        <section id="community" class="bg-gizmo-bg py-24 border-t border-gizmo-border">
+            <div class="max-w-7xl mx-auto px-4">
+                <div class="text-center max-w-3xl mx-auto mb-16">
+                    <span class="text-gizmo-accent font-bold uppercase tracking-widest text-sm theme-transition">Inspiration</span>
+                    <h2 class="text-4xl font-black text-white mt-2 mb-4">Community Setups</h2>
+                    <p class="text-gray-400">Show off your Gizmo rig. Upload a picture from your device to share it live!</p>
+                </div>
+
+                <div class="bg-gizmo-card p-8 rounded-3xl border border-gizmo-border mb-16 max-w-2xl mx-auto shadow-2xl">
+                    <form id="community-form" class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-300 mb-2">Setup Name</label>
+                            <input type="text" id="setup-name" required placeholder="e.g., Neon Dream by Alex" class="w-full px-5 py-3 bg-gizmo-section border border-gizmo-border rounded-xl text-white focus:ring-2 focus:ring-gizmo-accent outline-none transition-all">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-300 mb-2">Select Picture</label>
+                            <div class="flex items-center space-x-4">
+                                <button type="button" onclick="document.getElementById('setup-image-file').click()" class="px-5 py-3 border border-gizmo-border rounded-xl bg-gizmo-section text-gray-300 hover:bg-gizmo-border transition-all flex items-center font-bold text-sm">
+                                    <i data-lucide="image" class="w-5 h-5 mr-2 text-gizmo-accent theme-transition"></i> Choose & Crop
+                                </button>
+                                <span id="community-upload-status" class="text-sm text-gray-400 font-medium">No image selected</span>
+                            </div>
+                            <!-- Hidden input for file selection -->
+                            <input type="file" id="setup-image-file" accept="image/*" class="hidden">
+                        </div>
+                        <button type="submit" id="community-submit-btn" class="w-full bg-white hover:bg-gray-200 text-black py-4 rounded-xl font-bold flex justify-center items-center transition-colors shadow-lg mt-4 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            <i data-lucide="upload" class="w-5 h-5 mr-2"></i> Post to Community Gallery
+                        </button>
+                    </form>
+                </div>
+
+                <div id="gallery-loading" class="text-center text-gray-500 py-10">
+                    <i data-lucide="loader-2" class="w-8 h-8 animate-spin mx-auto mb-4"></i><p>Loading community setups...</p>
+                </div>
+                <div id="gallery-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 hidden"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-gizmo-section py-12 border-t border-gizmo-border text-center relative mt-auto">
+        <div class="max-w-7xl mx-auto px-4 flex flex-col items-center justify-center">
+            <p class="text-gizmo-text text-sm mb-6">© 2026 GIZMO Electronics. All rights reserved.</p>
+            <button onclick="showAdminModal()" id="admin-trigger-btn" class="flex items-center space-x-2 text-gizmo-text hover:text-white transition-colors group px-4 py-2 rounded-lg hover:bg-gizmo-card border border-transparent hover:border-gizmo-border" title="Admin Mode">
+                <i data-lucide="settings" class="w-4 h-4 group-hover:rotate-90 transition-transform"></i>
+                <span class="text-xs font-bold tracking-wider uppercase">Admin Access</span>
+            </button>
+        </div>
+    </footer>
+
+    <!-- Admin Auth Modal -->
+    <div id="admin-auth-modal" class="fixed inset-0 z-[200] hidden glass-modal items-center justify-center transition-opacity opacity-0">
+        <div class="bg-gizmo-card p-8 rounded-3xl border border-gizmo-border shadow-2xl w-full max-w-sm transform scale-95 transition-transform duration-300 relative" id="admin-auth-box">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-2xl font-black text-white">Admin Login</h3>
+                <button onclick="closeAdminModal()" class="text-gray-500 hover:text-white transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            <p class="text-sm text-gizmo-text mb-6">Enter system password to enable layout & image editing.</p>
+            
+            <input type="password" id="admin-pwd" class="w-full bg-gizmo-section border border-gizmo-border rounded-xl px-4 py-3 text-white mb-2 focus:ring-2 focus:ring-gizmo-accent outline-none theme-transition" placeholder="Password (Try: 1090)" onkeypress="if(event.key === 'Enter') submitAdminModal()">
+            <p id="admin-err" class="text-red-400 text-sm hidden mb-4 font-medium"><i data-lucide="alert-circle" class="w-4 h-4 inline mr-1 mb-0.5"></i> Incorrect password.</p>
+            
+            <div class="flex space-x-3 mt-6">
+                <button onclick="closeAdminModal()" class="flex-1 bg-gizmo-section hover:bg-gizmo-border text-white py-3 rounded-xl font-bold transition-colors border border-gizmo-border">Cancel</button>
+                <button onclick="submitAdminModal()" class="flex-1 bg-gizmo-accent hover:bg-gizmo-accentHover text-white py-3 rounded-xl font-bold transition-colors shadow-glow theme-transition">Unlock</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- UNIVERSAL CROP MODAL -->
+    <div id="crop-modal" class="fixed inset-0 z-[300] hidden glass-modal items-center justify-center transition-opacity opacity-0">
+        <div class="bg-gizmo-card p-6 rounded-3xl border border-gizmo-border shadow-2xl w-full max-w-3xl flex flex-col h-[85vh] transform scale-95 transition-transform duration-300" id="crop-box">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-black text-white flex items-center"><i data-lucide="crop" class="w-5 h-5 mr-2 text-gizmo-accent theme-transition"></i> Adjust Image</h3>
+                <button onclick="window.cancelCropFn()" class="text-gray-500 hover:text-white transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="flex-grow bg-black relative overflow-hidden rounded-xl mb-6 border border-gizmo-border">
+                <img id="crop-image" src="" class="max-w-full block">
+            </div>
+            
+            <div class="flex space-x-4 mt-auto">
+                <button onclick="window.cancelCropFn()" class="flex-1 bg-gizmo-section hover:bg-gizmo-border text-white py-4 rounded-xl font-bold transition-colors border border-gizmo-border">Cancel</button>
+                <button onclick="window.confirmCropFn()" class="flex-1 bg-gizmo-accent hover:bg-gizmo-accentHover text-white py-4 rounded-xl font-bold transition-colors shadow-glow theme-transition">Apply & Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden File Inputs -->
+    <input type="file" id="admin-product-image-upload" accept="image/*" class="hidden">
+    <input type="file" id="admin-logo-upload" accept="image/*" class="hidden">
+
+    <!-- Shopping Cart Sidebar -->
+    <div id="cart-modal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 glass-modal transition-opacity" onclick="toggleCart()"></div>
+        <div class="absolute right-0 top-0 bottom-0 w-full max-w-md bg-gizmo-section border-l border-gizmo-border shadow-2xl flex flex-col transform transition-transform duration-300 translate-x-full" id="cart-drawer">
+            <div class="p-6 border-b border-gizmo-border flex justify-between items-center bg-gizmo-bg">
+                <h2 class="text-xl font-black flex items-center text-white"><i data-lucide="shopping-bag" class="h-5 w-5 mr-3 text-gizmo-accent theme-transition"></i> Your Cart</h2>
+                <button onclick="toggleCart()" class="p-2 text-gray-400 hover:text-white hover:bg-gizmo-card rounded-full transition-colors"><i data-lucide="x" class="h-5 w-5"></i></button>
+            </div>
+            <div class="flex-grow p-6 overflow-y-auto" id="cart-items">
+                <div class="flex flex-col items-center justify-center h-full text-gizmo-text" id="empty-cart-msg">
+                    <div class="bg-gizmo-card p-5 rounded-full mb-4 border border-gizmo-border shadow-inner"><i data-lucide="shopping-cart" class="h-10 w-10 text-gray-500"></i></div>
+                    <p class="font-medium">Your cart is empty.</p>
+                </div>
+            </div>
+            <div class="p-6 border-t border-gizmo-border bg-gizmo-bg">
+                <div class="flex justify-between items-end mb-6">
+                    <span class="text-gray-400 font-medium">Subtotal</span>
+                    <span id="cart-total" class="text-3xl font-black text-white">$0.00</span>
+                </div>
+                <button onclick="checkout()" class="w-full bg-white hover:bg-gray-200 text-black py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-colors">
+                    Proceed to Checkout
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white text-black px-6 py-4 rounded-xl shadow-glow transform translate-y-20 opacity-0 transition-all duration-300 z-[110] flex items-center font-bold">
+        <i data-lucide="check-circle-2" class="h-5 w-5 mr-3 text-green-600"></i>
+        <span id="toast-msg">Success!</span>
+    </div>
+
+    <!-- MAIN APP LOGIC -->
+    <script>
+        // Data & State
+        let isAdmin = false;
+        let productImagesDB = {}; 
+        let pendingAdminProductId = null;
+        let pendingCommunityCropBase64 = null; 
+        
+        const shopData = [
+            { id: "laptops", title: "Pro Laptops", items: [
+                { id: 'l1', name: 'GizmoBook Pro 16"', price: 1999, specs: 'M-Series Max, 32GB RAM' },
+                { id: 'l2', name: 'GizmoBook Air 14"', price: 1099, specs: 'Ultra-thin, 20hr battery' },
+                { id: 'l3', name: 'Studio Workstation', price: 2499, specs: 'RTX 4080 Mobile, 64GB RAM' }
+            ]},
+            { id: "phones", title: "Smartphones", items: [
+                { id: 'p1', name: 'GizmoPhone 15 Pro', price: 999, specs: 'Titanium chassis, 200MP Lens' },
+                { id: 'p2', name: 'GizmoFold Z', price: 1799, specs: '7.6" OLED folding display' },
+                { id: 'p3', name: 'GizmoPhone Mini', price: 599, specs: 'Compact 5.4" powerhouse' }
+            ]}
+        ];
+
+        // Renders the shop HTML
+        function renderShopSections() {
+            const container = document.getElementById('shop-sections');
+            let html = '';
+            
+            shopData.forEach((section, index) => {
+                const bgClass = index % 2 === 0 ? 'bg-gizmo-bg' : 'bg-gizmo-section';
+                
+                let itemsHtml = section.items.map(product => {
+                    const imgUrl = productImagesDB[product.id] || `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100%' height='100%'><rect width='100%' height='100%' fill='%2318181b'/><text x='50%' y='50%' fill='%233f3f46' text-anchor='middle' font-family='sans-serif' font-weight='bold'>Hardware Image</text></svg>`;
+                    
+                    return `
+                    <div class="bg-gizmo-card rounded-2xl p-5 border border-gizmo-border shadow-lg hover:-translate-y-1 transition-all duration-300 flex flex-col group relative hover:border-gizmo-accent hover:shadow-glow theme-transition">
+                        
+                        <!-- Admin Edit Overlay -->
+                        <div class="absolute inset-0 z-10 bg-black/80 rounded-2xl flex flex-col items-center justify-center admin-only opacity-0 hover:opacity-100 transition-opacity backdrop-blur-sm cursor-pointer" onclick="triggerProductImageUpload('${product.id}')">
+                            <i data-lucide="image-plus" class="w-10 h-10 text-gizmo-accent mb-2 theme-transition"></i>
+                            <span class="text-white font-bold tracking-widest text-sm uppercase">Change Image</span>
+                        </div>
+
+                        <!-- Product Image -->
+                        <div class="h-56 rounded-xl mb-6 overflow-hidden relative bg-gizmo-section border border-gizmo-border">
+                            <img src="${imgUrl}" id="img-${product.id}" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="${product.name}">
+                        </div>
+                        
+                        <h3 class="text-xl font-bold text-white leading-tight">${product.name}</h3>
+                        <p class="text-sm text-gizmo-text mt-2 mb-6 flex-grow">${product.specs}</p>
+                        <div class="flex items-center justify-between mt-auto relative z-20">
+                            <span class="text-2xl font-black text-white">$${product.price}</span>
+                            <button onclick="event.stopPropagation(); addToCart('${product.id}', '${product.name}', ${product.price})" class="bg-gizmo-section hover:bg-gizmo-accent text-white p-3 rounded-xl transition-colors border border-gizmo-border hover:border-gizmo-accent group-hover:shadow-glow theme-transition">
+                                <i data-lucide="plus" class="h-5 w-5"></i>
+                            </button>
+                        </div>
+                    </div>
+                `}).join('');
+
+                html += `
+                    <section id="${section.id}" class="py-24 ${bgClass} border-t border-gizmo-border">
+                        <div class="max-w-7xl mx-auto px-4">
+                            <div class="flex items-center mb-10">
+                                <div class="w-8 h-1 bg-gizmo-accent mr-4 rounded-full shadow-glow theme-transition"></div>
+                                <h2 class="text-3xl font-black text-white">${section.title}</h2>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">${itemsHtml}</div>
+                        </div>
+                    </section>
+                `;
+            });
+            container.innerHTML = html;
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        // --- CROPPER MODAL LOGIC ---
+        function openCropModal(file, type) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (e) => {
+                    document.getElementById('crop-image').src = e.target.result;
+                    const modal = document.getElementById('crop-modal');
+                    const box = document.getElementById('crop-box');
+                    
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    setTimeout(() => { modal.classList.remove('opacity-0'); box.classList.remove('scale-95'); }, 10);
+                    
+                    if (window.currentCropper) window.currentCropper.destroy();
+                    
+                    window.currentCropper = new Cropper(document.getElementById('crop-image'), {
+                        viewMode: 1, 
+                        background: false,
+                        zoomable: true,
+                        aspectRatio: type === 'product' ? 4/3 : NaN 
+                    });
+
+                    window.confirmCropFn = () => {
+                        if (!window.currentCropper) return;
+                        const canvas = window.currentCropper.getCroppedCanvas({
+                            maxWidth: type === 'logo' ? 500 : 1200,
+                            maxHeight: type === 'logo' ? 500 : 1200
+                        });
+                        
+                        const format = type === 'logo' ? 'image/png' : 'image/jpeg';
+                        const quality = type === 'logo' ? 1.0 : 0.8;
+                        const dataUrl = canvas.toDataURL(format, quality);
+                        
+                        closeCropModal();
+                        resolve(dataUrl);
+                    };
+
+                    window.cancelCropFn = () => {
+                        closeCropModal();
+                        reject("Crop cancelled");
+                    };
+                };
+            });
+        }
+
+        function closeCropModal() {
+            const modal = document.getElementById('crop-modal');
+            const box = document.getElementById('crop-box');
+            modal.classList.add('opacity-0');
+            box.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                if (window.currentCropper) { window.currentCropper.destroy(); window.currentCropper = null; }
+            }, 300);
+        }
+
+        // --- COLOR EXTRACTION LOGIC ---
+        function extractDominantColor(dataUrl) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const colorThief = new ColorThief();
+                        const rgb = colorThief.getColor(img);
+                        resolve({
+                            main: `${rgb[0]} ${rgb[1]} ${rgb[2]}`,
+                            hover: `${Math.max(0, rgb[0]-30)} ${Math.max(0, rgb[1]-30)} ${Math.max(0, rgb[2]-30)}`
+                        });
+                    } catch(e) {
+                        console.error("Color extraction failed.", e);
+                        resolve(null);
+                    }
+                };
+                img.src = dataUrl;
+            });
+        }
+
+        // Custom Admin Modal Logic 
+        function showAdminModal() {
+            if (isAdmin) return showToast("Admin Mode is already active.");
+            const modal = document.getElementById('admin-auth-modal');
+            const box = document.getElementById('admin-auth-box');
+            document.getElementById('admin-pwd').value = '';
+            document.getElementById('admin-err').classList.add('hidden');
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                box.classList.remove('scale-95');
+                document.getElementById('admin-pwd').focus();
+            }, 10);
+        }
+
+        function closeAdminModal() {
+            const modal = document.getElementById('admin-auth-modal');
+            const box = document.getElementById('admin-auth-box');
+            modal.classList.add('opacity-0');
+            box.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        }
+
+        function activateAdminState() {
+            isAdmin = true;
+            document.body.classList.add('admin-mode');
+            document.getElementById('admin-trigger-btn').style.display = 'none'; 
+            sessionStorage.setItem('gizmo_admin_active', 'true');
+            closeAdminModal();
+            renderShopSections(); 
+        }
+
+        function exitAdminMode() {
+            isAdmin = false;
+            document.body.classList.remove('admin-mode');
+            document.getElementById('admin-trigger-btn').style.display = 'flex'; 
+            sessionStorage.removeItem('gizmo_admin_active');
+            showToast("Exited Admin Mode.");
+            renderShopSections(); 
+        }
+
+        function submitAdminModal() {
+            const pwd = document.getElementById('admin-pwd').value;
+            if (pwd === "1090") {
+                activateAdminState();
+                showToast("Admin Access Granted.");
+            } else {
+                document.getElementById('admin-err').classList.remove('hidden');
+                const box = document.getElementById('admin-auth-box');
+                box.classList.add('animate-pulse');
+                setTimeout(() => box.classList.remove('animate-pulse'), 500);
+            }
+        }
+
+        // PC Builder Logic
+        const pcParts = {
+            cpu: [{id:'c1',name:'Intel i5 Core',price:220},{id:'c2',name:'AMD Ryzen 7',price:340,default:true},{id:'c3',name:'Intel i9 Extreme',price:580}],
+            gpu: [{id:'g1',name:'RTX 4060',price:300},{id:'g2',name:'RTX 4070 Ti',price:600,default:true},{id:'g3',name:'RTX 4090',price:1600}],
+            ram: [{id:'r1',name:'16GB DDR5',price:80},{id:'r2',name:'32GB DDR5',price:150,default:true},{id:'r3',name:'64GB DDR5',price:280}],
+            storage: [{id:'s1',name:'1TB Gen4 NVMe',price:90},{id:'s2',name:'2TB Gen4 NVMe',price:160,default:true}]
+        };
+        let currentBuild = { cpu: pcParts.cpu[1], gpu: pcParts.gpu[1], ram: pcParts.ram[1], storage: pcParts.storage[1] };
+
+        function renderBuilderOptions() {
+            const createGroup = (cat, data) => {
+                document.getElementById(`${cat}-options`).innerHTML = data.map(item => `
+                    <label class="cursor-pointer relative block">
+                        <input type="radio" name="bld-${cat}" value="${item.id}" class="peer sr-only" ${item.id===currentBuild[cat].id?'checked':''} onchange="updateBuild('${cat}','${item.id}')">
+                        <div class="p-4 rounded-xl border border-gizmo-border bg-gizmo-section hover:bg-gizmo-border peer-checked:border-gizmo-accent peer-checked:bg-gizmo-accent/10 peer-checked:shadow-glow transition-all h-full flex flex-col justify-center theme-transition">
+                            <div class="font-bold text-sm text-gray-200 peer-checked:text-white">${item.name}</div>
+                            <div class="text-xs text-gizmo-text mt-2 font-mono peer-checked:text-indigo-300">+$${item.price}</div>
+                        </div>
+                    </label>
+                `).join('');
+            };
+            createGroup('cpu', pcParts.cpu); createGroup('gpu', pcParts.gpu);
+            createGroup('ram', pcParts.ram); createGroup('storage', pcParts.storage);
+            updateBuildSummary();
+        }
+        function updateBuild(cat, id) { currentBuild[cat] = pcParts[cat].find(p=>p.id===id); renderBuilderOptions(); } 
+        function updateBuildSummary() {
+            document.getElementById('summary-cpu').textContent = currentBuild.cpu.name;
+            document.getElementById('summary-gpu').textContent = currentBuild.gpu.name;
+            document.getElementById('summary-ram').textContent = currentBuild.ram.name;
+            document.getElementById('summary-storage').textContent = currentBuild.storage.name;
+            document.getElementById('builder-total').textContent = `$${currentBuild.cpu.price + currentBuild.gpu.price + currentBuild.ram.price + currentBuild.storage.price + 150}`;
+        }
+        function addCustomPCToCart() {
+            const total = currentBuild.cpu.price + currentBuild.gpu.price + currentBuild.ram.price + currentBuild.storage.price + 150;
+            addToCart('cst-'+Date.now(), `Custom PC Build`, total);
+        }
+
+        // Cart Logic
+        let cart = [];
+        function toggleCart() {
+            const modal = document.getElementById('cart-modal');
+            const drawer = document.getElementById('cart-drawer');
+            if(modal.classList.contains('hidden')) { 
+                modal.classList.remove('hidden'); 
+                setTimeout(()=>drawer.classList.remove('translate-x-full'), 10); 
+            } else { 
+                drawer.classList.add('translate-x-full'); 
+                setTimeout(()=>modal.classList.add('hidden'), 300); 
+            }
+        }
+        function toggleMobileMenu() { document.getElementById('mobile-menu').classList.toggle('hidden'); }
+        function addToCart(id, name, price) {
+            const item = cart.find(i => i.id === id);
+            item ? item.quantity++ : cart.push({id, name, price, quantity:1});
+            updateCartUI(); showToast(`Added to cart`);
+        }
+        function updateQuantity(id, change) {
+            const item = cart.find(i => i.id === id);
+            if(item) { item.quantity += change; if(item.quantity<=0) cart = cart.filter(i=>i.id!==id); updateCartUI(); }
+        }
+        function updateCartUI() {
+            const cItems = document.getElementById('cart-items'), badge = document.getElementById('cart-badge');
+            const qty = cart.reduce((s,i)=>s+i.quantity,0);
+            badge.textContent = qty; qty>0 ? badge.classList.remove('hidden') : badge.classList.add('hidden');
+            document.getElementById('empty-cart-msg').style.display = qty>0 ? 'none' : 'flex';
+            document.getElementById('cart-total').textContent = `$${cart.reduce((s,i)=>s+(i.price*i.quantity),0).toLocaleString()}`;
+            Array.from(cItems.children).forEach(c => { if(c.id !== 'empty-cart-msg') c.remove(); });
+            cart.forEach(i => {
+                const r = document.createElement('div'); r.className = 'flex justify-between items-center py-5 border-b border-gizmo-border';
+                r.innerHTML = `
+                <div class="flex-grow pr-4">
+                    <h4 class="font-bold text-sm text-gray-200">${i.name}</h4>
+                    <div class="text-gizmo-accent font-mono mt-1 theme-transition">$${i.price.toLocaleString()}</div>
+                </div>
+                <div class="flex items-center space-x-3 bg-gizmo-bg rounded-lg p-1 border border-gizmo-border">
+                    <button onclick="updateQuantity('${i.id}', -1)" class="w-7 h-7 bg-gizmo-section hover:bg-gizmo-border rounded text-white text-center transition-colors">-</button>
+                    <span class="text-sm font-bold w-4 text-center text-white">${i.quantity}</span>
+                    <button onclick="updateQuantity('${i.id}', 1)" class="w-7 h-7 bg-gizmo-section hover:bg-gizmo-border rounded text-white text-center transition-colors">+</button>
+                </div>`;
+                cItems.appendChild(r);
+            });
+        }
+        
+        let toastTmr;
+        function showToast(m) {
+            const t = document.getElementById('toast'); 
+            document.getElementById('toast-msg').textContent = m;
+            t.classList.remove('translate-y-20', 'opacity-0');
+            if(toastTmr) clearTimeout(toastTmr);
+            toastTmr = setTimeout(() => t.classList.add('translate-y-20', 'opacity-0'), 3000);
+        }
+        function checkout() { 
+            if(cart.length===0) return showToast("Cart is empty!"); 
+            toggleCart(); 
+            showToast("Proceeding to secure checkout..."); 
+            cart=[]; 
+            setTimeout(updateCartUI, 500); 
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (sessionStorage.getItem('gizmo_admin_active') === 'true') {
+                activateAdminState();
+            }
+
+            renderShopSections(); 
+            renderBuilderOptions();
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+            
+            // Re-wired Scroll Listener to use the newly created CSS classes
+            window.addEventListener('scroll', () => {
+                const nav = document.getElementById('navbar');
+                if(window.scrollY > 20) {
+                    nav.classList.add('nav-scrolled');
+                } else {
+                    nav.classList.remove('nav-scrolled');
+                }
+            });
+        });
+    </script>
+
+    <!-- FIREBASE INTEGRATION -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, serverTimestamp, doc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-gizmo';
+
+        if (firebaseConfig) {
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            
+            const productsCol = collection(db, 'artifacts', appId, 'public', 'data', 'product_images');
+            const galleryCol = collection(db, 'artifacts', appId, 'public', 'data', 'community_gallery');
+            const configCol = collection(db, 'artifacts', appId, 'public', 'data', 'site_config');
+
+            const initAuth = async () => {
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    startProductImageListener();
+                    startGalleryListener();
+                    startSiteConfigListener();
+                } catch (e) { 
+                    console.error("Auth error", e); 
+                    document.getElementById('gallery-loading').innerHTML = "<p class='text-red-500'>Cloud offline.</p>";
+                }
+            };
+
+            // ---- LOGO & THEME SYNC ----
+            const startSiteConfigListener = () => {
+                onSnapshot(configCol, (snapshot) => {
+                    snapshot.forEach(docSnap => {
+                        if (docSnap.id === 'main_logo') {
+                            const imgEl = document.getElementById('main-site-logo');
+                            if (imgEl && docSnap.data().imgBase64) {
+                                imgEl.src = docSnap.data().imgBase64;
+                            }
+                        }
+                        if (docSnap.id === 'theme') {
+                            const data = docSnap.data();
+                            if(data.accentColor) document.documentElement.style.setProperty('--color-gizmo-accent-rgb', data.accentColor);
+                            if(data.accentHover) document.documentElement.style.setProperty('--color-gizmo-accent-hover-rgb', data.accentHover);
+                        }
+                    });
+                }, (err) => console.error(err));
+            };
+
+            window.triggerLogoUpload = () => { document.getElementById('admin-logo-upload').click(); };
+
+            document.getElementById('admin-logo-upload').addEventListener('change', async (e) => {
+                if (!auth.currentUser || !e.target.files[0]) return;
+                
+                try {
+                    const croppedBase64 = await openCropModal(e.target.files[0], 'logo');
+                    showToast("Syncing Logo & Extracting Colors...");
+                    
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'site_config', 'main_logo'), {
+                        imgBase64: croppedBase64,
+                        updatedBy: auth.currentUser.uid,
+                        updatedAt: serverTimestamp()
+                    });
+
+                    const colors = await extractDominantColor(croppedBase64);
+                    if(colors) {
+                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'site_config', 'theme'), {
+                            accentColor: colors.main,
+                            accentHover: colors.hover,
+                            updatedAt: serverTimestamp()
+                        });
+                        showToast("Logo & Top UI Bar Theme Updated Globally!");
+                    } else {
+                        showToast("Logo Updated!");
+                    }
+                } catch (err) {
+                    if(err !== "Crop cancelled") { console.error(err); showToast("Failed to update logo."); }
+                }
+                e.target.value = ''; 
+            });
+
+            // ---- PRODUCTS SYNC ----
+            const startProductImageListener = () => {
+                onSnapshot(productsCol, (snapshot) => {
+                    snapshot.forEach(docSnap => {
+                        productImagesDB[docSnap.id] = docSnap.data().imgBase64;
+                        const imgEl = document.getElementById(`img-${docSnap.id}`);
+                        if (imgEl) imgEl.src = docSnap.data().imgBase64;
+                    });
+                }, (err) => console.error(err));
+            };
+
+            window.triggerProductImageUpload = (productId) => {
+                pendingAdminProductId = productId;
+                document.getElementById('admin-product-image-upload').click();
+            };
+
+            document.getElementById('admin-product-image-upload').addEventListener('change', async (e) => {
+                if (!auth.currentUser || !pendingAdminProductId || !e.target.files[0]) return;
+                
+                try {
+                    const croppedBase64 = await openCropModal(e.target.files[0], 'product');
+                    showToast("Syncing Product Image...");
+                    
+                    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'product_images', pendingAdminProductId), {
+                        imgBase64: croppedBase64,
+                        updatedBy: auth.currentUser.uid,
+                        updatedAt: serverTimestamp()
+                    });
+                    showToast("Product Image updated live!");
+                } catch (err) {
+                    if(err !== "Crop cancelled") console.error(err);
+                }
+                e.target.value = ''; 
+            });
+
+            // ---- GALLERY SYNC ----
+            const startGalleryListener = () => {
+                onSnapshot(galleryCol, (snapshot) => {
+                    document.getElementById('gallery-loading').style.display = 'none';
+                    const grid = document.getElementById('gallery-grid');
+                    grid.classList.remove('hidden');
+                    
+                    let setups = [];
+                    snapshot.forEach(docSnap => setups.push({id: docSnap.id, ...docSnap.data()}));
+                    setups.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0));
+
+                    if (setups.length === 0) {
+                        grid.innerHTML = `<div class="col-span-full text-center py-10 text-gizmo-text border border-dashed border-gizmo-border rounded-xl bg-gizmo-section/50">Be the first to share your rig!</div>`;
+                        return;
+                    }
+
+                    grid.innerHTML = setups.map(setup => `
+                        <div class="bg-gizmo-card rounded-2xl shadow-lg border border-gizmo-border overflow-hidden group hover:border-gizmo-accent hover:-translate-y-1 transition-all duration-300 theme-transition">
+                            <div class="h-64 w-full bg-gizmo-bg relative border-b border-gizmo-border">
+                                <img src="${setup.imgBase64}" alt="${setup.name}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
+                            </div>
+                            <div class="p-5">
+                                <h4 class="font-bold text-white text-lg">${setup.name}</h4>
+                            </div>
+                        </div>
+                    `).join('');
+                }, err => console.error(err));
+            };
+
+            document.getElementById('setup-image-file').addEventListener('change', async (e) => {
+                 if (!e.target.files[0]) return;
+                 try {
+                     pendingCommunityCropBase64 = await openCropModal(e.target.files[0], 'gallery');
+                     document.getElementById('community-upload-status').innerHTML = `<span class="text-green-400 font-bold"><i data-lucide="check" class="w-4 h-4 inline"></i> Ready to post!</span>`;
+                     document.getElementById('community-submit-btn').disabled = false;
+                     if (typeof lucide !== 'undefined') lucide.createIcons();
+                 } catch(err) {
+                     e.target.value = '';
+                 }
+            });
+
+            document.getElementById('community-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!auth.currentUser) return;
+                
+                const nameInput = document.getElementById('setup-name');
+                const btn = document.getElementById('community-submit-btn');
+                
+                if (!pendingCommunityCropBase64) return showToast("Please select and crop a file.");
+
+                try {
+                    btn.disabled = true; btn.innerHTML = `<i data-lucide="loader-2" class="w-5 h-5 mr-2 animate-spin"></i> Uploading...`;
+                    if (typeof lucide !== 'undefined') lucide.createIcons();
+                    
+                    await addDoc(galleryCol, {
+                        name: nameInput.value,
+                        imgBase64: pendingCommunityCropBase64,
+                        timestamp: serverTimestamp(),
+                        uid: auth.currentUser.uid
+                    });
+
+                    nameInput.value = ''; 
+                    document.getElementById('setup-image-file').value = '';
+                    pendingCommunityCropBase64 = null;
+                    document.getElementById('community-upload-status').textContent = "No image selected";
+                    showToast("Gallery updated! Rig posted.");
+                } catch (err) {
+                    console.error(err); showToast("Upload failed.");
+                    btn.disabled = false;
+                } finally {
+                    btn.innerHTML = `<i data-lucide="upload" class="w-5 h-5 mr-2"></i> Post to Community Gallery`;
+                    if (typeof lucide !== 'undefined') lucide.createIcons();
+                }
+            });
+
+            initAuth();
+        } else {
+             document.getElementById('gallery-loading').innerHTML = "<p class='text-gizmo-text'>Cloud storage disabled in this environment.</p>";
+        }
+    </script>
+</body>
+</html>
