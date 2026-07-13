@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Camera Stream via EMQX</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+    <style>
+        :root {
+            --bg-color: #121214;
+            --card-bg: #1a1a1e;
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --text: #ffffff;
+            --text-secondary: #a1a1aa;
+            --success: #16a34a;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 640px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 1.5rem;
+            margin-bottom: 8px;
+        }
+
+        p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 24px;
+        }
+
+        .video-container {
+            width: 100%;
+            aspect-ratio: 4 / 3;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .status-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(0,0,0,0.6);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .status-dot.connected {
+            background: var(--success);
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 1rem;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+        }
+
+        .btn-secondary {
+            background: #3f3f46;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #52525b;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .share-box {
+            background: #27272a;
+            padding: 12px;
+            border-radius: 6px;
+            margin-top: 16px;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.85rem;
+        }
+
+        .share-url {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            margin-right: 8px;
+            color: var(--text-secondary);
+        }
+
+        .copy-btn {
+            background: var(--primary);
+            color: white;
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            border-radius: 4px;
+            flex: none;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>P2P Camera Link</h1>
+    <p id="description">Host a stream from this device or join an existing session seamlessly.</p>
+
+    <div class="video-container">
+        <div class="status-badge">
+            <div id="statusDot" class="status-dot"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+        <video id="viewscreen" autoplay playsinline muted></video>
+    </div>
+
+    <div class="controls">
+        <div class="btn-group">
+            <button id="hostBtn" class="btn-primary" onclick="initiateHost()">Host Stream</button>
+            <button id="joinBtn" class="btn-secondary" onclick="initiateJoin()">Join Stream</button>
+        </div>
+
+        <div id="shareBox" class="share-box">
+            <span id="shareUrl" class="share-url"></span>
+            <button class="copy-btn" onclick="copyRoomLink()">Copy Link</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Configuration Constants
+    const MQTT_BROKER = "broker.emqx.io";
+    const MQTT_PORT = 8084; // Secure WebSocket Port
+    const ICE_SERVERS = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+    // Application State Variables
+    let mqttClient = null;
+    let peerConnection = null;
+    let localStream = null;
+    let myId = "uid_" + Math.random().toString(36).substr(2, 9);
+    let targetRoomId = "";
+    let isHost = false;
+
+    // DOM Elements
+    const videoElement = document.getElementById('viewscreen');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    const hostBtn = document.getElementById('hostBtn');
+    const joinBtn = document.getElementById('joinBtn');
+    const shareBox = document.getElementById('shareBox');
+    const shareUrl = document.getElementById('shareUrl');
+
+    // Parse URL Parameter on Load to detect automatic room assignment
+    window.addEventListener('DOMContentLoaded', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('room')) {
+            targetRoomId = urlParams.get('room');
+            document.getElementById('description').innerText = "Found an invitation room link! Click Join to view.";
+            hostBtn.style.display = 'none';
+        }
+    });
+
+    function updateStatus(text, isConnected = false) {
+        statusText.innerText = text;
+        if (isConnected) {
+            statusDot.classList.add('connected');
+        } else {
+            statusDot.classList.remove('connected');
+        }
+    }
+
+    // --- MQTT SIGNALLING LAYER ---
+    function setupMQTT(roomId, onConnectCallback) {
+        updateStatus("Connecting to signaling network...");
+        mqttClient = new Paho.MQTT.Client(MQTT_BROKER, Number(MQTT_PORT), "/mqtt", myId);
+
+        mqttClient.onConnectionLost = (responseObject) => {
+            if (responseObject.errorCode !== 0) {
+                updateStatus("Signal Lost: " + responseObject.errorMessage);
+            }
+        };
+
+        mqttClient.onMessageArrived = (message) => {
+            const payload = JSON.parse(message.payloadString);
+            // Ignore messages dispatched by ourselves
+            if (payload.sender === myId) return;
+
+            handleSignalingMessage(payload);
+        };
+
+        const connectOptions = {
+            useSSL: true,
+            onSuccess: () => {
+                updateStatus("Signal Ready", true);
+                mqttClient.subscribe(`p2pcam/${roomId}/+/signaling`, { qos: 1 });
+                onConnectCallback();
+            },
+            onFailure: (message) => {
+                updateStatus("Signal Setup Failed: " + message.errorMessage);
+            }
+        };
+
+        mqttClient.connect(connectOptions);
+    }
+
+    function sendSignal(type, data) {
+        if (!mqttClient || !mqttClient.isConnected()) return;
+        const messageBody = JSON.stringify({
+            sender: myId,
+            type: type,
+            data: data
+        });
+        const message = new Paho.MQTT.Message(messageBody);
+        message.destinationName = `p2pcam/${targetRoomId}/${myId}/signaling`;
+        message.qos = 1;
+        mqttClient.send(message);
+    }
+
+    // --- WEBRTC CORE FUNCTIONALITY ---
+    function createPeerConnection() {
+        peerConnection = new RTCPeerConnection(ICE_SERVERS);
+
+        // Handle network candidates discovered by WebRTC engine
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                sendSignal('candidate', event.candidate);
+            }
+        };
+
+        // UI stream hook depending on role
+        if (isHost) {
+            // Push tracks to connection
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+        } else {
+            // Mount inbound stream to video node
+            peerConnection.ontrack = (event) => {
+                if (videoElement.srcObject !== event.streams[0]) {
+                    videoElement.srcObject = event.streams[0];
+                    videoElement.muted = false; // Unmute receiver stream
+                    updateStatus("Connected & Streaming", true);
+                }
+            };
+        }
+    }
+
+    async function handleSignalingMessage(payload) {
+        switch (payload.type) {
+            case 'offer':
+                if (isHost) { // Hoster processes inbound WebRTC offer from a client joiner
+                    if (!peerConnection) createPeerConnection();
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.data));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    sendSignal('answer', answer);
+                    updateStatus("Streaming to target...", true);
+                }
+                break;
+            case 'answer':
+                if (!isHost) { // Client joiner processes verification answer back from hoster
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload.data));
+                }
+                break;
+            case 'candidate':
+                if (peerConnection) {
+                    try {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(payload.data));
+                    } catch (e) {
+                        console.error("Error adding received ice candidate", e);
+                    }
+                }
+                break;
+        }
+    }
+
+    // --- CONTROLLER ACTIONS ---
+    async function initiateHost() {
+        isHost = true;
+        hostBtn.disabled = true;
+        joinBtn.disabled = true;
+
+        try {
+            updateStatus("Accessing local camera...");
+            localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: true });
+            videoElement.srcObject = localStream;
+            
+            // Generate a clean room ID instantly
+            targetRoomId = Math.random().toString(36).substr(2, 6);
+            
+            setupMQTT(targetRoomId, () => {
+                // Generate absolute bypass link
+                const inviteLink = window.location.origin + window.location.pathname + "?room=" + targetRoomId;
+                shareUrl.innerText = inviteLink;
+                shareBox.style.display = 'flex';
+                updateStatus("Waiting for peer to join...", true);
+            });
+
+        } catch (err) {
+            updateStatus("Media Error: Permission denied");
+            hostBtn.disabled = false;
+            joinBtn.disabled = false;
+        }
+    }
+
+    function initiateJoin() {
+        if (!targetRoomId) {
+            alert("No room ID detected in URL. Please open the link generated by the host device.");
+            return;
+        }
+        
+        isHost = false;
+        hostBtn.disabled = true;
+        joinBtn.disabled = true;
+
+        setupMQTT(targetRoomId, async () => {
+            updateStatus("Initializing Peer Connection...");
+            createPeerConnection();
+            
+            // Create offer to send to hoster
+            const offer = await peerConnection.createOffer({ offerToReceiveVideo: true, offerToReceiveAudio: true });
+            await peerConnection.setLocalDescription(offer);
+            sendSignal('offer', offer);
+            updateStatus("Connecting to host...");
+        });
+    }
+
+    function copyRoomLink() {
+        navigator.clipboard.writeText(shareUrl.innerText).then(() => {
+            alert("Link copied! Open this URL on your secondary device to instantly pair.");
+        });
+    }
+</script>
+</body>
+</html>
