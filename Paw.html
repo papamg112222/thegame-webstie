@@ -457,7 +457,6 @@
             lastCheckInDate: null
         };
         let isEditing = false;
-        let lastNotifiedMinute = -1;
         let timerInterval = null;
         let clockInterval = null;
         let sparkInterval = null;
@@ -536,30 +535,44 @@
 
         function sendNotification(title, body) {
             if ("Notification" in window && Notification.permission === "granted") {
-                // Uses icon.png for system notification
-                new Notification(title, { body: body, icon: "icon.png" });
+                try {
+                    const notification = new Notification(title, { 
+                        body: body, 
+                        icon: "icon.png"
+                    });
+                    setTimeout(() => notification.close(), 8000); // Auto close after 8s
+                } catch (e) {
+                    console.log("Notification failed", e);
+                }
             }
         }
 
-        function notificationLoop() {
+        function checkNotifications() {
+            if (!("Notification" in window) || Notification.permission !== "granted") return;
+            
             const now = new Date();
-            const h = now.getHours();
-            const m = now.getMinutes();
-
-            if (m === lastNotifiedMinute) return;
-
-            // 17:00 Reminder
-            if (h === 17 && m === 0) {
-                sendNotification("Warrior Reminder", "don't forget. Your invincible");
-                lastNotifiedMinute = m;
-                return;
-            }
-
-            // Every 30 minutes
-            if (m === 0 || m === 30) {
+            const nowTs = now.getTime();
+            
+            // 1. Every 30 Minutes Quote
+            const lastQuote = parseInt(localStorage.getItem('lastQuoteTime') || '0');
+            const thirtyMins = 30 * 60 * 1000;
+            
+            // If 30 mins have passed, OR it's the very first time running (lastQuote === 0)
+            if (nowTs - lastQuote >= thirtyMins) {
                 const q = quotes[Math.floor(Math.random() * quotes.length)];
                 sendNotification("Stay Focused", `"${q.text}" - ${q.author}`);
-                lastNotifiedMinute = m;
+                localStorage.setItem('lastQuoteTime', nowTs.toString());
+            }
+
+            // 2. 17:00 Reminder
+            const h = now.getHours();
+            const last1700 = parseInt(localStorage.getItem('last1700Time') || '0');
+            const last1700Date = new Date(last1700).getDate();
+            
+            // If it is 17:xx and we haven't sent it today yet
+            if (h === 17 && last1700Date !== now.getDate()) {
+                sendNotification("Warrior Reminder", "don't forget. Your invincible");
+                localStorage.setItem('last1700Time', nowTs.toString());
             }
         }
 
@@ -641,7 +654,6 @@
                 userData.startTime = new Date().getTime();
                 userData.lastCheckInDate = null;
                 saveData();
-                sendNotification("Streak Lost", "You missed a day. Your journey begins anew.");
             }
 
             renderFireAndButton();
@@ -651,9 +663,11 @@
             if(timerInterval) clearInterval(timerInterval);
             timerInterval = setInterval(updateDetailedTimer, 1000);
 
+            // Clock interval runs every 1 second
             if(clockInterval) clearInterval(clockInterval);
             clockInterval = setInterval(() => {
-                notificationLoop();
+                checkNotifications(); // Check if a notification needs to be sent
+                
                 if (checkDailyStatus().missed) {
                     showFailureModal(); 
                 } else {
