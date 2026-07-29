@@ -691,7 +691,7 @@
         
         let friends = [];
         let pendingRequests = [];
-
+        let chatHistory = {};
         // --- Chat & EMQX Variables ---
         let mqttClient = null;
         const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
@@ -754,7 +754,14 @@
                 if (savedFriends) friends = JSON.parse(savedFriends);
                 const savedReqs = localStorage.getItem('eliteRequests');
                 if (savedReqs) pendingRequests = JSON.parse(savedReqs);
+                const savedChat = localStorage.getItem('eliteChatHistory');
+                if (savedChat) chatHistory = JSON.parse(savedChat);
             } catch(e) {}
+
+            // Request Notification Permission on load
+            if ("Notification" in window && Notification.permission !== "denied") {
+                Notification.requestPermission();
+            }
 
             // Setup Form Listener
             document.getElementById('submit-habit-btn').addEventListener('click', addNewHabit);
@@ -863,9 +870,16 @@
             document.getElementById('chat-messages').innerHTML = '';
             
             if (partnerName === 'Global_War_Room') {
-                appendChatMessage('System', `Connected to Global Server. All commanders online can see these messages.`, false);
+                appendChatMessageToDOM('System', `Connected to Global Server. All commanders online can see these messages.`, false);
             } else {
-                appendChatMessage('System', `Secure Direct Connection established with ${partnerName}. Waiting for them to connect...`, false);
+                appendChatMessageToDOM('System', `Secure Direct Connection established with ${partnerName}.`, false);
+            }
+
+            // Load saved chat history
+            if (chatHistory[partnerName]) {
+                chatHistory[partnerName].forEach(msg => {
+                    appendChatMessageToDOM(msg.sender, msg.text, msg.isSelf);
+                });
             }
         }
 
@@ -929,11 +943,17 @@
                             const msgType = data.type || 'chat';
 
                             if (msgType === 'chat') {
-                                // Route message to correct room
-                                if (currentChatPartner === 'Global_War_Room' && data.target === 'Global_War_Room') {
-                                    appendChatMessage(data.sender, data.text, false);
-                                } else if (data.sender === currentChatPartner && data.target === activeUsername) {
-                                    appendChatMessage(data.sender, data.text, false);
+                                // Route message to correct room and save it
+                                if (data.target === 'Global_War_Room') {
+                                    saveAndAppendMessage('Global_War_Room', data.sender, data.text, false);
+                                    if (currentChatPartner !== 'Global_War_Room' || document.hidden) {
+                                        notifyUser('Global War Room', `${data.sender}: ${data.text}`);
+                                    }
+                                } else if (data.target === activeUsername) {
+                                    saveAndAppendMessage(data.sender, data.sender, data.text, false);
+                                    if (currentChatPartner !== data.sender || document.hidden) {
+                                        notifyUser(`Message from ${data.sender}`, data.text);
+                                    }
                                 }
                             } else if (msgType === 'friend_request' && data.target === activeUsername) {
                                 if (!friends.includes(data.sender) && !pendingRequests.includes(data.sender)) {
@@ -941,6 +961,7 @@
                                     saveSocials();
                                     renderDMList();
                                     triggerHaptic('success');
+                                    notifyUser('New Connection Request', `${data.sender} wants to connect with you.`);
                                 }
                             } else if (msgType === 'friend_accept' && data.target === activeUsername) {
                                 if (!friends.includes(data.sender)) {
@@ -993,8 +1014,8 @@
                 
                 mqttClient.publish(CHAT_TOPIC, JSON.stringify(payload));
                 
-                // Immediately display our message locally
-                appendChatMessage(activeUsername, text, true);
+                // Immediately save and display our message locally
+                saveAndAppendMessage(currentChatPartner, activeUsername, text, true);
                 
                 input.value = '';
                 input.focus();
@@ -1006,7 +1027,30 @@
             }
         }
 
-        function appendChatMessage(sender, text, isSelf) {
+        function saveAndAppendMessage(room, sender, text, isSelf) {
+            if (!chatHistory[room]) chatHistory[room] = [];
+            
+            chatHistory[room].push({ sender, text, isSelf });
+            
+            // Keep history lean (last 100 messages per room)
+            if (chatHistory[room].length > 100) chatHistory[room].shift();
+            
+            localStorage.setItem('eliteChatHistory', JSON.stringify(chatHistory));
+
+            // Only append to DOM if the user is currently looking at this specific room
+            if (currentChatPartner === room) {
+                appendChatMessageToDOM(sender, text, isSelf);
+            }
+        }
+
+        function notifyUser(title, body) {
+            if ("Notification" in window && Notification.permission === "granted") {
+                new Notification(title, { body: body });
+                triggerHaptic('success');
+            }
+        }
+
+        function appendChatMessageToDOM(sender, text, isSelf) {
             const chatBox = document.getElementById('chat-messages');
             const msgDiv = document.createElement('div');
             
