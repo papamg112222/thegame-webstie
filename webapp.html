@@ -558,7 +558,7 @@
 
                 <!-- DM Room View -->
                 <div id="dm-room-view" class="absolute inset-0 flex flex-col dm-view-transition translate-x-full w-full h-full bg-black z-20">
-                    <header class="flex items-center gap-3 mb-2 pb-4 border-b border-slate-800 bg-black/90 backdrop-blur z-30 pt-2 px-1">
+                    <header class="flex items-center gap-3 mb-2 pb-4 border-b border-slate-800 bg-black/90 backdrop-blur z-30 pt-2 px-1 flex-none">
                         <button onclick="closeDM()" class="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-white active:scale-95 transition-transform border border-slate-800">
                             <i class="ph-bold ph-caret-left text-xl"></i>
                         </button>
@@ -576,13 +576,13 @@
                         </div>
                     </header>
                     
-                    <div class="chat-container h-full relative" style="height: calc(100% - 70px);">
-                        <div id="chat-messages" class="chat-messages absolute inset-0 pb-[70px] px-1">
+                    <div class="flex-1 flex flex-col relative overflow-hidden">
+                        <div id="chat-messages" class="flex-1 overflow-y-auto px-2 pb-4 flex flex-col gap-3">
                             <!-- Messages -->
                         </div>
                         
-                        <div class="absolute bottom-0 left-0 right-0 bg-black pt-2 z-30 px-2" style="padding-bottom: calc(1rem + var(--safe-area-bottom));">
-                            <form id="chat-form" class="flex w-full gap-2" onsubmit="sendChatMessage(event)">
+                        <div class="flex-none bg-black pt-2 pb-[max(10px,env(safe-area-inset-bottom))] px-2 border-t border-slate-800">
+                            <form id="chat-form" class="flex w-full gap-2" action="javascript:void(0);" onsubmit="sendChatMessage(event)">
                                 <input 
                                     type="text" 
                                     id="chat-input" 
@@ -772,6 +772,14 @@
                 addNewHabit();
             });
 
+            // Handle mobile keyboard scrolling
+            document.getElementById('chat-input').addEventListener('focus', () => {
+                setTimeout(() => {
+                    const chatBox = document.getElementById('chat-messages');
+                    if (chatBox) chatBox.scrollTop = chatBox.scrollHeight;
+                }, 300);
+            });
+
             renderHabits();
             updateDashboard();
             renderDMList();
@@ -950,6 +958,13 @@
                                         notifyUser('Global War Room', `${data.sender}: ${data.text}`);
                                     }
                                 } else if (data.target === activeUsername) {
+                                    // Auto-add to network if they DM you directly
+                                    if (!friends.includes(data.sender)) {
+                                        friends.push(data.sender);
+                                        saveSocials();
+                                        renderDMList();
+                                    }
+                                    
                                     saveAndAppendMessage(data.sender, data.sender, data.text, false);
                                     if (currentChatPartner !== data.sender || document.hidden) {
                                         notifyUser(`Message from ${data.sender}`, data.text);
@@ -1003,27 +1018,28 @@
             
             const activeUsername = userProfile ? userProfile.username : myUsername;
             
-            if(text !== "" && mqttClient && mqttClient.connected) {
-                const payload = {
-                    type: 'chat',
-                    sender: activeUsername,
-                    target: currentChatPartner, 
-                    text: text,
-                    timestamp: new Date().getTime()
-                };
-                
-                mqttClient.publish(CHAT_TOPIC, JSON.stringify(payload));
-                
-                // Immediately save and display our message locally
+            if(text !== "") {
+                // Immediately save and display our message locally regardless of connection status
                 saveAndAppendMessage(currentChatPartner, activeUsername, text, true);
+                
+                if (mqttClient && mqttClient.connected) {
+                    const payload = {
+                        type: 'chat',
+                        sender: activeUsername,
+                        target: currentChatPartner, 
+                        text: text,
+                        timestamp: new Date().getTime()
+                    };
+                    
+                    mqttClient.publish(CHAT_TOPIC, JSON.stringify(payload));
+                } else {
+                    // Mobile drop fallback notification
+                    appendChatMessageToDOM('System', 'Offline: Message saved locally but not sent. Reconnecting...', false);
+                }
                 
                 input.value = '';
                 input.focus();
                 triggerHaptic('light');
-            } else if (!mqttClient || !mqttClient.connected) {
-                // Inform user why it's not working in the preview
-                appendChatMessage('System', 'Live chat blocked in Preview. To test real P2P chat, export this HTML file and open it in your normal browser!', false);
-                input.value = '';
             }
         }
 
@@ -1035,7 +1051,11 @@
             // Keep history lean (last 100 messages per room)
             if (chatHistory[room].length > 100) chatHistory[room].shift();
             
-            localStorage.setItem('eliteChatHistory', JSON.stringify(chatHistory));
+            try {
+                localStorage.setItem('eliteChatHistory', JSON.stringify(chatHistory));
+            } catch(e) {
+                console.error("Storage limit reached.");
+            }
 
             // Only append to DOM if the user is currently looking at this specific room
             if (currentChatPartner === room) {
@@ -1389,8 +1409,10 @@
 
         // --- Social Logic & User Profiles ---
         function saveSocials() {
-            localStorage.setItem('eliteFriends', JSON.stringify(friends));
-            localStorage.setItem('eliteRequests', JSON.stringify(pendingRequests));
+            try {
+                localStorage.setItem('eliteFriends', JSON.stringify(friends));
+                localStorage.setItem('eliteRequests', JSON.stringify(pendingRequests));
+            } catch(e) { console.error(e); }
         }
 
         function showUserProfile(username) {
