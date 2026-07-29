@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Better Me | Elite Discipline Tracker</title>
+    
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Load Google Fonts (Inter) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Load Phosphor Icons for premium iconography -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Load Hammer.js for reliable swipe gestures -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+
+    <!-- Load MQTT.js for EMQX Chat -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+    <style>
+        :root {
+            /* PWA settings */
+            --safe-area-top: env(safe-area-inset-top, 0px);
+            --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000; /* True black for OLED screens */
+            color: #f8fafc;
+            overflow: hidden; /* Prevent body scroll, handle scroll in containers */
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Custom scrollbar hidden for app feel */
+        ::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* App Layout */
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100dvh; /* Dynamic viewport height */
+            padding-top: var(--safe-area-top);
+            padding-bottom: var(--safe-area-bottom);
+        }
+
+        #main-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-bottom: 20px;
+        }
+
+        /* Bottom Nav */
+        #bottom-nav {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: calc(1rem + var(--safe-area-bottom));
+            z-index: 40;
+        }
+
+        .nav-item {
+            color: #64748b;
+            transition: all 0.3s ease;
+        }
+        .nav-item.active {
+            color: #10b981;
+        }
+        .nav-item.active i {
+            font-weight: 700; /* Fill icon */
+        }
+
+        /* Swipeable List Items */
+        .habit-row-container {
+            position: relative;
+            overflow: hidden;
+            border-radius: 1rem;
+            margin-bottom: 0.75rem;
+            background: #1e293b; /* Action background behind the card */
+            touch-action: pan-y; /* Allow vertical scroll, handle horizontal via JS */
+        }
+
+        .habit-actions {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 1;
+        }
+
+        .action-reset {
+            width: 50%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            padding-left: 1.5rem;
+            background: linear-gradient(90deg, rgba(245, 158, 11, 0.8) 0%, rgba(245, 158, 11, 0) 100%);
+            color: white;
+        }
+
+        .action-delete {
+            width: 50%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 1.5rem;
+            background: linear-gradient(270deg, rgba(225, 29, 72, 0.8) 0%, rgba(225, 29, 72, 0) 100%);
+            color: white;
+        }
+
+        .habit-card {
+            position: relative;
+            z-index: 2;
+            background: #0f172a;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 1rem;
+            transition: transform 0.2s cubic-bezier(0.1, 0.7, 1.0, 0.1); /* Snappy return */
+            will-change: transform;
+        }
+
+        .habit-card.swiping {
+            transition: none; /* Follow finger exactly */
+        }
+
+        /* Circular Progress */
+        .progress-ring {
+            transform: rotate(-90deg);
+        }
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.5s ease-in-out;
+            transform-origin: 50% 50%;
+        }
+
+        /* Views */
+        .view {
+            display: none;
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+        .view.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Glass Form */
+        .glass-input-container {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.25rem;
+        }
+
+        /* Glowing ring for active logging */
+        .log-btn {
+            position: relative;
+        }
+        .log-btn::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid #10b981;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.3s ease;
+        }
+        .log-btn:active::after {
+            opacity: 1;
+            transform: scale(1.2);
+            transition: 0s;
+        }
+
+        /* Chat Styles */
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - var(--safe-area-top) - var(--safe-area-bottom) - 140px);
+        }
+        
+        .chat-messages {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .chat-message {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 16px;
+            font-size: 0.9rem;
+            word-wrap: break-word;
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        .msg-self {
+            align-self: flex-end;
+            background: var(--brand-500, #10b981);
+            color: #000;
+            border-bottom-right-radius: 4px;
+        }
+
+        .msg-other {
+            align-self: flex-start;
+            background: rgba(30, 41, 59, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            border-bottom-left-radius: 4px;
+        }
+        
+        .msg-sender {
+            font-size: 0.7rem;
+            opacity: 0.7;
+            margin-bottom: 2px;
+            font-weight: 600;
+        }
+        
+        .chat-input-area {
+            display: flex;
+            gap: 10px;
+            padding-top: 10px;
+        }
+
+        .ob-step {
+            display: none;
+            animation: fadeIn 0.4s ease-out forwards;
+        }
+        .ob-step.active {
+            display: block;
+        }
+        .goal-card {
+            transition: all 0.2s ease;
+            border: 2px solid transparent;
+        }
+        .goal-card.selected {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+            transform: scale(1.02);
+        }
+        .goal-card.selected i {
+            color: #10b981;
+        }
+        
+        .dm-view-transition {
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: { 400: '#34d399', 500: '#10b981', 600: '#059669', }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="selection:bg-brand-500/30">
+
+    <div id="onboarding-overlay" class="fixed inset-0 bg-[#000000] z-[100] flex flex-col justify-center p-6 text-white transition-opacity duration-500 hidden">
+        <div class="w-full max-w-md mx-auto">
+            
+            <!-- Step 1: Username -->
+            <div id="ob-step-1" class="ob-step active">
+                <div class="w-16 h-16 bg-brand-500/20 rounded-2xl flex items-center justify-center mb-6 border border-brand-500/30">
+                    <i class="ph-fill ph-identification-card text-3xl text-brand-500"></i>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Commander Identity</h2>
+                <p class="text-slate-400 mb-8 text-sm">Enter the alias you will use in this application.</p>
+                <input type="text" id="ob-username" placeholder="e.g. IronWolf" class="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-xl focus:border-brand-500 outline-none mb-6 text-white placeholder-slate-500 transition-colors">
+                <button onclick="nextStep(2)" class="w-full bg-brand-500 text-black font-bold py-4 rounded-xl active:scale-95 transition-transform shadow-[0_4px_20px_rgba(16,185,129,0.2)]">Next Step <i class="ph-bold ph-arrow-right ml-2"></i></button>
+            </div>
+
+            <!-- Step 2: Stats -->
+            <div id="ob-step-2" class="ob-step">
+                <div class="w-16 h-16 bg-blue-500/20 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/30">
+                    <i class="ph-fill ph-scales text-3xl text-blue-500"></i>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Physical Stats</h2>
+                <p class="text-slate-400 mb-8 text-sm">Age and current weight for profile tracking.</p>
+                <div class="flex flex-col gap-4 mb-8">
+                    <div>
+                        <label class="text-xs text-slate-500 font-semibold uppercase mb-1 block">Age</label>
+                        <input type="number" id="ob-age" placeholder="e.g. 25" class="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-xl focus:border-blue-500 outline-none text-white placeholder-slate-500 transition-colors">
+                    </div>
+                    <div>
+                        <label class="text-xs text-slate-500 font-semibold uppercase mb-1 block">Weight</label>
+                        <input type="text" id="ob-weight" placeholder="e.g. 75kg or 165lbs" class="w-full bg-slate-900 border border-slate-700 p-4 rounded-xl text-xl focus:border-blue-500 outline-none text-white placeholder-slate-500 transition-colors">
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button onclick="prevStep(1)" class="w-1/3 bg-slate-800 text-white font-bold py-4 rounded-xl active:scale-95 transition-transform">Back</button>
+                    <button onclick="nextStep(3)" class="w-2/3 bg-brand-500 text-black font-bold py-4 rounded-xl active:scale-95 transition-transform shadow-[0_4px_20px_rgba(16,185,129,0.2)]">Next Step <i class="ph-bold ph-arrow-right ml-2"></i></button>
+                </div>
+            </div>
+
+            <!-- Step 3: Goals -->
+            <div id="ob-step-3" class="ob-step">
+                <div class="w-16 h-16 bg-rose-500/20 rounded-2xl flex items-center justify-center mb-6 border border-rose-500/30">
+                    <i class="ph-fill ph-target text-3xl text-rose-500"></i>
+                </div>
+                <h2 class="text-3xl font-bold mb-2">Primary Objectives</h2>
+                <p class="text-slate-400 mb-6 text-sm">Select what you want to achieve. (Choose multiple)</p>
+                
+                <div class="grid grid-cols-2 gap-3 mb-8" id="ob-goals">
+                    <div class="goal-card bg-slate-900 p-4 rounded-xl cursor-pointer border border-slate-800 flex flex-col items-center text-center gap-2" onclick="toggleGoal(this, 'Quit Vices')">
+                        <i class="ph-fill ph-prohibit text-2xl text-slate-500 transition-colors"></i>
+                        <span class="text-sm font-semibold">Quit Vices</span>
+                    </div>
+                    <div class="goal-card bg-slate-900 p-4 rounded-xl cursor-pointer border border-slate-800 flex flex-col items-center text-center gap-2" onclick="toggleGoal(this, 'Get Shredded')">
+                        <i class="ph-fill ph-barbell text-2xl text-slate-500 transition-colors"></i>
+                        <span class="text-sm font-semibold">Get Shredded</span>
+                    </div>
+                    <div class="goal-card bg-slate-900 p-4 rounded-xl cursor-pointer border border-slate-800 flex flex-col items-center text-center gap-2" onclick="toggleGoal(this, 'Mental Clarity')">
+                        <i class="ph-fill ph-brain text-2xl text-slate-500 transition-colors"></i>
+                        <span class="text-sm font-semibold">Mental Clarity</span>
+                    </div>
+                    <div class="goal-card bg-slate-900 p-4 rounded-xl cursor-pointer border border-slate-800 flex flex-col items-center text-center gap-2" onclick="toggleGoal(this, 'Discipline')">
+                        <i class="ph-fill ph-fire text-2xl text-slate-500 transition-colors"></i>
+                        <span class="text-sm font-semibold">Extreme Discipline</span>
+                    </div>
+                </div>
+
+                <div class="flex gap-3">
+                    <button onclick="prevStep(2)" class="w-1/3 bg-slate-800 text-white font-bold py-4 rounded-xl active:scale-95 transition-transform">Back</button>
+                    <button onclick="finishOnboarding()" class="w-2/3 bg-brand-500 text-black font-bold py-4 rounded-xl active:scale-95 transition-transform shadow-[0_4px_20px_rgba(16,185,129,0.3)]">Initialize Profile</button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- App Container -->
+    <div id="app-container">
+        
+        <!-- Main Content Area (Scrollable) -->
+        <main id="main-content" class="px-4 pt-6">
+            
+            <!-- VIEW: TRACKER (List) -->
+            <div id="view-tracker" class="view active">
+                
+                <!-- Header -->
+                <header class="flex justify-between items-center mb-6">
+                    <div>
+                        <p class="text-slate-400 text-sm font-medium tracking-wide uppercase mb-1" id="current-date">Today</p>
+                        <h1 class="text-3xl font-bold text-white tracking-tight">Tracker</h1>
+                    </div>
+                    <div class="flex gap-3 items-center">
+                        <button onclick="switchTab('add')" class="w-10 h-10 rounded-full bg-brand-500/20 border border-brand-500/50 flex items-center justify-center text-brand-500 active:scale-95 transition-transform shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+                            <i class="ph-bold ph-plus"></i>
+                        </button>
+                        <div class="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center">
+                            <i class="ph-fill ph-user text-slate-300"></i>
+                        </div>
+                    </div>
+                </header>
+
+                <!-- Instructions Snippet -->
+                <div class="mb-4 text-xs text-center text-slate-500 bg-slate-900/50 rounded-lg py-2 flex items-center justify-center gap-2">
+                    <i class="ph ph-arrows-left-right"></i>
+                    <span>Swipe right to reset, left to delete</span>
+                </div>
+
+                <!-- Habit List -->
+                <div id="habit-list" class="space-y-1 pb-24">
+                    <!-- Habits injected here -->
+                </div>
+
+                <!-- Empty State -->
+                <div id="empty-state" class="hidden flex-col items-center justify-center py-20 text-center">
+                    <div class="w-20 h-20 bg-slate-800 rounded-full flex items-center justify-center mb-4">
+                        <i class="ph ph-target text-4xl text-slate-500"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-white mb-1">No Habits Yet</h3>
+                    <p class="text-sm text-slate-500 px-8">Tap '+' to start building your elite routine.</p>
+                </div>
+            </div>
+
+            <!-- VIEW: DASHBOARD (Stats) -->
+            <div id="view-dashboard" class="view">
+                <header class="mb-6">
+                    <h1 class="text-3xl font-bold text-white tracking-tight mb-4">Commander Profile</h1>
+                    <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 relative overflow-hidden">
+                        <div class="absolute inset-0 bg-brand-500/5 blur-2xl"></div>
+                        <div class="relative z-10 flex justify-between items-start mb-4">
+                            <div>
+                                <h2 id="profile-display-name" class="text-xl font-bold text-white mb-1">Unknown</h2>
+                                <p class="text-sm text-slate-400 font-medium">Age: <span id="profile-display-age" class="text-slate-300">--</span> • Weight: <span id="profile-display-weight" class="text-slate-300">--</span></p>
+                            </div>
+                            <div class="w-12 h-12 rounded-full bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-brand-500">
+                                <i class="ph-fill ph-shield-check text-2xl"></i>
+                            </div>
+                        </div>
+                        <div class="relative z-10">
+                            <div class="text-[10px] text-slate-500 uppercase tracking-widest font-bold mb-2">Active Directives</div>
+                            <div id="profile-display-goals" class="flex flex-wrap gap-2">
+                                <span class="bg-slate-800 text-slate-300 text-xs px-2.5 py-1 rounded-md border border-slate-700">None set</span>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <!-- Total Habits -->
+                    <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex flex-col items-center justify-center">
+                        <i class="ph-fill ph-list-checks text-2xl text-blue-400 mb-2"></i>
+                        <span class="text-3xl font-bold text-white" id="stat-total">0</span>
+                        <span class="text-xs text-slate-500 font-medium mt-1">Total Habits</span>
+                    </div>
+                    <!-- Longest Streak -->
+                    <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden">
+                        <div class="absolute inset-0 bg-brand-500/5 blur-xl"></div>
+                        <i class="ph-fill ph-fire text-2xl text-brand-500 mb-2 relative z-10"></i>
+                        <span class="text-3xl font-bold text-white relative z-10" id="stat-longest">0</span>
+                        <span class="text-xs text-brand-500/80 font-medium mt-1 relative z-10">Best Streak</span>
+                    </div>
+                </div>
+
+                <!-- Circular Progress (Overall Consistency) -->
+                <div class="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl flex flex-col items-center justify-center mb-6">
+                    <h3 class="text-sm font-medium text-slate-400 mb-4 w-full text-left">Overall Consistency</h3>
+                    <div class="relative w-40 h-40 flex items-center justify-center">
+                        <svg class="progress-ring w-full h-full" width="160" height="160">
+                            <!-- Background ring -->
+                            <circle class="text-slate-800" stroke-width="12" stroke="currentColor" fill="transparent" r="70" cx="80" cy="80"/>
+                            <!-- Progress ring -->
+                            <circle id="overall-progress-circle" class="text-brand-500 progress-ring__circle" stroke-width="12" stroke-linecap="round" stroke="currentColor" fill="transparent" r="70" cx="80" cy="80"/>
+                        </svg>
+                        <div class="absolute flex flex-col items-center">
+                            <span class="text-3xl font-bold text-white" id="stat-avg">0</span>
+                            <span class="text-xs text-slate-500">Avg Days</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VIEW: ADD HABIT -->
+            <div id="view-add" class="view h-full flex flex-col">
+                <header class="mb-6 flex justify-between items-center">
+                    <h1 class="text-3xl font-bold text-white tracking-tight">New Habit</h1>
+                    <button onclick="switchTab('tracker')" class="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center text-slate-400 hover:text-white">
+                        <i class="ph-bold ph-x"></i>
+                    </button>
+                </header>
+                
+                <div class="flex-grow">
+                    <div class="glass-input-container p-2 mb-6">
+                        <form id="add-habit-form" class="flex flex-col">
+                            <input 
+                                type="text" 
+                                id="new-habit-input" 
+                                class="w-full bg-transparent text-white px-4 py-4 focus:outline-none placeholder-slate-500 text-lg font-medium"
+                                placeholder="e.g., Read 10 pages, No sugar..."
+                                autocomplete="off"
+                            >
+                        </form>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 mb-6">
+                        <button onclick="fillSuggestion('Workout')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 px-4 rounded-xl text-sm font-medium border border-slate-700 text-left flex justify-between items-center">
+                            <span>Workout</span><i class="ph-fill ph-barbell text-slate-500"></i>
+                        </button>
+                        <button onclick="fillSuggestion('No Sugar')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 px-4 rounded-xl text-sm font-medium border border-slate-700 text-left flex justify-between items-center">
+                            <span>No Sugar</span><i class="ph-fill ph-hamburger text-slate-500"></i>
+                        </button>
+                        <button onclick="fillSuggestion('Read 10 Pages')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 px-4 rounded-xl text-sm font-medium border border-slate-700 text-left flex justify-between items-center">
+                            <span>Read</span><i class="ph-fill ph-book-open text-slate-500"></i>
+                        </button>
+                        <button onclick="fillSuggestion('Sleep before 11PM')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 py-3 px-4 rounded-xl text-sm font-medium border border-slate-700 text-left flex justify-between items-center">
+                            <span>Sleep Early</span><i class="ph-fill ph-moon text-slate-500"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pb-24">
+                    <button 
+                        id="submit-habit-btn"
+                        class="w-full bg-brand-500 text-black font-bold py-4 rounded-2xl text-lg shadow-[0_4px_20px_rgba(16,185,129,0.3)] active:scale-95 transition-transform"
+                    >
+                        Create Habit
+                    </button>
+                </div>
+            </div>
+
+            <!-- VIEW: CHAT -->
+            <div id="view-chat" class="view h-full flex flex-col relative overflow-hidden pb-16">
+                
+                <!-- DM List View -->
+                <div id="dm-list-view" class="absolute inset-0 flex flex-col dm-view-transition translate-x-0 w-full h-full bg-black z-10 px-1">
+                    <header class="mb-4 flex justify-between items-center pt-2">
+                        <div>
+                            <h1 class="text-3xl font-bold text-white tracking-tight">Messages</h1>
+                            <p class="text-sm text-slate-400 mt-1">Direct Accountability</p>
+                        </div>
+                        <div class="w-10 h-10 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-brand-500">
+                            <i class="ph-bold ph-magnifying-glass"></i>
+                        </div>
+                    </header>
+                    
+                    <div class="flex-grow overflow-y-auto space-y-2 mt-2 pb-24">
+                        
+                        <!-- Global War Room (Live P2P) -->
+                        <div onclick="openDM('Global_War_Room')" class="bg-brand-500/10 border-brand-500/30 hover:bg-brand-500/20 border p-4 rounded-2xl flex items-center gap-4 cursor-pointer transition-colors active:scale-95">
+                            <div class="relative">
+                                <div class="w-12 h-12 rounded-full bg-brand-500/20 flex items-center justify-center border border-brand-500/50">
+                                    <i class="ph-fill ph-globe text-xl text-brand-500"></i>
+                                </div>
+                                <div class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-500 rounded-full border-2 border-black"></div>
+                            </div>
+                            <div class="flex-grow">
+                                <h3 class="font-bold text-brand-400 text-[15px]">Global War Room</h3>
+                                <p class="text-xs text-brand-500/70 truncate mt-0.5">Connect with all commanders online</p>
+                            </div>
+                        </div>
+
+                        <!-- Simulated Contacts -->
+                        <div onclick="openDM('Iron_Goggins')" class="bg-slate-900/60 hover:bg-slate-800 border border-slate-800 p-4 rounded-2xl flex items-center gap-4 cursor-pointer transition-colors active:scale-95">
+                            <div class="relative">
+                                <div class="w-12 h-12 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-slate-600">
+                                    <i class="ph-fill ph-user text-xl text-slate-400"></i>
+                                </div>
+                                <div class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-500 rounded-full border-2 border-black"></div>
+                            </div>
+                            <div class="flex-grow">
+                                <h3 class="font-bold text-white text-[15px]">Iron_Goggins</h3>
+                                <p class="text-xs text-slate-400 truncate mt-0.5">Stay hard! Did you log today?</p>
+                            </div>
+                            <div class="text-xs text-slate-500 font-medium">1m</div>
+                        </div>
+
+                        <div onclick="openDM('Stoic_Bear')" class="bg-slate-900/60 hover:bg-slate-800 border border-slate-800 p-4 rounded-2xl flex items-center gap-4 cursor-pointer transition-colors active:scale-95">
+                            <div class="relative">
+                                <div class="w-12 h-12 rounded-full bg-gradient-to-br from-slate-700 to-slate-800 flex items-center justify-center border border-slate-600">
+                                    <i class="ph-fill ph-user text-xl text-slate-400"></i>
+                                </div>
+                                <div class="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-500 rounded-full border-2 border-black"></div>
+                            </div>
+                            <div class="flex-grow">
+                                <h3 class="font-bold text-white text-[15px]">Stoic_Bear</h3>
+                                <p class="text-xs text-slate-400 truncate mt-0.5">Let's crush this week.</p>
+                            </div>
+                            <div class="text-xs text-slate-500 font-medium">2h</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DM Room View -->
+                <div id="dm-room-view" class="absolute inset-0 flex flex-col dm-view-transition translate-x-full w-full h-full bg-black z-20">
+                    <header class="flex items-center gap-3 mb-2 pb-4 border-b border-slate-800 bg-black/90 backdrop-blur z-30 pt-2 px-1">
+                        <button onclick="closeDM()" class="w-10 h-10 rounded-full bg-slate-900 flex items-center justify-center text-white active:scale-95 transition-transform border border-slate-800">
+                            <i class="ph-bold ph-caret-left text-xl"></i>
+                        </button>
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700">
+                                <i class="ph-fill ph-user text-lg text-slate-400"></i>
+                            </div>
+                            <div>
+                                <h2 id="dm-partner-name" class="font-bold text-white text-[15px] leading-tight">Partner</h2>
+                                <div class="flex items-center gap-1.5 mt-0.5">
+                                    <div id="chat-status" class="w-2 h-2 rounded-full bg-brand-500 transition-colors"></div>
+                                    <span id="chat-status-text" class="text-[10px] text-brand-500 font-bold uppercase tracking-wide">Online</span>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+                    
+                    <div class="chat-container h-full relative" style="height: calc(100% - 70px);">
+                        <div id="chat-messages" class="chat-messages absolute inset-0 pb-[70px] px-1">
+                            <!-- Messages -->
+                        </div>
+                        
+                        <div class="absolute bottom-0 left-0 right-0 bg-black pb-4 pt-2 z-30 px-1">
+                            <form id="chat-form" class="flex w-full gap-2" onsubmit="sendChatMessage(event)">
+                                <input 
+                                    type="text" 
+                                    id="chat-input" 
+                                    class="flex-grow bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 focus:outline-none focus:border-brand-500 transition-colors placeholder-slate-500 text-sm"
+                                    placeholder="Direct message..."
+                                    autocomplete="off"
+                                >
+                                <button 
+                                    type="submit"
+                                    class="w-12 h-12 shrink-0 bg-brand-500 rounded-xl flex items-center justify-center text-black shadow-[0_2px_10px_rgba(16,185,129,0.3)] active:scale-95 transition-transform"
+                                >
+                                    <i class="ph-fill ph-paper-plane-right text-xl"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+        <!-- Bottom Navigation Bar -->
+        <nav id="bottom-nav" class="fixed bottom-0 w-full flex justify-around items-center pt-3 px-4">
+            <button onclick="switchTab('dashboard')" id="tab-dashboard" class="nav-item flex flex-col items-center gap-1 w-16">
+                <i class="ph ph-chart-pie-slice text-2xl"></i>
+                <span class="text-[10px] font-medium">Stats</span>
+            </button>
+            
+            <button onclick="switchTab('chat')" id="tab-chat" class="nav-item relative -top-6">
+                <div class="w-14 h-14 bg-brand-500 rounded-full flex items-center justify-center text-black shadow-[0_4px_15px_rgba(16,185,129,0.4)] border-4 border-black transition-transform active:scale-95">
+                    <i class="ph-fill ph-chat-circle-dots text-2xl"></i>
+                </div>
+            </button>
+
+            <button onclick="switchTab('tracker')" id="tab-tracker" class="nav-item active flex flex-col items-center gap-1 w-16">
+                <i class="ph ph-list-bullets text-2xl"></i>
+                <span class="text-[10px] font-medium">Habits</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- Action Modal Overlay (for confirmation) -->
+    <div id="action-modal" class="fixed inset-0 z-50 flex flex-col justify-end opacity-0 pointer-events-none transition-opacity duration-300 backdrop-blur-md bg-black/60 px-4 pb-8">
+        <div id="modal-content" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full transform translate-y-full transition-transform duration-300">
+            
+            <div class="flex justify-center mb-4">
+                <div id="modal-icon-bg" class="w-12 h-12 rounded-full flex items-center justify-center bg-slate-800">
+                    <i id="modal-icon" class="ph-fill ph-warning-circle text-2xl text-white"></i>
+                </div>
+            </div>
+            
+            <h3 id="modal-title" class="text-xl font-bold text-center text-white mb-1">Confirm Action</h3>
+            <p id="modal-message" class="text-center text-slate-400 mb-6 text-sm">
+                Are you sure?
+            </p>
+            
+            <div class="flex flex-col gap-3">
+                <button id="modal-confirm-btn" class="w-full py-4 rounded-xl font-bold text-white bg-rose-500 active:bg-rose-600 transition-colors">
+                    Confirm
+                </button>
+                <button onclick="closeModal()" class="w-full py-4 rounded-xl font-semibold text-slate-300 bg-slate-800 active:bg-slate-700 transition-colors">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Haptic/Audio Feedback Setup (Audio fallback if haptics fail) -->
+    <audio id="haptic-pop" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA" preload="auto"></audio>
+
+    <script>
+        const defaultHabits = [
+            { id: 1, name: "No Gooning", streak: 0, lastLogged: null },
+            { id: 2, name: "No Smoking", streak: 0, lastLogged: null },
+            { id: 3, name: "Read 10 Pages", streak: 0, lastLogged: null }
+        ];
+
+        let habits = [];
+        let pendingAction = null;
+        const SWIPE_THRESHOLD = 70; // Pixels needed to trigger action
+
+        let userProfile = null;
+        let selectedGoals = [];
+        let currentChatPartner = null;
+
+        // --- Chat & EMQX Variables ---
+        let mqttClient = null;
+        const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
+        const CHAT_TOPIC = 'betterme/app/global_chat_v1';
+        
+        // Generate a random, cool username for this session
+        const adjectives = ['Elite', 'Stoic', 'Iron', 'Savage', 'Relentless', 'Driven'];
+        const animals = ['Wolf', 'Tiger', 'Bear', 'Eagle', 'Lion', 'Hawk'];
+        const myUsername = adjectives[Math.floor(Math.random()*adjectives.length)] + '_' + animals[Math.floor(Math.random()*animals.length)] + Math.floor(Math.random()*100);
+
+        // Date utility
+        function setDateHeader() {
+            const options = { weekday: 'long', month: 'short', day: 'numeric' };
+            document.getElementById('current-date').textContent = new Date().toLocaleDateString('en-US', options);
+        }
+
+        // Haptic Feedback Helper
+        function triggerHaptic(type = 'light') {
+            try {
+                if (navigator.vibrate) {
+                    if (type === 'light') navigator.vibrate(10);
+                    if (type === 'heavy') navigator.vibrate([20, 10, 20]);
+                    if (type === 'success') navigator.vibrate([10, 30, 20, 30, 10]);
+                } else {
+                    // Fallback tiny sound if on desktop/unsupported (kept very short)
+                    const pop = document.getElementById('haptic-pop');
+                    pop.volume = 0.1;
+                    pop.play().catch(e => {}); 
+                }
+            } catch(e) {}
+        }
+
+        function init() {
+            setDateHeader();
+            
+            try {
+                const savedProfile = localStorage.getItem('eliteUserProfile');
+                if (savedProfile) {
+                    userProfile = JSON.parse(savedProfile);
+                }
+            } catch (e) {
+                console.error("Local storage error:", e);
+            }
+
+            try {
+                const saved = localStorage.getItem('eliteMobileHabits');
+                if (saved) habits = JSON.parse(saved);
+            } catch (e) {
+                console.error("Local storage error:", e);
+            }
+            
+            if (!habits || habits.length === 0) {
+                habits = defaultHabits;
+                saveHabits();
+            }
+
+            // Setup Form Listener
+            document.getElementById('submit-habit-btn').addEventListener('click', addNewHabit);
+            
+            // Handle form submission via enter key
+            document.getElementById('add-habit-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                addNewHabit();
+            });
+
+            renderHabits();
+            updateDashboard();
+            
+            if (!userProfile) {
+                document.getElementById('onboarding-overlay').classList.remove('hidden');
+            } else {
+                updateProfileUI();
+                initChat(); 
+            }
+        }
+
+        // --- Onboarding & Profile Functions ---
+        function nextStep(step) {
+            triggerHaptic('light');
+            document.querySelectorAll('.ob-step').forEach(el => el.classList.remove('active'));
+            document.getElementById(`ob-step-${step}`).classList.add('active');
+        }
+
+        function prevStep(step) {
+            triggerHaptic('light');
+            document.querySelectorAll('.ob-step').forEach(el => el.classList.remove('active'));
+            document.getElementById(`ob-step-${step}`).classList.add('active');
+        }
+
+        function toggleGoal(element, goalName) {
+            triggerHaptic('light');
+            const index = selectedGoals.indexOf(goalName);
+            if (index > -1) {
+                selectedGoals.splice(index, 1);
+                element.classList.remove('selected');
+            } else {
+                selectedGoals.push(goalName);
+                element.classList.add('selected');
+            }
+        }
+
+        function finishOnboarding() {
+            const username = document.getElementById('ob-username').value.trim() || 'Anonymous_Wolf';
+            const age = document.getElementById('ob-age').value.trim() || 'N/A';
+            const weight = document.getElementById('ob-weight').value.trim() || 'N/A';
+            
+            userProfile = {
+                username: username,
+                age: age,
+                weight: weight,
+                goals: selectedGoals.length > 0 ? selectedGoals : ['Discipline']
+            };
+
+            localStorage.setItem('eliteUserProfile', JSON.stringify(userProfile));
+            triggerHaptic('success');
+            
+            updateProfileUI();
+            
+            // Fade out overlay
+            const overlay = document.getElementById('onboarding-overlay');
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+                initChat(); // Connect chat now that we have a username
+            }, 500);
+        }
+
+        function updateProfileUI() {
+            if (!userProfile) return;
+            document.getElementById('profile-display-name').textContent = userProfile.username;
+            document.getElementById('profile-display-age').textContent = userProfile.age;
+            document.getElementById('profile-display-weight').textContent = userProfile.weight;
+            
+            const goalsContainer = document.getElementById('profile-display-goals');
+            goalsContainer.innerHTML = '';
+            
+            userProfile.goals.forEach(goal => {
+                const span = document.createElement('span');
+                span.className = 'bg-brand-500/20 text-brand-400 border border-brand-500/30 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-md';
+                span.textContent = goal;
+                goalsContainer.appendChild(span);
+            });
+        }
+
+        // --- Chat & EMQX Direct Message Updates ---
+        function openDM(partnerName) {
+            triggerHaptic('light');
+            currentChatPartner = partnerName;
+            document.getElementById('dm-partner-name').textContent = partnerName.replace(/_/g, ' ');
+            
+            // Slide to room view
+            document.getElementById('dm-list-view').style.transform = 'translateX(-100%)';
+            document.getElementById('dm-room-view').style.transform = 'translateX(0)';
+            
+            // Clear previous UI messages and add context
+            document.getElementById('chat-messages').innerHTML = '';
+            
+            if (partnerName === 'Global_War_Room') {
+                appendChatMessage('System', `Connected to Global Server. All commanders online can see these messages.`, false);
+            } else {
+                appendChatMessage('System', `Secure Direct Connection established with ${partnerName}. Waiting for them to connect...`, false);
+            }
+        }
+
+        function closeDM() {
+            triggerHaptic('light');
+            currentChatPartner = null;
+            
+            // Slide back to list view
+            document.getElementById('dm-list-view').style.transform = 'translateX(0)';
+            document.getElementById('dm-room-view').style.transform = 'translateX(100%)';
+        }
+
+        function initChat() {
+            const statusIndicator = document.getElementById('chat-status');
+            const statusText = document.getElementById('chat-status-text');
+            const clientId = 'betterme_web_' + Math.random().toString(16).substring(2, 10);
+            
+            // Safe UI updater for Tailwind JIT via CDN
+            function updateStatus(text, bgClass, textClass) {
+                if (statusIndicator) statusIndicator.className = `w-2 h-2 rounded-full ${bgClass} transition-colors`;
+                if (statusText) {
+                    statusText.textContent = text;
+                    statusText.className = `text-[10px] ${textClass} font-bold uppercase tracking-wide`;
+                }
+            }
+
+            try {
+                updateStatus('Connecting', 'bg-amber-500', 'text-amber-500');
+
+                // Connect natively without fallback bots
+                mqttClient = mqtt.connect(MQTT_BROKER, {
+                    clientId: clientId,
+                    clean: true,
+                    connectTimeout: 5000,
+                    reconnectPeriod: 3000, 
+                });
+
+                mqttClient.on('connect', () => {
+                    updateStatus('Online', 'bg-brand-500', 'text-brand-500');
+                    
+                    mqttClient.subscribe(CHAT_TOPIC, (err) => {
+                        if (!err) {
+                            console.log('Successfully connected to the Secure Matrix.');
+                        }
+                    });
+                });
+
+                mqttClient.on('message', (topic, message) => {
+                    if(topic === CHAT_TOPIC) {
+                        try {
+                            const data = JSON.parse(message.toString());
+                            const activeUsername = userProfile ? userProfile.username : myUsername;
+                            
+                            // Do not echo our own messages back (we render them instantly on send)
+                            if (data.sender === activeUsername) return;
+
+                            // Route message to correct room
+                            if (currentChatPartner === 'Global_War_Room' && data.target === 'Global_War_Room') {
+                                appendChatMessage(data.sender, data.text, false);
+                            } else if (data.sender === currentChatPartner && data.target === activeUsername) {
+                                appendChatMessage(data.sender, data.text, false);
+                            }
+                        } catch(e) {
+                            console.error("Failed to parse message", e);
+                        }
+                    }
+                });
+                
+                mqttClient.on('error', (err) => {
+                    console.error('MQTT Error', err);
+                    updateStatus('Error', 'bg-rose-500', 'text-rose-500');
+                });
+                
+                mqttClient.on('close', () => {
+                    updateStatus('Offline', 'bg-slate-500', 'text-slate-500');
+                });
+                
+                mqttClient.on('reconnect', () => {
+                    updateStatus('Reconnecting', 'bg-amber-500', 'text-amber-500');
+                });
+
+            } catch (err) {
+                console.error('Init error', err);
+                updateStatus('Failed', 'bg-rose-500', 'text-rose-500');
+            }
+        }
+
+        function sendChatMessage(e) {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const text = input.value.trim();
+            
+            const activeUsername = userProfile ? userProfile.username : myUsername;
+            
+            if(text !== "" && mqttClient && mqttClient.connected) {
+                const payload = {
+                    sender: activeUsername,
+                    target: currentChatPartner, 
+                    text: text,
+                    timestamp: new Date().getTime()
+                };
+                
+                mqttClient.publish(CHAT_TOPIC, JSON.stringify(payload));
+                
+                // Immediately display our message locally
+                appendChatMessage(activeUsername, text, true);
+                
+                input.value = '';
+                input.focus();
+                triggerHaptic('light');
+            } else if (!mqttClient || !mqttClient.connected) {
+                appendChatMessage('System', 'Cannot send: Not connected to live server.', false);
+            }
+        }
+
+        function appendChatMessage(sender, text, isSelf) {
+            const chatBox = document.getElementById('chat-messages');
+            const msgDiv = document.createElement('div');
+            
+            msgDiv.className = `chat-message ${isSelf ? 'msg-self' : 'msg-other'}`;
+            
+            let senderHtml = '';
+            if(!isSelf && sender !== 'System') {
+                senderHtml = `<div class="msg-sender">${sender}</div>`;
+            } else if (sender === 'System') {
+                senderHtml = `<div class="msg-sender text-brand-400"><i class="ph-fill ph-robot"></i> ${sender}</div>`;
+            }
+            
+            msgDiv.innerHTML = `${senderHtml}<div>${escapeHTML(text)}</div>`;
+            chatBox.appendChild(msgDiv);
+            
+            // Auto scroll to bottom
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            // Play light haptic if message received while in chat tab
+            if(!isSelf && document.getElementById('view-chat').classList.contains('active')) {
+                triggerHaptic('light');
+            }
+        }
+        
+        function escapeHTML(str) {
+            return str.replace(/[&<>'"]/g, 
+                tag => ({
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    "'": '&#39;',
+                    '"': '&quot;'
+                }[tag] || tag)
+            );
+        }
+
+        function saveHabits() {
+            localStorage.setItem('eliteMobileHabits', JSON.stringify(habits));
+        }
+
+        function renderHabits() {
+            const list = document.getElementById('habit-list');
+            const emptyState = document.getElementById('empty-state');
+            
+            list.innerHTML = ''; 
+
+            if (habits.length === 0) {
+                emptyState.classList.remove('hidden');
+                emptyState.classList.add('flex');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            emptyState.classList.remove('flex');
+
+            const today = new Date().toDateString();
+
+            habits.forEach((habit) => {
+                const isLoggedToday = habit.lastLogged === today;
+                
+                const container = document.createElement('div');
+                container.className = 'habit-row-container';
+                container.id = `habit-container-${habit.id}`;
+                
+                // Background actions
+                const actionsHtml = `
+                    <div class="habit-actions">
+                        <div class="action-reset">
+                            <i class="ph-bold ph-arrow-counter-clockwise text-2xl mr-2"></i>
+                            <span class="font-bold text-sm">Reset</span>
+                        </div>
+                        <div class="action-delete">
+                            <span class="font-bold text-sm">Delete</span>
+                            <i class="ph-bold ph-trash text-2xl ml-2"></i>
+                        </div>
+                    </div>
+                `;
+
+                // Foreground Card
+                const card = document.createElement('div');
+                card.className = `habit-card flex items-center p-4 min-h-[5rem]`;
+                card.id = `habit-card-${habit.id}`;
+                
+                const streakColor = habit.streak > 0 ? 'text-brand-400' : 'text-slate-500';
+                
+                // Logging Button styling based on status
+                let logBtnStyle = `bg-slate-800 text-slate-400 border-slate-700`;
+                let logIcon = `<i class="ph-bold ph-plus"></i>`;
+                
+                if (isLoggedToday) {
+                    logBtnStyle = `bg-brand-500 text-black border-brand-500 opacity-50`;
+                    logIcon = `<i class="ph-bold ph-check"></i>`;
+                } else if (habit.streak > 0) {
+                     logBtnStyle = `bg-slate-800 text-brand-400 border-brand-500/30`;
+                }
+
+                card.innerHTML = `
+                    <div class="flex-grow pr-4">
+                        <h3 class="font-semibold text-[17px] text-white leading-tight mb-1">${habit.name}</h3>
+                        <div class="flex items-center gap-1.5 text-xs font-medium ${streakColor}">
+                            <i class="ph-fill ph-fire"></i>
+                            <span>${habit.streak} Day${habit.streak !== 1 ? 's' : ''}</span>
+                        </div>
+                    </div>
+                    <button 
+                        onclick="toggleLogHabit(${habit.id})"
+                        class="log-btn w-12 h-12 rounded-full border-2 flex items-center justify-center text-xl shrink-0 transition-all duration-300 ${logBtnStyle}"
+                        ${isLoggedToday ? 'disabled' : ''}
+                    >
+                        ${logIcon}
+                    </button>
+                `;
+
+                container.innerHTML = actionsHtml;
+                container.appendChild(card);
+                list.appendChild(container);
+
+                setupSwipeGesture(card, habit);
+            });
+        }
+
+        function setupSwipeGesture(cardElement, habit) {
+            const mc = new Hammer.Manager(cardElement, {
+                recognizers: [
+                    [Hammer.Pan, { direction: Hammer.DIRECTION_HORIZONTAL }]
+                ]
+            });
+
+            let startX = 0;
+            let currentX = 0;
+            const cardWidth = cardElement.offsetWidth;
+
+            mc.on('panstart', (e) => {
+                cardElement.classList.add('swiping');
+                cardElement.style.transition = 'none';
+            });
+
+            mc.on('panmove', (e) => {
+                // Dampen the movement slightly for physical feel
+                currentX = e.deltaX * 0.8;
+                
+                // Limit swipe distance
+                if (currentX > 150) currentX = 150;
+                if (currentX < -150) currentX = -150;
+
+                cardElement.style.transform = `translateX(${currentX}px)`;
+
+                // Haptic feedback when crossing threshold
+                if (Math.abs(currentX) > SWIPE_THRESHOLD && Math.abs(currentX - e.deltaX*0.8) <= SWIPE_THRESHOLD ) {
+                    triggerHaptic('light');
+                }
+            });
+
+            mc.on('panend pancancel', (e) => {
+                cardElement.classList.remove('swiping');
+                cardElement.style.transition = 'transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                
+                if (currentX > SWIPE_THRESHOLD) {
+                    // Swiped Right -> Reset
+                    cardElement.style.transform = `translateX(${cardWidth}px)`;
+                    setTimeout(() => requestReset(habit.id, habit.name), 200);
+                } else if (currentX < -SWIPE_THRESHOLD) {
+                    // Swiped Left -> Delete
+                    cardElement.style.transform = `translateX(-${cardWidth}px)`;
+                    setTimeout(() => requestDelete(habit.id, habit.name), 200);
+                } else {
+                    // Snap back
+                    cardElement.style.transform = 'translateX(0)';
+                }
+                currentX = 0;
+            });
+        }
+
+        function toggleLogHabit(id) {
+            const habit = habits.find(h => h.id === id);
+            const today = new Date().toDateString();
+
+            if (habit && habit.lastLogged !== today) {
+                habit.streak += 1;
+                habit.lastLogged = today;
+                
+                triggerHaptic('success');
+                saveHabits();
+                
+                // Animate button immediately before full re-render
+                const card = document.getElementById(`habit-card-${id}`);
+                if(card) {
+                    const btn = card.querySelector('button');
+                    btn.classList.remove('text-brand-400', 'border-brand-500/30', 'bg-slate-800');
+                    btn.classList.add('bg-brand-500', 'text-black', 'border-brand-500', 'opacity-50');
+                    btn.innerHTML = `<i class="ph-bold ph-check"></i>`;
+                    btn.disabled = true;
+                }
+                
+                setTimeout(() => {
+                    renderHabits();
+                    updateDashboard();
+                }, 300);
+            }
+        }
+
+        function addNewHabit() {
+            const input = document.getElementById('new-habit-input');
+            const name = input.value.trim();
+            
+            if (name !== "") {
+                const newId = habits.length > 0 ? Math.max(...habits.map(h => h.id)) + 1 : 1;
+                habits.push({ id: newId, name: name, streak: 0, lastLogged: null });
+                saveHabits();
+                renderHabits();
+                updateDashboard();
+                
+                input.value = ''; 
+                input.blur();
+                triggerHaptic('heavy');
+                switchTab('tracker'); // Go back to list
+            }
+        }
+
+        function fillSuggestion(text) {
+            const input = document.getElementById('new-habit-input');
+            input.value = text;
+            input.focus();
+            triggerHaptic();
+        }
+
+        function updateDashboard() {
+            document.getElementById('stat-total').textContent = habits.length;
+            
+            const longest = habits.length > 0 ? Math.max(...habits.map(h => h.streak)) : 0;
+            document.getElementById('stat-longest').textContent = longest;
+
+            const totalStreaks = habits.reduce((sum, h) => sum + h.streak, 0);
+            const avg = habits.length > 0 ? Math.round((totalStreaks / habits.length) * 10) / 10 : 0;
+            document.getElementById('stat-avg').textContent = avg;
+
+            // Update Circle Progress (visual representation, arbitrarily maxes at 30 days avg)
+            const circle = document.getElementById('overall-progress-circle');
+            const radius = circle.r.baseVal.value;
+            const circumference = radius * 2 * Math.PI;
+            
+            circle.style.strokeDasharray = `${circumference} ${circumference}`;
+            
+            const maxDaysForFullCircle = 30;
+            const percent = Math.min((avg / maxDaysForFullCircle) * 100, 100);
+            const offset = circumference - (percent / 100) * circumference;
+            
+            // Small timeout to allow transition to play on load
+            setTimeout(() => {
+                circle.style.strokeDashoffset = offset;
+            }, 100);
+        }
+
+        function switchTab(tabName) {
+            triggerHaptic();
+            // Update Nav UI
+            ['dashboard', 'chat', 'tracker'].forEach(name => {
+                const tabEl = document.getElementById(`tab-${name}`);
+                if(tabEl) tabEl.classList.remove('active');
+                
+                const viewEl = document.getElementById(`view-${name}`);
+                if(viewEl) viewEl.classList.remove('active');
+            });
+            
+            // Add habit is an overlay view not in the bottom nav
+            document.getElementById('view-add').classList.remove('active');
+            
+            if (tabName === 'add') {
+                document.getElementById('view-add').classList.add('active');
+            } else {
+                const activeTab = document.getElementById(`tab-${tabName}`);
+                if(activeTab) activeTab.classList.add('active');
+                
+                const activeView = document.getElementById(`view-${tabName}`);
+                if(activeView) {
+                    activeView.classList.add('active');
+                    // Scroll chat to bottom when switching to it
+                    if(tabName === 'chat') {
+                        const chatBox = document.getElementById('chat-messages');
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+                }
+            }
+        }
+
+        const modal = document.getElementById('action-modal');
+        const modalContent = document.getElementById('modal-content');
+        const modalTitle = document.getElementById('modal-title');
+        const modalMessage = document.getElementById('modal-message');
+        const confirmBtn = document.getElementById('modal-confirm-btn');
+        const modalIcon = document.getElementById('modal-icon');
+
+        function openModal(type, title, message, action, cancelActionId) {
+            modalTitle.textContent = title;
+            modalMessage.innerHTML = message;
+            pendingAction = action;
+            
+            if (type === 'reset') {
+                modalIcon.className = "ph-fill ph-arrow-counter-clockwise text-2xl text-amber-500";
+                confirmBtn.className = "w-full py-4 rounded-xl font-bold text-black bg-amber-500 active:bg-amber-600 transition-colors";
+                confirmBtn.textContent = "Reset Streak";
+            } else {
+                modalIcon.className = "ph-fill ph-trash text-2xl text-rose-500";
+                confirmBtn.className = "w-full py-4 rounded-xl font-bold text-white bg-rose-500 active:bg-rose-600 transition-colors";
+                confirmBtn.textContent = "Delete Habit";
+            }
+
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            modalContent.classList.remove('translate-y-full');
+
+            triggerHaptic('heavy');
+
+            // Handle Cancel/Confirm
+            confirmBtn.onclick = () => {
+                if (pendingAction) pendingAction();
+                closeModal();
+            };
+
+            // Store ID to snap back card if canceled
+            modal.dataset.cancelId = cancelActionId;
+        }
+
+        function closeModal() {
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            modalContent.classList.add('translate-y-full');
+            
+            // Snap card back if action was canceled
+            const cancelId = modal.dataset.cancelId;
+            if (cancelId) {
+                const card = document.getElementById(`habit-card-${cancelId}`);
+                if (card) card.style.transform = 'translateX(0)';
+            }
+            
+            setTimeout(() => { pendingAction = null; modal.dataset.cancelId = ''; }, 300);
+        }
+
+        function requestReset(id, name) {
+            openModal(
+                'reset', 'Reset Streak', `Reset streak for <strong>${name}</strong> to 0?`,
+                () => {
+                    const habit = habits.find(h => h.id === id);
+                    if(habit) { habit.streak = 0; saveHabits(); renderHabits(); updateDashboard(); }
+                }, id
+            );
+        }
+
+        function requestDelete(id, name) {
+            openModal(
+                'delete', 'Delete Habit', `Remove <strong>${name}</strong> completely?`,
+                () => {
+                    habits = habits.filter(h => h.id !== id); saveHabits(); renderHabits(); updateDashboard();
+                }, id
+            );
+        }
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
