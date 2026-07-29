@@ -535,13 +535,23 @@
                             </div>
                         </div>
 
+                        <!-- Pending Requests container -->
+                        <div id="pending-requests-container" class="hidden flex-col gap-2 mt-4">
+                            <!-- items injected here -->
+                        </div>
+
+                        <!-- Friends container -->
+                        <div id="friends-container" class="hidden flex-col gap-2 mt-4">
+                            <!-- items injected here -->
+                        </div>
+
                         <!-- Empty State for DMs -->
-                        <div class="flex flex-col items-center justify-center py-12 text-center opacity-50">
+                        <div id="dm-empty-state" class="flex flex-col items-center justify-center py-12 text-center opacity-50">
                             <div class="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mb-3">
                                 <i class="ph-fill ph-users text-2xl text-slate-500"></i>
                             </div>
-                            <h3 class="text-sm font-semibold text-white mb-1">No Active DMs</h3>
-                            <p class="text-xs text-slate-400 px-8">Tap the search icon to find commanders.</p>
+                            <h3 class="text-sm font-semibold text-white mb-1">No Active Connections</h3>
+                            <p class="text-xs text-slate-400 px-8">Tap a commander's name in the Global War Room to connect.</p>
                         </div>
                     </div>
                 </div>
@@ -640,6 +650,27 @@
         </div>
     </div>
 
+    <!-- User Profile Modal (Social) -->
+    <div id="user-profile-modal" class="fixed inset-0 z-50 flex flex-col justify-end opacity-0 pointer-events-none transition-opacity duration-300 backdrop-blur-md bg-black/60 px-4 pb-8">
+        <div id="profile-modal-content" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full transform translate-y-full transition-transform duration-300 relative overflow-hidden">
+            <div class="absolute top-0 left-0 right-0 h-24 bg-brand-500/20 blur-2xl"></div>
+            <div class="relative z-10 flex flex-col items-center">
+                <div class="w-20 h-20 rounded-full bg-slate-800 border-2 border-brand-500 flex items-center justify-center mb-3">
+                    <i class="ph-fill ph-user text-4xl text-slate-300"></i>
+                </div>
+                <h3 id="profile-modal-name" class="text-2xl font-bold text-white mb-1">Username</h3>
+                <p class="text-sm text-brand-500 font-medium mb-6 uppercase tracking-wider text-[10px]">Active Commander</p>
+                
+                <div class="flex flex-col gap-3 w-full" id="profile-modal-actions">
+                    <!-- Dynamic buttons injected here -->
+                </div>
+                <button onclick="closeUserProfile()" class="w-full mt-3 py-4 rounded-xl font-semibold text-slate-400 bg-slate-800 active:bg-slate-700 transition-colors">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Haptic/Audio Feedback Setup (Audio fallback if haptics fail) -->
     <audio id="haptic-pop" src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA" preload="auto"></audio>
 
@@ -657,6 +688,9 @@
         let userProfile = null;
         let selectedGoals = [];
         let currentChatPartner = null;
+        
+        let friends = [];
+        let pendingRequests = [];
 
         // --- Chat & EMQX Variables ---
         let mqttClient = null;
@@ -714,6 +748,14 @@
                 saveHabits();
             }
 
+            // Load Socials
+            try {
+                const savedFriends = localStorage.getItem('eliteFriends');
+                if (savedFriends) friends = JSON.parse(savedFriends);
+                const savedReqs = localStorage.getItem('eliteRequests');
+                if (savedReqs) pendingRequests = JSON.parse(savedReqs);
+            } catch(e) {}
+
             // Setup Form Listener
             document.getElementById('submit-habit-btn').addEventListener('click', addNewHabit);
             
@@ -725,6 +767,7 @@
 
             renderHabits();
             updateDashboard();
+            renderDMList();
             
             if (!userProfile) {
                 document.getElementById('onboarding-overlay').classList.remove('hidden');
@@ -883,11 +926,29 @@
                             // Do not echo our own messages back (we render them instantly on send)
                             if (data.sender === activeUsername) return;
 
-                            // Route message to correct room
-                            if (currentChatPartner === 'Global_War_Room' && data.target === 'Global_War_Room') {
-                                appendChatMessage(data.sender, data.text, false);
-                            } else if (data.sender === currentChatPartner && data.target === activeUsername) {
-                                appendChatMessage(data.sender, data.text, false);
+                            const msgType = data.type || 'chat';
+
+                            if (msgType === 'chat') {
+                                // Route message to correct room
+                                if (currentChatPartner === 'Global_War_Room' && data.target === 'Global_War_Room') {
+                                    appendChatMessage(data.sender, data.text, false);
+                                } else if (data.sender === currentChatPartner && data.target === activeUsername) {
+                                    appendChatMessage(data.sender, data.text, false);
+                                }
+                            } else if (msgType === 'friend_request' && data.target === activeUsername) {
+                                if (!friends.includes(data.sender) && !pendingRequests.includes(data.sender)) {
+                                    pendingRequests.push(data.sender);
+                                    saveSocials();
+                                    renderDMList();
+                                    triggerHaptic('success');
+                                }
+                            } else if (msgType === 'friend_accept' && data.target === activeUsername) {
+                                if (!friends.includes(data.sender)) {
+                                    friends.push(data.sender);
+                                    saveSocials();
+                                    renderDMList();
+                                    triggerHaptic('success');
+                                }
                             }
                         } catch(e) {
                             // Silent catch for message parse errors
@@ -923,6 +984,7 @@
             
             if(text !== "" && mqttClient && mqttClient.connected) {
                 const payload = {
+                    type: 'chat',
                     sender: activeUsername,
                     target: currentChatPartner, 
                     text: text,
@@ -952,7 +1014,7 @@
             
             let senderHtml = '';
             if(!isSelf && sender !== 'System') {
-                senderHtml = `<div class="msg-sender">${sender}</div>`;
+                senderHtml = `<div class="msg-sender cursor-pointer hover:text-brand-400 transition-colors inline-block" onclick="showUserProfile('${sender}')">${sender}</div>`;
             } else if (sender === 'System') {
                 senderHtml = `<div class="msg-sender text-brand-400"><i class="ph-fill ph-robot"></i> ${sender}</div>`;
             }
@@ -1279,6 +1341,185 @@
             }
             
             setTimeout(() => { pendingAction = null; modal.dataset.cancelId = ''; }, 300);
+        }
+
+        // --- Social Logic & User Profiles ---
+        function saveSocials() {
+            localStorage.setItem('eliteFriends', JSON.stringify(friends));
+            localStorage.setItem('eliteRequests', JSON.stringify(pendingRequests));
+        }
+
+        function showUserProfile(username) {
+            const activeUsername = userProfile ? userProfile.username : myUsername;
+            if (username === activeUsername) return; // Can't add yourself
+            
+            document.getElementById('profile-modal-name').textContent = username.replace(/_/g, ' ');
+            const actionsContainer = document.getElementById('profile-modal-actions');
+            
+            if (friends.includes(username)) {
+                actionsContainer.innerHTML = `
+                    <button onclick="closeUserProfile(); openDM('${username}');" class="w-full py-4 rounded-xl font-bold text-black bg-brand-500 active:scale-95 transition-transform shadow-[0_4px_20px_rgba(16,185,129,0.3)] flex justify-center items-center gap-2">
+                        <i class="ph-fill ph-chat-circle-dots text-xl"></i> Message Commander
+                    </button>
+                    <button onclick="removeFriend('${username}')" class="w-full py-4 rounded-xl font-bold text-white bg-rose-500/20 border border-rose-500/30 text-rose-500 active:bg-rose-500/30 transition-colors">
+                        Remove Connection
+                    </button>
+                `;
+            } else if (pendingRequests.includes(username)) {
+                actionsContainer.innerHTML = `
+                    <div class="text-center text-slate-400 font-bold py-2 text-sm mb-2">They sent you a request!</div>
+                    <div class="flex gap-2">
+                        <button onclick="acceptRequest('${username}'); closeUserProfile();" class="w-1/2 py-4 rounded-xl font-bold text-black bg-brand-500 active:scale-95 transition-transform flex justify-center items-center gap-2">
+                            Accept
+                        </button>
+                        <button onclick="denyRequest('${username}'); closeUserProfile();" class="w-1/2 py-4 rounded-xl font-bold text-white bg-slate-800 active:bg-slate-700 transition-colors">
+                            Decline
+                        </button>
+                    </div>
+                `;
+            } else {
+                actionsContainer.innerHTML = `
+                    <button onclick="sendFriendRequest('${username}')" class="w-full py-4 rounded-xl font-bold text-black bg-brand-500 active:scale-95 transition-transform shadow-[0_4px_20px_rgba(16,185,129,0.3)] flex justify-center items-center gap-2">
+                        <i class="ph-bold ph-user-plus text-xl"></i> Connect with Commander
+                    </button>
+                `;
+            }
+            
+            const modal = document.getElementById('user-profile-modal');
+            const content = document.getElementById('profile-modal-content');
+            modal.classList.remove('opacity-0', 'pointer-events-none');
+            content.classList.remove('translate-y-full');
+            triggerHaptic('light');
+        }
+
+        function closeUserProfile() {
+            const modal = document.getElementById('user-profile-modal');
+            const content = document.getElementById('profile-modal-content');
+            modal.classList.add('opacity-0', 'pointer-events-none');
+            content.classList.add('translate-y-full');
+        }
+
+        function sendFriendRequest(username) {
+            const activeUsername = userProfile ? userProfile.username : myUsername;
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.publish(CHAT_TOPIC, JSON.stringify({
+                    type: 'friend_request',
+                    sender: activeUsername,
+                    target: username,
+                    timestamp: Date.now()
+                }));
+                
+                const actionsContainer = document.getElementById('profile-modal-actions');
+                actionsContainer.innerHTML = `<div class="text-center text-brand-500 font-bold py-4">Request Sent!</div>`;
+                setTimeout(closeUserProfile, 1000);
+                triggerHaptic('success');
+            } else {
+                alert("You must be online to send a request.");
+            }
+        }
+
+        function acceptRequest(username) {
+            const activeUsername = userProfile ? userProfile.username : myUsername;
+            pendingRequests = pendingRequests.filter(u => u !== username);
+            if (!friends.includes(username)) friends.push(username);
+            saveSocials();
+            renderDMList();
+            
+            if (mqttClient && mqttClient.connected) {
+                mqttClient.publish(CHAT_TOPIC, JSON.stringify({
+                    type: 'friend_accept',
+                    sender: activeUsername,
+                    target: username,
+                    timestamp: Date.now()
+                }));
+            }
+            triggerHaptic('success');
+        }
+
+        function denyRequest(username) {
+            pendingRequests = pendingRequests.filter(u => u !== username);
+            saveSocials();
+            renderDMList();
+            triggerHaptic('light');
+        }
+
+        function removeFriend(username) {
+            if(confirm(`Remove ${username} from your network?`)) {
+                friends = friends.filter(u => u !== username);
+                saveSocials();
+                renderDMList();
+                closeUserProfile();
+            }
+        }
+
+        function renderDMList() {
+            const pendingContainer = document.getElementById('pending-requests-container');
+            const friendsContainer = document.getElementById('friends-container');
+            const emptyState = document.getElementById('dm-empty-state');
+            
+            pendingContainer.innerHTML = '<h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 px-2 mt-2">Pending Requests</h4>';
+            friendsContainer.innerHTML = '<h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1 px-2 mt-2">Network</h4>';
+            
+            let hasDMs = false;
+            
+            if (pendingRequests.length > 0) {
+                pendingContainer.classList.remove('hidden');
+                pendingContainer.classList.add('flex');
+                hasDMs = true;
+                
+                pendingRequests.forEach(req => {
+                    pendingContainer.innerHTML += `
+                        <div class="bg-slate-900 border-slate-800 border p-3 rounded-2xl flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 shrink-0">
+                                <i class="ph-fill ph-user text-slate-400"></i>
+                            </div>
+                            <div class="flex-grow min-w-0">
+                                <h3 class="font-bold text-white text-[15px] truncate">${req.replace(/_/g, ' ')}</h3>
+                                <p class="text-[10px] text-brand-500 font-medium uppercase tracking-wide truncate mt-0.5">Wants to connect</p>
+                            </div>
+                            <div class="flex gap-2 shrink-0">
+                                <button onclick="acceptRequest('${req}')" class="w-8 h-8 rounded-full bg-brand-500 text-black flex items-center justify-center active:scale-95 transition-transform"><i class="ph-bold ph-check"></i></button>
+                                <button onclick="denyRequest('${req}')" class="w-8 h-8 rounded-full bg-slate-800 text-rose-500 flex items-center justify-center active:scale-95 transition-transform"><i class="ph-bold ph-x"></i></button>
+                            </div>
+                        </div>
+                    `;
+                });
+            } else {
+                pendingContainer.classList.add('hidden');
+                pendingContainer.classList.remove('flex');
+            }
+            
+            if (friends.length > 0) {
+                friendsContainer.classList.remove('hidden');
+                friendsContainer.classList.add('flex');
+                hasDMs = true;
+                
+                friends.forEach(friend => {
+                    friendsContainer.innerHTML += `
+                        <div onclick="openDM('${friend}')" class="bg-slate-900 border-slate-800 hover:bg-slate-800 border p-3 rounded-2xl flex items-center gap-3 cursor-pointer transition-colors active:scale-95">
+                            <div class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center border border-slate-700 shrink-0 relative">
+                                <i class="ph-fill ph-user text-slate-400"></i>
+                            </div>
+                            <div class="flex-grow min-w-0">
+                                <h3 class="font-bold text-white text-[15px] truncate">${friend.replace(/_/g, ' ')}</h3>
+                                <p class="text-xs text-slate-500 truncate mt-0.5">Direct Message</p>
+                            </div>
+                            <i class="ph-bold ph-caret-right text-slate-600"></i>
+                        </div>
+                    `;
+                });
+            } else {
+                friendsContainer.classList.add('hidden');
+                friendsContainer.classList.remove('flex');
+            }
+            
+            if (!hasDMs) {
+                emptyState.classList.remove('hidden');
+                emptyState.classList.add('flex');
+            } else {
+                emptyState.classList.add('hidden');
+                emptyState.classList.remove('flex');
+            }
         }
 
         function requestReset(id, name) {
