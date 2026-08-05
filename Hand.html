@@ -207,8 +207,8 @@
         // =              HOST LOGIC                =
         // ==========================================
         let scene, camera, renderer, handGroup;
-        let fingers = []; // Store finger joints for animation
-        let thumbPivot;
+        let fingerJoints = []; // Store multiple joints per finger for smooth curling
+        let thumbJoints = [];  // Store thumb joints
         let isHost = false;
 
         function initHost() {
@@ -318,38 +318,66 @@
 
             // Palm (flat, facing up/down)
             const palm = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.3, 1.4), skinMat);
+            palm.position.set(0, 0, -0.2); // Shift palm slightly back to align with knuckles
             handGroup.add(palm);
 
-            // Fingers pointing -Z (Forward). We use pivots to bend them at the knuckles.
-            const createFinger = (x, z, w, d) => {
-                const pivot = new THREE.Group();
-                pivot.position.set(x, 0, z); // Position pivot at the knuckle
+            // Helper to create a finger with multiple bending segments (Proximal, Intermediate, Distal)
+            const createSegmentedFinger = (x, z, lengths, w) => {
+                const rootPivot = new THREE.Group();
+                rootPivot.position.set(x, 0, z); // Position first knuckle
                 
-                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, d), skinMat);
-                mesh.position.set(0, 0, -d/2); // Offset the mesh from the knuckle
-                pivot.add(mesh);
+                let currentParent = rootPivot;
+                const joints = [];
                 
-                return pivot;
+                for (let i = 0; i < lengths.length; i++) {
+                    const len = lengths[i];
+                    const pivot = new THREE.Group();
+                    
+                    // Attach to the end of the previous segment
+                    if (i > 0) {
+                        pivot.position.set(0, 0, -lengths[i-1]);
+                    }
+                    
+                    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, len), skinMat);
+                    mesh.position.set(0, 0, -len/2); // Extend forward from pivot
+                    pivot.add(mesh);
+                    
+                    currentParent.add(pivot);
+                    currentParent = pivot;
+                    joints.push(pivot);
+                }
+                return { root: rootPivot, joints: joints };
             };
 
-            // Fingers arranged from Left (Index) to Right (Pinky) for a Right Hand (Palm down)
-            const indexF = createFinger(-0.5, -0.7, 0.25, 0.8);
-            const middleF = createFinger(-0.15, -0.7, 0.25, 0.9);
-            const ringF = createFinger(0.2, -0.7, 0.25, 0.8);
-            const pinkyF = createFinger(0.55, -0.7, 0.2, 0.6);
+            // Create fingers with 3 joints each, defining lengths for each segment
+            const indexData = createSegmentedFinger(-0.5, -0.9, [0.4, 0.25, 0.2], 0.25);
+            const middleData = createSegmentedFinger(-0.15, -0.9, [0.45, 0.3, 0.2], 0.25);
+            const ringData = createSegmentedFinger(0.2, -0.9, [0.4, 0.25, 0.2], 0.25);
+            const pinkyData = createSegmentedFinger(0.55, -0.9, [0.3, 0.2, 0.15], 0.2);
             
-            fingers = [indexF, middleF, ringF, pinkyF];
-            fingers.forEach(f => handGroup.add(f));
+            // Store all joints to animate them
+            fingerJoints.push(...indexData.joints, ...middleData.joints, ...ringData.joints, ...pinkyData.joints);
+            handGroup.add(indexData.root, middleData.root, ringData.root, pinkyData.root);
             
-            // Thumb setup (pivot at the base of the thumb)
-            thumbPivot = new THREE.Group();
-            thumbPivot.position.set(-0.7, 0, -0.2); 
-            thumbPivot.rotation.y = -Math.PI / 4; // Angle outward
+            // Thumb setup (Base and 1 extra joint for curling)
+            const thumbRoot = new THREE.Group();
+            thumbRoot.position.set(-0.7, 0, -0.2); 
+            thumbRoot.rotation.y = -Math.PI / 4; // Angle outward
             
-            const thumbMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.6), skinMat);
-            thumbMesh.position.set(-0.15, 0, -0.3); // Offset outward
-            thumbPivot.add(thumbMesh);
-            handGroup.add(thumbPivot);
+            const thumbBase = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.4), skinMat);
+            thumbBase.position.set(-0.15, 0, -0.2); // Offset outward
+            thumbRoot.add(thumbBase);
+
+            const thumbPivot = new THREE.Group();
+            thumbPivot.position.set(-0.15, 0, -0.4); // End of base
+            const thumbTip = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.3), skinMat);
+            thumbTip.position.set(0, 0, -0.15);
+            thumbPivot.add(thumbTip);
+            
+            thumbRoot.add(thumbPivot);
+            handGroup.add(thumbRoot);
+            
+            thumbJoints = [thumbRoot, thumbPivot];
 
             // Initial position (hovering above ground)
             handGroup.position.set(0, 10, 20);
@@ -373,9 +401,9 @@
                 const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
                 const targetQuat = new THREE.Quaternion().setFromEuler(euler);
                 
-                // Apply a -90 degree rotation on the X axis to correct the resting position.
-                // This makes it so holding the phone vertically (portrait) points the hand straight forward.
-                const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); 
+                // Apply a +90 degree rotation on the X axis to correct the resting position.
+                // This makes it so the TOP of the phone points forward, fixing the reversed direction!
+                const q1 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
                 targetQuat.multiply(q1);
                 
                 // Slerp (smooth interpolation) towards the target rotation
@@ -383,16 +411,18 @@
             }
 
             // 2. Animate Finger Grabbing
-            const targetFingerRotation = currentMotion.grab ? -Math.PI / 2.2 : 0; // Curl 80 degrees down
-            const targetThumbRotation = currentMotion.grab ? -Math.PI / 3 : 0; // Fold thumb in
+            // Since each finger now has 3 joints, we bend each joint ~45 degrees to form a full curled fist
+            const targetFingerRotation = currentMotion.grab ? -Math.PI / 4 : 0; 
+            // Thumb has 2 joints, bends slightly less
+            const targetThumbRotation = currentMotion.grab ? -Math.PI / 6 : 0; 
             
-            // Smoothly interpolate each finger joint to the target rotation
-            fingers.forEach(finger => {
-                finger.rotation.x += (targetFingerRotation - finger.rotation.x) * 0.2;
+            // Smoothly interpolate every single knuckle joint to the target rotation
+            fingerJoints.forEach(joint => {
+                joint.rotation.x += (targetFingerRotation - joint.rotation.x) * 0.2;
             });
-            if (thumbPivot) {
-                thumbPivot.rotation.x += (targetThumbRotation - thumbPivot.rotation.x) * 0.2;
-            }
+            thumbJoints.forEach(joint => {
+                joint.rotation.x += (targetThumbRotation - joint.rotation.x) * 0.2;
+            });
 
             // 3. Move Forward if Thrust is active
             if (currentMotion.thrust) {
@@ -517,5 +547,6 @@
     </script>
 </body>
 </html>
+
 
 
