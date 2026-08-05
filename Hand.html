@@ -3,9 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>P2P Host & Controller</title>
-    <!-- Include PeerJS for easy WebRTC -->
+    <title>3D P2P Hand Controller</title>
+    
+    <!-- PeerJS for P2P Connection -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Three.js for 3D Rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
     <style>
         body { 
             font-family: system-ui, -apple-system, sans-serif; 
@@ -15,17 +19,21 @@
             color: white; 
             text-align: center; 
             overflow: hidden;
-            touch-action: none; /* Prevents pull-to-refresh on mobile */
+            touch-action: none;
         }
         
-        /* Menu Screen */
-        #menu { 
-            padding-top: 20vh; 
+        /* Menus and UI overlays */
+        .overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
             display: flex;
             flex-direction: column;
+            justify-content: center;
             align-items: center;
-            gap: 15px;
+            background: #121212;
+            z-index: 100;
         }
+        
         button { 
             padding: 15px 30px; 
             font-size: 18px; 
@@ -35,64 +43,13 @@
             background: #007bff; 
             color: white; 
             font-weight: bold;
+            margin: 10px;
             width: 80%;
             max-width: 300px;
             transition: transform 0.1s, background 0.2s;
         }
-        button:active { 
-            background: #0056b3; 
-            transform: scale(0.95);
-        }
+        button:active { background: #0056b3; transform: scale(0.95); }
         
-        /* Host Display Screen */
-        #host-screen { 
-            display: none; 
-            width: 100vw; 
-            height: 100vh; 
-            position: relative; 
-            /* City map background using CSS grid */
-            background-color: #444; /* Road color */
-            background-image:
-                linear-gradient(#1a1a1a 120px, transparent 120px),
-                linear-gradient(90deg, #1a1a1a 120px, transparent 120px);
-            background-size: 150px 150px; /* Size of the city blocks */
-            background-position: 15px 15px; /* Offset for the roads */
-        }
-        #host-ui { 
-            position: absolute; 
-            top: 10px; 
-            left: 10px; 
-            background: rgba(0,0,0,0.7); 
-            padding: 15px; 
-            border-radius: 8px; 
-            text-align: left;
-        }
-        #host-ui h2 { margin: 0 0 5px 0; font-size: 20px; }
-        #host-ui p { margin: 0; color: #aaa; }
-        #player-avatar { 
-            position: absolute; 
-            top: 50%; 
-            left: 50%; 
-            transform: translate(-50%, -50%); 
-            transition: 0.1s linear;
-            font-size: 70px; /* Size of the hand */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            filter: drop-shadow(4px 6px 5px rgba(0,0,0,0.6));
-            z-index: 10;
-        }
-        
-        /* Controller Screen */
-        #controller-screen { 
-            display: none; 
-            padding: 20px; 
-            height: 100vh; 
-            box-sizing: border-box; 
-            flex-direction: column; 
-            justify-content: center; 
-            align-items: center;
-        }
         input { 
             padding: 15px; 
             font-size: 20px; 
@@ -102,95 +59,129 @@
             background: #222;
             color: white;
             margin-bottom: 15px; 
-            width: 100%; 
+            width: 80%; 
             max-width: 300px; 
-            outline: none;
         }
-        input:focus {
-            border-color: #007bff;
+
+        /* Host Screen Specifics */
+        #host-ui { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            background: rgba(0,0,0,0.7); 
+            padding: 15px; 
+            border-radius: 8px; 
+            text-align: left;
+            z-index: 10;
+            display: none;
+        }
+        #host-ui h2 { margin: 0 0 5px 0; color: #fff; font-size: 20px;}
+        #host-ui p { margin: 0; color: #aaa; }
+        
+        /* 3D Canvas */
+        #game-canvas { display: block; width: 100vw; height: 100vh; position: absolute; top:0; left:0; z-index: 1;}
+
+        /* Controller Specifics */
+        #controller-gamepad {
+            display: none;
+            width: 100vw;
+            height: 100vh;
+            background: #222;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: 40px 20px;
+            box-sizing: border-box;
         }
         
-        /* D-Pad Layout */
-        .d-pad { 
-            display: grid; 
-            grid-template-columns: 80px 80px 80px; 
-            grid-template-rows: 80px 80px 80px; 
-            gap: 10px; 
-            margin-top: 40px; 
-        }
-        .d-pad button { 
-            margin: 0; 
-            width: 100%; 
-            height: 100%; 
-            font-size: 30px; 
-            background: #333; 
-            border-radius: 12px;
+        .thrust-btn {
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            background: rgba(0, 234, 28, 0.2);
+            border: 4px solid #00ea1c;
+            color: #00ea1c;
+            font-size: 24px;
             display: flex;
             justify-content: center;
             align-items: center;
+            user-select: none;
+            margin-bottom: 50px;
+            box-shadow: 0 0 20px rgba(0, 234, 28, 0.4);
+            transition: all 0.1s;
         }
-        .d-pad button:active { background: #555; }
-        .btn-up { grid-column: 2; grid-row: 1; }
-        .btn-left { grid-column: 1; grid-row: 2; }
-        .btn-right { grid-column: 3; grid-row: 2; }
-        .btn-down { grid-column: 2; grid-row: 3; }
+        .thrust-btn:active {
+            background: rgba(0, 234, 28, 0.6);
+            transform: scale(0.95);
+            box-shadow: 0 0 40px rgba(0, 234, 28, 0.8);
+            color: white;
+        }
+
+        .sensor-status { color: #aaa; font-size: 14px; margin-top: 20px;}
     </style>
 </head>
 <body>
 
     <!-- 1. MAIN MENU -->
-    <div id="menu">
-        <h1 style="margin-bottom: 30px;">P2P Game Engine</h1>
-        <button onclick="initHost()">Create Room (Display)</button>
-        <button onclick="showJoinScreen()">Join Room (Controller)</button>
+    <div id="menu" class="overlay">
+        <h1 style="margin-bottom: 10px;">3D Motion Engine</h1>
+        <p style="color:#aaa; margin-bottom: 40px; max-width: 400px;">Host the game on a PC/Display, then join from your phone to use it as a motion controller.</p>
+        <button onclick="initHost()">Create Room (Host Display)</button>
+        <button onclick="showJoinScreen()">Join Room (Phone Controller)</button>
     </div>
 
-    <!-- 2. HOST DISPLAY -->
-    <div id="host-screen">
-        <div id="host-ui">
-            <h2>Room ID: <span id="room-id" style="color: #00ea1c;">Loading...</span></h2>
-            <p id="host-status">Waiting for player...</p>
-        </div>
-        <div id="player-avatar">🤚</div>
+    <!-- 2. HOST UI (3D Canvas is handled by ThreeJS) -->
+    <div id="host-ui">
+        <h2>Room ID: <span id="room-id" style="color: #00ea1c;">Loading...</span></h2>
+        <p id="host-status">Waiting for phone...</p>
     </div>
 
-    <!-- 3. CONTROLLER DISPLAY -->
-    <div id="controller-screen">
-        <div id="join-ui" style="display: flex; flex-direction: column; align-items: center; width: 100%;">
-            <h2>Enter Room ID</h2>
-            <input type="number" id="join-id-input" placeholder="e.g. 12345">
-            <button onclick="joinHost()">Connect</button>
-            <p id="controller-status" style="margin-top: 15px; color: #aaa;"></p>
+    <!-- 3. CONTROLLER JOIN SCREEN -->
+    <div id="join-screen" class="overlay" style="display: none;">
+        <h2>Enter Room ID</h2>
+        <input type="number" id="join-id-input" placeholder="12345">
+        <button onclick="joinHost()">Connect Phone</button>
+        <p id="controller-status" style="margin-top: 15px; color: #aaa;"></p>
+    </div>
+
+    <!-- 4. CONTROLLER GAMEPAD (Active Play) -->
+    <div id="controller-gamepad" class="overlay" style="display: none; background: #111;">
+        <div>
+            <h2 style="color: #00ea1c; margin: 0;">Connected!</h2>
+            <p style="color: #aaa; margin: 5px 0;">Point phone to look around</p>
+            <div id="sensor-data" class="sensor-status">Sensors: Waiting...</div>
         </div>
         
-        <!-- Gamepad hidden until connected -->
-        <div id="gamepad" style="display: none;">
-            <h2 style="color: #00ea1c; margin-bottom: 10px;">Connected!</h2>
-            <p style="color: #aaa; margin-top: 0;">Use the D-Pad to move</p>
-            <div class="d-pad">
-                <button class="btn-up" onmousedown="sendMove('up')" ontouchstart="sendMove('up'); event.preventDefault();">⬆️</button>
-                <button class="btn-left" onmousedown="sendMove('left')" ontouchstart="sendMove('left'); event.preventDefault();">⬅️</button>
-                <button class="btn-right" onmousedown="sendMove('right')" ontouchstart="sendMove('right'); event.preventDefault();">➡️</button>
-                <button class="btn-down" onmousedown="sendMove('down')" ontouchstart="sendMove('down'); event.preventDefault();">⬇️</button>
-            </div>
+        <!-- Big button to move forward in the direction the phone is pointing -->
+        <div class="thrust-btn" 
+             onmousedown="startThrust()" onmouseup="stopThrust()" onmouseleave="stopThrust()"
+             ontouchstart="startThrust(); event.preventDefault();" ontouchend="stopThrust(); event.preventDefault();">
+            HOLD TO FLY
         </div>
+        
+        <!-- Essential for iOS to request gyroscope permissions -->
+        <button id="sensor-btn" onclick="requestSensorAccess()" style="display: none;">Enable Motion Sensors</button>
     </div>
 
     <script>
         let peer = null;
         let connection = null;
 
-        // --- HOST LOGIC ---
-        let playerPos = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-        const moveSpeed = 30;
+        // --- GLOBAL P2P STATE ---
+        let currentMotion = { alpha: 0, beta: 0, gamma: 0, thrust: false };
+
+        // ==========================================
+        // =              HOST LOGIC                =
+        // ==========================================
+        let scene, camera, renderer, handGroup;
+        let isHost = false;
 
         function initHost() {
+            isHost = true;
             document.getElementById('menu').style.display = 'none';
-            document.getElementById('host-screen').style.display = 'block';
+            document.getElementById('host-ui').style.display = 'block';
 
-            // Generate a random 5-digit room ID for simplicity
             const roomId = Math.floor(10000 + Math.random() * 90000).toString();
-            
             peer = new Peer(roomId);
 
             peer.on('open', (id) => {
@@ -198,95 +189,255 @@
             });
 
             peer.on('connection', (conn) => {
-                document.getElementById('host-status').innerText = "Player Connected!";
+                document.getElementById('host-status').innerText = "Phone Connected! Sensors active.";
                 document.getElementById('host-status').style.color = "#00ea1c";
                 
-                // Listen for incoming controller data
+                // Receive motion data from phone
                 conn.on('data', (data) => {
-                    if(data.type === 'move') {
-                        updatePlayerPosition(data.direction);
+                    if(data.type === 'motion') {
+                        currentMotion.alpha = data.alpha;
+                        currentMotion.beta = data.beta;
+                        currentMotion.gamma = data.gamma;
+                        currentMotion.thrust = data.thrust;
                     }
                 });
             });
 
-            peer.on('error', (err) => {
-                document.getElementById('host-status').innerText = "Error: " + err.type;
-                document.getElementById('host-status').style.color = "#ff4757";
+            initThreeJS();
+        }
+
+        function initThreeJS() {
+            // Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 150);
+
+            // Setup Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // Setup Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.domElement.id = 'game-canvas';
+            document.body.appendChild(renderer.domElement);
+
+            // Add Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 100, 50);
+            scene.add(dirLight);
+
+            // Build the City Map
+            buildCity();
+
+            // Build the 3D Right Hand
+            buildHand();
+
+            // Handle Resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
             });
+
+            // Start Game Loop
+            animate();
         }
 
-        function updatePlayerPosition(direction) {
-            const avatar = document.getElementById('player-avatar');
-            if (direction === 'up') playerPos.y -= moveSpeed;
-            if (direction === 'down') playerPos.y += moveSpeed;
-            if (direction === 'left') playerPos.x -= moveSpeed;
-            if (direction === 'right') playerPos.x += moveSpeed;
+        function buildCity() {
+            // Ground
+            const groundGeo = new THREE.PlaneGeometry(500, 500);
+            const groundMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            scene.add(ground);
 
-            // Keep within screen bounds
-            playerPos.x = Math.max(25, Math.min(window.innerWidth - 25, playerPos.x));
-            playerPos.y = Math.max(25, Math.min(window.innerHeight - 25, playerPos.y));
-
-            avatar.style.left = playerPos.x + 'px';
-            avatar.style.top = playerPos.y + 'px';
+            // Random Buildings
+            const buildingGeo = new THREE.BoxGeometry(1, 1, 1);
+            for(let i=0; i<200; i++) {
+                // Different shades of gray/glass for buildings
+                const col = new THREE.Color().setHSL(0, 0, Math.random() * 0.3 + 0.2);
+                const mat = new THREE.MeshLambertMaterial({ color: col });
+                const building = new THREE.Mesh(buildingGeo, mat);
+                
+                const width = Math.random() * 4 + 2;
+                const height = Math.random() * 30 + 5;
+                const depth = Math.random() * 4 + 2;
+                
+                building.scale.set(width, height, depth);
+                
+                const x = (Math.random() - 0.5) * 200;
+                const z = (Math.random() - 0.5) * 200;
+                
+                building.position.set(x, height / 2, z);
+                scene.add(building);
+            }
         }
 
-        // --- CONTROLLER LOGIC ---
+        function buildHand() {
+            handGroup = new THREE.Group();
+            
+            const skinMat = new THREE.MeshLambertMaterial({ color: 0xffccaa }); // Skin tone
+
+            // Palm
+            const palm = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.4, 0.3), skinMat);
+            handGroup.add(palm);
+
+            // Fingers (very simplified blocks)
+            const createFinger = (x, y, w, h) => {
+                const finger = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.25), skinMat);
+                finger.position.set(x, y, 0);
+                return finger;
+            };
+
+            handGroup.add(createFinger(-0.4, 1.0, 0.25, 0.8)); // Index
+            handGroup.add(createFinger(-0.1, 1.1, 0.25, 0.9)); // Middle
+            handGroup.add(createFinger(0.2, 1.0, 0.25, 0.8));  // Ring
+            handGroup.add(createFinger(0.5, 0.9, 0.2, 0.6));   // Pinky
+            
+            // Right Thumb (sticking out the left side if back of hand faces us)
+            const thumb = createFinger(-0.8, 0.2, 0.3, 0.7);
+            thumb.rotation.z = Math.PI / 4;
+            handGroup.add(thumb);
+
+            // Initial position (hovering above ground)
+            handGroup.position.set(0, 10, 20);
+            scene.add(handGroup);
+        }
+
+        // --- GAME LOOP ---
+        function animate() {
+            if (!isHost) return;
+            requestAnimationFrame(animate);
+
+            // 1. Map Phone Orientation to Hand Rotation
+            // Mobile orientation logic: 
+            // Alpha (compass), Beta (front/back tilt), Gamma (left/right tilt)
+            if (currentMotion.beta !== null) {
+                const deg2rad = Math.PI / 180;
+                // Convert Euler angles. Adjusting signs based on standard webkit mobile orientation
+                const xRot = currentMotion.beta * deg2rad;
+                const yRot = currentMotion.alpha * deg2rad;
+                const zRot = -currentMotion.gamma * deg2rad;
+                
+                // Using Quaternions for smooth rotation and avoiding gimbal lock
+                const euler = new THREE.Euler(xRot, yRot, zRot, 'YXZ');
+                const targetQuat = new THREE.Quaternion().setFromEuler(euler);
+                
+                // Slerp (smooth interpolation) towards the target rotation
+                handGroup.quaternion.slerp(targetQuat, 0.1);
+            }
+
+            // 2. Move Forward if Thrust is active
+            if (currentMotion.thrust) {
+                // The hand points "UP" visually (local Y axis). We want to fly in the direction the fingers point.
+                // Translate along the local Y axis
+                handGroup.translateY(0.4); 
+            }
+
+            // 3. Camera Follows the Hand
+            // Position camera slightly behind and above the hand
+            const relativeCameraOffset = new THREE.Vector3(0, -3, 8); // Offset behind hand
+            const cameraOffset = relativeCameraOffset.applyMatrix4(handGroup.matrixWorld);
+            
+            // Smoothly move camera
+            camera.position.lerp(cameraOffset, 0.1);
+            // Camera always looks at the hand
+            camera.lookAt(handGroup.position);
+
+            renderer.render(scene, camera);
+        }
+
+
+        // ==========================================
+        // =           CONTROLLER LOGIC             =
+        // ==========================================
+        let isThrusting = false;
+        let sensorInterval;
+
         function showJoinScreen() {
             document.getElementById('menu').style.display = 'none';
-            document.getElementById('controller-screen').style.display = 'flex';
+            document.getElementById('join-screen').style.display = 'flex';
         }
 
         function joinHost() {
             const hostId = document.getElementById('join-id-input').value;
-            if (!hostId) {
-                document.getElementById('controller-status').innerText = "Please enter an ID.";
-                return;
-            }
+            if (!hostId) return;
 
             document.getElementById('controller-status').innerText = "Connecting...";
-            
-            peer = new Peer(); // Controller gets a random ID
+            peer = new Peer(); 
             
             peer.on('open', () => {
                 connection = peer.connect(hostId);
                 
                 connection.on('open', () => {
-                    document.getElementById('join-ui').style.display = 'none';
-                    document.getElementById('gamepad').style.display = 'flex';
-                    document.getElementById('gamepad').style.flexDirection = 'column';
-                    document.getElementById('gamepad').style.alignItems = 'center';
+                    document.getElementById('join-screen').style.display = 'none';
+                    document.getElementById('controller-gamepad').style.display = 'flex';
+                    
+                    // Show sensor button (crucial for iOS Safari which requires user click)
+                    document.getElementById('sensor-btn').style.display = 'block';
                 });
-
-                connection.on('error', (err) => {
-                    document.getElementById('controller-status').innerText = "Connection failed.";
-                });
-            });
-
-            peer.on('error', (err) => {
-                document.getElementById('controller-status').innerText = "Could not find room.";
             });
         }
 
-        function sendMove(direction) {
-            if (connection && connection.open) {
-                connection.send({ type: 'move', direction: direction });
-                // Optional: Trigger a tiny haptic vibration on mobile if supported
-                if (navigator.vibrate) {
-                    navigator.vibrate(20); 
+        // --- MOTION SENSORS ---
+        function requestSensorAccess() {
+            // iOS 13+ requires explicit permission for device orientation
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            startSensors();
+                        } else {
+                            alert("Permission denied. Game needs sensors to work!");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Android and older devices
+                startSensors();
+            }
+        }
+
+        function startSensors() {
+            document.getElementById('sensor-btn').style.display = 'none';
+            document.getElementById('sensor-data').innerText = "Sensors: Active - Move Phone!";
+            
+            window.addEventListener('deviceorientation', handleOrientation);
+
+            // Send data at ~30 FPS to save bandwidth
+            sensorInterval = setInterval(() => {
+                if (connection && connection.open) {
+                    connection.send({ 
+                        type: 'motion', 
+                        alpha: currentMotion.alpha, 
+                        beta: currentMotion.beta, 
+                        gamma: currentMotion.gamma,
+                        thrust: isThrusting
+                    });
                 }
-            }
+            }, 30);
         }
-        
-        // Handle window resize for the host screen bounds
-        window.addEventListener('resize', () => {
-            if (document.getElementById('host-screen').style.display === 'block') {
-                const avatar = document.getElementById('player-avatar');
-                playerPos.x = Math.max(25, Math.min(window.innerWidth - 25, playerPos.x));
-                playerPos.y = Math.max(25, Math.min(window.innerHeight - 25, playerPos.y));
-                avatar.style.left = playerPos.x + 'px';
-                avatar.style.top = playerPos.y + 'px';
-            }
-        });
+
+        function handleOrientation(event) {
+            // Calculate a baseline or just send raw. 
+            // Different devices handle absolute alpha differently.
+            currentMotion.alpha = event.alpha; // Z-axis rotation (compass)
+            currentMotion.beta = event.beta;   // X-axis rotation (tilt front/back)
+            currentMotion.gamma = event.gamma; // Y-axis rotation (tilt left/right)
+        }
+
+        // --- THRUST CONTROLS ---
+        function startThrust() {
+            isThrusting = true;
+            if(navigator.vibrate) navigator.vibrate(50); // Haptic feedback
+        }
+
+        function stopThrust() {
+            isThrusting = false;
+        }
+
     </script>
 </body>
 </html>
