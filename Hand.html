@@ -94,26 +94,50 @@
             box-sizing: border-box;
         }
         
-        .thrust-btn {
-            width: 200px;
-            height: 200px;
+        .controls-row {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            width: 100%;
+            margin-bottom: 30px;
+        }
+
+        .action-btn {
+            width: 140px;
+            height: 140px;
             border-radius: 50%;
-            background: rgba(0, 234, 28, 0.2);
-            border: 4px solid #00ea1c;
-            color: #00ea1c;
-            font-size: 24px;
             display: flex;
             justify-content: center;
             align-items: center;
             user-select: none;
-            margin-bottom: 50px;
-            box-shadow: 0 0 20px rgba(0, 234, 28, 0.4);
+            font-size: 22px;
+            font-weight: bold;
             transition: all 0.1s;
         }
-        .thrust-btn:active {
+
+        .btn-fly {
+            background: rgba(0, 234, 28, 0.2);
+            border: 4px solid #00ea1c;
+            color: #00ea1c;
+            box-shadow: 0 0 20px rgba(0, 234, 28, 0.4);
+        }
+        .btn-fly:active {
             background: rgba(0, 234, 28, 0.6);
             transform: scale(0.95);
             box-shadow: 0 0 40px rgba(0, 234, 28, 0.8);
+            color: white;
+        }
+
+        .btn-grab {
+            background: rgba(255, 153, 0, 0.2);
+            border: 4px solid #ff9900;
+            color: #ff9900;
+            box-shadow: 0 0 20px rgba(255, 153, 0, 0.4);
+        }
+        .btn-grab:active {
+            background: rgba(255, 153, 0, 0.6);
+            transform: scale(0.95);
+            box-shadow: 0 0 40px rgba(255, 153, 0, 0.8);
             color: white;
         }
 
@@ -152,11 +176,20 @@
             <div id="sensor-data" class="sensor-status">Sensors: Waiting...</div>
         </div>
         
-        <!-- Big button to move forward in the direction the phone is pointing -->
-        <div class="thrust-btn" 
-             onmousedown="startThrust()" onmouseup="stopThrust()" onmouseleave="stopThrust()"
-             ontouchstart="startThrust(); event.preventDefault();" ontouchend="stopThrust(); event.preventDefault();">
-            HOLD TO FLY
+        <div class="controls-row">
+            <!-- GRAB Button -->
+            <div class="action-btn btn-grab" 
+                 onmousedown="startGrab()" onmouseup="stopGrab()" onmouseleave="stopGrab()"
+                 ontouchstart="startGrab(); event.preventDefault();" ontouchend="stopGrab(); event.preventDefault();">
+                GRAB
+            </div>
+            
+            <!-- FLY Button -->
+            <div class="action-btn btn-fly" 
+                 onmousedown="startThrust()" onmouseup="stopThrust()" onmouseleave="stopThrust()"
+                 ontouchstart="startThrust(); event.preventDefault();" ontouchend="stopThrust(); event.preventDefault();">
+                FLY
+            </div>
         </div>
         
         <!-- Essential for iOS to request gyroscope permissions -->
@@ -168,12 +201,14 @@
         let connection = null;
 
         // --- GLOBAL P2P STATE ---
-        let currentMotion = { alpha: 0, beta: 0, gamma: 0, thrust: false };
+        let currentMotion = { alpha: 0, beta: 0, gamma: 0, thrust: false, grab: false };
 
         // ==========================================
         // =              HOST LOGIC                =
         // ==========================================
         let scene, camera, renderer, handGroup;
+        let fingers = []; // Store finger joints for animation
+        let thumbPivot;
         let isHost = false;
 
         function initHost() {
@@ -199,6 +234,7 @@
                         currentMotion.beta = data.beta;
                         currentMotion.gamma = data.gamma;
                         currentMotion.thrust = data.thrust;
+                        currentMotion.grab = data.grab;
                     }
                 });
             });
@@ -280,26 +316,40 @@
             
             const skinMat = new THREE.MeshLambertMaterial({ color: 0xffccaa }); // Skin tone
 
-            // Palm
-            const palm = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.4, 0.3), skinMat);
+            // Palm (flat, facing up/down)
+            const palm = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.3, 1.4), skinMat);
             handGroup.add(palm);
 
-            // Fingers (very simplified blocks)
-            const createFinger = (x, y, w, h) => {
-                const finger = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.25), skinMat);
-                finger.position.set(x, y, 0);
-                return finger;
+            // Fingers pointing -Z (Forward). We use pivots to bend them at the knuckles.
+            const createFinger = (x, z, w, d) => {
+                const pivot = new THREE.Group();
+                pivot.position.set(x, 0, z); // Position pivot at the knuckle
+                
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.25, d), skinMat);
+                mesh.position.set(0, 0, -d/2); // Offset the mesh from the knuckle
+                pivot.add(mesh);
+                
+                return pivot;
             };
 
-            handGroup.add(createFinger(-0.4, 1.0, 0.25, 0.8)); // Index
-            handGroup.add(createFinger(-0.1, 1.1, 0.25, 0.9)); // Middle
-            handGroup.add(createFinger(0.2, 1.0, 0.25, 0.8));  // Ring
-            handGroup.add(createFinger(0.5, 0.9, 0.2, 0.6));   // Pinky
+            // Fingers arranged from Left (Index) to Right (Pinky) for a Right Hand (Palm down)
+            const indexF = createFinger(-0.5, -0.7, 0.25, 0.8);
+            const middleF = createFinger(-0.15, -0.7, 0.25, 0.9);
+            const ringF = createFinger(0.2, -0.7, 0.25, 0.8);
+            const pinkyF = createFinger(0.55, -0.7, 0.2, 0.6);
             
-            // Right Thumb (sticking out the left side if back of hand faces us)
-            const thumb = createFinger(-0.8, 0.2, 0.3, 0.7);
-            thumb.rotation.z = Math.PI / 4;
-            handGroup.add(thumb);
+            fingers = [indexF, middleF, ringF, pinkyF];
+            fingers.forEach(f => handGroup.add(f));
+            
+            // Thumb setup (pivot at the base of the thumb)
+            thumbPivot = new THREE.Group();
+            thumbPivot.position.set(-0.7, 0, -0.2); 
+            thumbPivot.rotation.y = -Math.PI / 4; // Angle outward
+            
+            const thumbMesh = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.25, 0.6), skinMat);
+            thumbMesh.position.set(-0.15, 0, -0.3); // Offset outward
+            thumbPivot.add(thumbMesh);
+            handGroup.add(thumbPivot);
 
             // Initial position (hovering above ground)
             handGroup.position.set(0, 10, 20);
@@ -312,33 +362,47 @@
             requestAnimationFrame(animate);
 
             // 1. Map Phone Orientation to Hand Rotation
-            // Mobile orientation logic: 
-            // Alpha (compass), Beta (front/back tilt), Gamma (left/right tilt)
+            // We use standard AR/VR mapping so the top of the phone equals the tip of the fingers
             if (currentMotion.beta !== null) {
                 const deg2rad = Math.PI / 180;
-                // Convert Euler angles. Adjusting signs based on standard webkit mobile orientation
-                const xRot = currentMotion.beta * deg2rad;
-                const yRot = currentMotion.alpha * deg2rad;
-                const zRot = -currentMotion.gamma * deg2rad;
-                
-                // Using Quaternions for smooth rotation and avoiding gimbal lock
-                const euler = new THREE.Euler(xRot, yRot, zRot, 'YXZ');
+                const alpha = currentMotion.alpha ? currentMotion.alpha * deg2rad : 0;
+                const beta = currentMotion.beta ? currentMotion.beta * deg2rad : 0;
+                const gamma = currentMotion.gamma ? currentMotion.gamma * deg2rad : 0;
+
+                // Standard WebKit device orientation to Euler
+                const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
                 const targetQuat = new THREE.Quaternion().setFromEuler(euler);
                 
+                // Apply a -90 degree rotation on the X axis to correct the resting position.
+                // This makes it so holding the phone vertically (portrait) points the hand straight forward.
+                const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); 
+                targetQuat.multiply(q1);
+                
                 // Slerp (smooth interpolation) towards the target rotation
-                handGroup.quaternion.slerp(targetQuat, 0.1);
+                handGroup.quaternion.slerp(targetQuat, 0.15);
             }
 
-            // 2. Move Forward if Thrust is active
+            // 2. Animate Finger Grabbing
+            const targetFingerRotation = currentMotion.grab ? -Math.PI / 2.2 : 0; // Curl 80 degrees down
+            const targetThumbRotation = currentMotion.grab ? -Math.PI / 3 : 0; // Fold thumb in
+            
+            // Smoothly interpolate each finger joint to the target rotation
+            fingers.forEach(finger => {
+                finger.rotation.x += (targetFingerRotation - finger.rotation.x) * 0.2;
+            });
+            if (thumbPivot) {
+                thumbPivot.rotation.x += (targetThumbRotation - thumbPivot.rotation.x) * 0.2;
+            }
+
+            // 3. Move Forward if Thrust is active
             if (currentMotion.thrust) {
-                // The hand points "UP" visually (local Y axis). We want to fly in the direction the fingers point.
-                // Translate along the local Y axis
-                handGroup.translateY(0.4); 
+                // Translate along the local -Z axis (where the fingers point)
+                handGroup.translateZ(-0.6); 
             }
 
-            // 3. Camera Follows the Hand
+            // 4. Camera Follows the Hand
             // Position camera slightly behind and above the hand
-            const relativeCameraOffset = new THREE.Vector3(0, -3, 8); // Offset behind hand
+            const relativeCameraOffset = new THREE.Vector3(0, 3, 7); 
             const cameraOffset = relativeCameraOffset.applyMatrix4(handGroup.matrixWorld);
             
             // Smoothly move camera
@@ -354,6 +418,7 @@
         // =           CONTROLLER LOGIC             =
         // ==========================================
         let isThrusting = false;
+        let isGrabbing = false;
         let sensorInterval;
 
         function showJoinScreen() {
@@ -414,7 +479,8 @@
                         alpha: currentMotion.alpha, 
                         beta: currentMotion.beta, 
                         gamma: currentMotion.gamma,
-                        thrust: isThrusting
+                        thrust: isThrusting,
+                        grab: isGrabbing
                     });
                 }
             }, 30);
@@ -436,6 +502,16 @@
 
         function stopThrust() {
             isThrusting = false;
+        }
+        
+        // --- GRAB CONTROLS ---
+        function startGrab() {
+            isGrabbing = true;
+            if(navigator.vibrate) navigator.vibrate(30); 
+        }
+
+        function stopGrab() {
+            isGrabbing = false;
         }
 
     </script>
