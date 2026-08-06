@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Multiplayer Tag with EMQX</title>
+    <title>3D Multiplayer Tag - Humanoid Models</title>
     <style>
         body {
             margin: 0;
@@ -80,7 +80,6 @@
         }
     </style>
     
-    <!-- Import Maps & MQTT.js Client library -->
     <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
     <script type="importmap">
         {
@@ -106,7 +105,6 @@
         // ==========================================
         // 1. EMQX MQTT WEBSOCKET SETUP
         // ==========================================
-        // Using public EMQX public broker websocket endpoint (or change to your own self-hosted server)
         const clientId = 'tag_player_' + Math.random().toString(16).substr(2, 8);
         const mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
             clientId: clientId,
@@ -130,11 +128,9 @@
             console.log('Connected to EMQX Broker!');
             document.getElementById('status-box').innerText = "Connected! Initializing Arena...";
             
-            // Subscribe to channels
             mqttClient.subscribe(TOPIC_POSITIONS, { qos: 0 });
             mqttClient.subscribe(TOPIC_STATE, { qos: 1 });
 
-            // Initialize local game once connected
             initGame();
             startNetworkLoop();
         });
@@ -149,15 +145,15 @@
             const data = JSON.parse(payload.toString());
 
             if (topic === TOPIC_POSITIONS) {
-                if (data.id === clientId) return; // Skip self
+                if (data.id === clientId) return;
 
                 const now = Date.now();
                 if (!remotePlayerMeshes[data.id]) {
-                    const mesh = createPlayerMesh();
+                    const mesh = createHumanoidMesh();
                     mesh.position.set(data.x, 0, data.z);
                     scene.add(mesh);
                     remotePlayerMeshes[data.id] = mesh;
-                    remotePlayersData[data.id] = { targetX: data.x, targetZ: data.z, lastUpdate: now };
+                    remotePlayersData[data.id] = { targetX: data.x, targetZ: data.z, lastUpdate: now, isMoving: false };
                 } else {
                     remotePlayersData[data.id].targetX = data.x;
                     remotePlayersData[data.id].targetZ = data.z;
@@ -185,12 +181,12 @@
         renderer.domElement.id = 'game-canvas';
 
         // Lighting
-        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
-        hemiLight.position.set(0, 20, 0);
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.7);
+        hemiLight.position.set(0, 30, 0);
         scene.add(hemiLight);
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        dirLight.position.set(20, 30, -20);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+        dirLight.position.set(25, 40, -25);
         dirLight.castShadow = true;
         scene.add(dirLight);
 
@@ -279,37 +275,126 @@
             powerUps.push(mesh);
         }
 
-        // Players Setup
-        const matRunner = new THREE.MeshStandardMaterial({ color: 0x1e90ff, roughness: 0.4 });
-        const matIt = new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.4, emissive: 0xaa0000 });
-        
+        // ==========================================
+        // 3. HUMANOID CHARACTER CREATION & RIGGING
+        // ==========================================
+        const matRunner = new THREE.MeshStandardMaterial({ color: 0x1e90ff, roughness: 0.3 });
+        const matIt = new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.3, emissive: 0xaa0000 });
+        const matSkin = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.5 });
+
+        function createHumanoidMesh() {
+            const container = new THREE.Group();
+
+            // Materials array wrapper for easy color swaps
+            const partsList = [];
+
+            // Torso
+            const torsoGeo = new THREE.BoxGeometry(1.1, 1.4, 0.6);
+            const torso = new THREE.Mesh(torsoGeo, matRunner);
+            torso.position.y = 2.0;
+            torso.castShadow = true;
+            container.add(torso);
+            partsList.push(torso);
+
+            // Head & Neck
+            const neckGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.3, 8);
+            const neck = new THREE.Mesh(neckGeo, matSkin);
+            neck.position.y = 2.85;
+            container.add(neck);
+
+            const headGeo = new THREE.BoxGeometry(0.7, 0.7, 0.7);
+            const head = new THREE.Mesh(headGeo, matSkin);
+            head.position.y = 3.35;
+            head.castShadow = true;
+            container.add(head);
+
+            // --- Left Arm (Pivoting from shoulder) ---
+            const leftArmPivot = new THREE.Group();
+            leftArmPivot.position.set(-0.75, 2.5, 0);
+            container.add(leftArmPivot);
+
+            const upperLeftArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.8, 0.35), matRunner);
+            upperLeftArm.position.y = -0.4;
+            upperLeftArm.castShadow = true;
+            leftArmPivot.add(upperLeftArm);
+            partsList.push(upperLeftArm);
+
+            const lowerLeftArm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), matSkin);
+            lowerLeftArm.position.y = -1.15;
+            lowerLeftArm.castShadow = true;
+            leftArmPivot.add(lowerLeftArm);
+
+            // --- Right Arm (Pivoting from shoulder) ---
+            const rightArmPivot = new THREE.Group();
+            rightArmPivot.position.set(0.75, 2.5, 0);
+            container.add(rightArmPivot);
+
+            const upperRightArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.8, 0.35), matRunner);
+            upperRightArm.position.y = -0.4;
+            upperRightArm.castShadow = true;
+            rightArmPivot.add(upperRightArm);
+            partsList.push(upperRightArm);
+
+            const lowerRightArm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), matSkin);
+            lowerRightArm.position.y = -1.15;
+            lowerRightArm.castShadow = true;
+            rightArmPivot.add(lowerRightArm);
+
+            // --- Left Leg (Pivoting from hip) ---
+            const leftLegPivot = new THREE.Group();
+            leftLegPivot.position.set(-0.35, 1.25, 0);
+            container.add(leftLegPivot);
+
+            const upperLeftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, 0.4), matRunner);
+            upperLeftLeg.position.y = -0.45;
+            upperLeftLeg.castShadow = true;
+            leftLegPivot.add(upperLeftLeg);
+            partsList.push(upperLeftLeg);
+
+            const lowerLeftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.85, 0.35), matSkin);
+            lowerLeftLeg.position.y = -1.35;
+            lowerLeftLeg.castShadow = true;
+            leftLegPivot.add(lowerLeftLeg);
+
+            // --- Right Leg (Pivoting from hip) ---
+            const rightLegPivot = new THREE.Group();
+            rightLegPivot.position.set(0.35, 1.25, 0);
+            container.add(rightLegPivot);
+
+            const upperRightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, 0.4), matRunner);
+            upperRightLeg.position.y = -0.45;
+            upperRightLeg.castShadow = true;
+            rightLegPivot.add(upperRightLeg);
+            partsList.push(upperRightLeg);
+
+            const lowerRightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.85, 0.35), matSkin);
+            lowerRightLeg.position.y = -1.35;
+            lowerRightLeg.castShadow = true;
+            rightLegPivot.add(lowerRightLeg);
+
+            // IT Glowing Light Indicator
+            const itLight = new THREE.PointLight(0xff0000, 0, 15);
+            itLight.position.y = 4;
+            container.add(itLight);
+
+            // Store skeleton references for dynamic running animation loop
+            container.userData = {
+                partsList,
+                leftArmPivot,
+                rightArmPivot,
+                leftLegPivot,
+                rightLegPivot,
+                itLight
+            };
+
+            return container;
+        }
+
         let myPlayer;
         let basePlayerSpeed = 15;
         let playerSpeed = 15;
         let speedBoostTimer = 0;
         let lastTime = performance.now();
-
-        function createPlayerMesh() {
-            const group = new THREE.Group();
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2, 16), matRunner);
-            body.position.y = 1;
-            body.castShadow = true;
-            group.add(body);
-            
-            const head = new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), matRunner);
-            head.position.y = 2.5;
-            head.castShadow = true;
-            group.add(head);
-
-            const itLight = new THREE.PointLight(0xff0000, 0, 15);
-            itLight.position.y = 4;
-            group.add(itLight);
-            group.userData.itLight = itLight;
-            group.userData.body = body;
-            group.userData.head = head;
-
-            return group;
-        }
 
         function findSafeSpawnPosition() {
             const playerRadius = 1.2;
@@ -331,7 +416,7 @@
         }
 
         function initGame() {
-            myPlayer = createPlayerMesh();
+            myPlayer = createHumanoidMesh();
             myPlayer.position.copy(findSafeSpawnPosition());
             scene.add(myPlayer);
             
@@ -340,7 +425,6 @@
 
             isGameReady = true;
             
-            // Default first player to IT if none set
             if (!currentItId) {
                 currentItId = clientId;
                 mqttClient.publish(TOPIC_STATE, JSON.stringify({ currentIt: clientId }), { qos: 1, retain: true });
@@ -350,7 +434,7 @@
         }
 
         // ==========================================
-        // 3. CONTROLS
+        // 4. CONTROLS
         // ==========================================
         const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
         let joyVector = new THREE.Vector2(0, 0);
@@ -403,7 +487,7 @@
         });
 
         // ==========================================
-        // 4. NETWORK SYNC LOOP
+        // 5. NETWORK SYNC LOOP
         // ==========================================
         function startNetworkLoop() {
             setInterval(() => {
@@ -434,16 +518,37 @@
             }
         }
 
-        function updatePlayerAppearance(meshGroup, isIt) {
+        function updatePlayerAppearance(humanoidGroup, isIt) {
             const material = isIt ? matIt : matRunner;
-            meshGroup.userData.body.material = material;
-            meshGroup.userData.head.material = material;
-            meshGroup.userData.itLight.intensity = isIt ? 2 : 0;
+            humanoidGroup.userData.partsList.forEach(mesh => {
+                mesh.material = material;
+            });
+            humanoidGroup.userData.itLight.intensity = isIt ? 2.5 : 0;
         }
 
         // ==========================================
-        // 5. GAME LOOP
+        // 6. GAME LOOP & ANIMATION
         // ==========================================
+        function animateHumanoid(group, isMoving, time) {
+            const { leftArmPivot, rightArmPivot, leftLegPivot, rightLegPivot } = group.userData;
+            if (isMoving) {
+                const swing = Math.sin(time * 0.025) * 0.8;
+                leftArmPivot.rotation.x = swing;
+                rightArmPivot.rotation.x = -swing;
+                leftLegPivot.rotation.x = -swing;
+                rightLegPivot.rotation.x = swing;
+                // Subtle torso bounce while running
+                group.position.y = Math.abs(Math.sin(time * 0.025)) * 0.2;
+            } else {
+                // Idle neutral posture
+                leftArmPivot.rotation.x = THREE.MathUtils.lerp(leftArmPivot.rotation.x, 0, 0.1);
+                rightArmPivot.rotation.x = THREE.MathUtils.lerp(rightArmPivot.rotation.x, 0, 0.1);
+                leftLegPivot.rotation.x = THREE.MathUtils.lerp(leftLegPivot.rotation.x, 0, 0.1);
+                rightLegPivot.rotation.x = THREE.MathUtils.lerp(rightLegPivot.rotation.x, 0, 0.1);
+                group.position.y = THREE.MathUtils.lerp(group.position.y, 0, 0.1);
+            }
+        }
+
         function animate() {
             requestAnimationFrame(animate);
             if (!isGameReady) return;
@@ -474,7 +579,7 @@
             }
 
             const playerRadius = 1.2;
-            const playerHeight = 4.0; 
+            const playerHeight = 4.5; 
 
             const checkCollision = (px, pz) => {
                 const playerBox = new THREE.Box3(
@@ -490,15 +595,16 @@
             const proposedX = myPlayer.position.x + moveX * playerSpeed * delta;
             const proposedZ = myPlayer.position.z + moveZ * playerSpeed * delta;
 
+            let isMoving = false;
             if (moveX !== 0 || moveZ !== 0) {
+                isMoving = true;
                 if (!checkCollision(proposedX, myPlayer.position.z)) myPlayer.position.x = proposedX;
                 if (!checkCollision(myPlayer.position.x, proposedZ)) myPlayer.position.z = proposedZ;
 
                 myPlayer.rotation.y = Math.atan2(moveX, moveZ);
-                myPlayer.position.y = Math.abs(Math.sin(time * 0.015)) * 0.5;
-            } else {
-                myPlayer.position.y = 0;
             }
+
+            animateHumanoid(myPlayer, isMoving, time);
 
             powerUps.forEach(p => {
                 p.rotation.y += 0.02;
@@ -514,7 +620,7 @@
                 }
             }
 
-            camera.position.lerp(new THREE.Vector3(myPlayer.position.x, myPlayer.position.y + 15, myPlayer.position.z + 20), 0.1);
+            camera.position.lerp(new THREE.Vector3(myPlayer.position.x, myPlayer.position.y + 16, myPlayer.position.z + 22), 0.1);
             camera.lookAt(myPlayer.position);
 
             // Clean stale remote players
@@ -527,12 +633,26 @@
                 }
             }
 
-            // Interpolate remote players
+            // Interpolate remote players and animate their run cycles
             for (let id in remotePlayerMeshes) {
                 const mesh = remotePlayerMeshes[id];
                 const target = remotePlayersData[id];
+                
+                const oldX = mesh.position.x;
+                const oldZ = mesh.position.z;
+                
                 mesh.position.x += (target.targetX - mesh.position.x) * 0.15;
                 mesh.position.z += (target.targetZ - mesh.position.z) * 0.15;
+
+                const dx = target.targetX - oldX;
+                const dz = target.targetZ - oldZ;
+                const remoteMoving = (Math.abs(dx) > 0.02 || Math.abs(dz) > 0.02);
+                
+                if (remoteMoving) {
+                    mesh.rotation.y = Math.atan2(target.targetX - oldX, target.targetZ - oldZ);
+                }
+
+                animateHumanoid(mesh, remoteMoving, time);
             }
 
             // Tagging logic
