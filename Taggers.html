@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Multiplayer Tag - Humanoid Models</title>
+    <title>3D Multiplayer Tag - Advanced Parkour</title>
     <style>
         body {
             margin: 0;
@@ -51,6 +51,7 @@
             to { transform: scale(1.05); box-shadow: 0 0 25px rgba(255,0,0,0.9); }
         }
 
+        /* Controls Layout */
         #joystick-zone {
             position: absolute;
             bottom: 30px;
@@ -74,6 +75,41 @@
             transform: translate(-50%, -50%);
             box-shadow: 0 2px 10px rgba(0,0,0,0.3);
         }
+
+        /* Action Buttons Cluster */
+        #action-buttons {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+        }
+        .action-btn {
+            width: 65px;
+            height: 65px;
+            background: rgba(255, 255, 255, 0.25);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            border-radius: 50%;
+            color: white;
+            font-size: 18px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            user-select: none;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            transition: transform 0.1s, background 0.1s;
+        }
+        .action-btn:active {
+            transform: scale(0.9);
+            background: rgba(255, 255, 255, 0.5);
+        }
+        #btn-jump { background: rgba(50, 200, 255, 0.4); }
+        #btn-a { background: rgba(255, 150, 50, 0.4); }
+        #btn-b { background: rgba(50, 255, 100, 0.4); }
         
         @media (hover: none) and (pointer: coarse) {
             #joystick-zone { display: block; }
@@ -97,6 +133,12 @@
     
     <div id="joystick-zone">
         <div id="joystick-knob"></div>
+    </div>
+
+    <div id="action-buttons">
+        <div class="action-btn" id="btn-jump">JUMP</div>
+        <div class="action-btn" id="btn-a">A</div>
+        <div class="action-btn" id="btn-b">B</div>
     </div>
 
     <script type="module">
@@ -149,15 +191,16 @@
 
                 const now = Date.now();
                 if (!remotePlayerMeshes[data.id]) {
-                    const mesh = createHumanoidMesh();
+                    const mesh = createAdvancedHumanoidMesh();
                     mesh.position.set(data.x, 0, data.z);
                     scene.add(mesh);
                     remotePlayerMeshes[data.id] = mesh;
-                    remotePlayersData[data.id] = { targetX: data.x, targetZ: data.z, lastUpdate: now, isMoving: false };
+                    remotePlayersData[data.id] = { targetX: data.x, targetZ: data.z, lastUpdate: now, animState: 'idle' };
                 } else {
                     remotePlayersData[data.id].targetX = data.x;
                     remotePlayersData[data.id].targetZ = data.z;
                     remotePlayersData[data.id].lastUpdate = now;
+                    remotePlayersData[data.id].animState = data.animState || 'idle';
                 }
             } else if (topic === TOPIC_STATE) {
                 updateItStatus(data.currentIt);
@@ -203,10 +246,11 @@
         gridHelper.position.y = 0.05; 
         scene.add(gridHelper);
 
-        // --- MAP COLLISION ---
+        // --- MAP COLLISION & OBSTACLES ---
         const colliderBoxes = [];
+        const vaultableBoxes = []; // Low blocks suitable for vaulting
 
-        function createObstacle(w, h, d, x, z, material) {
+        function createObstacle(w, h, d, x, z, material, isVaultable = false) {
             const geo = new THREE.BoxGeometry(w, h, d);
             const mesh = new THREE.Mesh(geo, material);
             mesh.position.set(x, h / 2, z);
@@ -215,7 +259,12 @@
             scene.add(mesh);
             
             mesh.updateMatrixWorld();
-            colliderBoxes.push(new THREE.Box3().setFromObject(mesh));
+            const box = new THREE.Box3().setFromObject(mesh);
+            colliderBoxes.push(box);
+
+            if (isVaultable) {
+                vaultableBoxes.push({ mesh, box, height: h });
+            }
             return mesh;
         }
 
@@ -240,15 +289,16 @@
         createObstacle(cornerSize, height, thick, offset, offset + cornerSize/2, matWall);
         createObstacle(thick, height, cornerSize, offset + cornerSize/2, offset, matWall);
 
+        // Scattered boxes (some low enough to vault over: height <= 3.0)
         for (let i = 0; i < 40; i++) {
             const x = (Math.random() - 0.5) * (ARENA_SIZE - 15);
             const z = (Math.random() - 0.5) * (ARENA_SIZE - 15);
             if (Math.abs(x) < 14 && Math.abs(z) < 14) continue;
 
             const w = Math.random() * 4 + 2;
-            const h = Math.random() * 6 + 3;
+            const h = Math.random() * 2.2 + 1.2; // Low height vaultable blocks
             const d = Math.random() * 4 + 2;
-            createObstacle(w, h, d, x, z, Math.random() > 0.5 ? matBlock1 : matBlock2);
+            createObstacle(w, h, d, x, z, Math.random() > 0.5 ? matBlock1 : matBlock2, true);
         }
 
         const invisibleMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -276,129 +326,156 @@
         }
 
         // ==========================================
-        // 3. HUMANOID CHARACTER CREATION & RIGGING
+        // 3. HIGHLY ARTICULATED HUMANOID CHARACTER RIG
         // ==========================================
         const matRunner = new THREE.MeshStandardMaterial({ color: 0x1e90ff, roughness: 0.3 });
         const matIt = new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.3, emissive: 0xaa0000 });
         const matSkin = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.5 });
 
-        function createHumanoidMesh() {
+        function createAdvancedHumanoidMesh() {
             const container = new THREE.Group();
-
-            // Materials array wrapper for easy color swaps
             const partsList = [];
 
-            // Torso
-            const torsoGeo = new THREE.BoxGeometry(1.1, 1.4, 0.6);
+            // Pelvis/Hips root origin
+            const hipCenter = new THREE.Group();
+            hipCenter.position.y = 1.1;
+            container.add(hipCenter);
+
+            // Torso & Chest pitching
+            const torsoGeo = new THREE.BoxGeometry(1.1, 1.3, 0.55);
             const torso = new THREE.Mesh(torsoGeo, matRunner);
-            torso.position.y = 2.0;
+            torso.position.y = 0.65;
             torso.castShadow = true;
-            container.add(torso);
+            hipCenter.add(torso);
             partsList.push(torso);
 
-            // Head & Neck
-            const neckGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.3, 8);
-            const neck = new THREE.Mesh(neckGeo, matSkin);
-            neck.position.y = 2.85;
-            container.add(neck);
+            const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.25, 8), matSkin);
+            neck.position.y = 1.45;
+            torso.add(neck);
 
-            const headGeo = new THREE.BoxGeometry(0.7, 0.7, 0.7);
-            const head = new THREE.Mesh(headGeo, matSkin);
-            head.position.y = 3.35;
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.65, 0.65), matSkin);
+            head.position.y = 1.85;
             head.castShadow = true;
-            container.add(head);
+            torso.add(head);
 
-            // --- Left Arm (Pivoting from shoulder) ---
-            const leftArmPivot = new THREE.Group();
-            leftArmPivot.position.set(-0.75, 2.5, 0);
-            container.add(leftArmPivot);
+            // --- Left Arm Chain (Shoulder -> Elbow -> Wrist) ---
+            const leftShoulder = new THREE.Group();
+            leftShoulder.position.set(-0.7, 1.15, 0);
+            torso.add(leftShoulder);
 
-            const upperLeftArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.8, 0.35), matRunner);
-            upperLeftArm.position.y = -0.4;
+            const upperLeftArm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.65, 0.32), matRunner);
+            upperLeftArm.position.y = -0.32;
             upperLeftArm.castShadow = true;
-            leftArmPivot.add(upperLeftArm);
+            leftShoulder.add(upperLeftArm);
             partsList.push(upperLeftArm);
 
-            const lowerLeftArm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), matSkin);
-            lowerLeftArm.position.y = -1.15;
+            const leftElbow = new THREE.Group();
+            leftElbow.position.set(0, -0.65, 0);
+            leftShoulder.add(leftElbow);
+
+            const lowerLeftArm = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.6, 0.28), matSkin);
+            lowerLeftArm.position.y = -0.3;
             lowerLeftArm.castShadow = true;
-            leftArmPivot.add(lowerLeftArm);
+            leftElbow.add(lowerLeftArm);
 
-            // --- Right Arm (Pivoting from shoulder) ---
-            const rightArmPivot = new THREE.Group();
-            rightArmPivot.position.set(0.75, 2.5, 0);
-            container.add(rightArmPivot);
+            // --- Right Arm Chain ---
+            const rightShoulder = new THREE.Group();
+            rightShoulder.position.set(0.7, 1.15, 0);
+            torso.add(rightShoulder);
 
-            const upperRightArm = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.8, 0.35), matRunner);
-            upperRightArm.position.y = -0.4;
+            const upperRightArm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.65, 0.32), matRunner);
+            upperRightArm.position.y = -0.32;
             upperRightArm.castShadow = true;
-            rightArmPivot.add(upperRightArm);
+            rightShoulder.add(upperRightArm);
             partsList.push(upperRightArm);
 
-            const lowerRightArm = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.7, 0.3), matSkin);
-            lowerRightArm.position.y = -1.15;
+            const rightElbow = new THREE.Group();
+            rightElbow.position.set(0, -0.65, 0);
+            rightShoulder.add(rightElbow);
+
+            const lowerRightArm = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.6, 0.28), matSkin);
+            lowerRightArm.position.y = -0.3;
             lowerRightArm.castShadow = true;
-            rightArmPivot.add(lowerRightArm);
+            rightElbow.add(lowerRightArm);
 
-            // --- Left Leg (Pivoting from hip) ---
-            const leftLegPivot = new THREE.Group();
-            leftLegPivot.position.set(-0.35, 1.25, 0);
-            container.add(leftLegPivot);
+            // --- Left Leg Chain (Hip -> Knee -> Ankle) ---
+            const leftHip = new THREE.Group();
+            leftHip.position.set(-0.32, 0, 0);
+            hipCenter.add(leftHip);
 
-            const upperLeftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, 0.4), matRunner);
-            upperLeftLeg.position.y = -0.45;
+            const upperLeftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.75, 0.38), matRunner);
+            upperLeftLeg.position.y = -0.38;
             upperLeftLeg.castShadow = true;
-            leftLegPivot.add(upperLeftLeg);
+            leftHip.add(upperLeftLeg);
             partsList.push(upperLeftLeg);
 
-            const lowerLeftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.85, 0.35), matSkin);
-            lowerLeftLeg.position.y = -1.35;
+            const leftKnee = new THREE.Group();
+            leftKnee.position.set(0, -0.75, 0);
+            leftHip.add(leftKnee);
+
+            const lowerLeftLeg = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.7, 0.32), matSkin);
+            lowerLeftLeg.position.y = -0.35;
             lowerLeftLeg.castShadow = true;
-            leftLegPivot.add(lowerLeftLeg);
+            leftKnee.add(lowerLeftLeg);
 
-            // --- Right Leg (Pivoting from hip) ---
-            const rightLegPivot = new THREE.Group();
-            rightLegPivot.position.set(0.35, 1.25, 0);
-            container.add(rightLegPivot);
+            // --- Right Leg Chain ---
+            const rightHip = new THREE.Group();
+            rightHip.position.set(0.32, 0, 0);
+            hipCenter.add(rightHip);
 
-            const upperRightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.9, 0.4), matRunner);
-            upperRightLeg.position.y = -0.45;
+            const upperRightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.75, 0.38), matRunner);
+            upperRightLeg.position.y = -0.38;
             upperRightLeg.castShadow = true;
-            rightLegPivot.add(upperRightLeg);
+            rightHip.add(upperRightLeg);
             partsList.push(upperRightLeg);
 
-            const lowerRightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.85, 0.35), matSkin);
-            lowerRightLeg.position.y = -1.35;
+            const rightKnee = new THREE.Group();
+            rightKnee.position.set(0, -0.75, 0);
+            rightHip.add(rightKnee);
+
+            const lowerRightLeg = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.7, 0.32), matSkin);
+            lowerRightLeg.position.y = -0.35;
             lowerRightLeg.castShadow = true;
-            rightLegPivot.add(lowerRightLeg);
+            rightKnee.add(lowerRightLeg);
 
             // IT Glowing Light Indicator
             const itLight = new THREE.PointLight(0xff0000, 0, 15);
-            itLight.position.y = 4;
+            itLight.position.y = 3;
             container.add(itLight);
 
-            // Store skeleton references for dynamic running animation loop
             container.userData = {
                 partsList,
-                leftArmPivot,
-                rightArmPivot,
-                leftLegPivot,
-                rightLegPivot,
-                itLight
+                hipCenter,
+                torso,
+                leftShoulder, leftElbow,
+                rightShoulder, rightElbow,
+                leftHip, leftKnee,
+                rightHip, rightKnee,
+                itLight,
+                animMode: 'idle',
+                animTime: 0
             };
 
             return container;
         }
 
         let myPlayer;
-        let basePlayerSpeed = 15;
-        let playerSpeed = 15;
+        let basePlayerSpeed = 16;
+        let playerSpeed = 16;
         let speedBoostTimer = 0;
         let lastTime = performance.now();
 
+        // Physics & Action State
+        let velocityY = 0;
+        let isGrounded = true;
+        const gravity = -35;
+        const jumpForce = 15;
+        let currentAnimState = 'idle';
+        let actionAnimTimer = 0;
+
         function findSafeSpawnPosition() {
             const playerRadius = 1.2;
-            const playerHeight = 4.0;
+            const playerHeight = 4.5;
             for (let attempt = 0; attempt < 50; attempt++) {
                 const rx = (Math.random() - 0.5) * 30;
                 const rz = (Math.random() - 0.5) * 30;
@@ -416,7 +493,7 @@
         }
 
         function initGame() {
-            myPlayer = createHumanoidMesh();
+            myPlayer = createAdvancedHumanoidMesh();
             myPlayer.position.copy(findSafeSpawnPosition());
             scene.add(myPlayer);
             
@@ -434,14 +511,67 @@
         }
 
         // ==========================================
-        // 4. CONTROLS
+        // 4. CONTROLS & EVENT LISTENERS
         // ==========================================
         const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
         let joyVector = new THREE.Vector2(0, 0);
 
-        window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+        window.addEventListener('keydown', (e) => { 
+            if(keys.hasOwnProperty(e.key)) keys[e.key] = true;
+            if(e.code === 'Space') triggerJump();
+            if(e.code === 'KeyQ') triggerActionA();
+            if(e.code === 'KeyE') triggerActionB();
+        });
         window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
 
+        // UI Buttons
+        document.getElementById('btn-jump').addEventListener('click', triggerJump);
+        document.getElementById('btn-a').addEventListener('click', triggerActionA);
+        document.getElementById('btn-b').addEventListener('click', triggerActionB);
+
+        function triggerJump() {
+            if (isGrounded && actionAnimTimer <= 0) {
+                velocityY = jumpForce;
+                isGrounded = false;
+            }
+        }
+
+        function triggerActionA() {
+            if (actionAnimTimer > 0) return;
+            
+            // Check if near a low vaultable block
+            if (isGrounded) {
+                for (let i = 0; i < vaultableBoxes.length; i++) {
+                    const vb = vaultableBoxes[i];
+                    // Check distance to block
+                    const dist = myPlayer.position.distanceTo(vb.mesh.position);
+                    if (dist < 4.5 && vb.height <= 3.2) {
+                        // Vault Triggered!
+                        actionAnimTimer = 0.8;
+                        currentAnimState = 'vault';
+                        return;
+                    }
+                }
+            }
+
+            // Otherwise, if airborne -> Backflip!
+            if (!isGrounded) {
+                actionAnimTimer = 0.9;
+                currentAnimState = 'backflip';
+            }
+        }
+
+        function triggerActionB() {
+            if (actionAnimTimer > 0) return;
+
+            // If airborne -> Frontflip!
+            if (!isGrounded) {
+                actionAnimTimer = 0.9;
+                currentAnimState = 'frontflip';
+            }
+        }
+
+        // Virtual Joystick
         const joyZone = document.getElementById('joystick-zone');
         const joyKnob = document.getElementById('joystick-knob');
         let joyActive = false;
@@ -495,7 +625,8 @@
                 mqttClient.publish(TOPIC_POSITIONS, JSON.stringify({
                     id: clientId,
                     x: myPlayer.position.x,
-                    z: myPlayer.position.z
+                    z: myPlayer.position.z,
+                    animState: currentAnimState
                 }), { qos: 0 });
             }, SYNC_RATE_MS);
         }
@@ -527,28 +658,87 @@
         }
 
         // ==========================================
-        // 6. GAME LOOP & ANIMATION
+        // 6. ANIMATION & JOINT RIGGING ENGINE
         // ==========================================
-        function animateHumanoid(group, isMoving, time) {
-            const { leftArmPivot, rightArmPivot, leftLegPivot, rightLegPivot } = group.userData;
+        function updateHumanoidAnimation(group, isMoving, animState, time, delta) {
+            const ud = group.userData;
+            const { torso, leftShoulder, leftElbow, rightShoulder, rightElbow, leftHip, leftKnee, rightHip, rightKnee } = ud;
+
+            // Reset rotations
+            torso.rotation.x = 0;
+            torso.rotation.z = 0;
+
+            if (animState === 'vault') {
+                // Free running tiger vault over block
+                ud.animTime += delta * 6;
+                const p = ud.animTime;
+                torso.rotation.x = Math.sin(p * Math.PI) * 0.8;
+                leftShoulder.rotation.x = -Math.PI / 2;
+                rightShoulder.rotation.x = -Math.PI / 2;
+                leftKnee.rotation.x = 1.2;
+                rightKnee.rotation.x = 0.2;
+                if (p >= 1.0) { ud.animTime = 0; currentAnimState = 'idle'; }
+                return;
+            }
+
+            if (animState === 'backflip') {
+                ud.animTime += delta * 5;
+                const p = ud.animTime;
+                group.rotation.x = -p * Math.PI * 2; // Full backflip rotation
+                if (p >= 1.0) { ud.animTime = 0; group.rotation.x = 0; currentAnimState = 'idle'; }
+                return;
+            }
+
+            if (animState === 'frontflip') {
+                ud.animTime += delta * 5;
+                const p = ud.animTime;
+                group.rotation.x = p * Math.PI * 2; // Full frontflip rotation
+                if (p >= 1.0) { ud.animTime = 0; group.rotation.x = 0; currentAnimState = 'idle'; }
+                return;
+            }
+
+            if (!isGrounded) {
+                // Airborne sky posture
+                leftShoulder.rotation.x = -0.5;
+                rightShoulder.rotation.x = -0.5;
+                leftKnee.rotation.x = 0.5;
+                rightKnee.rotation.x = 0.5;
+                return;
+            }
+
             if (isMoving) {
-                const swing = Math.sin(time * 0.025) * 0.8;
-                leftArmPivot.rotation.x = swing;
-                rightArmPivot.rotation.x = -swing;
-                leftLegPivot.rotation.x = -swing;
-                rightLegPivot.rotation.x = swing;
-                // Subtle torso bounce while running
-                group.position.y = Math.abs(Math.sin(time * 0.025)) * 0.2;
+                // High-fidelity athletic sprint cycle
+                const cycle = time * 0.025;
+                const swing = Math.sin(cycle) * 1.1;
+                
+                leftShoulder.rotation.x = swing;
+                rightShoulder.rotation.x = -swing;
+                leftElbow.rotation.x = -Math.abs(Math.sin(cycle)) * 0.8 - 0.2;
+                rightElbow.rotation.x = -Math.abs(Math.cos(cycle)) * 0.8 - 0.2;
+
+                leftHip.rotation.x = -swing * 0.9;
+                rightHip.rotation.x = swing * 0.9;
+                leftKnee.rotation.x = Math.max(0, Math.sin(cycle)) * 1.2;
+                rightKnee.rotation.x = Math.max(0, -Math.sin(cycle)) * 1.2;
+
+                torso.rotation.x = 0.15; // Lean forward into sprint
             } else {
-                // Idle neutral posture
-                leftArmPivot.rotation.x = THREE.MathUtils.lerp(leftArmPivot.rotation.x, 0, 0.1);
-                rightArmPivot.rotation.x = THREE.MathUtils.lerp(rightArmPivot.rotation.x, 0, 0.1);
-                leftLegPivot.rotation.x = THREE.MathUtils.lerp(leftLegPivot.rotation.x, 0, 0.1);
-                rightLegPivot.rotation.x = THREE.MathUtils.lerp(rightLegPivot.rotation.x, 0, 0.1);
-                group.position.y = THREE.MathUtils.lerp(group.position.y, 0, 0.1);
+                // Idle stance smoothing
+                leftShoulder.rotation.x = THREE.MathUtils.lerp(leftShoulder.rotation.x, 0, 0.1);
+                rightShoulder.rotation.x = THREE.MathUtils.lerp(rightShoulder.rotation.x, 0, 0.1);
+                leftElbow.rotation.x = THREE.MathUtils.lerp(leftElbow.rotation.x, 0, 0.1);
+                rightElbow.rotation.x = THREE.MathUtils.lerp(rightElbow.rotation.x, 0, 0.1);
+                leftHip.rotation.x = THREE.MathUtils.lerp(leftHip.rotation.x, 0, 0.1);
+                rightHip.rotation.x = THREE.MathUtils.lerp(rightHip.rotation.x, 0, 0.1);
+                leftKnee.rotation.x = THREE.MathUtils.lerp(leftKnee.rotation.x, 0, 0.1);
+                rightKnee.rotation.x = THREE.MathUtils.lerp(rightKnee.rotation.x, 0, 0.1);
+                torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, 0, 0.1);
             }
         }
 
+        // ==========================================
+        // 7. MAIN GAME LOOP
+        // ==========================================
         function animate() {
             requestAnimationFrame(animate);
             if (!isGameReady) return;
@@ -560,6 +750,10 @@
             if (speedBoostTimer > 0 && time > speedBoostTimer) {
                 playerSpeed = basePlayerSpeed;
                 speedBoostTimer = 0;
+            }
+
+            if (actionAnimTimer > 0) {
+                actionAnimTimer -= delta;
             }
 
             let moveX = 0;
@@ -592,6 +786,17 @@
                 return false;
             };
 
+            // Gravity & Vertical Physics
+            velocityY += gravity * delta;
+            myPlayer.position.y += velocityY * delta;
+
+            if (myPlayer.position.y <= 0) {
+                myPlayer.position.y = 0;
+                velocityY = 0;
+                isGrounded = true;
+            }
+
+            // Horizontal Movement
             const proposedX = myPlayer.position.x + moveX * playerSpeed * delta;
             const proposedZ = myPlayer.position.z + moveZ * playerSpeed * delta;
 
@@ -604,8 +809,9 @@
                 myPlayer.rotation.y = Math.atan2(moveX, moveZ);
             }
 
-            animateHumanoid(myPlayer, isMoving, time);
+            updateHumanoidAnimation(myPlayer, isMoving, currentAnimState, time, delta);
 
+            // Power-ups collection
             powerUps.forEach(p => {
                 p.rotation.y += 0.02;
                 p.rotation.x += 0.01;
@@ -633,7 +839,7 @@
                 }
             }
 
-            // Interpolate remote players and animate their run cycles
+            // Interpolate remote players
             for (let id in remotePlayerMeshes) {
                 const mesh = remotePlayerMeshes[id];
                 const target = remotePlayersData[id];
@@ -652,7 +858,7 @@
                     mesh.rotation.y = Math.atan2(target.targetX - oldX, target.targetZ - oldZ);
                 }
 
-                animateHumanoid(mesh, remoteMoving, time);
+                updateHumanoidAnimation(mesh, remoteMoving, target.animState || 'idle', time, delta);
             }
 
             // Tagging logic
