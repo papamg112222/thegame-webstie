@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Multiplayer Tag - Horror Monster Update</title>
+    <title>3D Multiplayer Tag - Horror POV & Heart Rate Monitor</title>
     <style>
         body {
             margin: 0;
             overflow: hidden;
-            background-color: #0c0c14;
+            background-color: #06060c;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             touch-action: none;
         }
@@ -50,6 +50,48 @@
         @keyframes pulse {
             from { transform: scale(1); box-shadow: 0 0 20px rgba(255,0,0,0.8); }
             to { transform: scale(1.07); box-shadow: 0 0 40px rgba(255,0,0,1); }
+        }
+
+        /* Heart Rate Monitor HUD (Top Right) */
+        #heart-monitor {
+            position: absolute;
+            top: 25px;
+            right: 25px;
+            background: rgba(10, 10, 18, 0.85);
+            border: 2px solid rgba(255, 0, 68, 0.4);
+            border-radius: 15px;
+            padding: 12px 20px;
+            display: none; /* Shown only for runners */
+            align-items: center;
+            gap: 15px;
+            backdrop-filter: blur(6px);
+            box-shadow: 0 5px 20px rgba(255, 0, 50, 0.3);
+            pointer-events: none;
+        }
+        #heart-icon {
+            font-size: 28px;
+            color: #ff0044;
+            animation: heartbeat 1s infinite;
+        }
+        #heart-stats {
+            display: flex;
+            flex-direction: column;
+            color: #ff3366;
+            font-weight: 900;
+            font-family: monospace;
+            font-size: 18px;
+        }
+        #ecg-canvas {
+            width: 100px;
+            height: 35px;
+        }
+
+        @keyframes heartbeat {
+            0% { transform: scale(1); }
+            15% { transform: scale(1.25); }
+            30% { transform: scale(1); }
+            45% { transform: scale(1.15); }
+            60% { transform: scale(1); }
         }
 
         #joystick-zone {
@@ -131,6 +173,14 @@
         <div id="status-box">Connecting to EMQX Broker...</div>
     </div>
     
+    <div id="heart-monitor">
+        <div id="heart-icon">❤️</div>
+        <div id="heart-stats">
+            <span id="bpm-text">72 BPM</span>
+            <canvas id="ecg-canvas" width="100" height="35"></canvas>
+        </div>
+    </div>
+
     <div id="joystick-zone">
         <div id="joystick-knob"></div>
     </div>
@@ -154,8 +204,8 @@
             connectTimeout: 4000,
         });
 
-        const TOPIC_POSITIONS = 'taggame/room3/positions';
-        const TOPIC_STATE = 'taggame/room3/gamestate';
+        const TOPIC_POSITIONS = 'taggame/room4/positions';
+        const TOPIC_STATE = 'taggame/room4/gamestate';
 
         let isGameReady = false;
         let currentItId = null;
@@ -214,7 +264,7 @@
         // ==========================================
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x06060c);
-        scene.fog = new THREE.FogExp2(0x06060c, 0.02);
+        scene.fog = new THREE.FogExp2(0x06060c, 0.022);
 
         const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
         
@@ -227,7 +277,6 @@
         document.body.appendChild(renderer.domElement);
         renderer.domElement.id = 'game-canvas';
 
-        // Atmospheric Horror Lighting
         const ambientLight = new THREE.AmbientLight(0x111122, 0.8);
         scene.add(ambientLight);
 
@@ -249,14 +298,9 @@
         bloodMoonLight.position.set(-40, 30, -30);
         scene.add(bloodMoonLight);
 
-        // Environment (Cyberpunk Horror Plaza Arena)
         const ARENA_SIZE = 120;
         const floorGeo = new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE, 64, 64);
-        const floorMat = new THREE.MeshStandardMaterial({ 
-            color: 0x0a0a10, 
-            roughness: 0.3,
-            metalness: 0.8
-        });
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0a10, roughness: 0.3, metalness: 0.8 });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.rotation.x = -Math.PI / 2;
         floor.receiveShadow = true;
@@ -266,7 +310,6 @@
         gridHelper.position.y = 0.02; 
         scene.add(gridHelper);
 
-        // --- MAP OBSTACLES & HEIGHT MAPPING ---
         const colliderBoxes = [];
         const vaultableBoxes = [];
 
@@ -316,7 +359,7 @@
             if (Math.abs(x) < 16 && Math.abs(z) < 16) continue;
 
             const w = Math.random() * 5 + 3;
-            const h = Math.random() * 3.5 + 1.2;
+            const h = Math.random() * 4.5 + 1.2;
             const d = Math.random() * 5 + 3;
             const mat = Math.random() > 0.5 ? matNeonRed : matNeonCyan;
             createObstacle(w, h, d, x, z, mat, true);
@@ -328,7 +371,6 @@
         createObstacle(2, 30, ARENA_SIZE + 2, -ARENA_SIZE/2 - 1, 0, invisibleMat);
         createObstacle(2, 30, ARENA_SIZE + 2, ARENA_SIZE/2 + 1, 0, invisibleMat);
 
-        // Power-ups
         const powerUps = [];
         const powerUpGeo = new THREE.OctahedronGeometry(1.4, 0);
         const powerUpMat = new THREE.MeshStandardMaterial({ color: 0xff0055, emissive: 0xff0033, roughness: 0.1, metalness: 0.9 });
@@ -347,13 +389,12 @@
         }
 
         // ==========================================
-        // 3. CHARACTER RIGS (RUNNER & HORROR MONSTER)
+        // 3. CHARACTER RIGS
         // ==========================================
         const matRunner = new THREE.MeshStandardMaterial({ color: 0x2563eb, roughness: 0.25, metalness: 0.5 });
         const matSkin = new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.4 });
         const matJoints = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.1, metalness: 0.9 });
 
-        // Horror Monster Materials (Dark, decayed, flesh/bone aesthetic)
         const matMonsterBody = new THREE.MeshStandardMaterial({ color: 0x181215, roughness: 0.7, metalness: 0.3 });
         const matMonsterFlesh = new THREE.MeshStandardMaterial({ color: 0x4a0e17, roughness: 0.4, emissive: 0x220005 });
         const matMonsterBone = new THREE.MeshStandardMaterial({ color: 0xdcdcdc, roughness: 0.3 });
@@ -461,25 +502,21 @@
             const container = new THREE.Group();
             const partsList = [];
 
-            // Low slung torso for spider stance
             const hipCenter = new THREE.Group();
             hipCenter.position.y = 0.8;
             container.add(hipCenter);
 
-            // Gaunt, elongated torso
             const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.5), matMonsterBody);
             torso.position.y = 0.9;
             torso.castShadow = true;
             hipCenter.add(torso);
             partsList.push(torso);
 
-            // Freakish sunken skull & jaw
             const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.7), matMonsterFlesh);
             head.position.set(0, 1.9, -0.2);
             head.castShadow = true;
             torso.add(head);
 
-            // Glowing red eyes
             const eyeGeo = new THREE.SphereGeometry(0.08, 8, 8);
             const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
             const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
@@ -489,74 +526,58 @@
             rightEye.position.set(0.15, 1.95, -0.52);
             torso.add(rightEye);
 
-            // --- Front Legs (Extremely long and spider-like) ---
             const leftFrontShoulder = new THREE.Group();
             leftFrontShoulder.position.set(-0.5, 1.5, -0.2);
             torso.add(leftFrontShoulder);
-
             const upperLeftFrontArm = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.6, 0.22), matMonsterBody);
             upperLeftFrontArm.position.y = -0.8;
             leftFrontShoulder.add(upperLeftFrontArm);
             partsList.push(upperLeftFrontArm);
-
             const leftFrontElbow = new THREE.Group();
             leftFrontElbow.position.set(0, -1.6, 0);
             leftFrontShoulder.add(leftFrontElbow);
-
             const lowerLeftFrontArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.5, 0.18), matMonsterBone);
             lowerLeftFrontArm.position.y = -0.75;
             leftFrontElbow.add(lowerLeftFrontArm);
 
-            // Right Front Arm
             const rightFrontShoulder = new THREE.Group();
             rightFrontShoulder.position.set(0.5, 1.5, -0.2);
             torso.add(rightFrontShoulder);
-
             const upperRightFrontArm = new THREE.Mesh(new THREE.BoxGeometry(0.22, 1.6, 0.22), matMonsterBody);
             upperRightFrontArm.position.y = -0.8;
             rightFrontShoulder.add(upperRightFrontArm);
             partsList.push(upperRightFrontArm);
-
             const rightFrontElbow = new THREE.Group();
             rightFrontElbow.position.set(0, -1.6, 0);
             rightFrontShoulder.add(rightFrontElbow);
-
             const lowerRightFrontArm = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.5, 0.18), matMonsterBone);
             lowerRightFrontArm.position.y = -0.75;
             rightFrontElbow.add(lowerRightFrontArm);
 
-            // --- Back Legs (Slightly shorter, crawling stance) ---
             const leftBackHip = new THREE.Group();
             leftBackHip.position.set(-0.4, 0.2, 0.3);
             hipCenter.add(leftBackHip);
-
             const upperLeftBackLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.1, 0.25), matMonsterBody);
             upperLeftBackLeg.position.y = -0.55;
             leftBackHip.add(upperLeftBackLeg);
             partsList.push(upperLeftBackLeg);
-
             const leftBackKnee = new THREE.Group();
             leftBackKnee.position.set(0, -1.1, 0);
             leftBackHip.add(leftBackKnee);
-
             const lowerLeftBackLeg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.0, 0.2), matMonsterBone);
             lowerLeftBackLeg.position.y = -0.5;
             leftBackKnee.add(lowerLeftBackLeg);
 
-            // Right Back Leg
             const rightBackHip = new THREE.Group();
             rightBackHip.position.set(0.4, 0.2, 0.3);
             hipCenter.add(rightBackHip);
-
             const upperRightBackLeg = new THREE.Mesh(new THREE.BoxGeometry(0.25, 1.1, 0.25), matMonsterBody);
             upperRightBackLeg.position.y = -0.55;
             rightBackHip.add(upperRightBackLeg);
             partsList.push(upperRightBackLeg);
-
             const rightBackKnee = new THREE.Group();
             rightBackKnee.position.set(0, -1.1, 0);
             rightBackHip.add(rightBackKnee);
-
             const lowerRightBackLeg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.0, 0.2), matMonsterBone);
             lowerRightBackLeg.position.y = -0.5;
             rightBackKnee.add(lowerRightBackLeg);
@@ -620,8 +641,11 @@
             myPlayer.position.copy(findSafeSpawnPosition());
             scene.add(myPlayer);
             
-            camera.position.set(0, 16, 22);
-            camera.lookAt(myPlayer.position);
+            // Hide runner local mesh in First-Person View
+            if (!isIt) {
+                myPlayer.visible = false;
+                document.getElementById('heart-monitor').style.display = 'flex';
+            }
 
             isGameReady = true;
             
@@ -641,15 +665,19 @@
 
         window.addEventListener('keydown', (e) => { 
             if(keys.hasOwnProperty(e.key)) keys[e.key] = true;
-            if(e.code === 'Space') triggerJump();
+            if(e.code === 'Space') { e.preventDefault(); triggerJump(); }
             if(e.code === 'KeyQ') triggerActionA();
             if(e.code === 'KeyE') triggerActionB();
         });
         window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
 
-        document.getElementById('btn-jump').addEventListener('click', triggerJump);
-        document.getElementById('btn-a').addEventListener('click', triggerActionA);
-        document.getElementById('btn-b').addEventListener('click', triggerActionB);
+        const jumpBtn = document.getElementById('btn-jump');
+        const actionABtn = document.getElementById('btn-a');
+        const actionBBtn = document.getElementById('btn-b');
+
+        jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); triggerJump(); });
+        actionABtn.addEventListener('pointerdown', (e) => { e.preventDefault(); triggerActionA(); });
+        actionBBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); triggerActionB(); });
 
         function triggerJump() {
             if (isGrounded && actionAnimTimer <= 0) {
@@ -663,7 +691,7 @@
             if (isGrounded) {
                 for (let i = 0; i < vaultableBoxes.length; i++) {
                     const vb = vaultableBoxes[i];
-                    if (myPlayer.position.distanceTo(vb.mesh.position) < 4.5 && vb.height <= 3.2) {
+                    if (myPlayer.position.distanceTo(vb.mesh.position) < 4.5 && vb.height <= 3.5) {
                         actionAnimTimer = 0.8;
                         currentAnimState = 'vault';
                         return;
@@ -758,29 +786,32 @@
             const oldIt = currentItId;
             currentItId = newItId;
             const statusBox = document.getElementById('status-box');
+            const isItNow = (clientId === currentItId);
 
-            if (currentItId === clientId) {
+            if (isItNow) {
                 statusBox.innerText = "YOU ARE THE MONSTER! HUNT THEM!";
                 statusBox.className = "is-it";
+                document.getElementById('heart-monitor').style.display = 'none';
+                myPlayer.visible = true; // Monster visible in third-person view
             } else {
                 statusBox.innerText = "RUN! SURVIVE THE MONSTER!";
                 statusBox.className = "is-safe";
+                document.getElementById('heart-monitor').style.display = 'flex';
+                myPlayer.visible = false; // Runner invisible in first-person view
             }
 
-            // Recreate mesh if role changed
             if (oldIt !== currentItId) {
                 const pos = myPlayer.position.clone();
                 const rot = myPlayer.rotation.y;
                 scene.remove(myPlayer);
                 
-                const isItNow = (clientId === currentItId);
                 myPlayer = isItNow ? createHorrorMonsterMesh() : createNextGenHumanoidMesh();
                 myPlayer.position.copy(pos);
                 myPlayer.rotation.y = rot;
+                if (!isItNow) myPlayer.visible = false;
                 scene.add(myPlayer);
             }
 
-            // Update remote player meshes accordingly
             for (let id in remotePlayerMeshes) {
                 const mesh = remotePlayerMeshes[id];
                 const shouldBeMonster = (id === currentItId);
@@ -789,6 +820,7 @@
                     scene.remove(mesh);
                     const newMesh = shouldBeMonster ? createHorrorMonsterMesh() : createNextGenHumanoidMesh();
                     newMesh.position.copy(p);
+                    newMesh.visible = true;
                     scene.add(newMesh);
                     remotePlayerMeshes[id] = newMesh;
                 }
@@ -796,19 +828,17 @@
         }
 
         // ==========================================
-        // 6. ANIMATION & SPIDER CRAWLING ENGINE
+        // 6. ANIMATION & ECG CANVAS RENDERING
         // ==========================================
         function updateCharacterAnimation(group, isMoving, animState, time, delta) {
             const ud = group.userData;
 
             if (ud.type === 'monster') {
-                // Horror spider crawling animation on four limbs
                 const { torso, leftFrontShoulder, leftFrontElbow, rightFrontShoulder, rightFrontElbow, leftBackHip, leftBackKnee, rightBackHip, rightBackKnee } = ud;
                 torso.rotation.set(0, 0, 0);
 
                 if (isMoving) {
                     const cycle = time * 0.035;
-                    // Erratic spider crawl gait (diagonal limbs moving together)
                     leftFrontShoulder.rotation.x = Math.sin(cycle) * 0.9;
                     rightFrontShoulder.rotation.x = -Math.sin(cycle) * 0.9;
                     leftFrontElbow.rotation.x = -Math.abs(Math.sin(cycle)) * 0.8;
@@ -817,19 +847,14 @@
                     leftBackHip.rotation.x = -Math.sin(cycle) * 0.8;
                     rightBackHip.rotation.x = Math.sin(cycle) * 0.8;
 
-                    // Spidery body scuttle wobble
                     torso.rotation.z = Math.sin(cycle * 2) * 0.15;
-                    group.position.y = Math.abs(Math.sin(cycle * 2)) * 0.3;
                 } else {
-                    // Creepy idle breathing / twitching stance
                     leftFrontShoulder.rotation.x = -0.3 + Math.sin(time * 0.005) * 0.1;
                     rightFrontShoulder.rotation.x = -0.3 + Math.cos(time * 0.005) * 0.1;
-                    group.position.y = 0;
                 }
                 return;
             }
 
-            // Standard Humanoid Runner Animation
             const { torso, leftShoulder, leftElbow, rightShoulder, rightElbow, leftHip, leftKnee, rightHip, rightKnee } = ud;
             torso.rotation.set(0, 0, 0);
 
@@ -857,40 +882,46 @@
                 return;
             }
 
-            if (!isGrounded) {
-                leftShoulder.rotation.x = -0.6;
-                rightShoulder.rotation.x = -0.6;
-                leftKnee.rotation.x = 0.6;
-                rightKnee.rotation.x = 0.6;
-                return;
-            }
+            if (!isGrounded) return;
 
             if (isMoving) {
                 const cycle = time * 0.028;
                 const swing = Math.sin(cycle) * 1.2;
-                
                 leftShoulder.rotation.x = swing;
                 rightShoulder.rotation.x = -swing;
-                leftElbow.rotation.x = -Math.abs(Math.sin(cycle)) * 0.9 - 0.2;
-                rightElbow.rotation.x = -Math.abs(Math.cos(cycle)) * 0.9 - 0.2;
-
                 leftHip.rotation.x = -swing * 0.95;
                 rightHip.rotation.x = swing * 0.95;
-                leftKnee.rotation.x = Math.max(0, Math.sin(cycle)) * 1.3;
-                rightKnee.rotation.x = Math.max(0, -Math.sin(cycle)) * 1.3;
-
                 torso.rotation.x = 0.2;
             } else {
-                leftShoulder.rotation.x = THREE.MathUtils.lerp(leftShoulder.rotation.x, 0, 0.12);
-                rightShoulder.rotation.x = THREE.MathUtils.lerp(rightShoulder.rotation.x, 0, 0.12);
-                leftElbow.rotation.x = THREE.MathUtils.lerp(leftElbow.rotation.x, 0, 0.12);
-                rightElbow.rotation.x = THREE.MathUtils.lerp(rightElbow.rotation.x, 0, 0.12);
-                leftHip.rotation.x = THREE.MathUtils.lerp(leftHip.rotation.x, 0, 0.12);
-                rightHip.rotation.x = THREE.MathUtils.lerp(rightHip.rotation.x, 0, 0.12);
-                leftKnee.rotation.x = THREE.MathUtils.lerp(leftKnee.rotation.x, 0, 0.12);
-                rightKnee.rotation.x = THREE.MathUtils.lerp(rightKnee.rotation.x, 0, 0.12);
-                torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, 0, 0.12);
+                leftShoulder.rotation.x = 0;
+                rightShoulder.rotation.x = 0;
+                leftHip.rotation.x = 0;
+                rightHip.rotation.x = 0;
+                torso.rotation.x = 0;
             }
+        }
+
+        // Render dynamic ECG heart rate line
+        const ecgCtx = document.getElementById('ecg-canvas').getContext('2d');
+        let ecgPhase = 0;
+
+        function drawECG(bpm) {
+            ecgCtx.clearRect(0, 0, 100, 35);
+            ecgCtx.strokeStyle = '#ff0055';
+            ecgCtx.lineWidth = 2;
+            ecgCtx.beginPath();
+
+            ecgPhase += (bpm / 60) * 0.08;
+            for (let x = 0; x < 100; x++) {
+                const freq = (x + ecgPhase * 50) % 50;
+                let y = 17.5;
+                if (freq > 20 && freq < 25) y -= Math.sin((freq - 20) * Math.PI / 5) * 12;
+                else if (freq >= 25 && freq < 28) y += Math.sin((freq - 25) * Math.PI / 3) * 6;
+
+                if (x === 0) ecgCtx.moveTo(x, y);
+                else ecgCtx.lineTo(x, y);
+            }
+            ecgCtx.stroke();
         }
 
         // ==========================================
@@ -909,9 +940,7 @@
                 speedBoostTimer = 0;
             }
 
-            if (actionAnimTimer > 0) {
-                actionAnimTimer -= delta;
-            }
+            if (actionAnimTimer > 0) actionAnimTimer -= delta;
 
             let moveX = 0;
             let moveZ = 0;
@@ -934,7 +963,7 @@
 
             const checkCollision = (px, pz, py) => {
                 const playerBox = new THREE.Box3(
-                    new THREE.Vector3(px - playerRadius, py + 0.1, pz - playerRadius),
+                    new THREE.Vector3(px - playerRadius, py + 0.2, pz - playerRadius),
                     new THREE.Vector3(px + playerRadius, py + playerHeight, pz + playerRadius)
                 );
                 for (let i = 0; i < colliderBoxes.length; i++) {
@@ -944,16 +973,17 @@
             };
 
             let targetFloorY = 0;
-            const playerFootBox = new THREE.Box3(
-                new THREE.Vector3(myPlayer.position.x - playerRadius + 0.2, myPlayer.position.y, myPlayer.position.z - playerRadius + 0.2),
-                new THREE.Vector3(myPlayer.position.x + playerRadius - 0.2, myPlayer.position.y + 0.5, myPlayer.position.z + playerRadius - 0.2)
-            );
-
+            const footCheckRadius = 1.0;
             for (let i = 0; i < colliderBoxes.length; i++) {
                 const box = colliderBoxes[i];
-                if (playerFootBox.intersectsBox(box)) {
-                    if (box.max.y > targetFloorY && myPlayer.position.y >= box.max.y - 1.2) {
-                        targetFloorY = box.max.y;
+                if (
+                    myPlayer.position.x + footCheckRadius >= box.min.x &&
+                    myPlayer.position.x - footCheckRadius <= box.max.x &&
+                    myPlayer.position.z + footCheckRadius >= box.min.z &&
+                    myPlayer.position.z - footCheckRadius <= box.max.z
+                ) {
+                    if (myPlayer.position.y >= box.max.y - 1.8 && myPlayer.position.y <= box.max.y + 0.5) {
+                        if (box.max.y > targetFloorY) targetFloorY = box.max.y;
                     }
                 }
             }
@@ -980,7 +1010,6 @@
                 isMoving = true;
                 if (!checkCollision(proposedX, myPlayer.position.z, myPlayer.position.y)) myPlayer.position.x = proposedX;
                 if (!checkCollision(myPlayer.position.x, proposedZ, myPlayer.position.y)) myPlayer.position.z = proposedZ;
-
                 myPlayer.rotation.y = Math.atan2(moveX, moveZ);
             }
 
@@ -1000,8 +1029,42 @@
                 }
             }
 
-            camera.position.lerp(new THREE.Vector3(myPlayer.position.x, myPlayer.position.y + 17, myPlayer.position.z + 24), 0.1);
-            camera.lookAt(myPlayer.position);
+            // --- CAMERA & PROXIMITY HEART RATE SYSTEM ---
+            const isIt = (clientId === currentItId);
+            if (isIt) {
+                // Hunter: Third-Person Bird's Eye View
+                camera.position.lerp(new THREE.Vector3(myPlayer.position.x, myPlayer.position.y + 18, myPlayer.position.z + 24), 0.1);
+                camera.lookAt(myPlayer.position);
+            } else {
+                // Runner: First-Person View (POV from eyes)
+                camera.position.set(myPlayer.position.x, myPlayer.position.y + 3.2, myPlayer.position.z);
+                
+                // Look direction based on rotation
+                const lookTarget = new THREE.Vector3(
+                    myPlayer.position.x + Math.sin(myPlayer.rotation.y) * 10,
+                    myPlayer.position.y + 3.0,
+                    myPlayer.position.z + Math.cos(myPlayer.rotation.y) * 10
+                );
+                camera.lookAt(lookTarget);
+
+                // Calculate distance to nearest Monster / Hunter
+                let minMonsterDist = 999;
+                for (let id in remotePlayerMeshes) {
+                    if (id === currentItId) {
+                        const dist = myPlayer.position.distanceTo(remotePlayerMeshes[id].position);
+                        if (dist < minMonsterDist) minMonsterDist = dist;
+                    }
+                }
+
+                // Update Heart Rate HUD based on proximity
+                let currentBpm = 72;
+                if (minMonsterDist < 25) {
+                    currentBpm = Math.floor(72 + (25 - minMonsterDist) * 5.5);
+                    if (currentBpm > 180) currentBpm = 180;
+                }
+                document.getElementById('bpm-text').innerText = `${currentBpm} BPM`;
+                drawECG(currentBpm);
+            }
 
             const now = Date.now();
             for (let id in remotePlayersData) {
