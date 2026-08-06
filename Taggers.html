@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Multiplayer Tag with EMQX</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none;
+        }
+        #game-canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding-top: 20px;
+        }
+        #status-box {
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-size: 24px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: all 0.3s ease;
+        }
+        .is-it { background: rgba(255, 50, 50, 0.8) !important; animation: pulse 1s infinite alternate; }
+        .is-safe { background: rgba(50, 150, 255, 0.8) !important; }
+        
+        @keyframes pulse {
+            from { transform: scale(1); box-shadow: 0 0 10px rgba(255,0,0,0.5); }
+            to { transform: scale(1.05); box-shadow: 0 0 25px rgba(255,0,0,0.9); }
+        }
+
+        #joystick-zone {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: auto;
+            display: none;
+        }
+        #joystick-knob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        }
+        
+        @media (hover: none) and (pointer: coarse) {
+            #joystick-zone { display: block; }
+        }
+    </style>
+    
+    <!-- Import Maps & MQTT.js Client library -->
+    <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="status-box">Connecting to EMQX Broker...</div>
+    </div>
+    
+    <div id="joystick-zone">
+        <div id="joystick-knob"></div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        // ==========================================
+        // 1. EMQX MQTT WEBSOCKET SETUP
+        // ==========================================
+        // Using public EMQX public broker websocket endpoint (or change to your own self-hosted server)
+        const clientId = 'tag_player_' + Math.random().toString(16).substr(2, 8);
+        const mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
+            clientId: clientId,
+            clean: true,
+            connectTimeout: 4000,
+        });
+
+        const TOPIC_POSITIONS = 'taggame/room1/positions';
+        const TOPIC_STATE = 'taggame/room1/gamestate';
+
+        let isGameReady = false;
+        let currentItId = null;
+        let tagCooldown = 0;
+        const TAG_DISTANCE = 3.5;
+        const SYNC_RATE_MS = 100;
+
+        const remotePlayersData = {}; 
+        const remotePlayerMeshes = {};
+
+        mqttClient.on('connect', () => {
+            console.log('Connected to EMQX Broker!');
+            document.getElementById('status-box').innerText = "Connected! Initializing Arena...";
+            
+            // Subscribe to channels
+            mqttClient.subscribe(TOPIC_POSITIONS, { qos: 0 });
+            mqttClient.subscribe(TOPIC_STATE, { qos: 1 });
+
+            // Initialize local game once connected
+            initGame();
+            startNetworkLoop();
+        });
+
+        mqttClient.on('error', (err) => {
+            console.error('MQTT Connection error: ', err);
+            document.getElementById('status-box').innerText = "Broker Connection Failed.";
+        });
+
+        mqttClient.on('message', (topic, payload) => {
+            if (!isGameReady) return;
+            const data = JSON.parse(payload.toString());
+
+            if (topic === TOPIC_POSITIONS) {
+                if (data.id === clientId) return; // Skip self
+
+                const now = Date.now();
+                if (!remotePlayerMeshes[data.id]) {
+                    const mesh = createPlayerMesh();
+                    mesh.position.set(data.x, 0, data.z);
+                    scene.add(mesh);
+                    remotePlayerMeshes[data.id] = mesh;
+                    remotePlayersData[data.id] = { targetX: data.x, targetZ: data.z, lastUpdate: now };
+                } else {
+                    remotePlayersData[data.id].targetX = data.x;
+                    remotePlayersData[data.id].targetZ = data.z;
+                    remotePlayersData[data.id].lastUpdate = now;
+                }
+            } else if (topic === TOPIC_STATE) {
+                updateItStatus(data.currentIt);
+            }
+        });
+
+        // ==========================================
+        // 2. THREE.JS ENGINE SETUP
+        // ==========================================
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+        renderer.domElement.id = 'game-canvas';
+
+        // Lighting
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        hemiLight.position.set(0, 20, 0);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(20, 30, -20);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // Environment (Arena)
+        const ARENA_SIZE = 100;
+        const floorGeo = new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a24, roughness: 0.9 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        const gridHelper = new THREE.GridHelper(ARENA_SIZE, 50, 0x00ffaa, 0x005533);
+        gridHelper.position.y = 0.05; 
+        scene.add(gridHelper);
+
+        // --- MAP COLLISION ---
+        const colliderBoxes = [];
+
+        function createObstacle(w, h, d, x, z, material) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, material);
+            mesh.position.set(x, h / 2, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            
+            mesh.updateMatrixWorld();
+            colliderBoxes.push(new THREE.Box3().setFromObject(mesh));
+            return mesh;
+        }
+
+        const matCenter = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.5 });
+        const matWall = new THREE.MeshStandardMaterial({ color: 0x445577, roughness: 0.6 });
+        const matBlock1 = new THREE.MeshStandardMaterial({ color: 0xff3366, roughness: 0.4 });
+        const matBlock2 = new THREE.MeshStandardMaterial({ color: 0x33ccff, roughness: 0.4 });
+
+        createObstacle(8, 10, 8, 0, 0, matCenter);
+
+        const offset = 35;
+        const cornerSize = 15;
+        const thick = 3;
+        const height = 8;
+        
+        createObstacle(cornerSize, height, thick, -offset, -offset - cornerSize/2, matWall);
+        createObstacle(thick, height, cornerSize, -offset - cornerSize/2, -offset, matWall);
+        createObstacle(cornerSize, height, thick, offset, -offset - cornerSize/2, matWall);
+        createObstacle(thick, height, cornerSize, offset + cornerSize/2, -offset, matWall);
+        createObstacle(cornerSize, height, thick, -offset, offset + cornerSize/2, matWall);
+        createObstacle(thick, height, cornerSize, -offset - cornerSize/2, offset, matWall);
+        createObstacle(cornerSize, height, thick, offset, offset + cornerSize/2, matWall);
+        createObstacle(thick, height, cornerSize, offset + cornerSize/2, offset, matWall);
+
+        for (let i = 0; i < 40; i++) {
+            const x = (Math.random() - 0.5) * (ARENA_SIZE - 15);
+            const z = (Math.random() - 0.5) * (ARENA_SIZE - 15);
+            if (Math.abs(x) < 14 && Math.abs(z) < 14) continue;
+
+            const w = Math.random() * 4 + 2;
+            const h = Math.random() * 6 + 3;
+            const d = Math.random() * 4 + 2;
+            createObstacle(w, h, d, x, z, Math.random() > 0.5 ? matBlock1 : matBlock2);
+        }
+
+        const invisibleMat = new THREE.MeshBasicMaterial({ visible: false });
+        createObstacle(ARENA_SIZE + 2, 20, 2, 0, -ARENA_SIZE/2 - 1, invisibleMat);
+        createObstacle(ARENA_SIZE + 2, 20, 2, 0, ARENA_SIZE/2 + 1, invisibleMat);
+        createObstacle(2, 20, ARENA_SIZE + 2, -ARENA_SIZE/2 - 1, 0, invisibleMat);
+        createObstacle(2, 20, ARENA_SIZE + 2, ARENA_SIZE/2 + 1, 0, invisibleMat);
+
+        // Power-ups
+        const powerUps = [];
+        const powerUpGeo = new THREE.IcosahedronGeometry(1.2, 0);
+        const powerUpMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00aa77, roughness: 0.2 });
+
+        for (let i = 0; i < 6; i++) {
+            const mesh = new THREE.Mesh(powerUpGeo, powerUpMat);
+            let rx = (Math.random() - 0.5) * (ARENA_SIZE - 20);
+            let rz = (Math.random() - 0.5) * (ARENA_SIZE - 20);
+            while(Math.abs(rx) < 12 && Math.abs(rz) < 12) {
+                rx = (Math.random() - 0.5) * (ARENA_SIZE - 20);
+                rz = (Math.random() - 0.5) * (ARENA_SIZE - 20);
+            }
+            mesh.position.set(rx, 1.5, rz);
+            scene.add(mesh);
+            powerUps.push(mesh);
+        }
+
+        // Players Setup
+        const matRunner = new THREE.MeshStandardMaterial({ color: 0x1e90ff, roughness: 0.4 });
+        const matIt = new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.4, emissive: 0xaa0000 });
+        
+        let myPlayer;
+        let basePlayerSpeed = 15;
+        let playerSpeed = 15;
+        let speedBoostTimer = 0;
+        let lastTime = performance.now();
+
+        function createPlayerMesh() {
+            const group = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 2, 16), matRunner);
+            body.position.y = 1;
+            body.castShadow = true;
+            group.add(body);
+            
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), matRunner);
+            head.position.y = 2.5;
+            head.castShadow = true;
+            group.add(head);
+
+            const itLight = new THREE.PointLight(0xff0000, 0, 15);
+            itLight.position.y = 4;
+            group.add(itLight);
+            group.userData.itLight = itLight;
+            group.userData.body = body;
+            group.userData.head = head;
+
+            return group;
+        }
+
+        function findSafeSpawnPosition() {
+            const playerRadius = 1.2;
+            const playerHeight = 4.0;
+            for (let attempt = 0; attempt < 50; attempt++) {
+                const rx = (Math.random() - 0.5) * 30;
+                const rz = (Math.random() - 0.5) * 30;
+                const playerBox = new THREE.Box3(
+                    new THREE.Vector3(rx - playerRadius, 0, rz - playerRadius),
+                    new THREE.Vector3(rx + playerRadius, playerHeight, rz + playerRadius)
+                );
+                let collided = false;
+                for (let i = 0; i < colliderBoxes.length; i++) {
+                    if (playerBox.intersectsBox(colliderBoxes[i])) { collided = true; break; }
+                }
+                if (!collided) return new THREE.Vector3(rx, 0, rz);
+            }
+            return new THREE.Vector3(0, 0, 15);
+        }
+
+        function initGame() {
+            myPlayer = createPlayerMesh();
+            myPlayer.position.copy(findSafeSpawnPosition());
+            scene.add(myPlayer);
+            
+            camera.position.set(0, 15, 20);
+            camera.lookAt(myPlayer.position);
+
+            isGameReady = true;
+            
+            // Default first player to IT if none set
+            if (!currentItId) {
+                currentItId = clientId;
+                mqttClient.publish(TOPIC_STATE, JSON.stringify({ currentIt: clientId }), { qos: 1, retain: true });
+            }
+
+            animate();
+        }
+
+        // ==========================================
+        // 3. CONTROLS
+        // ==========================================
+        const keys = { w: false, a: false, s: false, d: false, ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+        let joyVector = new THREE.Vector2(0, 0);
+
+        window.addEventListener('keydown', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = true; });
+        window.addEventListener('keyup', (e) => { if(keys.hasOwnProperty(e.key)) keys[e.key] = false; });
+
+        const joyZone = document.getElementById('joystick-zone');
+        const joyKnob = document.getElementById('joystick-knob');
+        let joyActive = false;
+        let joyCenter = { x: 0, y: 0 };
+        const maxJoyRadius = 35;
+
+        joyZone.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            joyActive = true;
+            const rect = joyZone.getBoundingClientRect();
+            joyCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+            updateJoystick(e.touches[0]);
+        }, { passive: false });
+
+        joyZone.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if(joyActive) updateJoystick(e.touches[0]);
+        }, { passive: false });
+
+        joyZone.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            joyActive = false;
+            joyKnob.style.transform = `translate(-50%, -50%)`;
+            joyVector.set(0, 0);
+        }, { passive: false });
+
+        function updateJoystick(touch) {
+            let dx = touch.clientX - joyCenter.x;
+            let dy = touch.clientY - joyCenter.y;
+            const distance = Math.sqrt(dx*dx + dy*dy);
+            if (distance > maxJoyRadius) {
+                dx = (dx / distance) * maxJoyRadius;
+                dy = (dy / distance) * maxJoyRadius;
+            }
+            joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+            joyVector.set(dx / maxJoyRadius, dy / maxJoyRadius);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ==========================================
+        // 4. NETWORK SYNC LOOP
+        // ==========================================
+        function startNetworkLoop() {
+            setInterval(() => {
+                if (!isGameReady) return;
+                mqttClient.publish(TOPIC_POSITIONS, JSON.stringify({
+                    id: clientId,
+                    x: myPlayer.position.x,
+                    z: myPlayer.position.z
+                }), { qos: 0 });
+            }, SYNC_RATE_MS);
+        }
+
+        function updateItStatus(newItId) {
+            currentItId = newItId;
+            const statusBox = document.getElementById('status-box');
+
+            if (currentItId === clientId) {
+                statusBox.innerText = "YOU ARE IT! CATCH THEM!";
+                statusBox.className = "is-it";
+            } else {
+                statusBox.innerText = "RUN! AVOID THE RED PLAYER!";
+                statusBox.className = "is-safe";
+            }
+
+            updatePlayerAppearance(myPlayer, currentItId === clientId);
+            for (let id in remotePlayerMeshes) {
+                updatePlayerAppearance(remotePlayerMeshes[id], currentItId === id);
+            }
+        }
+
+        function updatePlayerAppearance(meshGroup, isIt) {
+            const material = isIt ? matIt : matRunner;
+            meshGroup.userData.body.material = material;
+            meshGroup.userData.head.material = material;
+            meshGroup.userData.itLight.intensity = isIt ? 2 : 0;
+        }
+
+        // ==========================================
+        // 5. GAME LOOP
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            if (!isGameReady) return;
+
+            const time = performance.now();
+            const delta = (time - lastTime) / 1000;
+            lastTime = time;
+
+            if (speedBoostTimer > 0 && time > speedBoostTimer) {
+                playerSpeed = basePlayerSpeed;
+                speedBoostTimer = 0;
+            }
+
+            let moveX = 0;
+            let moveZ = 0;
+            if (keys.w || keys.ArrowUp) moveZ -= 1;
+            if (keys.s || keys.ArrowDown) moveZ += 1;
+            if (keys.a || keys.ArrowLeft) moveX -= 1;
+            if (keys.d || keys.ArrowRight) moveX += 1;
+
+            if (joyVector.lengthSq() > 0) {
+                moveX = joyVector.x;
+                moveZ = joyVector.y;
+            } else if (moveX !== 0 || moveZ !== 0) {
+                const length = Math.sqrt(moveX*moveX + moveZ*moveZ);
+                moveX /= length;
+                moveZ /= length;
+            }
+
+            const playerRadius = 1.2;
+            const playerHeight = 4.0; 
+
+            const checkCollision = (px, pz) => {
+                const playerBox = new THREE.Box3(
+                    new THREE.Vector3(px - playerRadius, 0, pz - playerRadius),
+                    new THREE.Vector3(px + playerRadius, playerHeight, pz + playerRadius)
+                );
+                for (let i = 0; i < colliderBoxes.length; i++) {
+                    if (playerBox.intersectsBox(colliderBoxes[i])) return true;
+                }
+                return false;
+            };
+
+            const proposedX = myPlayer.position.x + moveX * playerSpeed * delta;
+            const proposedZ = myPlayer.position.z + moveZ * playerSpeed * delta;
+
+            if (moveX !== 0 || moveZ !== 0) {
+                if (!checkCollision(proposedX, myPlayer.position.z)) myPlayer.position.x = proposedX;
+                if (!checkCollision(myPlayer.position.x, proposedZ)) myPlayer.position.z = proposedZ;
+
+                myPlayer.rotation.y = Math.atan2(moveX, moveZ);
+                myPlayer.position.y = Math.abs(Math.sin(time * 0.015)) * 0.5;
+            } else {
+                myPlayer.position.y = 0;
+            }
+
+            powerUps.forEach(p => {
+                p.rotation.y += 0.02;
+                p.rotation.x += 0.01;
+            });
+
+            for (let i = powerUps.length - 1; i >= 0; i--) {
+                const p = powerUps[i];
+                if (myPlayer.position.distanceTo(p.position) < 2.5) {
+                    playerSpeed = basePlayerSpeed * 1.6;
+                    speedBoostTimer = time + 5000;
+                    p.position.set((Math.random() - 0.5) * (ARENA_SIZE - 20), 1.5, (Math.random() - 0.5) * (ARENA_SIZE - 20));
+                }
+            }
+
+            camera.position.lerp(new THREE.Vector3(myPlayer.position.x, myPlayer.position.y + 15, myPlayer.position.z + 20), 0.1);
+            camera.lookAt(myPlayer.position);
+
+            // Clean stale remote players
+            const now = Date.now();
+            for (let id in remotePlayersData) {
+                if (now - remotePlayersData[id].lastUpdate > 4000) {
+                    scene.remove(remotePlayerMeshes[id]);
+                    delete remotePlayerMeshes[id];
+                    delete remotePlayersData[id];
+                }
+            }
+
+            // Interpolate remote players
+            for (let id in remotePlayerMeshes) {
+                const mesh = remotePlayerMeshes[id];
+                const target = remotePlayersData[id];
+                mesh.position.x += (target.targetX - mesh.position.x) * 0.15;
+                mesh.position.z += (target.targetZ - mesh.position.z) * 0.15;
+            }
+
+            // Tagging logic
+            if (currentItId === clientId && time > tagCooldown) {
+                for (let id in remotePlayerMeshes) {
+                    const mesh = remotePlayerMeshes[id];
+                    if (myPlayer.position.distanceTo(mesh.position) < TAG_DISTANCE) {
+                        tagCooldown = time + 2000;
+                        mqttClient.publish(TOPIC_STATE, JSON.stringify({ currentIt: id }), { qos: 1, retain: true });
+                        break;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
+
