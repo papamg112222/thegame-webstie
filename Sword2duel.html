@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>P2P Sword Duel</title>
+    <!-- PeerJS for P2P connection -->
+    <script src="https://unpkg.com/peerjs@1.5.0/dist/peerjs.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body { 
+            font-family: 'Inter', system-ui, sans-serif; 
+            background: #121212; 
+            color: #f1f5f9; 
+            text-align: center; 
+            overflow: hidden; /* Prevent pull-to-refresh on mobile */
+            touch-action: none;
+        }
+        
+        .hidden { display: none !important; }
+        
+        /* Modern Button Styles */
+        .btn { 
+            padding: 1rem 2rem; 
+            font-size: 1.25rem; 
+            font-weight: 600;
+            background: linear-gradient(135deg, #ef4444, #b91c1c); 
+            color: white; 
+            border: none; 
+            border-radius: 12px; 
+            cursor: pointer; 
+            margin: 10px; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: all 0.2s ease;
+        }
+        .btn:active { 
+            transform: scale(0.95);
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        }
+        .btn-alt {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+        }
+        .btn-warning {
+             background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+        
+        input { 
+            padding: 1rem; 
+            font-size: 1.5rem; 
+            text-align: center; 
+            border-radius: 8px; 
+            border: 2px solid #334155;
+            background: #1e293b;
+            color: white;
+            outline: none;
+            width: 80%;
+            max-width: 300px;
+            margin-bottom: 1rem;
+        }
+        input:focus {
+            border-color: #3b82f6;
+        }
+        
+        /* Display Styles */
+        #display-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            width: 100%;
+        }
+
+        #enemy { 
+            width: 160px; 
+            height: 160px; 
+            background: linear-gradient(135deg, #475569, #1e293b); 
+            border-radius: 20px;
+            margin: 40px auto; 
+            transition: transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        /* Basic Face for Enemy */
+        #enemy::before {
+            content: '';
+            width: 80px;
+            height: 20px;
+            background: #cbd5e1;
+            border-radius: 10px;
+            position: absolute;
+            top: 40px;
+            box-shadow: 0 40px 0 #cbd5e1; /* Mouth */
+        }
+
+        .hit { 
+            background: linear-gradient(135deg, #ef4444, #991b1b) !important; 
+            transform: scale(0.9) rotate(8deg); 
+        }
+        
+        #healthBar { 
+            width: 80%; 
+            max-width: 500px;
+            height: 40px; 
+            border: 3px solid #334155; 
+            border-radius: 20px;
+            margin: 20px auto; 
+            overflow: hidden;
+            background: #0f172a;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        #healthFill { 
+            width: 100%; 
+            height: 100%; 
+            background: linear-gradient(90deg, #10b981, #34d399); 
+            transition: width 0.2s ease-out; 
+        }
+
+        .shake {
+            animation: shake 0.5s;
+        }
+
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+
+        /* Particles for hit effect */
+        .particle {
+            position: absolute;
+            background-color: #ef4444;
+            border-radius: 50%;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        /* Sword 3D Styles */
+        #sword-container {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100vw;
+            height: 100vh;
+            perspective: 800px;
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            z-index: 50;
+        }
+
+        #sword {
+            width: 40px;
+            height: 60vh;
+            background: linear-gradient(to right, #94a3b8, #e2e8f0, #94a3b8);
+            border-radius: 20px 20px 5px 5px;
+            transform-origin: bottom center;
+            position: relative;
+            box-shadow: inset 0 0 10px rgba(255,255,255,0.5), 0 0 15px rgba(0,0,0,0.5);
+            /* Initial state pointing up */
+            transform: rotateZ(0deg) rotateX(0deg) rotateY(0deg);
+            transition: transform 0.05s linear; 
+        }
+        
+        /* Sword Hilt & Guard */
+        #sword::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100px;
+            height: 20px;
+            background: linear-gradient(to bottom, #d97706, #b45309);
+            border-radius: 5px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        #sword::before {
+            content: '';
+            position: absolute;
+            bottom: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 30px;
+            height: 60px;
+            background: linear-gradient(to right, #78350f, #451a03, #78350f);
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen">
+
+    <!-- Main Menu -->
+    <div id="menu" class="w-full max-w-md p-8 bg-gray-800 rounded-2xl shadow-2xl">
+        <h1 class="text-4xl font-extrabold mb-8 text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-red-600">Sword Duel</h1>
+        <p class="mb-6 text-gray-400">Choose your role to begin</p>
+        <button class="btn w-full mb-4" onclick="initDisplay()">
+            📺 Create Game (Display)
+        </button>
+        <button class="btn btn-alt w-full" onclick="initController()">
+            📱 Join as Sword (Phone)
+        </button>
+    </div>
+
+    <!-- Display UI -->
+    <div id="display-ui" class="hidden w-full h-full">
+        
+        <div id="connection-screen" class="flex flex-col items-center justify-center h-full">
+            <h2 class="text-3xl font-bold mb-4">Display Mode</h2>
+            <p class="text-xl mb-4 text-gray-300">Enter this code on your phone to connect:</p>
+            <div class="bg-gray-800 p-8 rounded-xl shadow-inner border border-gray-700">
+                <h1 id="game-id" class="text-6xl font-mono font-bold text-yellow-400 tracking-widest">....</h1>
+            </div>
+            <p class="mt-8 text-gray-500 animate-pulse">Waiting for connection...</p>
+        </div>
+        
+        <div id="game-canvas" class="hidden h-full flex flex-col justify-center relative">
+            <!-- Container for particles -->
+            <div id="particle-container" class="absolute inset-0 pointer-events-none overflow-hidden"></div>
+            
+            <div id="sword-container">
+                <div id="sword"></div>
+            </div>
+            
+            <div class="w-full text-center mt-8">
+                <h2 id="action-text" class="text-4xl font-bold text-gray-400 mb-2 h-12">Waiting for swing...</h2>
+                <div id="healthBar"><div id="healthFill"></div></div>
+            </div>
+            
+            <div class="flex-grow flex items-center justify-center">
+                <div id="enemy"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controller UI -->
+    <div id="controller-ui" class="hidden w-full max-w-md p-6 bg-gray-800 rounded-2xl shadow-2xl">
+        
+        <div id="connect-screen">
+            <h2 class="text-3xl font-bold mb-6 text-blue-400">Sword Controller</h2>
+            <p class="mb-4 text-gray-300">Enter the code shown on the display</p>
+            <input type="number" id="join-id" placeholder="1234" pattern="\d*" maxlength="4">
+            <br>
+            <button class="btn btn-alt w-full mt-4" id="connect-btn" onclick="connectToDisplay()">Connect</button>
+            <p id="connect-status" class="mt-4 text-sm text-gray-400"></p>
+        </div>
+        
+        <div id="play-screen" class="hidden flex flex-col items-center justify-center h-full">
+            <div class="w-24 h-24 bg-green-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_20px_rgba(34,197,94,0.5)]">
+                <svg class="w-12 h-12 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            </div>
+            <h2 class="text-3xl font-bold text-green-400 mb-2">Connected!</h2>
+            <p class="text-xl text-gray-300 mb-8 text-center">Grip your phone tightly and<br><strong>SWING</strong> to attack!</p>
+            
+            <button class="btn w-full mb-4 shadow-lg shadow-red-500/30" onclick="requestMotionPermission()">Enable Sensors (Required for iOS)</button>
+            <button class="btn btn-alt w-full mb-4" onclick="recenterSword()">Recenter Sword Calibration</button>
+            <button class="btn btn-warning w-full" onclick="manualSwing()">Tap to Swing (Fallback)</button>
+        </div>
+    </div>
+
+    <script>
+        let peer;
+        let conn;
+        
+        // --- DISPLAY LOGIC ---
+        let enemyHealth = 100;
+        let displayId = '';
+
+        function initDisplay() {
+            document.getElementById('menu').classList.add('hidden');
+            document.getElementById('display-ui').classList.remove('hidden');
+            document.getElementById('connection-screen').classList.remove('hidden');
+            
+            // Generate a random 4-digit ID for easy typing
+            displayId = Math.floor(1000 + Math.random() * 9000).toString();
+            peer = new Peer('sword-' + displayId, {
+                debug: 2
+            });
+
+            peer.on('open', (id) => {
+                document.getElementById('game-id').innerText = displayId;
+                console.log('My peer ID is: ' + id);
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer error:', err);
+                if (err.type === 'unavailable-id') {
+                    // Try again with a new ID if taken (rare for 4 digits but possible)
+                    alert("ID collision, restarting...");
+                    location.reload();
+                }
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                console.log('Connected to: ' + conn.peer);
+                
+                document.getElementById('connection-screen').classList.add('hidden');
+                document.getElementById('game-canvas').classList.remove('hidden');
+
+                conn.on('data', (data) => {
+                    if (data.type === 'swing') {
+                        registerHit(data.force);
+                    } else if (data.type === 'orient') {
+                        updateSwordOrientation(data.alpha, data.beta, data.gamma);
+                    } else if (data.type === 'recenter') {
+                        baseAlpha = null; // Reset heading
+                    }
+                });
+                
+                conn.on('close', () => {
+                    alert('Controller disconnected. Reloading.');
+                    location.reload();
+                });
+            });
+        }
+
+        function createParticles(x, y) {
+            const container = document.getElementById('particle-container');
+            for (let i = 0; i < 10; i++) {
+                const particle = document.createElement('div');
+                particle.classList.add('particle');
+                
+                const size = Math.random() * 10 + 5;
+                particle.style.width = `${size}px`;
+                particle.style.height = `${size}px`;
+                
+                particle.style.left = `${x}px`;
+                particle.style.top = `${y}px`;
+                
+                container.appendChild(particle);
+                
+                const angle = Math.random() * Math.PI * 2;
+                const velocity = Math.random() * 100 + 50;
+                const tx = Math.cos(angle) * velocity;
+                const ty = Math.sin(angle) * velocity;
+                
+                particle.animate([
+                    { transform: 'translate(0, 0)', opacity: 1 },
+                    { transform: `translate(${tx}px, ${ty}px)`, opacity: 0 }
+                ], {
+                    duration: 500 + Math.random() * 500,
+                    easing: 'cubic-bezier(0, .9, .57, 1)'
+                }).onfinish = () => particle.remove();
+            }
+        }
+
+        function registerHit(force) {
+            if (enemyHealth <= 0) return; // Prevent hitting while dead
+            
+            // Calculate damage based on swing speed (force)
+            // Force usually ranges from 15 to maybe 50+ on hard swings
+            let damage = Math.floor((force - 10) * 1.5);
+            damage = Math.min(35, Math.max(5, damage)); 
+            
+            enemyHealth = Math.max(0, enemyHealth - damage);
+            
+            // Update UI
+            const healthFill = document.getElementById('healthFill');
+            healthFill.style.width = enemyHealth + '%';
+            
+            // Color changing based on health
+            if (enemyHealth < 30) {
+                healthFill.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+            } else if (enemyHealth < 60) {
+                healthFill.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+            }
+            
+            const actionText = document.getElementById('action-text');
+            actionText.innerText = `HIT! -${damage} DMG`;
+            actionText.style.color = '#ef4444';
+            setTimeout(() => { 
+                if (enemyHealth > 0) {
+                    actionText.innerText = "Ready..."; 
+                    actionText.style.color = '#9ca3af';
+                }
+            }, 1000);
+            
+            // Animations
+            const enemy = document.getElementById('enemy');
+            enemy.classList.add('hit');
+            document.body.classList.add('shake');
+            
+            // Spawn particles near enemy center
+            const rect = enemy.getBoundingClientRect();
+            createParticles(rect.left + rect.width / 2, rect.top + rect.height / 2);
+
+            // Audio (Synthesized for simplicity and no external dependencies)
+            playHitSound();
+
+            setTimeout(() => {
+                enemy.classList.remove('hit');
+                document.body.classList.remove('shake');
+            }, 150);
+
+            if (enemyHealth <= 0) {
+                actionText.innerText = "ENEMY DEFEATED!";
+                actionText.style.color = '#10b981';
+                enemy.style.transform = "scale(0) rotate(180deg)";
+                enemy.style.opacity = "0";
+                
+                playDeathSound();
+
+                setTimeout(() => { 
+                    enemyHealth = 100; 
+                    healthFill.style.width = '100%'; 
+                    healthFill.style.background = 'linear-gradient(90deg, #10b981, #34d399)';
+                    actionText.innerText = "New Enemy Approaches...";
+                    actionText.style.color = '#9ca3af';
+                    
+                    enemy.style.transform = "scale(1) rotate(0deg)";
+                    enemy.style.opacity = "1";
+                }, 3000);
+            }
+        }
+
+        let baseAlpha = null;
+        function updateSwordOrientation(alpha, beta, gamma) {
+            const sword = document.getElementById('sword');
+            if (!sword) return;
+
+            // Calibrate base compass heading on first read
+            if (baseAlpha === null && alpha !== null) {
+                baseAlpha = alpha;
+            }
+
+            // Beta (pitch): 90 is straight up. 0 is pointing away flat.
+            let rotX = beta - 90;
+            
+            // Gamma (roll): Twisting the wrist spins the sword.
+            let rotY = gamma;
+            
+            // Alpha (yaw): Swinging left and right.
+            let rotZ = 0;
+            if (alpha !== null && baseAlpha !== null) {
+                let diff = alpha - baseAlpha;
+                // Normalize to shortest path
+                if (diff > 180) diff -= 360;
+                if (diff < -180) diff += 360;
+                rotZ = -diff; // Inverse so right turns move sword right
+            }
+
+            // Apply rotations in Z-X-Y order for standard first-person feeling
+            sword.style.transform = `rotateZ(${rotZ}deg) rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+        }
+
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        let audioCtx;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new AudioContext();
+            }
+        }
+
+        function playHitSound() {
+            initAudio();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(150, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(40, audioCtx.currentTime + 0.1);
+            
+            gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.1);
+        }
+
+        function playDeathSound() {
+            initAudio();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.type = 'square';
+            oscillator.frequency.setValueAtTime(100, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.5);
+            
+            gainNode.gain.setValueAtTime(0.7, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.5);
+        }
+
+        // --- CONTROLLER LOGIC ---
+
+        function initController() {
+            document.getElementById('menu').classList.add('hidden');
+            document.getElementById('controller-ui').classList.remove('hidden');
+            // We don't need a specific ID for the controller, it just connects
+            peer = new Peer({ debug: 2 });
+            
+            peer.on('error', (err) => {
+                console.error('Controller Peer error:', err);
+                const status = document.getElementById('connect-status');
+                status.innerText = "Connection error. Check ID.";
+                status.classList.add('text-red-400');
+                document.getElementById('connect-btn').disabled = false;
+            });
+        }
+
+        function connectToDisplay() {
+            const idInput = document.getElementById('join-id').value;
+            if (!idInput) {
+                alert("Please enter a game ID");
+                return;
+            }
+            
+            const targetId = 'sword-' + idInput;
+            const status = document.getElementById('connect-status');
+            
+            document.getElementById('connect-btn').disabled = true;
+            status.innerText = "Connecting...";
+            status.classList.remove('text-red-400');
+            status.classList.add('text-yellow-400');
+
+            conn = peer.connect(targetId, {
+                reliable: false // Prefer speed over reliability for sensor data
+            });
+            
+            conn.on('open', () => {
+                document.getElementById('connect-screen').classList.add('hidden');
+                document.getElementById('play-screen').classList.remove('hidden');
+                // Attempt to setup motion immediately (works on Android, iOS needs explicit button click usually)
+                setupMotion();
+            });
+        }
+
+        // Sensor Variables
+        let lastSwingTime = 0;
+        const SWING_THRESHOLD = 18; // Minimum combined acceleration to count as a swing
+        const SWING_COOLDOWN = 500; // MS between swings to prevent spam
+        
+        let orientInterval = null;
+        let currentAlpha = 0, currentBeta = 90, currentGamma = 0;
+
+        function setupMotion() {
+            // Check for accelerometer
+            if (window.DeviceMotionEvent) {
+                window.addEventListener('devicemotion', handleMotion, false);
+                console.log("Motion listener added");
+            } else {
+                alert("DeviceMotionEvent is not supported on your device/browser.");
+            }
+            
+            // Check for gyroscope/compass
+            if (window.DeviceOrientationEvent) {
+                window.addEventListener('deviceorientation', handleOrientation, false);
+                
+                // Stream orientation data at ~25 FPS to keep visually smooth while saving bandwidth
+                if (orientInterval) clearInterval(orientInterval);
+                orientInterval = setInterval(() => {
+                    if (conn && conn.open) {
+                        conn.send({ 
+                            type: 'orient', 
+                            alpha: currentAlpha, 
+                            beta: currentBeta, 
+                            gamma: currentGamma 
+                        });
+                    }
+                }, 40);
+            }
+        }
+
+        function handleOrientation(event) {
+            currentAlpha = event.alpha;
+            currentBeta = event.beta;
+            currentGamma = event.gamma;
+        }
+
+        function handleMotion(event) {
+            if (!event.acceleration) return;
+            
+            // Combine X, Y, Z acceleration forces excluding gravity
+            // We take absolute values to measure raw magnitude of movement in any direction
+            let forceX = Math.abs(event.acceleration.x || 0);
+            let forceY = Math.abs(event.acceleration.y || 0);
+            let forceZ = Math.abs(event.acceleration.z || 0);
+            
+            let totalForce = forceX + forceY + forceZ;
+
+            if (totalForce > SWING_THRESHOLD) {
+                const now = Date.now();
+                if (now - lastSwingTime > SWING_COOLDOWN) {
+                    if (conn && conn.open) {
+                        conn.send({ type: 'swing', force: totalForce });
+                        
+                        // Haptic feedback if supported (Android mostly)
+                        if (navigator.vibrate) {
+                            navigator.vibrate(100); 
+                        }
+                    }
+                    lastSwingTime = now;
+                }
+            }
+        }
+
+        // iOS 13+ requires explicit user interaction to grant sensor permissions
+        function requestMotionPermission() {
+            let motionGranted = false;
+            let orientGranted = false;
+
+            const checkReady = () => {
+                if (motionGranted || orientGranted) {
+                    alert("Sensors active! Ready to swing.");
+                    setupMotion();
+                }
+            };
+
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            motionGranted = true;
+                        }
+                        
+                        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                            DeviceOrientationEvent.requestPermission().then(state => {
+                                if (state === 'granted') orientGranted = true;
+                                checkReady();
+                            });
+                        } else {
+                            orientGranted = true;
+                            checkReady();
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                alert("Sensor permission is not required or not supported on this device. Just swing!");
+                setupMotion();
+            }
+        }
+
+        function recenterSword() {
+            if (conn && conn.open) {
+                conn.send({ type: 'recenter' });
+            }
+        }
+
+        function manualSwing() {
+            if (conn && conn.open) {
+                // Send a simulated force between 20 and 40
+                const simulatedForce = 20 + Math.random() * 20;
+                conn.send({ type: 'swing', force: simulatedForce });
+                if (navigator.vibrate) {
+                    navigator.vibrate(50); 
+                }
+            } else {
+                alert("Not connected to display yet.");
+            }
+        }
+    </script>
+</body>
+</html>
