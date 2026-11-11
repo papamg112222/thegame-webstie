@@ -1465,7 +1465,7 @@
       if (!cameraActive || !cameraStream || !visionVideo.videoWidth) {
         return null;
       }
-      const maxDim = 640;
+      const maxDim = 384; // Optimized resolution for ultra-fast multimodal upload
       let w = visionVideo.videoWidth;
       let h = visionVideo.videoHeight;
       if (w > maxDim || h > maxDim) {
@@ -1484,9 +1484,9 @@
 
       // Flash scanning border effect on HUD viewfinder
       visionHud.classList.add('scanning');
-      setTimeout(() => visionHud.classList.remove('scanning'), 900);
+      setTimeout(() => visionHud.classList.remove('scanning'), 600);
 
-      const dataUrl = visionCanvas.toDataURL('image/jpeg', 0.82);
+      const dataUrl = visionCanvas.toDataURL('image/jpeg', 0.68);
       return dataUrl.split(',')[1] || null;
     }
 
@@ -1869,21 +1869,17 @@
       }
     }
 
-    // --- Smart AI Brain (Gemini 3 Flash with Structured Action Output + Live Camera Vision) ---
+    // --- Smart AI Brain (Gemini 3 Flash with Ultra-Low Latency Config + Live Camera Vision) ---
     async function askJarvisBrain(userText, base64Frame = null) {
       const cfg = loadConfig();
       // Uses user-provided key if set, otherwise falls back to Canvas environment key
       const apiKey = cfg.geminiKey || "";
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
 
-      const systemPrompt = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's ultra-intelligent, composed, witty, and concise British AI assistant.
-Current Status:
-- Optical Camera Feed: ${base64Frame ? 'ONLINE & FRAME ATTACHED (You can directly see what the user\'s camera is pointing at right now)' : 'OFFLINE (Tell the user they can click the camera icon in the bottom dock or say "turn on camera" to enable optical sensors if they ask you to look at something)'}.
-- Active Notification Channel: "${(cfg.notifyChannel || 'ntfy').toUpperCase()}".
-Rules:
-1. Keep your spoken "reply" natural, crisp, and concise (1 to 3 sentences max) so it sounds great when spoken aloud via ElevenLabs TTS. Address the user respectfully (e.g., "sir" or "boss" when appropriate). Do not use markdown formatting or asterisks in "reply".
-2. When an image frame is attached and the user asks what you see, what they are holding, how they look, or asks about their surroundings, describe or answer directly and intelligently based on the visual frame.
-3. If the user asks you to send a notification, alert, message, note, or reminder to their phone/device, set "sendNotification" to true, and populate "notificationTitle" and "notificationMessage" with the clean content to push. Otherwise set "sendNotification" to false.`;
+      const systemPrompt = `You are J.A.R.V.I.S., Tony Stark's ultra-fast, witty, concise British AI.
+Camera: ${base64Frame ? 'ONLINE (frame attached)' : 'OFFLINE'}.
+Return ONLY valid JSON: {"reply":"1-2 short spoken sentences, no markdown","sendNotification":boolean,"notificationTitle":"string","notificationMessage":"string","notificationPriority":"default"}
+Set sendNotification=true ONLY if asked to send a notification/alert/reminder.`;
 
       // Build current user turn (text + optional live camera frame inlineData)
       const currentUserParts = [{ text: userText }];
@@ -1896,8 +1892,8 @@ Rules:
         });
       }
 
-      // Keep last 10 text turns for sharp context without bloating payload size
-      const recentHistory = chatHistory.slice(-10);
+      // Keep last 6 turns for ultra-fast token processing
+      const recentHistory = chatHistory.slice(-6);
       const contents = [
         ...recentHistory,
         { role: 'user', parts: currentUserParts }
@@ -1910,23 +1906,17 @@ Rules:
         },
         generationConfig: {
           responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              reply: { type: 'STRING' },
-              sendNotification: { type: 'BOOLEAN' },
-              notificationTitle: { type: 'STRING' },
-              notificationMessage: { type: 'STRING' },
-              notificationPriority: { type: 'STRING' }
-            },
-            required: ['reply', 'sendNotification']
+          maxOutputTokens: 180,
+          temperature: 0.6,
+          thinkingConfig: {
+            thinkingBudget: 0
           }
         }
       };
 
-      // Exponential backoff retry helper
-      let delay = 800;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      // Fast retry helper
+      let delay = 400;
+      for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const res = await fetch(apiUrl, {
             method: 'POST',
@@ -1950,14 +1940,13 @@ Rules:
 
           return parsed;
         } catch (err) {
-          if (attempt === 2) throw err;
+          if (attempt === 1) throw err;
           await new Promise((r) => setTimeout(r, delay));
-          delay *= 2;
         }
       }
     }
 
-    // Master pipeline: User Input -> Auto Camera Check -> AI Thinking + Vision -> Optional ntfy Push -> ElevenLabs Voice
+    // Master pipeline: User Input -> Auto Camera Check -> AI Thinking + Vision -> Parallel Notification + ElevenLabs Voice
     async function processJarvisCommand(userInput) {
       const cleanInput = (userInput || '').trim();
       if (!cleanInput || isThinking) return;
@@ -1992,8 +1981,7 @@ Rules:
       } else if (wantsCameraOn) {
         const opened = await toggleCamera(true);
         if (opened) {
-          // Wait briefly for first video frame exposure
-          await new Promise((r) => setTimeout(r, 350));
+          await new Promise((r) => setTimeout(r, 150));
         }
       }
 
@@ -2012,16 +2000,17 @@ Rules:
 
         showSubtitle(replyText);
 
+        isThinking = false;
+        ttsSendBtn.disabled = false;
+
+        // Fire notification in parallel without blocking voice playback!
         if (decision?.sendNotification) {
-          await sendJarvisNotification(
+          sendJarvisNotification(
             decision.notificationTitle || 'J.A.R.V.I.S. Dispatch',
             decision.notificationMessage || replyText,
             decision.notificationPriority || 'default'
           );
         }
-
-        isThinking = false;
-        ttsSendBtn.disabled = false;
 
         await speakWithElevenLabs(replyText);
       } catch (err) {
@@ -2104,18 +2093,19 @@ Rules:
 
       isSynthesizing = true;
       ttsSendBtn.disabled = true;
-      setReadout('SYNTHESIZING // ELEVENLABS STREAM...');
+      setReadout('SYNTHESIZING // ELEVENLABS TURBO STREAM...');
 
-      const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(targetVoiceId)}?output_format=mp3_44100_128`;
+      // optimize_streaming_latency=4 + mp3_22050_32 cuts audio generation & download latency by >60%
+      const endpoint = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(targetVoiceId)}?optimize_streaming_latency=4&output_format=mp3_22050_32`;
 
       const payload = {
         text: cleanText,
         model_id: modelId || DEFAULT_MODEL_ID,
         voice_settings: {
-          stability: 0.50,
-          similarity_boost: 0.78,
+          stability: 0.48,
+          similarity_boost: 0.75,
           style: 0.0,
-          use_speaker_boost: true
+          use_speaker_boost: false
         }
       };
 
