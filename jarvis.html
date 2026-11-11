@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>J.A.R.V.I.S. - Tactical AI Assistant</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts: Orbitron for HUD headers, Rajdhani & Inter for body -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        hud: ['Orbitron', 'sans-serif'],
+                        tech: ['Rajdhani', 'sans-serif']
+                    },
+                    colors: {
+                        jarvis: {
+                            cyan: '#00f0ff',
+                            blue: '#0088ff',
+                            dark: '#040b16',
+                            panel: 'rgba(8, 22, 44, 0.78)',
+                            border: 'rgba(0, 240, 255, 0.28)'
+                        }
+                    },
+                    animation: {
+                        'spin-slow': 'spin 12s linear infinite',
+                        'spin-reverse': 'spin-reverse 8s linear infinite',
+                        'pulse-glow': 'pulse-glow 2.5s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        'spin-reverse': {
+                            from: { transform: 'rotate(360deg)' },
+                            to: { transform: 'rotate(0deg)' },
+                        },
+                        'pulse-glow': {
+                            '0%, 100%': { opacity: 1, filter: 'drop-shadow(0 0 12px rgba(0, 240, 255, 0.8))' },
+                            '50%': { opacity: 0.55, filter: 'drop-shadow(0 0 4px rgba(0, 240, 255, 0.3))' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #030914;
+            background-image: 
+                radial-gradient(circle at 50% 15%, rgba(0, 240, 255, 0.12) 0%, transparent 55%),
+                linear-gradient(rgba(0, 240, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 240, 255, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 32px 32px, 32px 32px;
+            color: #e2f1ff;
+            overflow: hidden;
+        }
+
+        /* Custom HUD Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(4, 11, 22, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 240, 255, 0.3);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 240, 255, 0.6);
+        }
+
+        .hud-border {
+            border: 1px solid rgba(0, 240, 255, 0.28);
+            box-shadow: 0 0 20px rgba(0, 240, 255, 0.07), inset 0 0 15px rgba(0, 240, 255, 0.04);
+        }
+
+        .hud-corner {
+            position: relative;
+        }
+        .hud-corner::before,
+        .hud-corner::after {
+            content: '';
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border-color: #00f0ff;
+            pointer-events: none;
+        }
+        .hud-corner::before {
+            top: -1px;
+            left: -1px;
+            border-top: 2px solid #00f0ff;
+            border-left: 2px solid #00f0ff;
+        }
+        .hud-corner::after {
+            bottom: -1px;
+            right: -1px;
+            border-bottom: 2px solid #00f0ff;
+            border-right: 2px solid #00f0ff;
+        }
+
+        /* Markdown-like code formatting inside chat */
+        .jarvis-msg pre {
+            background: rgba(2, 6, 15, 0.9);
+            border: 1px solid rgba(0, 240, 255, 0.25);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            overflow-x: auto;
+            margin: 0.5rem 0;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #a5f3fc;
+        }
+        .jarvis-msg code {
+            background: rgba(0, 240, 255, 0.12);
+            padding: 0.1rem 0.35rem;
+            border-radius: 0.25rem;
+            color: #67e8f9;
+            font-size: 0.875em;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col select-none">
+
+    <!-- TOP NAVIGATION / HUD STATUS BAR -->
+    <header class="w-full px-4 sm:px-6 py-3 bg-jarvis-panel backdrop-blur-md border-b border-jarvis-cyan/30 flex items-center justify-between z-20">
+        <!-- Left: Arc Reactor Core & Title -->
+        <div class="flex items-center space-x-3 sm:space-x-4">
+            <div id="reactorCore" class="relative w-11 h-11 flex items-center justify-center">
+                <!-- Outer Ring -->
+                <svg class="w-full h-full animate-spin-slow text-jarvis-cyan" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="45" fill="none" stroke="currentColor" stroke-width="3" stroke-dasharray="25 12" />
+                    <circle cx="50" cy="50" r="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-opacity="0.5" />
+                </svg>
+                <!-- Inner Reverse Ring -->
+                <svg class="w-7 h-7 absolute animate-spin-reverse text-sky-400" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" stroke-width="6" stroke-dasharray="18 22" />
+                </svg>
+                <!-- Center Core Glow -->
+                <div id="coreDot" class="w-3 h-3 rounded-full bg-jarvis-cyan animate-pulse-glow"></div>
+            </div>
+
+            <div>
+                <div class="flex items-center space-x-2">
+                    <h1 class="font-hud text-lg sm:text-xl font-bold tracking-wider text-jarvis-cyan drop-shadow-[0_0_8px_rgba(0,240,255,0.6)]">
+                        J.A.R.V.I.S.
+                    </h1>
+                    <span id="statusBadge" class="text-[10px] font-tech font-semibold uppercase tracking-widest px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/40">
+                        ONLINE
+                    </span>
+                </div>
+                <p class="text-xs font-tech text-sky-300/70 tracking-wider hidden sm:block">
+                    JUST A RATHER VERY INTELLIGENT SYSTEM // MARK VII INTERFACE
+                </p>
+            </div>
+        </div>
+
+        <!-- Right: Controls & Settings Button -->
+        <div class="flex items-center space-x-2 sm:space-x-3">
+            <!-- Voice Output Toggle -->
+            <button id="voiceToggleBtn" onclick="toggleVoice()" title="Toggle JARVIS Voice Synthesis"
+                class="px-3 py-2 rounded-lg hud-border bg-slate-900/70 hover:bg-cyan-950/60 text-cyan-300 transition flex items-center space-x-1.5 text-xs font-tech tracking-wider">
+                <i id="voiceIcon" class="fa-solid fa-volume-high text-jarvis-cyan"></i>
+                <span class="hidden md:inline" id="voiceStatusText">VOICE: ON</span>
+            </button>
+
+            <!-- Clear Memory Button -->
+            <button onclick="clearConversation()" title="Reset Memory Protocol"
+                class="px-3 py-2 rounded-lg hud-border bg-slate-900/70 hover:bg-rose-950/50 hover:border-rose-400/50 text-sky-200 hover:text-rose-300 transition flex items-center space-x-1.5 text-xs font-tech tracking-wider">
+                <i class="fa-solid fa-rotate-right"></i>
+                <span class="hidden md:inline">RESET</span>
+            </button>
+
+            <!-- API Key & Settings Button -->
+            <button onclick="openSettingsModal()" id="settingsBtn"
+                class="px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 border border-jarvis-cyan/60 text-jarvis-cyan font-tech font-semibold text-xs sm:text-sm tracking-wider transition flex items-center space-x-2 shadow-[0_0_15px_rgba(0,240,255,0.2)]">
+                <i class="fa-solid fa-gear animate-spin-slow"></i>
+                <span>API KEY & SETTINGS</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT AREA -->
+    <main class="flex-1 flex overflow-hidden max-w-7xl w-full mx-auto p-3 sm:p-5 gap-5">
+        
+        <!-- LEFT SIDEBAR: SYSTEM DIAGNOSTICS & QUICK PROTOCOLS (Hidden on small screens) -->
+        <aside class="hidden lg:flex flex-col w-72 hud-border hud-corner bg-jarvis-panel backdrop-blur-md rounded-xl p-4 justify-between">
+            <div class="space-y-5">
+                <!-- Diagnostics Header -->
+                <div class="border-b border-cyan-500/20 pb-3">
+                    <h2 class="font-hud text-xs tracking-widest text-jarvis-cyan uppercase flex items-center gap-2">
+                        <i class="fa-solid fa-microchip"></i> System Diagnostics
+                    </h2>
+                    <p class="text-[11px] font-tech text-slate-400 mt-0.5">STARK INDUSTRIES MAINFRAME</p>
+                </div>
+
+                <!-- Telemetry Bars -->
+                <div class="space-y-3 font-tech text-xs">
+                    <div>
+                        <div class="flex justify-between text-cyan-200 mb-1">
+                            <span>NEURAL MATRIX LOAD</span>
+                            <span id="cpuLoadText">34%</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-cyan-500/20">
+                            <div id="cpuBar" class="h-full bg-gradient-to-r from-cyan-400 to-blue-500 w-1/3 transition-all duration-700"></div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between text-cyan-200 mb-1">
+                            <span>ARC REACTOR OUTPUT</span>
+                            <span class="text-emerald-300">3.0 GJ/s</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-cyan-500/20">
+                            <div class="h-full bg-gradient-to-r from-emerald-400 to-cyan-400 w-[94%]"></div>
+                        </div>
+                    </div>
+
+                    <div class="pt-1 flex items-center justify-between text-slate-300 border-t border-cyan-500/10">
+                        <span>AUTH KEY SOURCE:</span>
+                        <span id="keySourceBadge" class="px-2 py-0.5 rounded bg-cyan-500/15 text-jarvis-cyan border border-cyan-500/30 font-semibold">
+                            BUILT-IN CORE
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Quick Tactical Prompts -->
+                <div class="space-y-2 pt-2">
+                    <h3 class="font-hud text-[11px] tracking-widest text-sky-300 uppercase">
+                        <i class="fa-solid fa-bolt mr-1 text-jarvis-cyan"></i> Quick Protocols
+                    </h3>
+                    <div class="space-y-1.5 text-xs font-tech">
+                        <button onclick="sendQuickPrompt('Run a full system diagnostic report and introduce yourself, Jarvis.')"
+                            class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-cyan-950/60 border border-cyan-500/20 hover:border-cyan-400/50 text-sky-200 transition flex items-center justify-between group">
+                            <span>System Diagnostic</span>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-cyan-400 group-hover:translate-x-1 transition"></i>
+                        </button>
+                        <button onclick="sendQuickPrompt('Jarvis, give me a high-level tactical briefing on productivity for today.')"
+                            class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-cyan-950/60 border border-cyan-500/20 hover:border-cyan-400/50 text-sky-200 transition flex items-center justify-between group">
+                            <span>Tactical Daily Briefing</span>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-cyan-400 group-hover:translate-x-1 transition"></i>
+                        </button>
+                        <button onclick="sendQuickPrompt('Explain how I can get my own free Gemini API key step-by-step.')"
+                            class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-cyan-950/60 border border-cyan-500/20 hover:border-cyan-400/50 text-sky-200 transition flex items-center justify-between group">
+                            <span>How to Get an API Key</span>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-cyan-400 group-hover:translate-x-1 transition"></i>
+                        </button>
+                        <button onclick="sendQuickPrompt('Write a clean Python script to automate file organization, Sir.')"
+                            class="w-full text-left px-3 py-2 rounded-lg bg-slate-900/70 hover:bg-cyan-950/60 border border-cyan-500/20 hover:border-cyan-400/50 text-sky-200 transition flex items-center justify-between group">
+                            <span>Code Generation Protocol</span>
+                            <i class="fa-solid fa-chevron-right text-[10px] text-cyan-400 group-hover:translate-x-1 transition"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom HUD Clock -->
+            <div class="border-t border-cyan-500/20 pt-3 flex items-center justify-between text-xs font-tech text-sky-300/70">
+                <span>LOCAL TIME</span>
+                <span id="hudClock" class="font-hud text-jarvis-cyan text-sm">--:--:--</span>
+            </div>
+        </aside>
+
+        <!-- RIGHT/CENTER: CHAT TERMINAL -->
+        <section class="flex-1 flex flex-col hud-border hud-corner bg-jarvis-panel backdrop-blur-md rounded-xl overflow-hidden">
+            
+            <!-- Chat Feed -->
+            <div id="chatContainer" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 select-text">
+                <!-- Initial Greeting Injected by JS -->
+            </div>
+
+            <!-- Typing / Thinking Indicator -->
+            <div id="thinkingIndicator" class="hidden px-6 py-2.5 bg-cyan-950/40 border-t border-cyan-500/20 flex items-center space-x-3">
+                <div class="flex space-x-1">
+                    <span class="w-2 h-2 rounded-full bg-jarvis-cyan animate-ping"></span>
+                    <span class="w-2 h-2 rounded-full bg-jarvis-cyan animate-pulse"></span>
+                </div>
+                <span class="font-tech text-xs tracking-widest uppercase text-jarvis-cyan">
+                    J.A.R.V.I.S. is analyzing telemetry...
+                </span>
+            </div>
+
+            <!-- Input Console -->
+            <div class="p-3 sm:p-4 bg-slate-950/80 border-t border-cyan-500/30">
+                <form id="chatForm" onsubmit="handleUserSubmit(event)" class="flex items-center gap-2 sm:gap-3">
+                    <!-- Microphone Speech-to-Text Button -->
+                    <button type="button" id="micBtn" onclick="toggleSpeechRecognition()" title="Voice Command Input"
+                        class="p-3 rounded-lg hud-border bg-slate-900 hover:bg-cyan-950/60 text-cyan-300 transition flex-shrink-0">
+                        <i id="micIcon" class="fa-solid fa-microphone"></i>
+                    </button>
+
+                    <!-- Text Input -->
+                    <div class="relative flex-1">
+                        <input id="userInput" type="text" autocomplete="off"
+                            placeholder="Enter command for J.A.R.V.I.S. (e.g., 'Status report, Jarvis')..."
+                            class="w-full bg-slate-900/90 text-sky-100 placeholder-sky-400/40 text-sm rounded-lg px-4 py-3 border border-cyan-500/30 focus:outline-none focus:border-jarvis-cyan focus:ring-1 focus:ring-jarvis-cyan transition font-sans" />
+                    </div>
+
+                    <!-- Transmit Button -->
+                    <button type="submit" id="sendBtn"
+                        class="px-5 py-3 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-hud font-bold text-xs sm:text-sm tracking-wider transition flex items-center space-x-2 shadow-[0_0_15px_rgba(0,240,255,0.4)] flex-shrink-0">
+                        <span>TRANSMIT</span>
+                        <i class="fa-solid fa-paper-plane"></i>
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- SETTINGS & API KEY GENERATOR MODAL -->
+    <div id="settingsModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+        <div class="w-full max-w-lg hud-border hud-corner bg-[#061326] rounded-xl overflow-hidden shadow-[0_0_50px_rgba(0,240,255,0.2)] animate-fadeIn">
+            
+            <!-- Modal Header -->
+            <div class="px-6 py-4 bg-cyan-950/40 border-b border-cyan-500/30 flex items-center justify-between">
+                <div class="flex items-center space-x-2.5">
+                    <i class="fa-solid fa-key text-jarvis-cyan"></i>
+                    <h2 class="font-hud text-base sm:text-lg font-bold tracking-wider text-jarvis-cyan">
+                        SECURITY & API KEY CONFIGURATION
+                    </h2>
+                </div>
+                <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-jarvis-cyan transition p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Modal Body -->
+            <div class="p-6 space-y-5 text-sm select-text">
+                
+                <!-- Section 1: Make / Get a Free Real Gemini API Key -->
+                <div class="p-4 rounded-xl bg-cyan-950/30 border border-jarvis-cyan/40 space-y-3">
+                    <div class="flex items-start justify-between gap-2">
+                        <div>
+                            <h3 class="font-hud text-xs uppercase tracking-wider text-jarvis-cyan flex items-center gap-2">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Need an API Key? Create One Free
+                            </h3>
+                            <p class="text-xs text-sky-200/80 mt-1 leading-relaxed">
+                                Real Gemini API keys are tied to your personal Google account for security. You can generate a real, free API key in 2 clicks using Google AI Studio, or generate a Stark Demo Token below for testing.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2 pt-1">
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer"
+                            class="flex-1 min-w-[180px] text-center px-3 py-2.5 rounded-lg bg-jarvis-cyan hover:bg-cyan-300 text-slate-950 font-tech font-bold text-xs uppercase tracking-wider transition shadow-[0_0_12px_rgba(0,240,255,0.4)] flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-external-link-alt"></i> Get Free Real Gemini Key
+                        </a>
+                        <button type="button" onclick="generateDemoStarkKey()"
+                            class="px-3 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-cyan-500/40 text-cyan-300 font-tech font-semibold text-xs uppercase tracking-wider transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-bolt"></i> Generate Stark Test Key
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Section 2: Enter / Save Custom API Key -->
+                <div class="space-y-2">
+                    <label for="apiKeyInput" class="block font-tech text-xs uppercase tracking-wider text-sky-300">
+                        Your Gemini API Key (<code class="text-jarvis-cyan">AIzaSy...</code>)
+                    </label>
+                    <div class="relative flex items-center">
+                        <input id="apiKeyInput" type="password"
+                            placeholder="Paste your Gemini API key here (or leave blank for built-in core)..."
+                            class="w-full bg-slate-950 text-cyan-100 placeholder-slate-500 text-xs sm:text-sm rounded-lg pl-3.5 pr-20 py-3 border border-cyan-500/40 focus:outline-none focus:border-jarvis-cyan font-mono" />
+                        <div class="absolute right-2 flex items-center space-x-1">
+                            <button type="button" onclick="toggleKeyVisibility()" title="Show/Hide Key"
+                                class="p-1.5 text-slate-400 hover:text-cyan-300 transition">
+                                <i id="eyeIcon" class="fa-solid fa-eye"></i>
+                            </button>
+                            <button type="button" onclick="copyApiKeyInput()" title="Copy Key"
+                                class="p-1.5 text-slate-400 hover:text-cyan-300 transition">
+                                <i class="fa-solid fa-copy"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-400 leading-normal">
+                        <i class="fa-solid fa-shield-halved text-emerald-400 mr-1"></i>
+                        Your key is stored locally in your browser's <code class="text-sky-300">localStorage</code>. If left blank or using a Stark Test Key inside this preview, J.A.R.V.I.S. automatically uses the built-in environment core.
+                    </p>
+                </div>
+
+                <!-- Section 3: User Title / Address Preference -->
+                <div class="space-y-2">
+                    <label for="userTitleInput" class="block font-tech text-xs uppercase tracking-wider text-sky-300">
+                        How should J.A.R.V.I.S. address you?
+                    </label>
+                    <input id="userTitleInput" type="text" value="Sir"
+                        placeholder="e.g., Sir, Boss, Commander, Mr. Stark"
+                        class="w-full bg-slate-950 text-cyan-100 text-sm rounded-lg px-3.5 py-2.5 border border-cyan-500/30 focus:outline-none focus:border-jarvis-cyan font-sans" />
+                </div>
+
+                <!-- Status Feedback Banner inside Modal -->
+                <div id="modalToast" class="hidden px-3.5 py-2.5 rounded-lg bg-emerald-950/70 border border-emerald-400/50 text-emerald-300 text-xs font-tech tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-circle-check"></i>
+                    <span id="modalToastText">Settings saved to mainframe.</span>
+                </div>
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="px-6 py-4 bg-slate-950/90 border-t border-cyan-500/20 flex items-center justify-between gap-3">
+                <button type="button" onclick="clearSavedApiKey()"
+                    class="px-3.5 py-2 rounded-lg border border-rose-500/40 hover:bg-rose-950/50 text-rose-300 text-xs font-tech uppercase tracking-wider transition">
+                    Clear Key
+                </button>
+                <div class="flex items-center space-x-2">
+                    <button type="button" onclick="closeSettingsModal()"
+                        class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-tech uppercase tracking-wider transition">
+                        Cancel
+                    </button>
+                    <button type="button" onclick="saveSettings()"
+                        class="px-5 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-hud font-bold text-xs uppercase tracking-wider transition shadow-[0_0_15px_rgba(0,240,255,0.3)]">
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // STATE & CONFIGURATION
+        // ==========================================
+        const apiKey = ""; // Built-in Canvas environment key fallback
+        let customUserApiKey = localStorage.getItem('jarvis_custom_api_key') || "";
+        let userHonorific = localStorage.getItem('jarvis_user_honorific') || "Sir";
+        let voiceEnabled = false; // Default off so it doesn't startle, toggleable in HUD
+        let conversationHistory = [];
+
+        // Initialize UI on load
+        window.onload = function () {
+            updateClock();
+            setInterval(updateClock, 1000);
+            setInterval(updateTelemetry, 3500);
+            updateKeyBadge();
+            updateVoiceUI();
+            renderInitialGreeting();
+        };
+
+        // ==========================================
+        // HUD TELEMETRY & CLOCK
+        // ==========================================
+        function updateClock() {
+            const now = new Date();
+            const clockEl = document.getElementById('hudClock');
+            if (clockEl) {
+                clockEl.textContent = now.toLocaleTimeString([], { hour12: false });
+            }
+        }
+
+        function updateTelemetry() {
+            const load = Math.floor(Math.random() * 28) + 22;
+            const loadText = document.getElementById('cpuLoadText');
+            const loadBar = document.getElementById('cpuBar');
+            if (loadText && loadBar) {
+                loadText.textContent = load + "%";
+                loadBar.style.width = load + "%";
+            }
+        }
+
+        function updateKeyBadge() {
+            const badge = document.getElementById('keySourceBadge');
+            if (!badge) return;
+
+            if (customUserApiKey && customUserApiKey.startsWith("AIza")) {
+                badge.textContent = "CUSTOM API KEY";
+                badge.className = "px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 font-semibold";
+            } else if (customUserApiKey && customUserApiKey.startsWith("STARK-")) {
+                badge.textContent = "STARK TEST KEY";
+                badge.className = "px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-400/40 font-semibold";
+            } else {
+                badge.textContent = "BUILT-IN CORE";
+                badge.className = "px-2 py-0.5 rounded bg-cyan-500/15 text-jarvis-cyan border border-cyan-500/30 font-semibold";
+            }
+        }
+
+        // ==========================================
+        // INITIAL GREETING & CHAT RENDERING
+        // ==========================================
+        function renderInitialGreeting() {
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.innerHTML = '';
+            conversationHistory = [];
+
+            const greeting = `Good evening, ${userHonorific}. I am **J.A.R.V.I.S.** (*Just A Rather Very Intelligent System*). All primary tactical, analytical, and diagnostic subroutines are online and operating at peak efficiency.\n\nYou can configure your personal API key or generate a new one anytime via the **API Key & Settings** button in the top-right corner. How may I be of assistance today, ${userHonorific}?`;
+            appendMessage('jarvis', greeting);
+        }
+
+        function formatMessageHTML(rawText) {
+            // Escape basic HTML tags to prevent injection
+            let safe = rawText
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+
+            // Format fenced code blocks ```code```
+            safe = safe.replace(/```(\w+)?\n([\s\S]*?)```/g, function (_, lang, code) {
+                return `<pre><code>${code.trim()}</code></pre>`;
+            });
+
+            // Format inline code `code`
+            safe = safe.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+            // Format bold **text**
+            safe = safe.replace(/\*\*([^*]+)\*\*/g, '<strong class="text-jarvis-cyan font-semibold">$1</strong>');
+
+            // Format italic *text*
+            safe = safe.replace(/\*([^*]+)\*/g, '<em class="text-sky-200">$1</em>');
+
+            // Convert line breaks
+            safe = safe.replace(/\n/g, '<br>');
+            return safe;
+        }
+
+        function appendMessage(sender, text) {
+            const chatContainer = document.getElementById('chatContainer');
+            const wrapper = document.createElement('div');
+            const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            if (sender === 'user') {
+                wrapper.className = "flex justify-end";
+                wrapper.innerHTML = `
+                    <div class="max-w-[85%] sm:max-w-[75%] rounded-xl rounded-tr-none bg-gradient-to-br from-blue-600/30 to-cyan-600/20 border border-cyan-400/40 px-4 py-3 text-sm text-sky-100 shadow-lg">
+                        <div class="flex items-center justify-between gap-4 mb-1 text-[10px] font-tech tracking-widest uppercase text-cyan-300/80">
+                            <span>COMMANDER (${userHonorific.toUpperCase()})</span>
+                            <span>${timestamp}</span>
+                        </div>
+                        <div class="leading-relaxed">${formatMessageHTML(text)}</div>
+                    </div>
+                `;
+            } else {
+                wrapper.className = "flex justify-start";
+                wrapper.innerHTML = `
+                    <div class="max-w-[90%] sm:max-w-[80%] rounded-xl rounded-tl-none bg-slate-900/85 border border-jarvis-cyan/35 px-4 py-3 text-sm text-sky-100 shadow-[0_0_20px_rgba(0,240,255,0.06)] jarvis-msg">
+                        <div class="flex items-center justify-between gap-4 mb-1.5 text-[10px] font-hud tracking-widest uppercase text-jarvis-cyan">
+                            <span class="flex items-center gap-1.5">
+                                <i class="fa-solid fa-atom animate-spin-slow"></i> J.A.R.V.I.S. MAINFRAME
+                            </span>
+                            <span class="font-tech text-sky-400/70">${timestamp}</span>
+                        </div>
+                        <div class="leading-relaxed text-sky-100/95">${formatMessageHTML(text)}</div>
+                    </div>
+                `;
+            }
+
+            chatContainer.appendChild(wrapper);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // ==========================================
+        // GEMINI API INTEGRATION WITH BACKOFF
+        // ==========================================
+        async function fetchWithRetry(url, options, maxRetries = 4) {
+            let delay = 1000;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(url, options);
+                    if (response.ok) {
+                        return await response.json();
+                    }
+                    // If invalid custom API key (400 / 403), return error details immediately
+                    if (response.status === 400 || response.status === 403) {
+                        const errJson = await response.json().catch(() => ({}));
+                        throw new Error(errJson?.error?.message || `API Error (${response.status}): Please check your API key in Settings.`);
+                    }
+                } catch (err) {
+                    if (attempt === maxRetries - 1 || err.message.includes("API Error")) {
+                        throw err;
+                    }
+                }
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2;
+            }
+            throw new Error("Unable to establish uplink with Stark Satellite Network.");
+        }
+
+        async function queryJarvis(userPrompt) {
+            const systemInstruction = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's ultra-advanced, British-accented, witty, polite, and hyper-competent AI assistant.
+Always refer to yourself as J.A.R.V.I.S. and address the user respectfully as "${userHonorific}".
+Keep your tone composed, sophisticated, slightly dry-witted when appropriate, and extraordinarily helpful.
+If the user asks how to get or make an API key, explain clearly that they can click the "API KEY & SETTINGS" button at the top right of this interface and click "Get Free Real Gemini Key" (which opens Google AI Studio at aistudio.google.com/app/apikey) or click "Generate Stark Test Key" for a simulated key.`;
+
+            // Determine which key to use:
+            // If the user pasted a real Google Gemini key (starts with AIza), use their key.
+            // Otherwise (empty or simulated STARK- key), use the built-in Canvas runtime key.
+            const effectiveKey = (customUserApiKey && customUserApiKey.startsWith("AIza"))
+                ? customUserApiKey
+                : apiKey;
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${effectiveKey}`;
+
+            conversationHistory.push({
+                role: "user",
+                parts: [{ text: userPrompt }]
+            });
+
+            const payload = {
+                contents: conversationHistory,
+                systemInstruction: {
+                    parts: [{ text: systemInstruction }]
+                }
+            };
+
+            const data = await fetchWithRetry(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!replyText) {
+                throw new Error("Received an empty telemetry packet from the neural core.");
+            }
+
+            conversationHistory.push({
+                role: "model",
+                parts: [{ text: replyText }]
+            });
+
+            return replyText;
+        }
+
+        // ==========================================
+        // USER INTERACTION HANDLERS
+        // ==========================================
+        async function handleUserSubmit(event) {
+            if (event) event.preventDefault();
+            const inputEl = document.getElementById('userInput');
+            const text = inputEl.value.trim();
+            if (!text) return;
+
+            inputEl.value = '';
+            await processCommand(text);
+        }
+
+        async function sendQuickPrompt(promptText) {
+            await processCommand(promptText);
+        }
+
+        async function processCommand(text) {
+            appendMessage('user', text);
+
+            const thinkingEl = document.getElementById('thinkingIndicator');
+            const sendBtn = document.getElementById('sendBtn');
+            thinkingEl.classList.remove('hidden');
+            sendBtn.disabled = true;
+
+            try {
+                const reply = await queryJarvis(text);
+                appendMessage('jarvis', reply);
+                if (voiceEnabled) {
+                    speakJarvis(reply);
+                }
+            } catch (error) {
+                appendMessage('jarvis', `I apologize, ${userHonorific}, but we encountered a communications anomaly: **${error.message}**\n\nIf you entered a custom API key, please verify it in **API Key & Settings** or clear it to switch back to the built-in Stark Core.`);
+            } finally {
+                thinkingEl.classList.add('hidden');
+                sendBtn.disabled = false;
+            }
+        }
+
+        function clearConversation() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+            renderInitialGreeting();
+        }
+
+        // ==========================================
+        // SETTINGS & API KEY GENERATOR MODAL LOGIC
+        // ==========================================
+        function openSettingsModal() {
+            const modal = document.getElementById('settingsModal');
+            const keyInput = document.getElementById('apiKeyInput');
+            const titleInput = document.getElementById('userTitleInput');
+            const toast = document.getElementById('modalToast');
+
+            keyInput.value = customUserApiKey;
+            titleInput.value = userHonorific;
+            toast.classList.add('hidden');
+            modal.classList.remove('hidden');
+        }
+
+        function closeSettingsModal() {
+            document.getElementById('settingsModal').classList.add('hidden');
+        }
+
+        function generateDemoStarkKey() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let token = 'STARK-JARVIS-';
+            for (let i = 0; i < 24; i++) {
+                token += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            const keyInput = document.getElementById('apiKeyInput');
+            keyInput.type = 'text';
+            keyInput.value = token;
+            showModalToast("Generated Stark Demo Key! Click 'Save Configuration' to apply.");
+        }
+
+        function toggleKeyVisibility() {
+            const keyInput = document.getElementById('apiKeyInput');
+            const eyeIcon = document.getElementById('eyeIcon');
+            if (keyInput.type === 'password') {
+                keyInput.type = 'text';
+                eyeIcon.className = 'fa-solid fa-eye-slash';
+            } else {
+                keyInput.type = 'password';
+                eyeIcon.className = 'fa-solid fa-eye';
+            }
+        }
+
+        function copyApiKeyInput() {
+            const keyInput = document.getElementById('apiKeyInput');
+            if (!keyInput.value) {
+                showModalToast("No API Key in input field to copy.");
+                return;
+            }
+            const prevType = keyInput.type;
+            keyInput.type = 'text';
+            keyInput.select();
+            document.execCommand('copy');
+            keyInput.type = prevType;
+            showModalToast("API Key copied to clipboard, " + userHonorific + ".");
+        }
+
+        function saveSettings() {
+            const keyInput = document.getElementById('apiKeyInput').value.trim();
+            const titleInput = document.getElementById('userTitleInput').value.trim() || "Sir";
+
+            customUserApiKey = keyInput;
+            userHonorific = titleInput;
+
+            localStorage.setItem('jarvis_custom_api_key', customUserApiKey);
+            localStorage.setItem('jarvis_user_honorific', userHonorific);
+
+            updateKeyBadge();
+            showModalToast("Configuration saved to J.A.R.V.I.S. mainframe.");
+            setTimeout(() => {
+                closeSettingsModal();
+            }, 900);
+        }
+
+        function clearSavedApiKey() {
+            customUserApiKey = "";
+            document.getElementById('apiKeyInput').value = "";
+            localStorage.removeItem('jarvis_custom_api_key');
+            updateKeyBadge();
+            showModalToast("Custom API Key cleared. Reverted to Built-in Stark Core.");
+        }
+
+        function showModalToast(msg) {
+            const toast = document.getElementById('modalToast');
+            const toastText = document.getElementById('modalToastText');
+            toastText.textContent = msg;
+            toast.classList.remove('hidden');
+        }
+
+        // ==========================================
+        // VOICE SYNTHESIS (JARVIS BRITISH VOICE) & MIC
+        // ==========================================
+        function toggleVoice() {
+            voiceEnabled = !voiceEnabled;
+            if (!voiceEnabled && 'speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+            }
+            updateVoiceUI();
+        }
+
+        function updateVoiceUI() {
+            const icon = document.getElementById('voiceIcon');
+            const text = document.getElementById('voiceStatusText');
+            if (voiceEnabled) {
+                icon.className = "fa-solid fa-volume-high text-jarvis-cyan";
+                text.textContent = "VOICE: ON";
+            } else {
+                icon.className = "fa-solid fa-volume-xmark text-slate-400";
+                text.textContent = "VOICE: OFF";
+            }
+        }
+
+        function speakJarvis(rawText) {
+            if (!('speechSynthesis' in window)) return;
+            window.speechSynthesis.cancel();
+
+            // Strip markdown symbols for cleaner speech
+            const cleanText = rawText
+                .replace(/```[\s\S]*?```/g, "Code block displayed on your HUD.")
+                .replace(/[*`_#]/g, "");
+
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            const voices = window.speechSynthesis.getVoices();
+            // Prefer British Male voice for JARVIS feel
+            const britishVoice = voices.find(v => v.lang.includes('en-GB') && v.name.toLowerCase().includes('male'))
+                || voices.find(v => v.lang.includes('en-GB'))
+                || voices.find(v => v.lang.includes('en'));
+
+            if (britishVoice) utterance.voice = britishVoice;
+            utterance.pitch = 0.95;
+            utterance.rate = 1.05;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Speech-to-Text Microphone Support
+        let recognition = null;
+        function toggleSpeechRecognition() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                appendMessage('jarvis', `Apologies, ${userHonorific}. Voice recognition is not supported by your current browser.`);
+                return;
+            }
+
+            if (!recognition) {
+                recognition = new SpeechRecognition();
+                recognition.lang = 'en-US';
+                recognition.interimResults = false;
+
+                recognition.onstart = () => {
+                    document.getElementById('micIcon').className = "fa-solid fa-microphone-lines text-rose-400 animate-pulse";
+                };
+                recognition.onend = () => {
+                    document.getElementById('micIcon').className = "fa-solid fa-microphone";
+                };
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    document.getElementById('userInput').value = transcript;
+                    handleUserSubmit();
+                };
+            }
+
+            recognition.start();
+        }
+    </script>
+</body>
+</html>
