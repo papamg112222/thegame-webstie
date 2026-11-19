@@ -789,6 +789,9 @@
         // Cannon projectile pool
         const cannonProjectiles = [];
 
+        // Track active waist Dutchrooms for collision & sword-fighting
+        const activeWaistDutchrooms = [];
+
         // ==========================================
         // 5. WATER-TIGHT, OPAQUE HALF-SPHERE "DUTCHROOM" GENERATOR
         // ==========================================
@@ -1142,6 +1145,11 @@
                 state: 'WAIST',
                 remoteDragOffset: new THREE.Vector3(0, 0, 0),
                 isBeingDraggedByMe: false,
+                // World space tip & base positions for sword-fighting collisions
+                worldBasePos: new THREE.Vector3(),
+                worldTipPos: new THREE.Vector3(),
+                lastWorldTipPos: new THREE.Vector3(),
+                tipVelocity: new THREE.Vector3(),
                 // Snapping & bleeding states
                 isSnapped: false,
                 bleedTimer: 0, // Pour liquid for 10 seconds
@@ -1152,6 +1160,7 @@
 
             mesh.userData.dutchroom = waistDr;
             pickableMeshes.push(mesh);
+            activeWaistDutchrooms.push(waistDr);
             return waistDr;
         }
 
@@ -1984,6 +1993,8 @@
             if (rp.waistDutchroom && rp.waistDutchroom.mesh) {
                 const pIdx = pickableMeshes.indexOf(rp.waistDutchroom.mesh);
                 if (pIdx !== -1) pickableMeshes.splice(pIdx, 1);
+                const wIdx = activeWaistDutchrooms.indexOf(rp.waistDutchroom);
+                if (wIdx !== -1) activeWaistDutchrooms.splice(wIdx, 1);
             }
             scene.remove(rp.group);
             if (rp.nametag && rp.nametag.tex) rp.nametag.tex.dispose();
@@ -2712,7 +2723,7 @@
             shotMesh.castShadow = true;
             scene.add(shotMesh);
 
-            // Muzzle flash flash & smoke
+            // Muzzle flash & smoke
             const flashMat = new THREE.MeshBasicMaterial({ color: 0xfb923c, transparent: true, opacity: 0.95 });
             const flashM = new THREE.Mesh(new THREE.SphereGeometry(0.7, 12, 12), flashMat);
             flashM.position.copy(startPos);
@@ -2727,6 +2738,7 @@
             cannonProjectiles.push({
                 mesh: shotMesh,
                 vel: vel.clone(),
+                prevPos: startPos.clone(),
                 shooterId,
                 life: 6.0
             });
@@ -2939,6 +2951,20 @@
 
             updateDutchroomMeshGeometry(dr);
 
+            // Track continuous 3D world positions of base & tip for sword fighting & collisions
+            const worldM = dr.mesh.matrixWorld;
+            dr.worldBasePos.set(0, 0, 0).applyMatrix4(worldM);
+            dr.lastWorldTipPos.copy(dr.worldTipPos);
+            dr.worldTipPos.set(
+                dr.bendPos.x / dr.baseScale,
+                dr.localTotalHeight + (dr.bendPos.y / dr.baseScale),
+                dr.bendPos.z / dr.baseScale
+            ).applyMatrix4(worldM);
+
+            if (dt > 0.0001) {
+                dr.tipVelocity.subVectors(dr.worldTipPos, dr.lastWorldTipPos).divideScalar(dt);
+            }
+
             // ----------------------------------------------------
             // VISCOUS RED LIQUID POURING & CONTINUOUS TRAIL SYSTEM
             // ----------------------------------------------------
@@ -3083,31 +3109,13 @@
                 }
             }
 
-            // Position local player's own waist Dutchroom right beneath camera
-            localWaistDr.containerGroup.position.set(camera.position.x, 0.76, camera.position.z);
+            // Sync Local Player's Waist Dutchroom Position & Orientation with Camera
+            localWaistDr.containerGroup.position.set(camera.position.x, camera.position.y - 0.72, camera.position.z);
             localWaistDr.containerGroup.rotation.y = cameraYaw;
-            updateWaistDutchroomPhysics(localWaistDr, localWaistDr.containerGroup.matrixWorld, dt, elapsedTime);
-
-            // Animate held severed piece in first-person view
-            if (heldSeveredTop) {
-                heldSeveredTop.dripTimer += dt;
-                // Idle hand breathing bob
-                playerHandGroup.position.y = -0.32 + Math.sin(elapsedTime * 3.5) * 0.015;
-                playerHandGroup.position.x = 0.38 + Math.cos(elapsedTime * 2.2) * 0.01;
-
-                if (heldSeveredTop.dripTimer >= 0.12) {
-                    heldSeveredTop.dripTimer = 0;
-                    const handWorldPos = new THREE.Vector3();
-                    heldSeveredTop.mesh.getWorldPosition(handWorldPos);
-                    spawnRedLiquidDrop(handWorldPos.x, handWorldPos.y - 0.1, handWorldPos.z, false);
-                    if (Math.random() < 0.45) {
-                        spawnGroundBloodPuddle(handWorldPos.x, handWorldPos.z, 0.14);
-                    }
-                }
-            }
+            updateWaistDutchroomPhysics(localWaistDr, localWaistDr.mesh.matrixWorld, dt, elapsedTime);
 
             // ------------------------------------------
-            // B. SHOPKEEPER NPC ANIMATIONS
+            // B. SHOPKEEPER NPC ANIMATIONS & FLOATING "OPEN STORE" BUTTON
             // ------------------------------------------
             const distToNPC = Math.hypot(camera.position.x - NPC_POS.x, camera.position.z - (NPC_POS.z + 0.8));
             const distToSellBooth = Math.hypot(camera.position.x - SELL_BOOTH_POS.x, camera.position.z - (SELL_BOOTH_POS.z + 0.8));
@@ -3152,7 +3160,7 @@
             }
 
             // ------------------------------------------
-            // B2. REMOTE PLAYERS & THEIR WAIST DUTCHROOMS
+            // B2. UPDATE REMOTE PLAYERS
             // ------------------------------------------
             const nowMs = performance.now();
             remotePlayers.forEach((rp, id) => {
@@ -3161,12 +3169,9 @@
                     return;
                 }
 
-                // Apply dynamic push velocity from cannon hits
-                if (rp.velocity.lengthSq() > 0.001) {
-                    rp.group.position.addScaledVector(rp.velocity, dt);
-                    rp.targetPos.addScaledVector(rp.velocity, dt);
-                    rp.velocity.multiplyScalar(Math.max(0, 1.0 - 5.0 * dt)); // ground friction
-                }
+                // Apply velocity push from cannon shots
+                rp.group.position.addScaledVector(rp.velocity, dt);
+                rp.velocity.multiplyScalar(Math.max(0, 1.0 - 6.0 * dt));
 
                 rp.group.position.x += (rp.targetPos.x - rp.group.position.x) * Math.min(1.0, 10.0 * dt);
                 rp.group.position.z += (rp.targetPos.z - rp.group.position.z) * Math.min(1.0, 10.0 * dt);
@@ -3193,9 +3198,8 @@
                     rp.torso.position.y = 0.74 + Math.sin(elapsedTime * 2.6 + rp.walkCycle) * 0.02;
                 }
 
-                // Update physical simulation of this player's waist Dutchroom!
                 if (rp.waistDutchroom) {
-                    updateWaistDutchroomPhysics(rp.waistDutchroom, rp.group.matrixWorld, dt, elapsedTime);
+                    updateWaistDutchroomPhysics(rp.waistDutchroom, rp.waistDutchroom.mesh.matrixWorld, dt, elapsedTime);
                 }
             });
 
@@ -3204,7 +3208,7 @@
             }
 
             // ------------------------------------------
-            // C. MEADOW DUTCHROOM PHYSICS & HARVESTING
+            // C. MEADOW DUTCHROOM PHYSICS & CANDIDATE DETECTION
             // ------------------------------------------
             const windDirX = grassUniforms.uWindDir.value.x;
             const windDirZ = grassUniforms.uWindDir.value.y;
@@ -3346,118 +3350,156 @@
             }
 
             // ------------------------------------------
-            // 3D WHITE FIREWORK GLOBULES & GROUND SPLATTERS
-            // ------------------------------------------
-            for (let i = activeSkyFlashes.length - 1; i >= 0; i--) {
-                const fl = activeSkyFlashes[i];
-                fl.life -= dt;
-                if (fl.life <= 0) {
-                    scene.remove(fl.mesh);
-                    fl.mat.dispose();
-                    activeSkyFlashes.splice(i, 1);
-                    continue;
-                }
-                const s = 1.0 + (fl.maxLife - fl.life) * fl.rate;
-                fl.mesh.scale.setScalar(s);
-                fl.mat.opacity = Math.max(0, (fl.life / fl.maxLife) * 0.85);
-            }
-
-            let dropsHittingCamera = 0;
-            for (let i = activeLiquidDrops.length - 1; i >= 0; i--) {
-                const d = activeLiquidDrops[i];
-                d.life -= dt;
-                if (d.life <= 0) {
-                    scene.remove(d.mesh);
-                    activeLiquidDrops.splice(i, 1);
-                    continue;
-                }
-
-                d.vel.y -= (d.isTrail ? 9.5 : 15.5) * dt;
-                d.mesh.position.addScaledVector(d.vel, dt);
-
-                if (!d.isTrail) {
-                    const speed = d.vel.length();
-                    const stretch = Math.min(3.2, 1.0 + speed * 0.08);
-                    d.mesh.scale.set(d.baseR * 0.75, d.baseR * stretch, d.baseR * 0.75);
-                }
-
-                if (!d.isTrail && d.vel.y < 0 && d.mesh.position.y <= PLAYER_EYE_HEIGHT + 2.2 && d.mesh.position.y >= 0.0) {
-                    const distToPlayer = Math.hypot(camera.position.x - d.mesh.position.x, camera.position.z - d.mesh.position.z);
-                    if (distToPlayer < 8.5) {
-                        dropsHittingCamera++;
-                        scene.remove(d.mesh);
-                        activeLiquidDrops.splice(i, 1);
-                        continue;
-                    }
-                }
-
-                if (d.mesh.position.y <= 0.05) {
-                    if (!d.isTrail) {
-                        const distToPlayer = Math.hypot(camera.position.x - d.mesh.position.x, camera.position.z - d.mesh.position.z);
-                        if (distToPlayer < 9.5 && Math.random() < 0.35) {
-                            dropsHittingCamera++;
-                        }
-                        if (Math.random() < 0.25) {
-                            const ringMat = new THREE.MeshBasicMaterial({
-                                color: 0xffffff,
-                                transparent: true,
-                                opacity: 0.75,
-                                side: THREE.DoubleSide
-                            });
-                            const ringMesh = new THREE.Mesh(splashRingGeo, ringMat);
-                            ringMesh.position.set(d.mesh.position.x, 0.03, d.mesh.position.z);
-                            scene.add(ringMesh);
-                            activeSkyFlashes.push({ mesh: ringMesh, mat: ringMat, rate: 3.5, life: 0.9, maxLife: 0.9 });
-                        }
-                    }
-                    scene.remove(d.mesh);
-                    activeLiquidDrops.splice(i, 1);
-                }
-            }
-
-            if (dropsHittingCamera > 0 && cameraSplatterDrops.length < 42) {
-                addScreenSplatter(Math.min(3, dropsHittingCamera));
-            }
-
-            drawSplatter(dt);
-
-            // ------------------------------------------
-            // D1. UPDATE FLYING SEVERED TOPS & RED LIQUID TRAIL PUDDLES
+            // C2. FLYING SEVERED PHYSICAL PIECES SIMULATION
             // ------------------------------------------
             for (let i = flyingSeveredParts.length - 1; i >= 0; i--) {
                 const part = flyingSeveredParts[i];
-                if (part.isHeld) continue;
-
                 part.life -= dt;
                 if (part.life <= 0) {
-                    scene.remove(part.mesh);
-                    const pIdx = pickableSeveredMeshes.indexOf(part.mesh);
-                    if (pIdx !== -1) pickableSeveredMeshes.splice(pIdx, 1);
-                    flyingSeveredParts.splice(i, 1);
+                    removeSeveredFromWorld(part);
                     continue;
                 }
 
                 if (!part.isGrounded) {
-                    part.vel.y -= 13.5 * dt; // gravity
+                    part.vel.y -= 14.0 * dt;
                     part.mesh.position.addScaledVector(part.vel, dt);
                     part.mesh.rotation.x += part.rotVel.x * dt;
                     part.mesh.rotation.y += part.rotVel.y * dt;
                     part.mesh.rotation.z += part.rotVel.z * dt;
 
-                    // Ground bounce / splat
-                    if (part.mesh.position.y <= 0.12) {
-                        part.mesh.position.y = 0.12;
-                        part.vel.y *= -0.32;
-                        part.vel.x *= 0.65;
-                        part.vel.z *= 0.65;
-                        part.rotVel.multiplyScalar(0.5);
+                    if (Math.random() < 0.3) {
+                        spawnRedLiquidDrop(part.mesh.position.x, part.mesh.position.y, part.mesh.position.z, false);
+                    }
 
-                        if (Math.abs(part.vel.y) < 0.15 && part.vel.length() < 0.3) {
-                            part.isGrounded = true;
-                        }
+                    if (part.mesh.position.y <= 0.22) {
+                        part.mesh.position.y = 0.22;
+                        part.vel.set(0, 0, 0);
+                        part.rotVel.set(0, 0, 0);
+                        part.isGrounded = true;
+                        spawnGroundBloodPuddle(part.mesh.position.x, part.mesh.position.z, 0.45);
+                    }
+                }
+            }
 
-                        if (Math.abs(part.vel.y) > 0.4) {
-                            spawnGroundBloodPuddle(part.mesh.position.x, part.mesh.position.z, 0.45);
+            // Dripping held piece
+            if (heldSeveredTop) {
+                heldSeveredTop.dripTimer = (heldSeveredTop.dripTimer || 0) + dt;
+                if (heldSeveredTop.dripTimer >= 0.12) {
+                    heldSeveredTop.dripTimer = 0;
+                    const handWorldPos = new THREE.Vector3();
+                    heldSeveredTop.mesh.getWorldPosition(handWorldPos);
+                    spawnRedLiquidDrop(handWorldPos.x, handWorldPos.y, handWorldPos.z, false);
+                }
+            }
+
+            // ----------------------------------------------------------------------
+            // WAIST DUTCHROOM INTERACTIVE SWORD-FIGHTING & FLOOR COLLISION SYSTEM
+            // ----------------------------------------------------------------------
+            const helperLine = new THREE.Line3();
+            const helperClosest = new THREE.Vector3();
+
+            for (let i = 0; i < activeWaistDutchrooms.length; i++) {
+                const wDrA = activeWaistDutchrooms[i];
+                if (wDrA.isSnapped) continue;
+
+                const baseA = wDrA.worldBasePos;
+                const tipA = wDrA.worldTipPos;
+                const shaftLenA = baseA.distanceTo(tipA);
+                const isExtendedA = shaftLenA > 0.65 || wDrA.isBeingDraggedByMe || wDrA.remoteDragOffset.lengthSq() > 0.1;
+                helperLine.set(baseA, tipA);
+
+                // 1. COLLIDE AND PUSH DUTCHROOMS ON THE FLOOR (Ground Harvestables)
+                for (let m = 0; m < dutchrooms.length; m++) {
+                    const floorDr = dutchrooms[m];
+                    if (floorDr.state !== 'IDLE' && floorDr.state !== 'TREE') continue;
+
+                    const floorCenter = floorDr.mesh.position.clone();
+                    floorCenter.y += floorDr.totalHeight * 0.45;
+
+                    helperLine.closestPointToPoint(floorCenter, true, helperClosest);
+                    const distToFloorDr = helperClosest.distanceTo(floorCenter);
+                    const touchThresh = floorDr.radius + 0.32;
+
+                    if (distToFloorDr < touchThresh && distToFloorDr > 0.001) {
+                        const pushOut = touchThresh - distToFloorDr;
+                        const pushDir = floorCenter.clone().sub(helperClosest).normalize();
+
+                        // Transfer strong viscous impulse to bend/knock the ground Dutchroom
+                        const hitVelocity = wDrA.tipVelocity.length();
+                        const forceMag = Math.max(3.5, hitVelocity * 1.4);
+
+                        floorDr.bendVel.x += (pushDir.x * pushOut * 18.0) + (wDrA.tipVelocity.x * 0.45) * dt * forceMag;
+                        floorDr.bendVel.z += (pushDir.z * pushOut * 18.0) + (wDrA.tipVelocity.z * 0.45) * dt * forceMag;
+
+                        // Recoil the waist Dutchroom slightly upon striking
+                        wDrA.bendVel.x -= pushDir.x * 0.8;
+                        wDrA.bendVel.z -= pushDir.z * 0.8;
+                    }
+                }
+
+                // 2. SWING / PUSH AGAINST PLAYERS (Sword strike against bodies)
+                const tipSpeedA = wDrA.tipVelocity.length();
+
+                // Check collision against Local Player
+                if (!wDrA.isLocal && isExtendedA) {
+                    const playerCenter = camera.position.clone();
+                    playerCenter.y -= 0.6; // player waist level
+                    helperLine.closestPointToPoint(playerCenter, true, helperClosest);
+                    const d = helperClosest.distanceTo(playerCenter);
+
+                    if (d < 0.72) {
+                        const pushAway = playerCenter.clone().sub(helperClosest).normalize();
+                        const impulse = Math.max(5.5, tipSpeedA * 0.95);
+                        playerVelocity.addScaledVector(pushAway, impulse * 1.35 * dt * 60.0);
+                        playerVelocity.y += 0.8; // subtle lift
+                    }
+                }
+
+                // Check collision against Remote Players
+                remotePlayers.forEach((rp, rpId) => {
+                    if (wDrA.ownerId === rpId) return;
+                    if (!isExtendedA) return;
+
+                    const rpCenter = rp.group.position.clone();
+                    rpCenter.y += 0.75;
+                    helperLine.closestPointToPoint(rpCenter, true, helperClosest);
+                    const d = helperClosest.distanceTo(rpCenter);
+
+                    if (d < 0.72) {
+                        const pushAway = rpCenter.clone().sub(helperClosest).normalize();
+                        const impulse = Math.max(5.5, tipSpeedA * 0.95);
+                        rp.velocity.addScaledVector(pushAway, impulse * 1.35 * dt * 60.0);
+                    }
+                });
+
+                // 3. "SWORD FIGHTING" CLASH WITH OTHER PLAYERS' WAIST DUTCHROOMS
+                for (let j = i + 1; j < activeWaistDutchrooms.length; j++) {
+                    const wDrB = activeWaistDutchrooms[j];
+                    if (wDrB.isSnapped) continue;
+
+                    const baseB = wDrB.worldBasePos;
+                    const tipB = wDrB.worldTipPos;
+
+                    // Approximate closest distance between the two stretched segment lines
+                    const dTipTip = tipA.distanceTo(tipB);
+                    const midA = baseA.clone().lerp(tipA, 0.65);
+                    const midB = baseB.clone().lerp(tipB, 0.65);
+                    const dMidMid = midA.distanceTo(midB);
+                    const minSegDist = Math.min(dTipTip, dMidMid);
+
+                    if (minSegDist < 0.55) {
+                        // CLASH! Rubber swords bounce off each other with spring repulsion
+                        const clashDir = tipA.clone().sub(tipB).normalize();
+                        const clashOverlap = 0.55 - minSegDist;
+                        const clashPower = 12.0 + (tipSpeedA + wDrB.tipVelocity.length()) * 0.8;
+
+                        wDrA.bendVel.addScaledVector(clashDir, clashOverlap * clashPower);
+                        wDrB.bendVel.addScaledVector(clashDir, -clashOverlap * clashPower);
+
+                        // Spawn little elastic liquid droplet sparks at point of clash
+                        const clashPt = tipA.clone().lerp(tipB, 0.5);
+                        if (Math.random() < 0.65) {
+                            spawnTrailDroplet(clashPt.x, clashPt.y, clashPt.z);
                         }
                     }
                 }
@@ -3475,6 +3517,7 @@
                     continue;
                 }
 
+                proj.prevPos.copy(proj.mesh.position);
                 proj.vel.y -= 9.8 * dt; // gravity arc
                 proj.mesh.position.addScaledVector(proj.vel, dt);
                 proj.mesh.rotation.x += 12.0 * dt;
@@ -3486,47 +3529,56 @@
 
                 let projectileHit = false;
 
+                // Segment line between previous and current projectile position to prevent tunneling through targets
+                const shotSegment = new THREE.Line3(proj.prevPos, proj.mesh.position);
+                const closestOnRay = new THREE.Vector3();
+
                 // Calculate push force direction based on projectile velocity
                 const pushDir = proj.vel.clone().normalize();
-                const pushStrength = 16.5; // Strong push force on hit
+                const pushStrength = 22.0; // Strong, satisfying push force on hit
 
-                // 1. Collision check with Local Player
+                // 1. Swept collision check with Local Player
                 if (proj.shooterId !== localPlayerId) {
-                    const distToLocal = Math.hypot(camera.position.x - proj.mesh.position.x, camera.position.z - proj.mesh.position.z);
-                    const vertDist = Math.abs(camera.position.y - 0.7 - proj.mesh.position.y);
-                    if (distToLocal < 0.85 && vertDist < 1.35) {
-                        // Impact local player: push player back
+                    const localCenter = camera.position.clone();
+                    localCenter.y -= 0.65; // waist/torso level
+                    shotSegment.closestPointToPoint(localCenter, true, closestOnRay);
+                    const distToLocal = closestOnRay.distanceTo(localCenter);
+
+                    if (distToLocal < 1.15) { // Generous hit cylinder
                         const pushVec = pushDir.clone().multiplyScalar(pushStrength);
-                        pushVec.y = 3.5; // add slight upward launch pop
+                        pushVec.y = 4.2; // Upward pop
                         playerVelocity.add(pushVec);
                         addScreenSplatter(6);
 
-                        for (let k = 0; k < 18; k++) spawnRedLiquidDrop(proj.mesh.position.x, proj.mesh.position.y, proj.mesh.position.z, true);
-                        spawnGroundBloodPuddle(proj.mesh.position.x, proj.mesh.position.z, 0.65);
+                        for (let k = 0; k < 18; k++) spawnRedLiquidDrop(closestOnRay.x, closestOnRay.y, closestOnRay.z, true);
+                        spawnGroundBloodPuddle(closestOnRay.x, closestOnRay.z, 0.65);
 
                         projectileHit = true;
                     }
                 }
 
-                // 2. Collision check with Remote Players
+                // 2. Swept collision check with Remote Players
                 if (!projectileHit) {
                     remotePlayers.forEach((rp, id) => {
                         if (projectileHit) return;
-                        if (proj.shooterId === id) return; // avoid immediately hitting the shooter
+                        if (proj.shooterId === id) return;
 
-                        const distToRp = Math.hypot(rp.group.position.x - proj.mesh.position.x, rp.group.position.z - proj.mesh.position.z);
-                        const vertDist = Math.abs((rp.group.position.y + 0.85) - proj.mesh.position.y);
-                        if (distToRp < 0.95 && vertDist < 1.4) {
+                        const rpCenter = rp.group.position.clone();
+                        rpCenter.y += 0.85;
+                        shotSegment.closestPointToPoint(rpCenter, true, closestOnRay);
+                        const distToRp = closestOnRay.distanceTo(rpCenter);
+
+                        if (distToRp < 1.25) {
                             // Hit remote player! Push them
                             const pushVec = pushDir.clone().multiplyScalar(pushStrength);
-                            pushVec.y = 3.5;
+                            pushVec.y = 4.2;
                             rp.velocity.add(pushVec);
 
                             // Broadcast hit so all clients and target client apply push
                             broadcastPlayerHit(id, pushVec);
 
-                            for (let k = 0; k < 18; k++) spawnRedLiquidDrop(proj.mesh.position.x, proj.mesh.position.y, proj.mesh.position.z, true);
-                            spawnGroundBloodPuddle(proj.mesh.position.x, proj.mesh.position.z, 0.65);
+                            for (let k = 0; k < 18; k++) spawnRedLiquidDrop(closestOnRay.x, closestOnRay.y, closestOnRay.z, true);
+                            spawnGroundBloodPuddle(closestOnRay.x, closestOnRay.z, 0.65);
 
                             projectileHit = true;
                         }
